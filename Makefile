@@ -47,7 +47,9 @@ PROVIDER_INSTALLED_STATE_TEST_TARGET := $(BUILD_DIR)/tests/provider-installed-st
 DEPENDENCY_CONSTRAINT_TEST_TARGET := $(BUILD_DIR)/tests/dependency-constraint-test
 PACKAGE_RELATION_TEST_TARGET := $(BUILD_DIR)/tests/package-relation-test
 PACKAGE_RELATION_OBSERVATION_TEST_TARGET := $(BUILD_DIR)/tests/package-relation-observation-test
+PACKAGE_RELATION_ASSESSMENT_TEST_TARGET := $(BUILD_DIR)/tests/package-relation-assessment-test
 PACKAGE_CONSTRAINT_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/package-constraint-metadata-test
+BUILD_PLAN_RELATION_ASSESSMENT_STUB_SOURCE := tests/stubs/build-plan-relation-assessment/assessment_stub.cpp
 AUR_CONSTRAINT_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/aur-constraint-metadata-test
 ROOT_PACKAGE_CANDIDATE_TEST_TARGET := $(BUILD_DIR)/tests/root-package-candidate-test
 ROOT_PACKAGE_SEARCH_TEST_TARGET := $(BUILD_DIR)/tests/root-package-search-test
@@ -334,6 +336,7 @@ AUR_UPDATE_QUERY_TEST_SRCS := \
 AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS := \
 	tests/aur_update_execution_preflight_test.cpp \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
+	$(SRC_DIR)/package_relation.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
@@ -341,10 +344,24 @@ AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS := \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	tests/stubs/aur-update-execution-preflight/preflight_stub.cpp
+# POLICY(#353): preflight consumes an already-projected PlanReason. It must not
+# own assessment, observation, installed inventory, or metadata query logic.
+AUR_UPDATE_EXECUTION_PREFLIGHT_FORBIDDEN_RELATION_AUTHORITY_TEST_SRCS := \
+	$(SRC_DIR)/build_plan_relation_assessment.cpp \
+	$(SRC_DIR)/installed_package_relation_inventory.cpp \
+	$(SRC_DIR)/package_relation_assessment.cpp \
+	$(SRC_DIR)/package_relation_observation.cpp \
+	$(SRC_DIR)/package_relation_observation_adapter.cpp \
+	$(SRC_DIR)/package_constraint_metadata.cpp \
+	$(SRC_DIR)/package_metadata.cpp \
+	$(SRC_DIR)/repository_query.cpp
 AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS := \
 	tests/aur_update_execution_preflight_integration_test.cpp \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
 	$(SRC_DIR)/aur_constraint_metadata.cpp \
+	$(SRC_DIR)/build_plan_relation_assessment.cpp \
+	$(SRC_DIR)/installed_package_relation_inventory.cpp \
+	$(SRC_DIR)/package_relation_assessment.cpp \
 	$(SRC_DIR)/package_relation.cpp \
 	$(SRC_DIR)/package_relation_observation.cpp \
 	$(SRC_DIR)/package_relation_observation_adapter.cpp \
@@ -664,6 +681,7 @@ LOCAL_DEPENDENCY_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/logging.cpp
 LOCAL_DEPENDENCY_PLAN_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS := \
+	$(BUILD_PLAN_RELATION_ASSESSMENT_STUB_SOURCE) \
 	tests/stubs/local-dependency-plan/aur_rpc_stub.cpp \
 	tests/stubs/local-dependency-plan/repository_query_stub.cpp
 LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS := \
@@ -724,6 +742,7 @@ LOCAL_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/shell_words.cpp \
 	$(SRC_DIR)/logging.cpp
 LOCAL_SOURCE_BUILD_REQUIRED_TEST_SUPPORT_SRCS := \
+	$(BUILD_PLAN_RELATION_ASSESSMENT_STUB_SOURCE) \
 	tests/stubs/local-dependency-plan/aur_rpc_stub.cpp \
 	tests/stubs/local-dependency-plan/repository_query_stub.cpp \
 	tests/stubs/local-source-build/process_stub.cpp
@@ -742,6 +761,7 @@ CLI_DIAGNOSTIC_MODEL_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation.cpp \
 	$(SRC_DIR)/diagnostic_projection.cpp \
 	$(SRC_DIR)/operation_state_model.cpp \
 	$(SRC_DIR)/presentation_projection.cpp
@@ -766,8 +786,10 @@ RUNTIME_CLI_CONNECTION_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(RUNTIME_CLI_CONNECTION_ALLOWED_PRODUCTION_TEST_SRCS), \
 		$(SRCS))
-# POLICY(#268): dependency resolver model testはresolverとpure model supportだけを
-# productionからlinkし、metadata/process/source-build execution ownerを持ち込まない。
+# POLICY(#268, #353): dependency resolver/model testはresolverとpure model
+# supportだけをproductionからlinkする。Slice 4 relation readiness casesは
+# computed assessment stubを入力とし、assessment classifier、installed inventory、
+# query、metadata/process/source-build execution ownerを持ち込まない。
 DEPENDENCY_PLAN_MODEL_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_plan.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
@@ -781,6 +803,7 @@ DEPENDENCY_PLAN_MODEL_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/logging.cpp
 DEPENDENCY_PLAN_MODEL_REQUIRED_TEST_SUPPORT_SRCS := \
+	$(BUILD_PLAN_RELATION_ASSESSMENT_STUB_SOURCE) \
 	tests/stubs/dependency-plan/aur_rpc_stub.cpp \
 	tests/stubs/dependency-plan/repository_query_stub.cpp
 DEPENDENCY_PLAN_MODEL_TEST_SRCS := \
@@ -810,6 +833,7 @@ BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_FORBIDDEN_TEST_SRCS := \
 # linkし、transport、process、filesystem adapter、CLI、executorを持ち込まない。
 UNIFIED_PLAN_OBSERVATION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/unified_plan_observation.cpp \
+	$(SRC_DIR)/package_relation.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp
 UNIFIED_PLAN_OBSERVATION_TEST_SRCS := \
 	tests/unified_plan_observation_test.cpp \
@@ -843,6 +867,7 @@ UNIFIED_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/logging.cpp
 UNIFIED_PLAN_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS := \
+	$(BUILD_PLAN_RELATION_ASSESSMENT_STUB_SOURCE) \
 	tests/stubs/local-dependency-plan/aur_rpc_stub.cpp \
 	tests/stubs/local-dependency-plan/repository_query_stub.cpp
 UNIFIED_PLAN_PROJECTION_TEST_SRCS := \
@@ -874,6 +899,7 @@ UNIFIED_PLAN_RENDERER_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/logging.cpp
 UNIFIED_PLAN_RENDERER_REQUIRED_TEST_SUPPORT_SRCS := \
+	$(BUILD_PLAN_RELATION_ASSESSMENT_STUB_SOURCE) \
 	tests/stubs/local-dependency-plan/aur_rpc_stub.cpp \
 	tests/stubs/local-dependency-plan/repository_query_stub.cpp
 UNIFIED_PLAN_RENDERER_TEST_SRCS := \
@@ -1198,6 +1224,22 @@ PACKAGE_RELATION_OBSERVATION_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(PACKAGE_RELATION_OBSERVATION_ALLOWED_PRODUCTION_TEST_SRCS), \
 		$(SRCS))
+# POLICY(#353): Slice 4 assessment test links only declaration, observation,
+# and assessment owners. Query, BuildPlan, renderer, preflight, and transaction
+# translation units remain behind the link firewall.
+PACKAGE_RELATION_ASSESSMENT_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/package_relation_assessment.cpp \
+	$(SRC_DIR)/package_relation_observation.cpp \
+	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/package_identifier.cpp
+PACKAGE_RELATION_ASSESSMENT_TEST_SRCS := \
+	tests/package_relation_assessment_test.cpp \
+	$(PACKAGE_RELATION_ASSESSMENT_ALLOWED_PRODUCTION_TEST_SRCS)
+PACKAGE_RELATION_ASSESSMENT_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(PACKAGE_RELATION_ASSESSMENT_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 # POLICY(#351): Slice 3 adapter testはlibalpm read phase、owned adapter、
 # pure constraint modelだけをlinkし、legacy repository query、provider
 # selection、CLI、production executionへ接続しない。
@@ -1501,6 +1543,8 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: check-unified-plan-renderer-link-firewall test-unified-plan-renderer
 .PHONY: check-cli-diagnostic-model-link-firewall test-cli-diagnostic-model
 .PHONY: check-runtime-cli-connection-link-firewall test-runtime-cli-connection
+.PHONY: check-package-relation-assessment-link-firewall test-package-relation-assessment
+.PHONY: check-aur-update-execution-preflight-relation-link-firewall
 .PHONY: test-artifact-identity-real-pacman
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface check-completion-freshness test-completion-schema test-public-documentation
 .PHONY: test-container test-container-live test-container-live-provider test-container-live-aur test-container-live-local
@@ -1739,6 +1783,7 @@ NON_HEAVY_TARGETS := \
 	$(DEPENDENCY_CONSTRAINT_TEST_TARGET) \
 	$(PACKAGE_RELATION_TEST_TARGET) \
 	$(PACKAGE_RELATION_OBSERVATION_TEST_TARGET) \
+	$(PACKAGE_RELATION_ASSESSMENT_TEST_TARGET) \
 	$(PACKAGE_CONSTRAINT_METADATA_TEST_TARGET) \
 	$(AUR_CONSTRAINT_METADATA_TEST_TARGET) \
 	$(PACKAGE_METADATA_INTEGRATION_TEST_TARGET)
@@ -1879,6 +1924,7 @@ $(eval $(call define_non_heavy_test_profile,PROVIDER_INSTALLED_STATE,$(DIRECT_LI
 $(eval $(call define_non_heavy_test_profile,DEPENDENCY_CONSTRAINT,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(DEPENDENCY_CONSTRAINT_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
 $(eval $(call define_non_heavy_test_profile,PACKAGE_RELATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(PACKAGE_RELATION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
 $(eval $(call define_non_heavy_test_profile,PACKAGE_RELATION_OBSERVATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(PACKAGE_RELATION_OBSERVATION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,PACKAGE_RELATION_ASSESSMENT,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(PACKAGE_RELATION_ASSESSMENT_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
 $(eval $(call define_non_heavy_test_profile,PACKAGE_CONSTRAINT_METADATA,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests/stubs/package-metadata,$(PACKAGE_CONSTRAINT_METADATA_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,AUR_CONSTRAINT_METADATA,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(AUR_CONSTRAINT_METADATA_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
 $(eval $(call define_non_heavy_test_profile,PACKAGE_METADATA_INTEGRATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(PACKAGE_METADATA_INTEGRATION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
@@ -2385,6 +2431,11 @@ $(PACKAGE_RELATION_OBSERVATION_TEST_TARGET): $(PACKAGE_RELATION_OBSERVATION_TEST
 	@echo ":: Compiling package relation observation test binary"
 	$(call compile_non_heavy_test,PACKAGE_RELATION_OBSERVATION)
 
+$(PACKAGE_RELATION_ASSESSMENT_TEST_TARGET): $(PACKAGE_RELATION_ASSESSMENT_TEST_SRCS) $(SRC_DIR)/package_relation_assessment.hpp $(SRC_DIR)/package_relation_observation.hpp $(SRC_DIR)/package_relation.hpp $(SRC_DIR)/dependency_constraint.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling package relation assessment test binary"
+	$(call compile_non_heavy_test,PACKAGE_RELATION_ASSESSMENT)
+
 $(PACKAGE_CONSTRAINT_METADATA_TEST_TARGET): $(PACKAGE_CONSTRAINT_METADATA_TEST_SRCS) $(SRC_DIR)/installed_package_relation_inventory.hpp $(SRC_DIR)/package_relation_observation_adapter.hpp $(SRC_DIR)/package_relation_observation.hpp $(SRC_DIR)/package_constraint_metadata.hpp $(SRC_DIR)/package_relation.hpp $(SRC_DIR)/dependency_constraint.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/package-metadata/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling package constraint metadata adapter test binary"
@@ -2581,6 +2632,32 @@ check-package-relation-observation-link-firewall:
 
 test-package-relation-observation: check-package-relation-observation-link-firewall $(PACKAGE_RELATION_OBSERVATION_TEST_TARGET)
 	$(abspath $(PACKAGE_RELATION_OBSERVATION_TEST_TARGET))
+
+check-package-relation-assessment-link-firewall:
+	@echo ":: Checking package relation assessment link firewall"
+	@test "$(words $(PACKAGE_RELATION_ASSESSMENT_TEST_SRCS))" -eq "$(words $(sort $(PACKAGE_RELATION_ASSESSMENT_TEST_SRCS)))" || { \
+		echo "error: package relation assessment test source list contains duplicates" >&2; \
+		exit 1; \
+	}
+	@set -e; for source in $(PACKAGE_RELATION_ASSESSMENT_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(PACKAGE_RELATION_ASSESSMENT_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: package relation assessment test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(PACKAGE_RELATION_ASSESSMENT_FORBIDDEN_TEST_SRCS),$(PACKAGE_RELATION_ASSESSMENT_TEST_SRCS))" || { \
+		echo "error: package relation assessment test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter tests/stubs/%,$(PACKAGE_RELATION_ASSESSMENT_TEST_SRCS))" || { \
+		echo "error: package relation assessment test links a test stub" >&2; \
+		exit 1; \
+	}
+
+test-package-relation-assessment: check-package-relation-assessment-link-firewall $(PACKAGE_RELATION_ASSESSMENT_TEST_TARGET)
+	$(abspath $(PACKAGE_RELATION_ASSESSMENT_TEST_TARGET))
 
 check-package-constraint-metadata-link-firewall:
 	@echo ":: Checking package constraint metadata adapter link firewall"
@@ -3106,13 +3183,22 @@ test-aur-update-command: check-aur-update-command-link-firewall $(AUR_UPDATE_COM
 test-upgrade-all-command: check-upgrade-all-command-link-firewall $(UPGRADE_ALL_COMMAND_TEST_TARGET) $(MO_FILES)
 	sh tests/test-upgrade-all-command.sh $(abspath $(UPGRADE_ALL_COMMAND_TEST_TARGET))
 
-test-aur-update-execution-preflight: $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET)
+check-aur-update-execution-preflight-relation-link-firewall:
+	@echo ":: Checking AUR update preflight relation-authority link firewall"
+	@test -z "$(filter $(AUR_UPDATE_EXECUTION_PREFLIGHT_FORBIDDEN_RELATION_AUTHORITY_TEST_SRCS),$(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS))" || { \
+		echo "error: AUR update preflight test links relation assessment/query authority" >&2; \
+		exit 1; \
+	}
+
+test-aur-update-execution-preflight: check-aur-update-execution-preflight-relation-link-firewall $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET))
 
 test-aur-update-execution-preflight-integration: $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET)) simple
 	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET)) repository-failure
 	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET)) aur-failure
+	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET)) relation-assessment
+	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET)) relation-query-failure
 
 test-aur-update-execution-preparation: $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET) $(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET))
@@ -3657,6 +3743,7 @@ test: \
 	test-dependency-constraint \
 	test-package-relation \
 	test-package-relation-observation \
+	test-package-relation-assessment \
 	test-package-constraint-metadata \
 	test-aur-constraint-metadata \
 	test-root-package-candidate \

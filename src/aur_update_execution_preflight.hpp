@@ -54,6 +54,7 @@ struct AurUpdateExecutionIssue {
     std::string                diagnostic;
     std::optional<BuildPlanArtifactTargetProjectionIssue>
             build_plan_projection_issue;
+    std::optional<PlanDeclaredRelationReason> relation_reason;
 
     AurUpdateExecutionIssue() = default;
 
@@ -64,14 +65,17 @@ struct AurUpdateExecutionIssue {
             std::optional<std::string> dependency_specification_value,
             std::string diagnostic_value,
             std::optional<BuildPlanArtifactTargetProjectionIssue>
-                    projection_issue = std::nullopt)
+                    projection_issue = std::nullopt,
+            std::optional<PlanDeclaredRelationReason>
+                    relation_reason_value = std::nullopt)
         : reason(reason_value),
           package_name(std::move(package_name_value)),
           package_base(std::move(package_base_value)),
           dependency_specification(
                   std::move(dependency_specification_value)),
           diagnostic(std::move(diagnostic_value)),
-          build_plan_projection_issue(std::move(projection_issue)) {
+          build_plan_projection_issue(std::move(projection_issue)),
+          relation_reason(std::move(relation_reason_value)) {
     }
 };
 

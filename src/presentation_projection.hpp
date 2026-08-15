@@ -37,7 +37,7 @@ using PlanPresentationReasonDetail = std::variant<
         PlanConstraintAuthorityIssueKind,
         ConstraintSatisfaction,
         BuildPlanResolutionFailureKind,
-        DeclaredRelationAssessment,
+        PackageRelationAssessmentKind,
         ObservedVersionUnknownReason>;
 
 struct PlanPresentationReason {

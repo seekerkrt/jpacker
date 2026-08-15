@@ -68,39 +68,19 @@ std::string join_split_package_target_summaries(
     return join_guard_summary_values(values);
 }
 
-std::string metadata_risk_summary(const BuildPlanMetadataRisk& risk) {
-    // NO_TRANSLATE(Issue #308): These are stable BuildPlan metadata field
-    // tokens surrounding package identities, not human-readable prose.
-    std::vector<std::string> metadata;
-    if(!risk.conflicts.empty()) {
-        metadata.push_back(
-                "conflicts: " + join_guard_summary_values(risk.conflicts));
+std::string relation_assessment_summary(
+        const PackageRelationAssessment& assessment) {
+    std::string package_display =
+            assessment.declaring_package.package_name;
+    if(assessment.declaring_package.package_base.has_value() &&
+       *assessment.declaring_package.package_base != package_display) {
+        package_display += " (base: " +
+                *assessment.declaring_package.package_base + ")";
     }
-    if(!risk.replaces.empty()) {
-        metadata.push_back(
-                "replaces: " + join_guard_summary_values(risk.replaces));
-    }
-
-    std::string package_display = risk.package_name;
-    if(risk.package_base != risk.package_name) {
-        package_display += " (base: " + risk.package_base + ")";
-    }
-
-    std::stringstream metadata_summary;
-    for(size_t i = 0; i < metadata.size(); ++i) {
-        if(i > 0) metadata_summary << "; ";
-        metadata_summary << metadata[i];
-    }
-    return package_display + " [" + metadata_summary.str() + "]";
-}
-
-std::string join_metadata_risk_summaries(
-        const std::vector<BuildPlanMetadataRisk>& risks) {
-    std::vector<std::string> values;
-    for(const auto& risk : risks) {
-        values.push_back(metadata_risk_summary(risk));
-    }
-    return join_guard_summary_values(values);
+    return package_display + " [" +
+            std::string(package_relation_assessment_kind_token(
+                    assessment.kind)) +
+            "]";
 }
 
 std::optional<PlanSelectedProviderIdentityConflictReason>
@@ -415,12 +395,42 @@ std::vector<AssessedPlanReason> assess_plan_reasons(const BuildPlan& plan) {
     const unsigned int build_and_install =
             capability_bit(ExecutionCapability::Build) |
             capability_bit(ExecutionCapability::Install);
-    for(const BuildPlanMetadataRisk& risk : plan.metadata_risks) {
-        append_assessed_reason(
-                reasons, PlanDeclaredRelationReason{risk},
-                ExecutionReadinessState::RequiresCheck, true,
-                PlanRequiredAction::ReviewDeclaredRelations,
-                build_and_install, PlanCompletenessEffect::Unknown);
+    for(const PackageRelationAssessment& assessment :
+        plan.relation_assessments) {
+        switch(assessment.kind) {
+        case PackageRelationAssessmentKind::
+                ConfirmedNoMatchingCurrentOrPlannedTarget:
+            append_assessed_reason(
+                    reasons, PlanDeclaredRelationReason{assessment},
+                    ExecutionReadinessState::Ready, false,
+                    PlanRequiredAction::None, build_and_install,
+                    PlanCompletenessEffect::None);
+            break;
+        case PackageRelationAssessmentKind::ConfirmedInstalledConflict:
+        case PackageRelationAssessmentKind::ConfirmedPlannedTargetConflict:
+        case PackageRelationAssessmentKind::PotentialReplacement:
+            append_assessed_reason(
+                    reasons, PlanDeclaredRelationReason{assessment},
+                    ExecutionReadinessState::RequiresCheck, true,
+                    PlanRequiredAction::ReviewDeclaredRelations,
+                    build_and_install, PlanCompletenessEffect::None);
+            break;
+        case PackageRelationAssessmentKind::DeclaredRelation:
+        case PackageRelationAssessmentKind::Unknown:
+            append_assessed_reason(
+                    reasons, PlanDeclaredRelationReason{assessment},
+                    ExecutionReadinessState::RequiresCheck, true,
+                    PlanRequiredAction::ReviewDeclaredRelations,
+                    build_and_install, PlanCompletenessEffect::Unknown);
+            break;
+        case PackageRelationAssessmentKind::Invalid:
+            append_assessed_reason(
+                    reasons, PlanDeclaredRelationReason{assessment},
+                    ExecutionReadinessState::Blocked, true,
+                    PlanRequiredAction::ReviewDeclaredRelations,
+                    build_and_install, PlanCompletenessEffect::Incomplete);
+            break;
+        }
     }
 
     for(const BuildPlanSplitPackageTarget& target :
@@ -516,11 +526,12 @@ void throw_production_guard_reason(
                 "Cannot execute build plan for {}; cyclic dependencies: {}",
                 target, join_guard_summary_values(plan.cycles)));
     }
-    if(std::holds_alternative<PlanDeclaredRelationReason>(reason)) {
+    if(const auto* relation =
+               std::get_if<PlanDeclaredRelationReason>(&reason)) {
         throw std::runtime_error(localization::format_translated_message(
-                "Cannot execute build plan for {}; conflicts/replaces metadata requires manual review: {}",
-                target,
-                join_metadata_risk_summaries(plan.metadata_risks)));
+                "Cannot execute build plan for {}; package relation assessment requires manual review: {}",
+                target, relation_assessment_summary(
+                                relation->assessment)));
     }
     if(std::holds_alternative<PlanSplitPackageReason>(reason)) {
         throw std::runtime_error(localization::format_translated_message(
@@ -568,8 +579,13 @@ PlanStateProjection project_build_plan_state(const BuildPlan& plan) {
     bool has_definite_incomplete_reason = false;
     bool has_unknown_reason = false;
     for(const AssessedPlanReason& reason : assessed) {
+        const auto* relation = std::get_if<PlanDeclaredRelationReason>(
+                &reason.readiness.reason);
         if(std::holds_alternative<PlanConstraintAuthorityReason>(
-                   reason.readiness.reason)) {
+                   reason.readiness.reason) ||
+           (relation != nullptr &&
+            relation->assessment.kind ==
+                    PackageRelationAssessmentKind::Invalid)) {
             projection.construction = PlanConstruction::Failed;
         }
         switch(reason.completeness_effect) {

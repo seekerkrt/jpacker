@@ -127,6 +127,114 @@ BuildPlan build_plan_for(const std::vector<RootFixture>& roots) {
     return plan;
 }
 
+PackageRelationAssessment relation_assessment_fixture(
+        PackageRelationAssessmentKind kind,
+        std::string package_name = "relation-root",
+        std::string package_base = "relation-root",
+        std::vector<PackageRelationRootAttribution> roots = {
+                {0, "relation-root"}}) {
+    const PackageRelationKind declaration_kind =
+            kind == PackageRelationAssessmentKind::PotentialReplacement
+            ? PackageRelationKind::Replacement
+            : PackageRelationKind::Conflict;
+    const std::string source_name = package_name;
+    const std::string source_base = package_base;
+    PackageRelationObservedPackage declaring{
+            package_name,
+            package_base,
+            ObservedVersion::available(
+                    ObservedVersionSource::AurExactPackage, "2"),
+            {},
+            PackageRelationAurSourceIdentity{source_name, source_base},
+            PackageRelationObservationRole::PlannedTarget,
+            std::move(roots)};
+    DeclaredPackageRelation declaration(
+            package_name, package_base, declaration_kind,
+            "relation-target", "relation-target", std::nullopt);
+    PackageRelationMatchingEvidence evidence{
+            PackageRelationObservationCompleteness::Complete,
+            {},
+            {},
+            {},
+            {}};
+    std::optional<PackageRelationMatchEvidence> package_evidence;
+    std::optional<PackageRelationObservationFailure> observation_failure;
+
+    if(kind == PackageRelationAssessmentKind::
+                       ConfirmedInstalledConflict ||
+       kind == PackageRelationAssessmentKind::PotentialReplacement) {
+        const PackageRelationInstalledDatabaseIdentity source{
+                "/", "/var/lib/pacman"};
+        package_evidence = PackageRelationMatchEvidence{
+                PackageRelationObservedPackage{
+                        "relation-target",
+                        std::nullopt,
+                        ObservedVersion::available(
+                                ObservedVersionSource::
+                                        InstalledExactPackage,
+                                "1"),
+                        {},
+                        source,
+                        PackageRelationObservationRole::Installed,
+                        {}},
+                PackageRelationIdentityMatchKind::ExactPackage,
+                PackageRelationVersionMatchKind::Unconstrained,
+                {},
+                std::nullopt};
+        evidence.package_evidence.push_back(*package_evidence);
+    } else if(kind == PackageRelationAssessmentKind::
+                              ConfirmedPlannedTargetConflict) {
+        package_evidence = PackageRelationMatchEvidence{
+                PackageRelationObservedPackage{
+                        "relation-target",
+                        "relation-target-base",
+                        ObservedVersion::available(
+                                ObservedVersionSource::AurExactPackage,
+                                "1"),
+                        {},
+                        PackageRelationAurSourceIdentity{
+                                "relation-target", "relation-target-base"},
+                        PackageRelationObservationRole::PlannedTarget,
+                        {{0, "relation-root"}}},
+                PackageRelationIdentityMatchKind::ExactPackage,
+                PackageRelationVersionMatchKind::Unconstrained,
+                {},
+                std::nullopt};
+        evidence.package_evidence.push_back(*package_evidence);
+    } else if(kind == PackageRelationAssessmentKind::Unknown ||
+              kind == PackageRelationAssessmentKind::Invalid) {
+        const bool is_invalid =
+                kind == PackageRelationAssessmentKind::Invalid;
+        evidence.observation_completeness = is_invalid
+                ? PackageRelationObservationCompleteness::Invalid
+                : PackageRelationObservationCompleteness::Unavailable;
+        observation_failure = PackageRelationObservationFailure{
+                is_invalid
+                        ? PackageRelationObservationFailureKind::
+                                  MalformedMetadata
+                        : PackageRelationObservationFailureKind::
+                                  SourceUnavailable,
+                PackageRelationObservationRole::Installed,
+                std::nullopt,
+                std::nullopt,
+                is_invalid ? "invalid relation observation"
+                           : "relation observation unavailable"};
+        evidence.observation_failures.push_back(*observation_failure);
+    } else if(kind == PackageRelationAssessmentKind::DeclaredRelation) {
+        evidence.observation_completeness =
+                PackageRelationObservationCompleteness::Unavailable;
+    }
+
+    return PackageRelationAssessment{
+            std::move(declaration),
+            kind,
+            std::move(declaring),
+            std::move(evidence),
+            std::nullopt,
+            std::move(package_evidence),
+            std::move(observation_failure)};
+}
+
 void add_dependency_target(
         BuildPlan& plan, const std::string& package_name,
         const std::string& package_base,
@@ -834,6 +942,9 @@ void test_incomplete_same_base_coverage_is_typed_failure() {
             }});
     plan.metadata_risks.push_back(BuildPlanMetadataRisk{
             "second-child", "shared-suite", {"old-package"}, {"renamed-package"}});
+    plan.relation_assessments.push_back(relation_assessment_fixture(
+            PackageRelationAssessmentKind::ConfirmedInstalledConflict,
+            "second-child", "shared-suite", {{0, "unsupported-root"}}));
     return_build_plan(std::move(plan));
 
     AurUpdateExecutionPreflight preflight =
@@ -886,6 +997,119 @@ void test_incomplete_same_base_coverage_is_typed_failure() {
                     AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase),
             "Incomplete coverage was flattened to the legacy multiple-target blocker");
     expect(!can_execute(preflight), "Unsupported invocation was executable");
+}
+
+void test_typed_relation_assessment_preflight_mapping() {
+    const std::vector<PackageRelationAssessmentKind> blocking_kinds = {
+            PackageRelationAssessmentKind::ConfirmedInstalledConflict,
+            PackageRelationAssessmentKind::ConfirmedPlannedTargetConflict,
+            PackageRelationAssessmentKind::PotentialReplacement,
+            PackageRelationAssessmentKind::DeclaredRelation,
+            PackageRelationAssessmentKind::Unknown,
+            PackageRelationAssessmentKind::Invalid};
+    for(const PackageRelationAssessmentKind kind : blocking_kinds) {
+        reset_preflight_stub();
+        AurUpdatePlan update_plan{{remote_entry(
+                "relation-root", InstalledPackageReason::Explicit)}};
+        BuildPlan plan = build_plan_for({
+                {"relation-root", "relation-root", "relation-root"}});
+        plan.metadata_risks.push_back(BuildPlanMetadataRisk{
+                "relation-root", "relation-root", {"relation-target"}, {}});
+        plan.relation_assessments.push_back(
+                relation_assessment_fixture(kind));
+        return_build_plan(std::move(plan));
+
+        const AurUpdateExecutionPreflight preflight =
+                resolve_aur_update_execution_preflight(update_plan);
+        const AurUpdateExecutionTarget& target = preflight.targets.front();
+        expect_status(
+                target, AurUpdateExecutionTargetStatus::Unsupported,
+                "typed relation blocker");
+        expect(
+                issue_count(
+                        target,
+                        AurUpdateExecutionReason::
+                                ConflictsOrReplacesUnresolved) == 1,
+                "Typed relation blocker was duplicated by raw metadata");
+        const auto issue = std::find_if(
+                target.issues.begin(), target.issues.end(),
+                [](const AurUpdateExecutionIssue& candidate) {
+                    return candidate.relation_reason.has_value();
+                });
+        expect(
+                issue != target.issues.end() &&
+                        issue->package_name ==
+                                std::optional<std::string>{"relation-root"} &&
+                        issue->package_base ==
+                                std::optional<std::string>{"relation-root"} &&
+                        issue->relation_reason->assessment.kind == kind &&
+                        issue->relation_reason->assessment.declaration
+                                        .target_component() ==
+                                "relation-target" &&
+                        issue->relation_reason->assessment.declaring_package
+                                        .roots ==
+                                std::vector<
+                                        PackageRelationRootAttribution>{
+                                        {0, "relation-root"}},
+                "Preflight lost typed relation target or root attribution");
+        if(kind == PackageRelationAssessmentKind::
+                           ConfirmedInstalledConflict ||
+           kind == PackageRelationAssessmentKind::
+                           ConfirmedPlannedTargetConflict ||
+           kind == PackageRelationAssessmentKind::PotentialReplacement) {
+            expect(
+                    issue->relation_reason->assessment
+                            .attributed_package_evidence.has_value(),
+                    "Confirmed relation lost matched source evidence");
+            const PackageRelationObservationRole expected_role =
+                    kind == PackageRelationAssessmentKind::
+                                    ConfirmedPlannedTargetConflict
+                    ? PackageRelationObservationRole::PlannedTarget
+                    : PackageRelationObservationRole::Installed;
+            expect(
+                    issue->relation_reason->assessment
+                                    .attributed_package_evidence
+                                    ->observed_package.role == expected_role,
+                    "Confirmed relation source role differs");
+        }
+    }
+
+    reset_preflight_stub();
+    AurUpdatePlan update_plan{{remote_entry(
+            "relation-root", InstalledPackageReason::Explicit)}};
+    BuildPlan no_match = build_plan_for({
+            {"relation-root", "relation-root", "relation-root"}});
+    no_match.metadata_risks.push_back(BuildPlanMetadataRisk{
+            "relation-root", "relation-root", {"relation-target"}, {}});
+    no_match.relation_assessments.push_back(relation_assessment_fixture(
+            PackageRelationAssessmentKind::
+                    ConfirmedNoMatchingCurrentOrPlannedTarget));
+    return_build_plan(std::move(no_match));
+    const AurUpdateExecutionPreflight assessed_clear =
+            resolve_aur_update_execution_preflight(update_plan);
+    expect(
+            assessed_clear.targets.front().status ==
+                            AurUpdateExecutionTargetStatus::Executable &&
+                    !has_issue(
+                            assessed_clear.targets.front(),
+                            AurUpdateExecutionReason::
+                                    ConflictsOrReplacesUnresolved),
+            "Confirmed NoMatch retained a preflight relation blocker");
+
+    reset_preflight_stub();
+    BuildPlan raw_only = build_plan_for({
+            {"relation-root", "relation-root", "relation-root"}});
+    raw_only.metadata_risks.push_back(BuildPlanMetadataRisk{
+            "relation-root", "relation-root", {"relation-target"}, {}});
+    return_build_plan(std::move(raw_only));
+    const AurUpdateExecutionPreflight compatibility_only =
+            resolve_aur_update_execution_preflight(update_plan);
+    expect(
+            !has_issue(
+                    compatibility_only.targets.front(),
+                    AurUpdateExecutionReason::
+                            ConflictsOrReplacesUnresolved),
+            "Raw compatibility metadata remained a preflight authority");
 }
 
 void test_incomplete_status_preserves_provider_failure_without_split_blocker() {
@@ -2076,6 +2300,9 @@ int main() {
         run_case(
                 "incomplete same-base coverage is typed failure",
                 test_incomplete_same_base_coverage_is_typed_failure);
+        run_case(
+                "typed relation assessment preflight mapping",
+                test_typed_relation_assessment_preflight_mapping);
         run_case(
                 "incomplete status preserves provider failure without split blocker",
                 test_incomplete_status_preserves_provider_failure_without_split_blocker);

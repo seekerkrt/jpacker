@@ -4,7 +4,7 @@
 #include "dependency_constraint.hpp"
 #include "dependency_provider.hpp"
 #include "package_constraint_metadata.hpp"
-#include "package_relation_observation.hpp"
+#include "package_relation_assessment.hpp"
 
 #include <array>
 #include <cstddef>
@@ -212,8 +212,8 @@ struct IncompleteProviderCandidateSet {
     bool operator==(const IncompleteProviderCandidateSet&) const = default;
 };
 
-// AUR package が宣言する conflicts / replaces を、解決済みと誤認せず plan に残す。
-// POLICY(#150): v1.x では installed/repo DB との照合や置換先選択を行わず、raw metadata を保持する。
+// Raw relation strings remain for compatibility/presentation only. Production
+// safety is exclusively projected from relation_assessments below.
 struct BuildPlanMetadataRisk {
     std::string              package_name;
     std::string              package_base;
@@ -228,6 +228,7 @@ struct BuildPlan {
     std::vector<PlannedPackageTarget>         package_targets;
     std::vector<PlannedPackageRelationObservation>
             planned_relation_observations;
+    std::vector<PackageRelationAssessment>   relation_assessments;
     std::vector<BuildPlanDependencyEdge>      dependency_edges;
     std::vector<BuildPlanResolutionFailure>   resolution_failures;
     std::vector<BuildPlanSplitPackageTarget> split_package_targets;
@@ -333,15 +334,10 @@ struct PlanDependencyCycleReason {
     std::string dependency;
 };
 
-enum class DeclaredRelationAssessment {
-    DeclaredMetadataActualRelationUnassessed,
-};
-
 struct PlanDeclaredRelationReason {
-    BuildPlanMetadataRisk      metadata;
-    DeclaredRelationAssessment assessment =
-            DeclaredRelationAssessment::
-                    DeclaredMetadataActualRelationUnassessed;
+    PackageRelationAssessment assessment;
+
+    bool operator==(const PlanDeclaredRelationReason&) const = default;
 };
 
 struct PlanSplitPackageReason {

@@ -1579,6 +1579,31 @@ void test_local_relation_observation_retains_source_and_effective_scope() {
                     libraries.declarations[1].target_component() ==
                             "old-suite",
             "Local inherited typed declarations differ");
+    expect(
+            plan.build_plan().relation_assessments.size() == 4 &&
+                    std::all_of(
+                            plan.build_plan().relation_assessments.begin(),
+                            plan.build_plan().relation_assessments.end(),
+                            [](const PackageRelationAssessment& assessment) {
+                                return assessment.kind ==
+                                       PackageRelationAssessmentKind::
+                                               ConfirmedNoMatchingCurrentOrPlannedTarget;
+                            }),
+            "Complete local observations did not project typed NoMatch assessments");
+    expect(
+            std::all_of(
+                    plan.build_plan().relation_assessments.begin(),
+                    plan.build_plan().relation_assessments.end(),
+                    [&source](const PackageRelationAssessment& assessment) {
+                        return assessment.declaring_package.package_base ==
+                                       std::optional<std::string>{
+                                               "local-observation-suite"} &&
+                                std::get<PackageRelationLocalSourceIdentity>(
+                                        assessment.declaring_package.source) ==
+                                        source &&
+                                assessment.declaring_package.roots.size() == 1;
+                    }),
+            "Local relation assessment lost source/base/root attribution");
 
     const LocalBuildPlan unsupported = resolve_local_build_plan(
             metadata, "riscv64", source, reject_provider_selection());

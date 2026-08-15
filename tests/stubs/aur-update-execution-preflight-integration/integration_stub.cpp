@@ -1,5 +1,6 @@
 #include "integration_stub.hpp"
 
+#include "alpm_stub.hpp"
 #include "aur_rpc.hpp"
 #include "logging.hpp"
 
@@ -25,12 +26,16 @@ IntegrationStubState g_state;
 
 AurPackageInfo package_info(
         const std::string& name,
-        const std::vector<std::string>& dependencies = {}) {
+        const std::vector<std::string>& dependencies = {},
+        const std::vector<std::string>& conflicts = {},
+        const std::vector<std::string>& replaces = {}) {
     AurPackageInfo info;
     info.Name = name;
     info.PackageBase = name;
     info.Version = "2.0-1";
     info.Depends = dependencies;
+    info.Conflicts = conflicts;
+    info.Replaces = replaces;
     info.Maintainer = "moguet-test";
     return info;
 }
@@ -48,6 +53,7 @@ namespace aur_update_execution_preflight_integration_stub {
 
 void reset() {
     g_state = IntegrationStubState{};
+    package_metadata_test_stub::reset_alpm_stub();
 }
 
 void enqueue_captured_command_result(
@@ -152,6 +158,18 @@ std::optional<AurPackageInfo> AurClient::info_strict(
     }
     if(package_name == "aur-failure-child") {
         throw std::runtime_error("strict integration dependency metadata failure");
+    }
+    if(package_name == "relation-installed-root") {
+        return package_info(
+                package_name, {}, {"installed-conflict"});
+    }
+    if(package_name == "relation-no-match-root") {
+        return package_info(
+                package_name, {}, {"absent-conflict"});
+    }
+    if(package_name == "relation-query-failure-root") {
+        return package_info(
+                package_name, {}, {"unknown-conflict"});
     }
 
     throw AurRpcResponseError(

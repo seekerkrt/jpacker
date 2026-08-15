@@ -3,6 +3,7 @@
 #include "aur_update_query.hpp"
 #include "commands_sync.hpp"
 #include "local_dependency_plan_projection.hpp"
+#include "package_relation_assessment_fixture.hpp"
 #include "source_install.hpp"
 #include "stubs/local-dependency-plan/query_stub.hpp"
 #include "system_source_upgrade.hpp"
@@ -814,8 +815,10 @@ void test_blocker_variant_details() {
                             CandidateVersionUnavailable)});
     const BuildPlanDependencyEdge& constraint_edge =
             constraint_plan.dependency_edges[1];
-    const BuildPlanMetadataRisk metadata_risk{
-            "risk-child", "risk-base", {"conflict-a"}, {"replace-b"}};
+    const PlanDeclaredRelationReason relation_reason =
+            package_relation_assessment_fixture::
+                    confirmed_installed_conflict_reason(
+                            "risk-child", "risk-base", "conflict-a");
     const LocalDependencyPlanFailure local_dependency_failure{
             LocalDependencyPlanFailureKind::ConstraintMismatch,
             "local-parent",
@@ -918,12 +921,11 @@ void test_blocker_variant_details() {
             constraint_text, "constraint-decoy-provider",
             "constraint blocker edge correlation");
     expect_blocker(
-            MetadataRiskUnifiedPlanBlocker{
-                    UnifiedPlanBorrowedAuthorityReference<
-                            BuildPlanMetadataRisk>(metadata_risk)},
+            MetadataRiskUnifiedPlanBlocker{relation_reason},
             {"MetadataRiskUnifiedPlanBlocker", "risk-child",
              "PackageBase: risk-base", "conflicts: conflict-a",
-             "replaces: replace-b"},
+             "replaces: None",
+             "assessment: ConfirmedInstalledConflict"},
             "metadata blocker");
     expect_blocker(
             LocalDependencyPlanUnifiedPlanBlocker{

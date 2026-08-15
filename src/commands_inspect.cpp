@@ -526,8 +526,9 @@ std::string plan_presentation_reason_label(
     case PlanPresentationReasonKind::DependencyCycle:
         return localization::translate_message("dependency cycle");
     case PlanPresentationReasonKind::DeclaredRelation:
-        return localization::translate_message(
-                "declared relation (actual relation unassessed)");
+        // Slice 5 owns the localized public wording. This Slice only replaces
+        // the factually false "unassessed" label with a stable typed label.
+        return "package relation assessment";
     case PlanPresentationReasonKind::SplitPackage:
         return localization::translate_message("split package");
     case PlanPresentationReasonKind::IncompleteProviderCandidate:
@@ -975,6 +976,38 @@ void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks) 
     }
 }
 
+// Slice 5 owns localized prose. Slice 4 exposes the stable typed result and
+// keeps raw metadata above as presentation-only compatibility detail.
+void print_relation_assessment_group(
+        const std::vector<PackageRelationAssessment>& assessments,
+        const std::optional<std::string>& declaring_package = std::nullopt) {
+    bool printed_header = false;
+    for(const auto& assessment : assessments) {
+        if(declaring_package.has_value() &&
+           assessment.declaring_package.package_name !=
+                   declaring_package.value()) {
+            continue;
+        }
+        if(!printed_header) {
+            std::cout << "Relation assessments:" << std::endl;
+            printed_header = true;
+        }
+        std::cout << "  " << assessment.declaring_package.package_name
+                  << ": " << assessment.declaration.raw_specification()
+                  << " -> "
+                  << package_relation_assessment_kind_token(assessment.kind)
+                  << std::endl;
+        if(assessment.attributed_package_evidence.has_value()) {
+            const auto& matched =
+                    assessment.attributed_package_evidence->observed_package;
+            std::cout << "    matched package: " << matched.package_name
+                      << "; target component: "
+                      << assessment.declaration.target_component()
+                      << std::endl;
+        }
+    }
+}
+
 void print_build_plan(const BuildPlan& plan) {
     const PlanStateProjection state = project_build_plan_state(plan);
     const PresentationProjection presentation =
@@ -1007,7 +1040,10 @@ void print_build_plan(const BuildPlan& plan) {
     if(!plan.metadata_risks.empty()) {
         std::cout << std::endl;
         print_metadata_risk_group(plan.metadata_risks);
-        std::cout << "  actual relation: unassessed (#353)" << std::endl;
+    }
+    if(!plan.relation_assessments.empty()) {
+        std::cout << std::endl;
+        print_relation_assessment_group(plan.relation_assessments);
     }
     if(!plan.unresolved.empty()) {
         std::cout << std::endl;
@@ -1153,8 +1189,10 @@ void print_fetch_plan(const BuildPlan& plan) {
     if(!plan.metadata_risks.empty()) {
         std::cout << std::endl;
         print_metadata_risk_group(plan.metadata_risks);
-        Logger::warn(localization::translate_message(
-                "Conflicts/replaces metadata requires manual review before build/install; fetch is allowed."));
+    }
+    if(!plan.relation_assessments.empty()) {
+        std::cout << std::endl;
+        print_relation_assessment_group(plan.relation_assessments);
     }
 }
 
@@ -1273,8 +1311,17 @@ int cmd_deps(
             if(!metadata_risks.empty()) {
                 std::cout << std::endl;
                 print_metadata_risk_group(metadata_risks);
-                Logger::warn(localization::translate_message(
-                        "Conflicts/replaces metadata is separate from dependency resolution and requires manual review."));
+            }
+            if(std::any_of(
+                       invocation_plan.relation_assessments.begin(),
+                       invocation_plan.relation_assessments.end(),
+                       [&info](const PackageRelationAssessment& assessment) {
+                           return assessment.declaring_package.package_name ==
+                                  info->Name;
+                       })) {
+                std::cout << std::endl;
+                print_relation_assessment_group(
+                        invocation_plan.relation_assessments, info->Name);
             }
             print_incomplete_provider_candidate_sets(invocation_plan);
             print_constraint_evaluations(invocation_plan, info->Name);

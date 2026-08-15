@@ -1,6 +1,7 @@
 #include "aur_update_execution_preflight.hpp"
 #include "source_install.hpp"
 #include "system_source_upgrade.hpp"
+#include "package_relation_assessment_fixture.hpp"
 #include "unified_plan_observation.hpp"
 #include "upgrade_all_operation.hpp"
 
@@ -783,9 +784,10 @@ void test_typed_blockers() {
                             "1"),
                     {}}},
             ConstraintEvaluation::unsatisfied()};
-    const BuildPlanMetadataRisk metadata_risk{
-            "risky-child", "risky-base", {"old-package"},
-            {"replacement"}};
+    const PlanDeclaredRelationReason relation_reason =
+            package_relation_assessment_fixture::
+                    confirmed_installed_conflict_reason(
+                            "risky-child", "risky-base", "old-package");
     const AurUpdateExecutionIssue route_preflight{
             AurUpdateExecutionReason::BuildPlanInconsistent,
             "route-package",
@@ -814,9 +816,7 @@ void test_typed_blockers() {
     blockers.push_back(ConstraintFailureUnifiedPlanBlocker{
             UnifiedPlanBorrowedAuthorityReference<BuildPlanDependencyEdge>(
                     constraint_edge)});
-    blockers.push_back(MetadataRiskUnifiedPlanBlocker{
-            UnifiedPlanBorrowedAuthorityReference<BuildPlanMetadataRisk>(
-                    metadata_risk)});
+    blockers.push_back(MetadataRiskUnifiedPlanBlocker{relation_reason});
     blockers.push_back(RoutePreflightUnifiedPlanBlocker{
             RoutePreflightUnifiedPlanBlockerDetail{
                     UnifiedPlanBorrowedAuthorityReference<

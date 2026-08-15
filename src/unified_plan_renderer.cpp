@@ -4365,31 +4365,44 @@ std::string blocker_display(
                 } else if constexpr(std::is_same_v<
                                             Blocker,
                                             MetadataRiskUnifiedPlanBlocker>) {
-                    const BuildPlanMetadataRisk& risk =
-                            typed_blocker.detail.get();
-                    return localization::format_translated_message(
+                    const PackageRelationAssessment& assessment =
+                            typed_blocker.detail.assessment;
+                    const bool is_conflict =
+                            assessment.declaration.kind() ==
+                            PackageRelationKind::Conflict;
+                    std::string display =
+                            localization::format_translated_message(
                             "metadata risk blocker ({}); package: {} ({}: {}); conflicts: {}; replaces: {}",
                             "MetadataRiskUnifiedPlanBlocker",
                             required_string_display(
-                                    risk.package_name, state,
+                                    assessment.declaring_package.package_name,
+                                    state,
                                     UnifiedPlanRenderingSection::Blockers,
                                     blocker_index, std::nullopt,
                                     localization::translate_message(
                                             "A metadata risk blocker is missing its package identity.")),
                             "PackageBase",
                             required_string_display(
-                                    risk.package_base, state,
+                                    assessment.declaring_package.package_base
+                                            .value_or(""),
+                                    state,
                                     UnifiedPlanRenderingSection::Blockers,
                                     blocker_index, std::nullopt,
                                     localization::format_translated_message(
                                             "A metadata risk blocker is missing its {} identity.",
                                             "PackageBase")),
-                            risk.conflicts.empty()
+                            is_conflict
+                                    ? assessment.declaration
+                                              .raw_specification()
+                                    : localization::translate_message("None"),
+                            is_conflict
                                     ? localization::translate_message("None")
-                                    : join_display_values(risk.conflicts),
-                            risk.replaces.empty()
-                                    ? localization::translate_message("None")
-                                    : join_display_values(risk.replaces));
+                                    : assessment.declaration
+                                              .raw_specification());
+                    display += "; assessment: ";
+                    display += package_relation_assessment_kind_token(
+                            assessment.kind);
+                    return display;
                 } else if constexpr(std::is_same_v<
                                             Blocker,
                                             LocalDependencyPlanUnifiedPlanBlocker>) {

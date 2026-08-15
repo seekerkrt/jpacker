@@ -44,4 +44,6 @@ if [ "$should_fail" -eq 1 ] && [ "$exit_code" -ne 0 ]; then
     exit "$exit_code"
 fi
 
-printf 'RootDir = /\nDBPath = /var/lib/pacman\n'
+printf 'RootDir = %s\nDBPath = %s\n' \
+    "${MOGUET_TEST_PACKAGE_METADATA_ROOT_DIR:-/}" \
+    "${MOGUET_TEST_PACKAGE_METADATA_DB_PATH:-/var/lib/pacman}"

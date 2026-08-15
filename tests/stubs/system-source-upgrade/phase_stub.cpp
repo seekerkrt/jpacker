@@ -743,6 +743,28 @@ BuildPlan resolve_build_plan(
     return plan;
 }
 
+PlanStateProjection project_build_plan_state(const BuildPlan&) {
+    // This phase-characterization binary already replaces the BuildPlan
+    // execution guard below. It supplies an empty, already-projected readiness
+    // seam for unrelated unified-plan paths; relation classification remains
+    // covered by the dedicated production-model and unified-plan tests.
+    return PlanStateProjection{};
+}
+
+const ExecutionReadiness& execution_readiness(
+        const PlanStateProjection& projection,
+        ExecutionCapability capability) noexcept {
+    switch(capability) {
+    case ExecutionCapability::Fetch:
+        return projection.readiness[0];
+    case ExecutionCapability::Build:
+        return projection.readiness[1];
+    case ExecutionCapability::Install:
+        return projection.readiness[2];
+    }
+    return projection.readiness[0];
+}
+
 void require_executable_install_plan(
         const std::string&, const BuildPlan&) {
     if(g_state.build_plan_guard_failure.has_value()) {

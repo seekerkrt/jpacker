@@ -794,7 +794,7 @@ while IFS='|' read -r case_name target expected; do
     assert_request_log_nonempty
     assert_cache_entry_absent "$target"
 done <<'AUR_GUARDS'
-metadata-risk|risk-root|conflicts/replaces metadata requires manual review
+relation-assessment|planned-conflict-root|package relation assessment requires manual review
 ambiguous-provider|ambiguous-root|ambiguous providers
 unresolved-dependency|unresolved-root|unresolved dependencies
 cyclic-plan|cycle-root|cyclic dependencies
