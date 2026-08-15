@@ -178,20 +178,36 @@ the output distinguishes user-selected providers from unresolved ambiguity.
 Constraint results and reasons are displayed. Unsatisfied or unknown results
 warn but do not stop this read-only command; invalid or conflicting input
 fails closed.
+Conflict and replacement declarations are shown with their current typed
+assessment, including the declaring package and any matched installed or
+planned package. This read-only command does not perform replacement or
+conflict resolution.
 This command does not clone, build, install, or calculate a build order.
 .
 .TP
 .B "plan <pkg>..."
 Display AUR build-order plans and direct official repository package sizes for
 one or more packages.
-Unknown dependencies, unselected ambiguous providers, cycles, and conflicts/replacements
-that Moguet cannot resolve make the plan incomplete.
+Unknown dependencies, unselected ambiguous providers, and cycles make the
+plan incomplete.
 The plan distinguishes uniquely resolved, user-selected, and still-ambiguous
 providers.
 Metadata-size unavailability does not suppress the plan body.
 Unsatisfied or unknown dependency constraints make the plan incomplete and
 are shown with their result and reason. Invalid or conflicting constraints
 fail plan construction.
+The plan also distinguishes installed conflicts, planned-target conflicts,
+potential replacement impacts, unavailable or not-yet-completed judgments,
+invalid metadata or observations, and a complete observation with no matching
+current or planned target.
+Confirmed installed or planned conflicts and potential replacement impacts can
+leave plan completeness Complete while build and install require review and
+remain blocked by the safety guard; Moguet does not resolve them automatically.
+An unavailable or not-yet-completed relation judgment leaves completeness
+Unknown and fails closed. Invalid relation metadata or observation makes
+completeness Incomplete and blocks build and install.
+A complete observation with no matching current or planned target adds no
+relation blocker. These results do not add a separate command status taxonomy.
 This command does not clone, build, or install.
 .
 .TP
@@ -286,6 +302,9 @@ Show package information.
 Auto mode prefers official repository information and falls back to exact AUR
 metadata when the package is absent.
 Source selectors restrict the lookup to their named source.
+For AUR metadata, declared conflicts and replacements are shown as metadata;
+the installed/planned assessment is explicitly deferred to planning and build
+preflight.
 .
 .TP
 .B "-Qua"
@@ -652,6 +671,17 @@ state authoritatively.
 It does not use
 .B --noconfirm
 to cross such a guard.
+.
+.PP
+Before build or install, Moguet assesses declared conflicts and replacements
+against installed and planned packages, including provided components and
+versioned relations. Diagnostics distinguish installed conflicts from planned
+target conflicts. A matching replacement is only a potential impact requiring
+review; Moguet does not remove, replace, or resolve packages automatically.
+Unavailable or invalid judgments fail closed and are not reported as absence.
+Only a complete observation with no matching current or planned package or
+provided component releases that relation guard. The declaration remains, and
+pacman/libalpm remains the transaction authority.
 .
 .PP
 When multiple dependency providers remain, an interactive TTY displays

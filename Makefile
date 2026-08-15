@@ -336,11 +336,12 @@ AUR_UPDATE_QUERY_TEST_SRCS := \
 AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS := \
 	tests/aur_update_execution_preflight_test.cpp \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
-	$(SRC_DIR)/package_relation.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	tests/stubs/aur-update-execution-preflight/preflight_stub.cpp
@@ -370,6 +371,7 @@ AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_constraint_metadata.cpp \
 	$(SRC_DIR)/repository_query.cpp \
@@ -387,6 +389,8 @@ AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/shell_words.cpp \
@@ -399,6 +403,8 @@ AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_preference.cpp \
 	$(SRC_DIR)/source_environment.cpp \
@@ -417,6 +423,8 @@ AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/shell_words.cpp \
@@ -447,6 +455,8 @@ AUR_UPDATE_OPERATION_RESULT_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/shell_words.cpp \
@@ -479,6 +489,8 @@ FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/aur_update_execution_runner.cpp \
 	$(SRC_DIR)/aur_update_operation_result.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
@@ -502,6 +514,8 @@ FILTERED_AUR_UPDATE_OPERATION_REQUIRED_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/aur_update_execution_runner.cpp \
 	$(SRC_DIR)/aur_update_operation_result.cpp
 FILTERED_AUR_UPDATE_OPERATION_FORBIDDEN_TEST_SRCS := \
@@ -545,6 +559,8 @@ UPGRADE_ALL_OPERATION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/aur_update_execution_runner.cpp \
 	$(SRC_DIR)/aur_update_operation_result.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
@@ -578,6 +594,8 @@ UPGRADE_ALL_OPERATION_REQUIRED_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/aur_update_execution_runner.cpp \
 	$(SRC_DIR)/aur_update_operation_result.cpp
 UPGRADE_ALL_OPERATION_FORBIDDEN_TEST_SRCS := \
@@ -677,6 +695,7 @@ LOCAL_DEPENDENCY_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/logging.cpp
@@ -727,6 +746,7 @@ LOCAL_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
@@ -761,6 +781,7 @@ CLI_DIAGNOSTIC_MODEL_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/package_relation.cpp \
 	$(SRC_DIR)/diagnostic_projection.cpp \
 	$(SRC_DIR)/operation_state_model.cpp \
@@ -793,6 +814,7 @@ RUNTIME_CLI_CONNECTION_FORBIDDEN_TEST_SRCS := \
 DEPENDENCY_PLAN_MODEL_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_plan.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/aur_constraint_metadata.cpp \
 	$(SRC_DIR)/package_relation.cpp \
 	$(SRC_DIR)/package_relation_observation.cpp \
@@ -821,6 +843,8 @@ BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/package_identifier.cpp
 BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS := \
 	tests/build_plan_artifact_target_projection_test.cpp \
@@ -863,6 +887,7 @@ UNIFIED_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/logging.cpp
@@ -895,6 +920,7 @@ UNIFIED_PLAN_RENDERER_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/logging.cpp
@@ -1147,6 +1173,7 @@ PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_relation_presentation.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(LOCAL_DEPENDENCY_PLAN_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS) \

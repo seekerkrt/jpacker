@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-15 10:25+0900\n"
+"POT-Creation-Date: 2026-08-15 14:42+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -1086,9 +1086,6 @@ msgstr "到達可能な依存関係の循環が {} の概要にありません�
 #, c++-format
 msgid "Ambiguous provider summary has no matching dependency edge: {}"
 msgstr "曖昧な提供元の概要に対応する依存関係エッジがありません: {}"
-
-msgid "Package declares conflicts or replaces metadata that requires policy."
-msgstr "パッケージに、方針による判断が必要な競合または置換メタデータが宣言されています。"
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
 #, c++-format
@@ -2498,6 +2495,9 @@ msgstr "制約の実行準備"
 msgid "resolution failure"
 msgstr "解決失敗"
 
+msgid "package relation assessment"
+msgstr "パッケージ関係の判定"
+
 msgid "split package"
 msgstr "分割パッケージ"
 
@@ -2642,6 +2642,9 @@ msgstr "    競合: {}"
 #, c++-format
 msgid "    replaces: {}"
 msgstr "    置換: {}"
+
+msgid "Package relation assessments:"
+msgstr "パッケージ関係の判定:"
 
 msgid "Ambiguous provided dependencies:"
 msgstr "プロバイダーを一意に決定できない依存関係:"
@@ -3237,6 +3240,13 @@ msgstr "競合              : {}"
 #, c++-format
 msgid "Replaces        : {}"
 msgstr "置換              : {}"
+
+msgid "deferred to planning and build preflight"
+msgstr "計画またはビルドの事前検査まで保留"
+
+#, c++-format
+msgid "Relation Check  : {}"
+msgstr "関係の判定        : {}"
 
 #, c++-format
 msgid "Maintainer      : {}"
@@ -4564,8 +4574,8 @@ msgid "Cannot execute build plan for {}; cyclic dependencies: {}"
 msgstr "{}のビルド計画を実行できません。循環依存: {}"
 
 #, c++-format
-msgid "Cannot execute build plan for {}; package relation assessment requires manual review: {}"
-msgstr "{}のビルド計画を実行できません。パッケージ関係の評価結果は手動確認が必要です: {}"
+msgid "Cannot execute build plan for {}; {}"
+msgstr "{}のビルド計画を実行できません: {}"
 
 #, c++-format
 msgid "Cannot execute singular install plan for {}; split package targets require the {} set lifecycle: {}"
@@ -5071,13 +5081,13 @@ msgstr "1つの{} {}の{}を{}へ出力（チェックアウトは保存しま�
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
 #, c++-format
-msgid "Classify {} dependencies and show constraint results"
-msgstr "{}の依存関係を分類しconstraint resultを表示"
+msgid "Classify {} dependencies and show constraint and conflict/replacement assessments"
+msgstr "{}の依存関係を分類し、制約と競合/置換の判定結果を表示"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
 #, c++-format
-msgid "Show the {} build-order plan and constraint completeness"
-msgstr "{}のビルド順序とconstraint completenessを表示"
+msgid "Show the {} build-order plan, constraint completeness, and conflict/replacement assessments"
+msgstr "{}のビルド順序、制約の完全性、競合/置換の判定結果を表示"
 
 #. TRANSLATORS: The placeholders are literal git commands and the AUR identity.
 #, c++-format
@@ -5162,6 +5172,9 @@ msgstr "persistent stateを変更せず、対応するmutating operationを観�
 msgid "Reject unsupported routes and do not create state, cache, or workspaces"
 msgstr "未対応経路を拒否し、state、cache、workspaceを作成しません"
 
+msgid "Show assessed conflict/replacement blockers before any supported mutation"
+msgstr "対応する変更の前に判定済みの競合/置換ブロッカーを表示"
+
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
 msgid "Prompt to review {} and {} files"
@@ -5182,6 +5195,9 @@ msgstr "リポジトリ更新差分の確認を省略"
 #, c++-format
 msgid "Pass this option to {} and {}"
 msgstr "このオプションを{}と{}へ渡します"
+
+msgid "Do not bypass conflict/replacement safety stops or perform automatic replacement"
+msgstr "競合/置換の安全停止を回避せず、自動置換も行いません"
 
 #. TRANSLATORS: pacman, AUR, and -S are literal identities or CLI tokens.
 #, c++-format
@@ -5579,6 +5595,184 @@ msgstr "リポジトリパッケージグループのメタデータに無効な
 
 msgid "Repository package group contains an invalid package source."
 msgstr "リポジトリパッケージグループに無効なパッケージ取得元が含まれています。"
+
+msgid "not observed"
+msgstr "未観測"
+
+msgid "conflict"
+msgstr "競合"
+
+msgid "replacement"
+msgstr "置換"
+
+msgid "invalid relation kind"
+msgstr "不正な関係種別"
+
+msgid "planned"
+msgstr "計画中"
+
+msgid "repository-context"
+msgstr "リポジトリ情報"
+
+msgid "unknown-role"
+msgstr "不明な役割"
+
+msgid "complete"
+msgstr "完全"
+
+msgid "partial"
+msgstr "一部のみ"
+
+msgid "unavailable"
+msgstr "利用不可"
+
+msgid "invalid"
+msgstr "不正"
+
+msgid "installed package database"
+msgstr "インストール済みパッケージデータベース"
+
+#, c++-format
+msgid "configured repository {} (order #{})"
+msgstr "設定済みリポジトリ{}（順序 #{}）"
+
+#. TRANSLATORS: The first and third placeholders are
+#. the literal source and package-base field names.
+#, c++-format
+msgid "{} source {} ({}: {})"
+msgstr "{}ソース{}（{}: {}）"
+
+msgid "local source"
+msgstr "ローカルソース"
+
+#, c++-format
+msgid "input #{} requested {}"
+msgstr "入力 #{} の要求: {}"
+
+#. TRANSLATORS: The second placeholder is the literal package-base
+#. field name.
+#, c++-format
+msgid "{} ({}: {})"
+msgstr "{}（{}: {}）"
+
+#, c++-format
+msgid "roots: {}"
+msgstr "ルート: {}"
+
+#, c++-format
+msgid "{} [{}]"
+msgstr "{} [{}]"
+
+#, c++-format
+msgid "exact package component {} (version unavailable)"
+msgstr "実パッケージコンポーネント{}（バージョンを利用できません）"
+
+#, c++-format
+msgid "exact package component {} (version {})"
+msgstr "実パッケージコンポーネント{}（バージョン{}）"
+
+#, c++-format
+msgid "provided component {}"
+msgstr "提供コンポーネント{}"
+
+msgid "no matching component evidence"
+msgstr "一致するコンポーネントの根拠なし"
+
+msgid "invalid component evidence"
+msgstr "不正なコンポーネント根拠"
+
+msgid "source unavailable"
+msgstr "ソースを利用できません"
+
+msgid "source observation incomplete"
+msgstr "ソースの観測が不完全です"
+
+msgid "source identity invalid"
+msgstr "ソース識別情報が不正です"
+
+msgid "metadata malformed"
+msgstr "メタデータの形式が不正です"
+
+msgid "declaration target is invalid"
+msgstr "宣言対象が不正です"
+
+msgid "package identity is invalid"
+msgstr "パッケージ識別情報が不正です"
+
+msgid "source role is inconsistent"
+msgstr "ソースの役割に矛盾があります"
+
+msgid "source identity is inconsistent"
+msgstr "ソース識別情報に矛盾があります"
+
+msgid "version source is inconsistent"
+msgstr "バージョンの取得元に矛盾があります"
+
+msgid "provided component is malformed"
+msgstr "提供コンポーネントの形式が不正です"
+
+msgid "version metadata is invalid"
+msgstr "バージョンメタデータが不正です"
+
+msgid "root attribution is invalid"
+msgstr "ルートへの帰属が不正です"
+
+msgid "observation is invalid"
+msgstr "観測が不正です"
+
+#, c++-format
+msgid "{}: {}"
+msgstr "{}: {}"
+
+#, c++-format
+msgid "package {}: {}"
+msgstr "パッケージ{}: {}"
+
+#, c++-format
+msgid "version judgment unavailable for package {} through {}"
+msgstr "パッケージ{}について{}によるバージョン判定を利用できません"
+
+#, c++-format
+msgid "version evidence invalid for package {} through {}"
+msgstr "パッケージ{}について{}によるバージョン根拠が不正です"
+
+#, c++-format
+msgid "observation completeness: {}"
+msgstr "観測の完全性: {}"
+
+msgid "current or planned"
+msgstr "現在または計画中"
+
+#, c++-format
+msgid "Installed conflict confirmed: declaring package {} declares conflict {} for target component {}; matched installed package {} through {}; build/install is blocked before mutation."
+msgstr "インストール済みパッケージとの競合を確認: 宣言元パッケージ{}は競合 {} を宣言（対象コンポーネント: {}）; インストール済みパッケージ{}が{}として一致; ビルド/インストールは変更前に停止します。"
+
+#, c++-format
+msgid "Planned-target conflict confirmed: declaring package {} declares conflict {} for target component {}; matched planned package {} through {}; build/install is blocked before mutation."
+msgstr "計画中の対象との競合を確認: 宣言元パッケージ{}は競合 {} を宣言（対象コンポーネント: {}）; 計画中のパッケージ{}が{}として一致; ビルド/インストールは変更前に停止します。"
+
+#, c++-format
+msgid "Potential replacement impact: declaring package {} declares replacement {} for target component {}; matched {} package {} through {} is a replacement candidate; review is required and no automatic replacement is performed; build/install is blocked before mutation."
+msgstr "置換候補による影響: 宣言元パッケージ{}は置換 {} を宣言（対象コンポーネント: {}）; {}パッケージ{}が{}として置換候補に一致; ユーザーの確認が必要で、自動置換は行いません; ビルド/インストールは変更前に停止します。"
+
+#, c++-format
+msgid "Confirmed no matching current or planned target: declaring package {} declares {} {} for target component {}; complete current/planned observation found no matching package or provided component; this relation does not block build/install."
+msgstr "現在または計画中の一致対象なしを確認: 宣言元パッケージ{}は{} {} を宣言（対象コンポーネント: {}）; 現在/計画中の状態を完全に観測した結果、一致するパッケージまたは提供コンポーネントはありません; この関係だけを理由にビルド/インストールを停止しません。"
+
+#, c++-format
+msgid "Relation judgment unavailable: declaring package {} declares {} {} for target component {}; current/planned observation is {}; {}; this is not a confirmed absence, so build/install is blocked."
+msgstr "関係を確定できません: 宣言元パッケージ{}は{} {} を宣言（対象コンポーネント: {}）; 現在/計画中の観測状態: {}; {}; 一致対象なしを確認した結果ではないため、ビルド/インストールを停止します。"
+
+#, c++-format
+msgid "Invalid relation metadata or observation: declaring package {} declares {} {} for target component {}; {}; invalid input is fail-closed, so build/install is blocked."
+msgstr "関係メタデータまたは観測が不正です: 宣言元パッケージ{}は{} {} を宣言（対象コンポーネント: {}）; {}; 不正な入力は安全側に扱い、ビルド/インストールを停止します。"
+
+#, c++-format
+msgid "Declared relation awaiting assessment: declaring package {} declares {} {} for target component {}; current/planned assessment is incomplete, so build/install remains blocked under the fail-closed policy."
+msgstr "宣言済み関係の判定待ち: 宣言元パッケージ{}は{} {} を宣言（対象コンポーネント: {}）; 現在/計画中の判定が未完了のため、安全側にビルド/インストールを停止します。"
+
+msgid "Invalid relation metadata or observation."
+msgstr "関係メタデータまたは観測が不正です。"
 
 #, c++-format
 msgid "Invalid {} target for operation {}: {}"
@@ -6963,12 +7157,6 @@ msgstr "ユーザー設定エラー: '{}': キー'{}'（行{}、列{}）: 文字
 msgid "User config error: '{}': key '{}' (line {}, column {}): unsupported value '{}'; accepted values: {}, {}, {}"
 msgstr "ユーザー設定エラー: '{}': キー'{}'（行{}、列{}）: 値'{}'は未対応です。使用可能な値: {}、{}、{}"
 
-msgid "unavailable"
-msgstr "利用不可"
-
-msgid "not observed"
-msgstr "未観測"
-
 msgid "NoOp"
 msgstr "操作なし"
 
@@ -7091,10 +7279,6 @@ msgstr "{}経路のフェーズはレンダラーでサポートされていま�
 #, c++-format
 msgid "system/source: {}"
 msgstr "システム/ソース: {}"
-
-#, c++-format
-msgid "{}: {}"
-msgstr "{}: {}"
 
 msgid "provider"
 msgstr "プロバイダー"
@@ -7256,6 +7440,16 @@ msgstr "        保存済み制約結果: {}"
 msgid "A resolved dependency edge is missing its stored constraint result."
 msgstr "解決済み依存関係エッジに保存済み制約結果がありません。"
 
+msgid "     Package relation assessments: None"
+msgstr "     パッケージ関係の判定: なし"
+
+msgid "     Package relation assessments:"
+msgstr "     パッケージ関係の判定:"
+
+#, c++-format
+msgid "       {}. {}"
+msgstr "       {}. {}"
+
 #, c++-format
 msgid "A {} is missing its effective architecture."
 msgstr "{}に有効なアーキテクチャがありません。"
@@ -7306,10 +7500,6 @@ msgstr "     ローカル依存関係の失敗: なし"
 
 msgid "     Local dependency failures:"
 msgstr "     ローカル依存関係の失敗:"
-
-#, c++-format
-msgid "       {}. {}"
-msgstr "       {}. {}"
 
 msgid "Dependency authorities:"
 msgstr "依存関係authority:"
@@ -7909,8 +8099,12 @@ msgid "An {} route preflight blocker has no affected identity or diagnostic deta
 msgstr "{}経路事前検査ブロッカーに影響対象の識別情報も診断詳細もありません。"
 
 #, c++-format
+msgid "{} route preflight failure ({}); package: {}; {}: {}; dependency: {}; artifact projection: {}; relation assessment: {}"
+msgstr "{}経路の事前検査失敗（{}）; パッケージ: {}; {}: {}; 依存関係: {}; アーティファクト投影: {}; 関係の判定: {}"
+
+#, c++-format
 msgid "{} route preflight failure ({}); package: {}; {}: {}; dependency: {}; artifact projection: {}; diagnostic: {}"
-msgstr "{}経路事前検査失敗（{}）、パッケージ: {}、{}: {}、依存関係: {}、アーティファクト投影: {}、診断: {}"
+msgstr "{}経路の事前検査失敗（{}）; パッケージ: {}; {}: {}; 依存関係: {}; アーティファクト投影: {}; 診断: {}"
 
 msgid "A system package snapshot issue is missing its package metadata failure."
 msgstr "システムパッケージスナップショットの問題にパッケージメタデータ失敗がありません。"
@@ -8037,16 +8231,9 @@ msgstr "制約失敗ブロッカーに依存指定がありません。"
 msgid "constraint failure blocker ({}); parent: {} ({}: {}); dependency: {}; dependency kind: {}; role: {}; resolved package: {} ({}: {}); selected candidate: {}; selected provider: {}; stored result: {}"
 msgstr "制約失敗ブロッカー（{}）、親: {}（{}: {}）、依存関係: {}、依存種別: {}、役割: {}、解決済みパッケージ: {}（{}: {}）、選択済み候補: {}、選択済みプロバイダー: {}、保存済み結果: {}"
 
-msgid "A metadata risk blocker is missing its package identity."
-msgstr "メタデータリスクブロッカーにパッケージ識別情報がありません。"
-
 #, c++-format
-msgid "A metadata risk blocker is missing its {} identity."
-msgstr "メタデータリスクブロッカーに{}識別情報がありません。"
-
-#, c++-format
-msgid "metadata risk blocker ({}); package: {} ({}: {}); conflicts: {}; replaces: {}"
-msgstr "メタデータリスクブロッカー（{}）、パッケージ: {}（{}: {}）、競合: {}、置換: {}"
+msgid "package relation blocker: {}"
+msgstr "パッケージ関係ブロッカー: {}"
 
 msgid "Blockers:"
 msgstr "ブロッカー:"
@@ -8231,6 +8418,24 @@ msgstr "{}のデフォルト状態ログを段階{}で安全に使用できま�
 
 msgid "Unknown state log error code."
 msgstr "不明な状態ログエラーコードです。"
+
+#~ msgid "Package declares conflicts or replaces metadata that requires policy."
+#~ msgstr "パッケージに、方針による判断が必要な競合または置換メタデータが宣言されています。"
+
+#, c++-format
+#~ msgid "Cannot execute build plan for {}; package relation assessment requires manual review: {}"
+#~ msgstr "{}のビルド計画を実行できません。パッケージ関係の評価結果は手動確認が必要です: {}"
+
+#~ msgid "A metadata risk blocker is missing its package identity."
+#~ msgstr "メタデータリスクブロッカーにパッケージ識別情報がありません。"
+
+#, c++-format
+#~ msgid "A metadata risk blocker is missing its {} identity."
+#~ msgstr "メタデータリスクブロッカーに{}識別情報がありません。"
+
+#, c++-format
+#~ msgid "metadata risk blocker ({}); package: {} ({}: {}); conflicts: {}; replaces: {}"
+#~ msgstr "メタデータリスクブロッカー（{}）、パッケージ: {}（{}: {}）、競合: {}、置換: {}"
 
 #~ msgid "declared relation (actual relation unassessed)"
 #~ msgstr "宣言済み関係（実際の関係は未評価）"
@@ -8423,10 +8628,6 @@ msgstr "不明な状態ログエラーコードです。"
 
 #~ msgid "     Local dependency authority is borrowed without detaching it."
 #~ msgstr "     ローカル依存関係authorityを切り離さず借用しています。"
-
-#, c++-format
-#~ msgid "{} {}: {}"
-#~ msgstr "{} {}: {}"
 
 #, c++-format
 #~ msgid "Local {}: {} ({})"

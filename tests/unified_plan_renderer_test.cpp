@@ -216,6 +216,18 @@ LocalPackageMetadata local_build_plan_metadata_fixture() {
 
 void test_ready_rendering_and_identity_boundaries() {
     BuildPlan plan = build_plan_fixture();
+    PackageRelationAssessment no_match =
+            package_relation_assessment_fixture::
+                    confirmed_installed_conflict_reason(
+                            "aur-child", "aur-base", "absent-component")
+                    .assessment;
+    no_match.kind = PackageRelationAssessmentKind::
+            ConfirmedNoMatchingCurrentOrPlannedTarget;
+    no_match.attributed_package_evidence.reset();
+    no_match.attributed_observation_failure.reset();
+    no_match.active_evidence.observation_completeness =
+            PackageRelationObservationCompleteness::Complete;
+    plan.relation_assessments.push_back(std::move(no_match));
     LocalPackageMetadata local_metadata = local_metadata_fixture();
     const LocalSourceRootObservationIdentity local_identity =
             local_source_identity();
@@ -406,6 +418,17 @@ void test_ready_rendering_and_identity_boundaries() {
     expect_contains(
             rendered.text, "Stored constraint result: Satisfied",
             "stored constraint display");
+    expect_contains(
+            rendered.text,
+            "Package relation assessments:\n       1. Confirmed no matching current or planned target",
+            "complete no-match relation authority");
+    expect_contains(
+            rendered.text, "this relation does not block build/install",
+            "complete no-match readiness wording");
+    expect_not_contains(
+            rendered.text,
+            "ConfirmedNoMatchingCurrentOrPlannedTarget",
+            "internal no-match enum token");
     expect_contains(
             rendered.text,
             "AUR BuildPlan unit #1 (PackageBase: aur-base)",
@@ -851,6 +874,14 @@ void test_blocker_variant_details() {
             "route-base",
             "route-dependency>=1",
             "route preflight diagnostic"};
+    const AurUpdateExecutionIssue relation_route_issue{
+            AurUpdateExecutionReason::ConflictsOrReplacesUnresolved,
+            "risk-child",
+            "risk-base",
+            std::nullopt,
+            "DO-NOT-DUPLICATE-RELATION-DIAGNOSTIC",
+            std::nullopt,
+            relation_reason};
 
     const auto expect_blocker = [](
                                         UnifiedPlanBlocker blocker,
@@ -922,10 +953,11 @@ void test_blocker_variant_details() {
             "constraint blocker edge correlation");
     expect_blocker(
             MetadataRiskUnifiedPlanBlocker{relation_reason},
-            {"MetadataRiskUnifiedPlanBlocker", "risk-child",
-             "PackageBase: risk-base", "conflicts: conflict-a",
-             "replaces: None",
-             "assessment: ConfirmedInstalledConflict"},
+            {"package relation blocker: Installed conflict confirmed",
+             "declaring package risk-child",
+             "PackageBase: risk-base", "declares conflict conflict-a",
+             "matched installed package conflict-a",
+             "build/install is blocked before mutation"},
             "metadata blocker");
     expect_blocker(
             LocalDependencyPlanUnifiedPlanBlocker{
@@ -974,6 +1006,20 @@ void test_blocker_variant_details() {
              "dependency: route-dependency>=1",
              "route preflight diagnostic"},
             "route preflight blocker");
+    const std::string relation_route_text = expect_blocker(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            AurUpdateExecutionIssue>(relation_route_issue)},
+            {"AurUpdateExecutionReason::ConflictsOrReplacesUnresolved",
+             "package: risk-child", "PackageBase: risk-base",
+             "relation assessment: Installed conflict confirmed",
+             "matched installed package conflict-a",
+             "build/install is blocked before mutation"},
+            "relation route preflight blocker");
+    expect_not_contains(
+            relation_route_text,
+            "DO-NOT-DUPLICATE-RELATION-DIAGNOSTIC",
+            "relation route preflight diagnostic duplication");
 }
 
 void test_invalid_root_search_snapshot_typed_details() {

@@ -678,7 +678,11 @@ assert_exact_line "  completeness: Complete" "$stdout_file"
 assert_exact_line "  Fetch readiness: Ready" "$stdout_file"
 assert_exact_line "  Build readiness: Ready" "$stdout_file"
 assert_exact_line "  Install readiness: Ready" "$stdout_file"
-assert_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" "$stdout_file"
+assert_contains "Confirmed no matching current or planned target" "$stdout_file"
+assert_contains "declares conflict legacy-risk-package" "$stdout_file"
+assert_contains "declares replacement replaced-risk-package" "$stdout_file"
+assert_contains "this relation does not block build/install" "$stdout_file"
+assert_not_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" "$stdout_file"
 assert_not_contains "actual relation: unassessed (#353)" "$stdout_file"
 assert_not_contains "reason: package relation assessment" "$stdout_file"
 echo "  ok: plan releases a complete typed no-match relation guard"
@@ -701,7 +705,8 @@ run_ok plan plan-density-root
 assert_exact_line \
     "  items: 34 total, 34 normal, 0 attention-required" "$stdout_file"
 assert_exact_line "  normal unconstrained dependencies: 33" "$stdout_file"
-assert_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" "$stdout_file"
+assert_contains "Confirmed no matching current or planned target" "$stdout_file"
+assert_not_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" "$stdout_file"
 assert_not_contains "Attention-required details:" "$stdout_file"
 echo "  ok: typed no-match metadata remains in the normal plan summary"
 
@@ -1287,9 +1292,8 @@ assert_contains "Foreign package not found in AUR: foreign-non-aur" "$stdout_fil
 assert_no_foreign_update_mutation
 echo "  ok: foreign version parse failure remains fail-closed"
 
-# Issue #350 Slice 5: typed plan state is localized only at presentation time.
-# Slice 4 replaces the former unassessed relation fixture with a complete
-# NoMatch while leaving detailed relation prose to Issue #353 Slice 5.
+# Issue #353 Slice 5: typed relation results are localized only at
+# presentation time and retain the same readiness authority.
 command -v localedef >/dev/null 2>&1 ||
     fail_case "localedef is required for plan localization coverage"
 locale_root=$tmp_dir/locale
@@ -1309,7 +1313,12 @@ assert_exact_line "  プロバイダー判断: 一意" "$stdout_file"
 assert_exact_line "  取得の実行準備: 準備完了" "$stdout_file"
 assert_exact_line "  ビルドの実行準備: 準備完了" "$stdout_file"
 assert_exact_line "  インストールの実行準備: 準備完了" "$stdout_file"
-assert_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" "$stdout_file"
+assert_contains "現在または計画中の一致対象なしを確認" "$stdout_file"
+assert_contains "競合 legacy-risk-package を宣言" "$stdout_file"
+assert_contains "置換 replaced-risk-package を宣言" "$stdout_file"
+assert_contains "この関係だけを理由にビルド/インストールを停止しません" \
+    "$stdout_file"
+assert_not_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" "$stdout_file"
 assert_not_contains "実際の関係は未評価" "$stdout_file"
 assert_not_contains "確認が必要な詳細:" "$stdout_file"
 echo "  ok: Japanese plan presentation preserves typed NoMatch readiness"

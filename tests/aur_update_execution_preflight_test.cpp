@@ -1052,6 +1052,60 @@ void test_typed_relation_assessment_preflight_mapping() {
                                         PackageRelationRootAttribution>{
                                         {0, "relation-root"}},
                 "Preflight lost typed relation target or root attribution");
+        const std::string& diagnostic = issue->diagnostic;
+        const std::string expected_outcome = [&]() {
+            switch(kind) {
+            case PackageRelationAssessmentKind::
+                    ConfirmedInstalledConflict:
+                return std::string("Installed conflict confirmed");
+            case PackageRelationAssessmentKind::
+                    ConfirmedPlannedTargetConflict:
+                return std::string("Planned-target conflict confirmed");
+            case PackageRelationAssessmentKind::PotentialReplacement:
+                return std::string("Potential replacement impact");
+            case PackageRelationAssessmentKind::DeclaredRelation:
+                return std::string("Declared relation awaiting assessment");
+            case PackageRelationAssessmentKind::Unknown:
+                return std::string("Relation judgment unavailable");
+            case PackageRelationAssessmentKind::Invalid:
+                return std::string(
+                        "Invalid relation metadata or observation");
+            case PackageRelationAssessmentKind::
+                    ConfirmedNoMatchingCurrentOrPlannedTarget:
+                break;
+            }
+            return std::string();
+        }();
+        expect(
+                diagnostic.find(expected_outcome) != std::string::npos &&
+                        diagnostic.find("relation-root") !=
+                                std::string::npos &&
+                        diagnostic.find("relation-target") !=
+                                std::string::npos &&
+                        diagnostic.find("ConfirmedInstalledConflict") ==
+                                std::string::npos &&
+                        diagnostic.find("PotentialReplacement") ==
+                                std::string::npos,
+                "Preflight public relation diagnostic lost typed semantics");
+        if(kind == PackageRelationAssessmentKind::PotentialReplacement) {
+            expect(
+                    diagnostic.find("no automatic replacement is performed") !=
+                                    std::string::npos &&
+                            diagnostic.find("review is required") !=
+                                    std::string::npos,
+                    "Replacement preflight diagnostic implies automatic action");
+        }
+        if(kind == PackageRelationAssessmentKind::Unknown) {
+            expect(
+                    diagnostic.find("not a confirmed absence") !=
+                            std::string::npos,
+                    "Unknown preflight diagnostic implies a completed absence");
+        }
+        if(kind == PackageRelationAssessmentKind::Invalid) {
+            expect(
+                    diagnostic.find("fail-closed") != std::string::npos,
+                    "Invalid preflight diagnostic lost fail-closed semantics");
+        }
         if(kind == PackageRelationAssessmentKind::
                            ConfirmedInstalledConflict ||
            kind == PackageRelationAssessmentKind::

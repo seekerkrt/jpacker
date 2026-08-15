@@ -751,12 +751,14 @@ void print_help() {
             cli_operation_syntax(OperationId::Deps),
             localization::format_translated_message(
                     // TRANSLATORS: The placeholder is the AUR project identity.
-                    "Classify {} dependencies and show constraint results", "AUR"));
+                    "Classify {} dependencies and show constraint and conflict/replacement assessments",
+                    "AUR"));
     print_help_entry(
             cli_operation_syntax(OperationId::Plan),
             localization::format_translated_message(
                     // TRANSLATORS: The placeholder is the AUR project identity.
-                    "Show the {} build-order plan and constraint completeness", "AUR"));
+                    "Show the {} build-order plan, constraint completeness, and conflict/replacement assessments",
+                    "AUR"));
     print_help_entry(
             cli_operation_syntax(OperationId::Fetch),
             localization::format_translated_message(
@@ -849,6 +851,8 @@ void print_help() {
                     "Observe supported mutating operations without changing persistent state"));
     print_help_continuation(localization::translate_message(
             "Reject unsupported routes and do not create state, cache, or workspaces"));
+    print_help_continuation(localization::translate_message(
+            "Show assessed conflict/replacement blockers before any supported mutation"));
     print_help_entry(
             cli_option_syntax(OptionId::Edit),
             localization::format_translated_message(
@@ -872,6 +876,8 @@ void print_help() {
             localization::format_translated_message(
                     // TRANSLATORS: pacman and makepkg are literal external-program identities.
                     "Pass this option to {} and {}", "pacman", "makepkg"));
+    print_help_continuation(localization::translate_message(
+            "Do not bypass conflict/replacement safety stops or perform automatic replacement"));
     print_help_entry(
             cli_option_syntax(OptionId::Needed),
             localization::format_translated_message(

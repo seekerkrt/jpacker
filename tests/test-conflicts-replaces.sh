@@ -142,13 +142,36 @@ assert_not_contains() {
     fi
 }
 
+assert_no_relation_mutation() {
+    if grep -E \
+        '^(git|makepkg|sudo) |^pacman (-S|-U|-R)( |$)' \
+        "$command_log" >/dev/null
+    then
+        echo "relation blocker allowed a mutation command" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 run_ok "$tmp_dir/conflict-plan.out" plan conflict-only
 assert_contains "conflicts: conflict-old, conflict-git" "$tmp_dir/conflict-plan.out"
-assert_contains "ConfirmedInstalledConflict" "$tmp_dir/conflict-plan.out"
+assert_contains "Installed conflict confirmed" "$tmp_dir/conflict-plan.out"
+assert_contains "declaring package conflict-only" "$tmp_dir/conflict-plan.out"
+assert_contains "matched installed package conflict-old" "$tmp_dir/conflict-plan.out"
+assert_contains "target component conflict-old" "$tmp_dir/conflict-plan.out"
+assert_contains "build/install is blocked before mutation" \
+    "$tmp_dir/conflict-plan.out"
+assert_not_contains "ConfirmedInstalledConflict" "$tmp_dir/conflict-plan.out"
 
 run_ok "$tmp_dir/replace-plan.out" plan replace-only
 assert_contains "replaces: replace-legacy" "$tmp_dir/replace-plan.out"
-assert_contains "PotentialReplacement" "$tmp_dir/replace-plan.out"
+assert_contains "Potential replacement impact" "$tmp_dir/replace-plan.out"
+assert_contains "matched installed package replace-legacy" \
+    "$tmp_dir/replace-plan.out"
+assert_contains "is a replacement candidate" "$tmp_dir/replace-plan.out"
+assert_contains "review is required and no automatic replacement is performed" \
+    "$tmp_dir/replace-plan.out"
+assert_not_contains "PotentialReplacement" "$tmp_dir/replace-plan.out"
 
 : > "$command_log"
 run_ok "$tmp_dir/dependency-plan.out" plan dependency-risk-root
@@ -159,8 +182,9 @@ assert_contains "completeness: Complete" "$tmp_dir/dependency-plan.out"
 assert_contains "Fetch readiness: Ready" "$tmp_dir/dependency-plan.out"
 assert_contains "Build readiness: Requires check" "$tmp_dir/dependency-plan.out"
 assert_contains "Install readiness: Requires check" "$tmp_dir/dependency-plan.out"
-assert_contains "ConfirmedInstalledConflict" "$tmp_dir/dependency-plan.out"
-assert_contains "PotentialReplacement" "$tmp_dir/dependency-plan.out"
+assert_contains "Installed conflict confirmed" "$tmp_dir/dependency-plan.out"
+assert_contains "Potential replacement impact" "$tmp_dir/dependency-plan.out"
+assert_contains "declaring package risk-dep" "$tmp_dir/dependency-plan.out"
 assert_not_contains "actual relation: unassessed (#353)" \
     "$tmp_dir/dependency-plan.out"
 risk_dep_count=$(validation_grep_count -c '^  risk-dep$' \
@@ -179,9 +203,13 @@ assert_contains "Build readiness: Ready" "$tmp_dir/clean-plan.out"
 assert_contains "Install readiness: Ready" "$tmp_dir/clean-plan.out"
 
 run_ok "$tmp_dir/planned-conflict-plan.out" plan planned-conflict-root
-assert_contains "ConfirmedPlannedTargetConflict" \
+assert_contains "Planned-target conflict confirmed" \
     "$tmp_dir/planned-conflict-plan.out"
-assert_contains "matched package: planned-conflict-target" \
+assert_contains "matched planned package planned-conflict-target" \
+    "$tmp_dir/planned-conflict-plan.out"
+assert_contains "roots: input #1 requested planned-conflict-root" \
+    "$tmp_dir/planned-conflict-plan.out"
+assert_not_contains "ConfirmedPlannedTargetConflict" \
     "$tmp_dir/planned-conflict-plan.out"
 assert_contains "Fetch readiness: Ready" "$tmp_dir/planned-conflict-plan.out"
 assert_contains "Build readiness: Requires check" \
@@ -190,32 +218,63 @@ assert_contains "Install readiness: Requires check" \
     "$tmp_dir/planned-conflict-plan.out"
 
 run_ok "$tmp_dir/no-match-plan.out" plan no-match-root
-assert_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" \
+assert_contains "Confirmed no matching current or planned target" \
+    "$tmp_dir/no-match-plan.out"
+assert_contains "declares conflict absent-relation-target" \
+    "$tmp_dir/no-match-plan.out"
+assert_contains "complete current/planned observation" \
+    "$tmp_dir/no-match-plan.out"
+assert_contains "this relation does not block build/install" \
+    "$tmp_dir/no-match-plan.out"
+assert_not_contains "no conflict" "$tmp_dir/no-match-plan.out"
+assert_not_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" \
     "$tmp_dir/no-match-plan.out"
 assert_contains "completeness: Complete" "$tmp_dir/no-match-plan.out"
 assert_contains "Build readiness: Ready" "$tmp_dir/no-match-plan.out"
 assert_contains "Install readiness: Ready" "$tmp_dir/no-match-plan.out"
 
+: > "$command_log"
+run_fail "$tmp_dir/conflict-dry-run.out" --dry-run build conflict-only
+assert_contains "Unified plan:" "$tmp_dir/conflict-dry-run.out"
+assert_contains "Status: Blocked" "$tmp_dir/conflict-dry-run.out"
+assert_contains "package relation blocker: Installed conflict confirmed" \
+    "$tmp_dir/conflict-dry-run.out"
+assert_contains "matched installed package conflict-old" \
+    "$tmp_dir/conflict-dry-run.out"
+assert_no_relation_mutation
+
+: > "$command_log"
+run_ok "$tmp_dir/no-match-dry-run.out" --dry-run build no-match-root
+assert_contains "Unified plan:" "$tmp_dir/no-match-dry-run.out"
+assert_contains "Status: Ready" "$tmp_dir/no-match-dry-run.out"
+assert_contains "Confirmed no matching current or planned target" \
+    "$tmp_dir/no-match-dry-run.out"
+assert_contains "this relation does not block build/install" \
+    "$tmp_dir/no-match-dry-run.out"
+assert_not_contains "package relation blocker:" \
+    "$tmp_dir/no-match-dry-run.out"
+assert_no_relation_mutation
+
 run_ok "$tmp_dir/self-conflict-plan.out" plan foo-git
-assert_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" \
+assert_contains "Confirmed no matching current or planned target" \
     "$tmp_dir/self-conflict-plan.out"
-assert_not_contains "ConfirmedPlannedTargetConflict" \
+assert_not_contains "Planned-target conflict confirmed" \
     "$tmp_dir/self-conflict-plan.out"
 assert_contains "Build readiness: Ready" "$tmp_dir/self-conflict-plan.out"
 
 run_ok "$tmp_dir/other-planned-conflict-plan.out" plan foo-git-with-target
-assert_contains "ConfirmedPlannedTargetConflict" \
+assert_contains "Planned-target conflict confirmed" \
     "$tmp_dir/other-planned-conflict-plan.out"
-assert_contains "matched package: foo" \
+assert_contains "matched planned package foo" \
     "$tmp_dir/other-planned-conflict-plan.out"
 
 add_installed_package foo-git 0.9-1 foo=1
 run_ok "$tmp_dir/installed-old-self-plan.out" plan foo-git
-assert_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" \
+assert_contains "Confirmed no matching current or planned target" \
     "$tmp_dir/installed-old-self-plan.out"
-assert_not_contains "ConfirmedInstalledConflict" \
+assert_not_contains "Installed conflict confirmed" \
     "$tmp_dir/installed-old-self-plan.out"
-assert_not_contains "ConfirmedPlannedTargetConflict" \
+assert_not_contains "Planned-target conflict confirmed" \
     "$tmp_dir/installed-old-self-plan.out"
 assert_contains "completeness: Complete" \
     "$tmp_dir/installed-old-self-plan.out"
@@ -240,11 +299,11 @@ unset MOGUET_TEST_MAKEPKG_EXIT_CODE
 
 add_installed_package foo 1.0-1
 run_ok "$tmp_dir/installed-real-conflict-plan.out" plan foo-git
-assert_contains "ConfirmedInstalledConflict" \
+assert_contains "Installed conflict confirmed" \
     "$tmp_dir/installed-real-conflict-plan.out"
-assert_contains "matched package: foo" \
+assert_contains "matched installed package foo" \
     "$tmp_dir/installed-real-conflict-plan.out"
-assert_not_contains "matched package: foo-git" \
+assert_not_contains "matched installed package foo-git" \
     "$tmp_dir/installed-real-conflict-plan.out"
 assert_contains "Fetch readiness: Ready" \
     "$tmp_dir/installed-real-conflict-plan.out"
@@ -255,15 +314,13 @@ assert_contains "Install readiness: Requires check" \
 
 : > "$command_log"
 run_fail "$tmp_dir/installed-real-conflict-build.out" build foo-git
-assert_contains "package relation assessment requires manual review" \
+assert_contains "Installed conflict confirmed" \
     "$tmp_dir/installed-real-conflict-build.out"
-assert_contains "foo-git [ConfirmedInstalledConflict]" \
+assert_contains "declaring package foo-git" \
     "$tmp_dir/installed-real-conflict-build.out"
-if grep -E '^(git|makepkg|sudo) ' "$command_log" >/dev/null; then
-    echo "real installed conflict guard allowed an external mutation command" >&2
-    cat "$command_log" >&2
-    exit 1
-fi
+assert_contains "matched installed package foo" \
+    "$tmp_dir/installed-real-conflict-build.out"
+assert_no_relation_mutation
 
 run_ok "$tmp_dir/deps.out" deps risk-root
 assert_contains "Metadata conflicts/replaces:" "$tmp_dir/deps.out"
@@ -273,74 +330,68 @@ assert_contains "replaces: root-legacy" "$tmp_dir/deps.out"
 run_ok "$tmp_dir/info.out" -Si risk-root
 assert_contains "Conflicts With  : root-old  root-git" "$tmp_dir/info.out"
 assert_contains "Replaces        : root-legacy" "$tmp_dir/info.out"
+assert_contains "Relation Check  : deferred to planning and build preflight" \
+    "$tmp_dir/info.out"
+assert_not_contains "Installed conflict confirmed" "$tmp_dir/info.out"
 
 : > "$command_log"
 run_fail "$tmp_dir/build.out" build dependency-risk-root
-assert_contains "package relation assessment requires manual review" \
+assert_contains "Installed conflict confirmed" \
     "$tmp_dir/build.out"
-assert_contains "risk-dep [ConfirmedInstalledConflict]" \
+assert_contains "declaring package risk-dep" \
     "$tmp_dir/build.out"
-if grep -E '^(git|makepkg|sudo) ' "$command_log" >/dev/null; then
-    echo "build guard allowed an external mutation command" >&2
-    cat "$command_log" >&2
-    exit 1
-fi
+assert_no_relation_mutation
 
 : > "$command_log"
 run_fail "$tmp_dir/noconfirm.out" --noconfirm -S risk-root
-assert_contains "package relation assessment requires manual review" \
+assert_contains "Installed conflict confirmed" \
     "$tmp_dir/noconfirm.out"
-if grep -E '^(git|makepkg|sudo) |^pacman -S ' "$command_log" >/dev/null; then
-    echo "--noconfirm bypassed the metadata guard" >&2
-    cat "$command_log" >&2
-    exit 1
-fi
+assert_no_relation_mutation
 
 : > "$command_log"
 run_fail "$tmp_dir/planned-build.out" build planned-conflict-root
-assert_contains "ConfirmedPlannedTargetConflict" "$tmp_dir/planned-build.out"
-if grep -E '^(git|makepkg|sudo) ' "$command_log" >/dev/null; then
-    echo "planned conflict guard allowed an external mutation command" >&2
-    cat "$command_log" >&2
-    exit 1
-fi
+assert_contains "Planned-target conflict confirmed" "$tmp_dir/planned-build.out"
+assert_contains "matched planned package planned-conflict-target" \
+    "$tmp_dir/planned-build.out"
+assert_no_relation_mutation
 
 : > "$command_log"
 run_fail "$tmp_dir/replacement-noconfirm.out" --noconfirm -S replace-only
-assert_contains "PotentialReplacement" "$tmp_dir/replacement-noconfirm.out"
-if grep -E '^(git|makepkg|sudo) |^pacman -R ' "$command_log" >/dev/null; then
-    echo "PotentialReplacement triggered or bypassed mutation" >&2
-    cat "$command_log" >&2
-    exit 1
-fi
+assert_contains "Potential replacement impact" \
+    "$tmp_dir/replacement-noconfirm.out"
+assert_contains "no automatic replacement is performed" \
+    "$tmp_dir/replacement-noconfirm.out"
+assert_no_relation_mutation
 
 : > "$command_log"
 run_ok "$tmp_dir/unknown-plan.out" plan unknown-relation-root
-assert_contains "Unknown" "$tmp_dir/unknown-plan.out"
+assert_contains "Relation judgment unavailable" "$tmp_dir/unknown-plan.out"
+assert_contains "version judgment unavailable" "$tmp_dir/unknown-plan.out"
+assert_contains "not a confirmed absence" "$tmp_dir/unknown-plan.out"
+assert_not_contains "Confirmed no matching current or planned target" \
+    "$tmp_dir/unknown-plan.out"
 assert_contains "completeness: Unknown" "$tmp_dir/unknown-plan.out"
 assert_contains "Fetch readiness: Ready" "$tmp_dir/unknown-plan.out"
 assert_contains "Build readiness: Requires check" "$tmp_dir/unknown-plan.out"
 run_fail "$tmp_dir/unknown-noconfirm.out" \
     --noconfirm build unknown-relation-root
-assert_contains "[Unknown]" "$tmp_dir/unknown-noconfirm.out"
-if grep -E '^(git|makepkg|sudo) ' "$command_log" >/dev/null; then
-    echo "--noconfirm bypassed an Unknown relation assessment" >&2
-    cat "$command_log" >&2
-    exit 1
-fi
+assert_contains "Relation judgment unavailable" \
+    "$tmp_dir/unknown-noconfirm.out"
+assert_no_relation_mutation
 
 export MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE=42
 run_ok "$tmp_dir/inventory-failure-plan.out" plan no-match-root
-assert_contains "Unknown" "$tmp_dir/inventory-failure-plan.out"
+assert_contains "Relation judgment unavailable" \
+    "$tmp_dir/inventory-failure-plan.out"
 assert_contains "completeness: Unknown" "$tmp_dir/inventory-failure-plan.out"
-assert_not_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" \
+assert_not_contains "Confirmed no matching current or planned target" \
     "$tmp_dir/inventory-failure-plan.out"
 unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
 
 : > "$command_log"
 export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_fail "$tmp_dir/no-match-build.out" build no-match-root
-assert_not_contains "package relation assessment requires manual review" \
+assert_not_contains "Relation judgment unavailable" \
     "$tmp_dir/no-match-build.out"
 assert_contains "git clone https://aur.archlinux.org/no-match-root.git" \
     "$command_log"
@@ -352,7 +403,7 @@ unset MOGUET_TEST_MAKEPKG_EXIT_CODE
 : > "$command_log"
 run_ok "$tmp_dir/fetch-first.out" fetch risk-root
 assert_contains "Fetch targets:" "$tmp_dir/fetch-first.out"
-assert_contains "ConfirmedInstalledConflict" "$tmp_dir/fetch-first.out"
+assert_contains "Installed conflict confirmed" "$tmp_dir/fetch-first.out"
 assert_contains "git clone https://aur.archlinux.org/risk-dep.git risk-dep" "$command_log"
 assert_contains "git clone https://aur.archlinux.org/risk-root.git risk-root" "$command_log"
 run_ok "$tmp_dir/fetch-second.out" fetch risk-root

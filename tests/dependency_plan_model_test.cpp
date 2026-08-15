@@ -816,9 +816,15 @@ void test_execution_guard_category_order() {
     plan.cycles.clear();
     expect_exception(
             require_install_plan,
-            "Cannot execute build plan for guard-root; package relation "
-            "assessment requires manual review: relation-child (base: "
-            "relation-base) [ConfirmedInstalledConflict]");
+            "Cannot execute build plan for guard-root; Installed conflict "
+            "confirmed: declaring package relation-child (PackageBase: "
+            "relation-base) [source: AUR source relation-child (PackageBase: "
+            "relation-base); roots: input #1 requested root] declares conflict "
+            "relation-target for target component relation-target; matched "
+            "installed package relation-target [source: installed package "
+            "database] through exact "
+            "package component relation-target (version 1); build/install is "
+            "blocked before mutation.");
 
     plan.relation_assessments.clear();
     expect_exception(

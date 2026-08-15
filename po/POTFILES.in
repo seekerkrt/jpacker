@@ -35,6 +35,7 @@ src/moguet.cpp
 src/package_base_artifact_install_executor.cpp
 src/package_identifier.cpp
 src/package_metadata.cpp
+src/package_relation_presentation.cpp
 src/pkgbuild_export.cpp
 src/process.cpp
 src/provider_selection.cpp

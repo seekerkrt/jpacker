@@ -64,12 +64,13 @@ endpoint exists.
 Moguet v2.x is published and usable, but it remains a development-phase
 product rather than a finished, general-purpose AUR helper. Basic pacman
 wrapping, AUR source builds, updates, and per-package source-build
-preferences already work today, while the wider AUR-support surface — a full
-dependency solver, provider/conflict/replaces/version-constraint handling,
-and edge-case coverage — is still being implemented incrementally and its UX
-is still maturing. Moguet does not promise the same automatic-resolution
-completeness as established AUR helpers: unsupported or ambiguous cases stop
-fail-closed instead of guessing. v2.x is the public development period that
+preferences already work today, while the wider AUR-support surface and
+edge-case coverage are still being implemented incrementally and the UX is
+still maturing. Moguet remains pacman-first rather than reimplementing a full
+dependency solver or automatic provider/conflict resolution, and does not
+promise the same automatic-resolution completeness as established AUR
+helpers: unsupported or ambiguous cases stop fail-closed instead of guessing.
+v2.x is the public development period that
 builds Moguet's source-aware entry points, safety boundaries, and validation
 infrastructure; v3.0.0 is the point where Moguet-specific build-profile and
 PKGBUILD-diff workflows come together, which the project treats internally
@@ -96,6 +97,18 @@ detailed plan.
   fail closed. `fetch`, build, install, upgrade, and local build stop before
   clone, fetch, source mutation, build, sudo, pacman, or transaction work when
   the result is `Unsatisfied` or `Unknown`.
+- AUR `Conflicts` and `Replaces` declarations are assessed before build and
+  install against installed and planned packages, including provided
+  components and versioned relations. Diagnostics distinguish an installed
+  conflict from a planned-target conflict and present a matching replacement
+  only as a potential impact that requires review. Moguet does not remove a
+  package, select a replacement target, or resolve a conflict automatically.
+- An unavailable (`Unknown`) or invalid relation assessment fails closed; it
+  is never presented as an absence. Only a complete observation that confirms
+  no matching current or planned package or provided component releases that
+  relation guard. The declaration still exists, and pacman/libalpm remains the
+  transaction authority. `-Si` shows the source metadata and explicitly
+  defers this stateful assessment to planning and build preflight.
 - When multiple provider candidates remain, an interactive TTY lists
   source-aware candidates by number and requires exactly one explicit choice;
   there is no default. Empty input, `q`, `quit`, `cancel`, or EOF cancels the
@@ -148,11 +161,11 @@ detailed plan.
   remains ambiguous and stops before system or source execution because this
   singular compatibility route cannot schedule that provider's PackageBase.
 - Moguet rejects unresolved dependencies, unselected ambiguous providers,
-  cycles, conflicts/replacements that it cannot safely resolve, and
-  unprovable artifact identities before the corresponding mutation.
+  cycles, blocking conflict/replacement assessments, and unprovable artifact
+  identities before the corresponding mutation.
 - `--noconfirm` avoids interactive blocking. It is not “yes to everything” and
   does not bypass source selection, planning, identity, conflict, or ownership
-  guards.
+  guards, and it never authorizes automatic removal or replacement.
 - Multi-phase upgrades are not one atomic transaction. A failure stops later
   work but does not roll back an already completed package transaction. If
   cleanup fails after installation succeeds, inspect the result before

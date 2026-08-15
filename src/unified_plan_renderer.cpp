@@ -6,6 +6,7 @@
 #include "commands_sync.hpp"
 #include "local_dependency_plan_projection.hpp"
 #include "localization.hpp"
+#include "package_relation_presentation.hpp"
 #include "system_source_upgrade.hpp"
 #include "upgrade_all_operation.hpp"
 
@@ -743,13 +744,12 @@ void render_build_plan_dependencies(
         state.output << localization::translate_message(
                                 "     Dependencies: None")
                      << '\n';
-        return;
-    }
-    for(std::size_t edge_index = 0;
-        edge_index < plan.dependency_edges.size(); ++edge_index) {
-        const BuildPlanDependencyEdge& edge =
-                plan.dependency_edges[edge_index];
-        state.output << localization::format_translated_message(
+    } else {
+        for(std::size_t edge_index = 0;
+            edge_index < plan.dependency_edges.size(); ++edge_index) {
+            const BuildPlanDependencyEdge& edge =
+                    plan.dependency_edges[edge_index];
+            state.output << localization::format_translated_message(
                                 "     {}. {} ({}: {}) -> {} [{}; role: {}]",
                                 edge_index + 1,
                                 required_string_display(
@@ -785,9 +785,9 @@ void render_build_plan_dependencies(
                                         UnifiedPlanRenderingSection::
                                                 Dependencies,
                                         authority_index, edge_index))
-                     << '\n';
-        if(edge.resolved_candidate.has_value()) {
-            state.output << localization::format_translated_message(
+                         << '\n';
+            if(edge.resolved_candidate.has_value()) {
+                state.output << localization::format_translated_message(
                                     "        Selected identity: {}",
                                     resolved_candidate_display(
                                             edge.resolved_candidate.value(),
@@ -795,9 +795,9 @@ void render_build_plan_dependencies(
                                             UnifiedPlanRenderingSection::
                                                     Dependencies,
                                             authority_index, edge_index))
-                         << '\n';
-        } else if(edge.resolved_provider.has_value()) {
-            state.output << localization::format_translated_message(
+                             << '\n';
+            } else if(edge.resolved_provider.has_value()) {
+                state.output << localization::format_translated_message(
                                     "        Selected provider: {}",
                                     provider_identity_display(
                                             edge.resolved_provider.value(),
@@ -805,10 +805,10 @@ void render_build_plan_dependencies(
                                             UnifiedPlanRenderingSection::
                                                     Dependencies,
                                             authority_index, edge_index))
-                         << '\n';
-        } else if(edge.kind != DependencyKind::Unknown &&
-                  edge.kind != DependencyKind::AmbiguousProvider) {
-            state.output << localization::format_translated_message(
+                             << '\n';
+            } else if(edge.kind != DependencyKind::Unknown &&
+                      edge.kind != DependencyKind::AmbiguousProvider) {
+                state.output << localization::format_translated_message(
                                     "        Selected identity: {}",
                                     unavailable_display(
                                             state,
@@ -817,10 +817,10 @@ void render_build_plan_dependencies(
                                             authority_index, edge_index,
                                             localization::translate_message(
                                                     "A resolved dependency edge is missing its selected candidate or provider identity.")))
-                         << '\n';
-        }
-        if(edge.constraint_evaluation.has_value()) {
-            state.output << localization::format_translated_message(
+                             << '\n';
+            }
+            if(edge.constraint_evaluation.has_value()) {
+                state.output << localization::format_translated_message(
                                     "        Stored constraint result: {}",
                                     constraint_evaluation_display(
                                             edge.constraint_evaluation.value(),
@@ -828,9 +828,9 @@ void render_build_plan_dependencies(
                                             UnifiedPlanRenderingSection::
                                                     Dependencies,
                                             authority_index, edge_index))
-                         << '\n';
-        } else {
-            state.output << localization::format_translated_message(
+                             << '\n';
+            } else {
+                state.output << localization::format_translated_message(
                                     "        Stored constraint result: {}",
                                     edge.resolved_candidate.has_value()
                                             ? unavailable_display(
@@ -843,8 +843,28 @@ void render_build_plan_dependencies(
                                                               "A resolved dependency edge is missing its stored constraint result."))
                                             : localization::translate_message(
                                                       "not observed"))
-                         << '\n';
+                             << '\n';
+            }
         }
+    }
+
+    if(plan.relation_assessments.empty()) {
+        state.output << localization::translate_message(
+                                "     Package relation assessments: None")
+                     << '\n';
+        return;
+    }
+    state.output << localization::translate_message(
+                            "     Package relation assessments:")
+                 << '\n';
+    for(std::size_t relation_index = 0;
+        relation_index < plan.relation_assessments.size(); ++relation_index) {
+        state.output << localization::format_translated_message(
+                                "       {}. {}", relation_index + 1,
+                                package_relation_assessment_diagnostic_display(
+                                        plan.relation_assessments
+                                                [relation_index]))
+                     << '\n';
     }
 }
 
@@ -3775,6 +3795,29 @@ std::string route_preflight_blocker_display(
                                         "An {} route preflight blocker has no affected identity or diagnostic detail.",
                                         "AUR"));
                     }
+                    const std::string artifact_projection =
+                            detail.build_plan_projection_issue.has_value()
+                            ? build_plan_artifact_projection_issue_display(
+                                      detail.build_plan_projection_issue
+                                              .value(),
+                                      blocker_index, state)
+                            : localization::translate_message(
+                                      "not observed");
+                    if(detail.relation_reason.has_value()) {
+                        return localization::format_translated_message(
+                                "{} route preflight failure ({}); package: {}; {}: {}; dependency: {}; artifact projection: {}; relation assessment: {}",
+                                "AUR",
+                                aur_update_execution_reason_display(
+                                        detail.reason, blocker_index, state),
+                                optional_string_display(detail.package_name),
+                                "PackageBase",
+                                optional_string_display(detail.package_base),
+                                optional_string_display(
+                                        detail.dependency_specification),
+                                artifact_projection,
+                                package_relation_assessment_diagnostic_display(
+                                        detail.relation_reason->assessment));
+                    }
                     return localization::format_translated_message(
                             "{} route preflight failure ({}); package: {}; {}: {}; dependency: {}; artifact projection: {}; diagnostic: {}",
                             "AUR",
@@ -3785,14 +3828,7 @@ std::string route_preflight_blocker_display(
                             optional_string_display(detail.package_base),
                             optional_string_display(
                                     detail.dependency_specification),
-                            detail.build_plan_projection_issue.has_value()
-                                    ? build_plan_artifact_projection_issue_display(
-                                              detail
-                                                      .build_plan_projection_issue
-                                                      .value(),
-                                              blocker_index, state)
-                                    : localization::translate_message(
-                                              "not observed"),
+                            artifact_projection,
                             detail.diagnostic.empty()
                                     ? localization::translate_message(
                                               "not observed")
@@ -4367,42 +4403,10 @@ std::string blocker_display(
                                             MetadataRiskUnifiedPlanBlocker>) {
                     const PackageRelationAssessment& assessment =
                             typed_blocker.detail.assessment;
-                    const bool is_conflict =
-                            assessment.declaration.kind() ==
-                            PackageRelationKind::Conflict;
-                    std::string display =
-                            localization::format_translated_message(
-                            "metadata risk blocker ({}); package: {} ({}: {}); conflicts: {}; replaces: {}",
-                            "MetadataRiskUnifiedPlanBlocker",
-                            required_string_display(
-                                    assessment.declaring_package.package_name,
-                                    state,
-                                    UnifiedPlanRenderingSection::Blockers,
-                                    blocker_index, std::nullopt,
-                                    localization::translate_message(
-                                            "A metadata risk blocker is missing its package identity.")),
-                            "PackageBase",
-                            required_string_display(
-                                    assessment.declaring_package.package_base
-                                            .value_or(""),
-                                    state,
-                                    UnifiedPlanRenderingSection::Blockers,
-                                    blocker_index, std::nullopt,
-                                    localization::format_translated_message(
-                                            "A metadata risk blocker is missing its {} identity.",
-                                            "PackageBase")),
-                            is_conflict
-                                    ? assessment.declaration
-                                              .raw_specification()
-                                    : localization::translate_message("None"),
-                            is_conflict
-                                    ? localization::translate_message("None")
-                                    : assessment.declaration
-                                              .raw_specification());
-                    display += "; assessment: ";
-                    display += package_relation_assessment_kind_token(
-                            assessment.kind);
-                    return display;
+                    return localization::format_translated_message(
+                            "package relation blocker: {}",
+                            package_relation_assessment_diagnostic_display(
+                                    assessment));
                 } else if constexpr(std::is_same_v<
                                             Blocker,
                                             LocalDependencyPlanUnifiedPlanBlocker>) {

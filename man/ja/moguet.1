@@ -171,18 +171,32 @@ interactive TTYではsource-aware provider candidateを選択でき、user-selec
 未解決のambiguityを区別して表示します。
 constraintのresult / reasonを表示します。Unsatisfied / Unknownはwarning付きでread-only
 commandを継続し、Invalid / Conflictingはfail-closedです。
+conflict / replacement宣言についても、宣言元packageと一致したinstalled / planned packageを
+含むcurrent typed assessmentを表示します。このread-only commandはreplacementやconflict
+resolutionを実行しません。
 clone、build、install、build order計算は行いません。
 .
 .TP
 .B "plan <pkg>..."
 1件以上のpackageについてAUR build-order planとdirect official repository package
 sizeを表示します。
-unknown dependency、未選択のambiguous provider、cycle、安全に解決できないconflicts /
-replacesがあるplanはincompleteです。
+unknown dependency、未選択のambiguous provider、cycleがあるplanはincompleteです。
 unique resolve、user-selected provider、未選択のambiguous providerを区別します。
 size metadataが利用できなくてもplan bodyを省略しません。
 Unsatisfied / Unknownのdependency constraintはplanをincompleteとし、result / reasonを
 表示します。Invalid / Conflictingはplan constructionをfail-closedにします。
+planはinstalled conflict、planned-target conflict、potential replacement impact、利用不能または
+未完了のjudgment、invalidなmetadata / observation、complete observationによるcurrent / planned
+targetのno-matchを区別します。
+確認済みのinstalled / planned conflictやpotential replacement impactがあっても、plan
+completenessはCompleteのままになり得ますが、build / installは確認が必要で、safety guardにより
+停止します。
+Moguetはこれらを自動解決しません。
+relation judgmentが利用不能または未完了ならcompletenessはUnknownとなり、fail-closedです。
+relation metadataまたはobservationがinvalidならcompletenessはIncompleteとなり、build / installを
+blockします。
+complete observationでcurrent / planned targetにmatchがなければ、relation blockerはありません。
+これらはcommand statusの独自taxonomyを追加しません。
 clone、build、installは行いません。
 .
 .TP
@@ -272,6 +286,8 @@ package情報を表示します。
 Auto modeはofficial repository情報を優先し、packageが存在しない場合だけexact AUR
 metadataへfallbackします。
 source selectorはlookupを指定sourceへ限定します。
+AUR metadataではdeclared conflict / replacementをmetadataとして表示し、installed / planned
+assessmentをplan / build preflightへ延期したことを明示します。
 .
 .TP
 .B "-Qua"
@@ -628,6 +644,15 @@ dependency、provider、PackageBase、source、artifact、ownership、transactio
 authoritativeに確定できなければ、対応するexternal mutation前に停止します。
 .B --noconfirm
 でguardを突破しません。
+.
+.PP
+build / install前に、Moguetはprovided componentとversion付きrelationを含め、declared
+conflict / replacementをinstalled / planned packageへ照合します。diagnosticはinstalled
+conflictとplanned target conflictを区別します。matching replacementはreviewが必要な
+potential impactにすぎず、Moguetはpackageの削除・置換・conflict解決を自動実行しません。
+利用不能またはinvalidなjudgmentはfail-closedとし、absenceとして表示しません。completeな
+観測でcurrent / planned packageとprovided componentのいずれにも一致しない場合だけrelation
+guardを解除します。宣言は残り、transaction authorityはpacman / libalpmです。
 .
 .PP
 複数dependency providerが残る場合、interactive TTYではsource-aware candidateを番号付きで
