@@ -388,6 +388,69 @@ choosing a package.
 Source-build preferences are managed with multi-target `add-src`, `edit-src`,
 `del-src`, and `revert`, plus target-less `list-src`. A one-off
 `build <pkg> [V=K...]` resolves a remote package and does not save a preference.
+
+### Per-package build customization
+
+The existing v2.x `[V=K...]` and source-build preference forms let you adjust
+one package's build environment without editing the system-wide
+`/etc/makepkg.conf`. Complete replacement and inheriting the system values
+before a local modification are separate patterns; choose between them for the
+specific task rather than treating either one as a universal default.
+
+For a one-off complete override:
+
+```bash
+moguet build example-package \
+  CFLAGS="-O3 -pipe" \
+  CXXFLAGS="-O3 -pipe"
+```
+
+Each named variable is set to an explicit value for this package build; it is
+not merged with the corresponding system-wide value. This can be useful when
+deliberately simplifying flags for troubleshooting or trying a package-specific
+setting. `-O3` is illustrative here, not a performance recommendation.
+
+To inherit the current system settings and modify only one part:
+
+```bash
+source /etc/makepkg.conf
+
+moguet build obs-studio \
+  CFLAGS="${CFLAGS/-O2/-O3}" \
+  CXXFLAGS="${CXXFLAGS/-O2/-O3}"
+```
+
+Here, `source` loads `/etc/makepkg.conf` into the current shell as a baseline;
+it does not modify the file. Each substitution preserves the other existing
+flags and changes a matching `-O2`; if that text is absent, the value remains
+unchanged. This is not a universal optimization recipe, and `-O3` remains an
+illustrative value.
+
+A mixed C/C++ package may need both `CFLAGS` and `CXXFLAGS`, while a C-only or
+C++-only package may need different variables. The package's `PKGBUILD` and
+upstream build system determine which environment flags they consume; Moguet
+does not guarantee that these variables affect the compiler invocation.
+
+`build` remains a one-off operation and does not save these assignments. After
+verifying a setting, use `add-src` to save it as that package's source-build
+preference. Save a complete override with:
+
+```bash
+moguet add-src example-package \
+  CFLAGS="-O3 -pipe" \
+  CXXFLAGS="-O3 -pipe"
+```
+
+Or save the result of inheriting and locally modifying the system values:
+
+```bash
+source /etc/makepkg.conf
+
+moguet add-src obs-studio \
+  CFLAGS="${CFLAGS/-O2/-O3}" \
+  CXXFLAGS="${CXXFLAGS/-O2/-O3}"
+```
+
 `build --local <directory> [V=K...]`
 instead treats exactly one user-owned directory as a local PackageBase source;
 it does not infer a local root from a path-like package operand or query AUR for

@@ -346,7 +346,69 @@ non-TTYと`--noconfirm`ではqueryやpackage選択を行わず失敗します。
 
 source-build preferenceはmulti-targetの`add-src`、`edit-src`、`del-src`、`revert`と、
 target-lessの`list-src`で管理します。一時的な`build <pkg> [V=K...]`はremote packageを
-解決し、preferenceを保存しません。`build --local <directory> [V=K...]`は、代わりにuser所有directoryを
+解決し、preferenceを保存しません。
+
+### Package単位のbuild customization
+
+既存v2.xの`[V=K...]`とsource-build preferenceを使うと、system-wideな
+`/etc/makepkg.conf`を編集せず、1つのpackageだけbuild environmentを調整できます。
+complete replacementと、system-wide valueを引き継いでから局所変更する方法は別の
+patternです。どちらかを常にdefaultとせず、目的に応じて選びます。
+
+one-offでcomplete overrideする例:
+
+```bash
+moguet build example-package \
+  CFLAGS="-O3 -pipe" \
+  CXXFLAGS="-O3 -pipe"
+```
+
+指定した各variableは、このpackage build向けの明示値へ置き換わり、対応する
+system-wide valueとはmergeされません。問題の切り分けのためにflagsを意図的に
+単純化する場合や、package固有の設定を試す場合に使えます。ここでの`-O3`は説明用で、
+performance recommendationではありません。
+
+現在のsystem settingを引き継ぎ、一部分だけ変更する例:
+
+```bash
+source /etc/makepkg.conf
+
+moguet build obs-studio \
+  CFLAGS="${CFLAGS/-O2/-O3}" \
+  CXXFLAGS="${CXXFLAGS/-O2/-O3}"
+```
+
+ここで`source`は`/etc/makepkg.conf`をbaselineとしてcurrent shellへ読み込むだけで、
+file自体を変更しません。各substitutionはその他の既存flagsを維持し、現在の値に
+`-O2`が含まれる場合だけその部分を変更します。含まれなければ値は変わりません。
+これは万能なoptimization recipeではなく、`-O3`も説明用の値です。
+
+C / C++ mixed packageでは`CFLAGS`と`CXXFLAGS`の両方が必要になり得ますが、
+C-only / C++-only packageでは必要なvariableが異なり得ます。実際にどのenvironment flagsを
+利用するかはpackageの`PKGBUILD`とupstream build systemが決めるため、Moguetはこれらの
+variableがcompiler invocationへ作用することを保証しません。
+
+`build`はone-off operationのままで、これらのassignmentを保存しません。設定を確認後、
+`add-src`を使うと、そのpackageのsource-build preferenceとして保存できます。
+complete overrideを保存する例:
+
+```bash
+moguet add-src example-package \
+  CFLAGS="-O3 -pipe" \
+  CXXFLAGS="-O3 -pipe"
+```
+
+system-wide valueを引き継いで局所変更した結果を保存する例:
+
+```bash
+source /etc/makepkg.conf
+
+moguet add-src obs-studio \
+  CFLAGS="${CFLAGS/-O2/-O3}" \
+  CXXFLAGS="${CXXFLAGS/-O2/-O3}"
+```
+
+`build --local <directory> [V=K...]`は、代わりにuser所有directoryを
 exactly oneのlocal PackageBase sourceとして扱います。pathらしいpackage operandからlocal
 rootを推測せず、そのrootをAURへqueryしません。
 
