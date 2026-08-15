@@ -3,6 +3,7 @@
 #include "aur_update_query.hpp"
 #include "commands_sync.hpp"
 #include "local_dependency_plan_projection.hpp"
+#include "package_relation_assessment_fixture.hpp"
 #include "root_package_route_projection.hpp"
 #include "system_source_upgrade.hpp"
 #include "unified_plan_projection.hpp"
@@ -1543,6 +1544,11 @@ void test_fetch_and_remote_source_build_adapters() {
     FetchPreparation fetch{build_plan_fixture(), "suite-child"};
     fetch.plan.metadata_risks.push_back(BuildPlanMetadataRisk{
             "suite-child", "suite-base", {"legacy-suite"}, {}});
+    fetch.plan.relation_assessments.push_back(
+            package_relation_assessment_fixture::
+                    confirmed_installed_conflict_reason(
+                            "suite-child", "suite-base", "legacy-suite")
+                    .assessment);
     const std::unique_ptr<UnifiedPlanProjection> fetch_projection =
             project_fetch_unified_plan(
                     FetchUnifiedPlanProjectionInput{std::cref(fetch)});

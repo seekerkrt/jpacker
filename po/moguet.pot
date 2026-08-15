@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-13 19:03+0900\n"
+"POT-Creation-Date: 2026-08-15 10:25+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2504,9 +2504,6 @@ msgstr ""
 msgid "resolution failure"
 msgstr ""
 
-msgid "declared relation (actual relation unassessed)"
-msgstr ""
-
 msgid "split package"
 msgstr ""
 
@@ -2689,9 +2686,6 @@ msgstr ""
 msgid "Selected provided dependencies:"
 msgstr ""
 
-msgid "Conflicts/replaces metadata requires manual review before build/install; fetch is allowed."
-msgstr ""
-
 #. TRANSLATORS: The first placeholder is the
 #. literal command name "upgrade-all"; the
 #. second is a runtime option token.
@@ -2731,9 +2725,6 @@ msgid "{} dependencies:"
 msgstr ""
 
 msgid "Unknown dependencies:"
-msgstr ""
-
-msgid "Conflicts/replaces metadata is separate from dependency resolution and requires manual review."
 msgstr ""
 
 #, c++-format
@@ -4580,7 +4571,7 @@ msgid "Cannot execute build plan for {}; cyclic dependencies: {}"
 msgstr ""
 
 #, c++-format
-msgid "Cannot execute build plan for {}; conflicts/replaces metadata requires manual review: {}"
+msgid "Cannot execute build plan for {}; package relation assessment requires manual review: {}"
 msgstr ""
 
 #, c++-format

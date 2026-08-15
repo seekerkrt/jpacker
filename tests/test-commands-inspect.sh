@@ -674,14 +674,14 @@ echo "  ok: same-root conflict fails before provider interaction"
 setup_case plan-metadata-risk-readiness
 export MOGUET_TEST_INSPECTION_SCENARIO=plan-metadata-risk-readiness
 run_ok plan plan-metadata-risk-root
-assert_exact_line "  completeness: Unknown" "$stdout_file"
+assert_exact_line "  completeness: Complete" "$stdout_file"
 assert_exact_line "  Fetch readiness: Ready" "$stdout_file"
-assert_exact_line "  Build readiness: Requires check" "$stdout_file"
-assert_exact_line "  Install readiness: Requires check" "$stdout_file"
-assert_contains \
-    "reason: declared relation (actual relation unassessed)" "$stdout_file"
-assert_exact_line "  actual relation: unassessed (#353)" "$stdout_file"
-echo "  ok: plan keeps declared relation metadata separate from assessment"
+assert_exact_line "  Build readiness: Ready" "$stdout_file"
+assert_exact_line "  Install readiness: Ready" "$stdout_file"
+assert_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" "$stdout_file"
+assert_not_contains "actual relation: unassessed (#353)" "$stdout_file"
+assert_not_contains "reason: package relation assessment" "$stdout_file"
+echo "  ok: plan releases a complete typed no-match relation guard"
 
 setup_case plan-split-only-readiness
 export MOGUET_TEST_INSPECTION_SCENARIO=plan-split-only-readiness
@@ -699,13 +699,11 @@ setup_case plan-density-attention
 export MOGUET_TEST_INSPECTION_SCENARIO=plan-density-attention
 run_ok plan plan-density-root
 assert_exact_line \
-    "  items: 34 total, 33 normal, 1 attention-required" "$stdout_file"
+    "  items: 34 total, 34 normal, 0 attention-required" "$stdout_file"
 assert_exact_line "  normal unconstrained dependencies: 33" "$stdout_file"
-assert_exact_line "  - package: attention-risk-child" "$stdout_file"
-assert_contains \
-    "reason: declared relation (actual relation unassessed)" "$stdout_file"
-assert_before "Attention-required details:" "Build plan:" "$stdout_file"
-echo "  ok: plan aggregates normal dependencies before attention detail"
+assert_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" "$stdout_file"
+assert_not_contains "Attention-required details:" "$stdout_file"
+echo "  ok: typed no-match metadata remains in the normal plan summary"
 
 # Issue #125: formatterはprivate helperのまま、repository metadataからplan表示へ流して固定する。
 setup_case plan-repository-size-formatter
@@ -1290,8 +1288,8 @@ assert_no_foreign_update_mutation
 echo "  ok: foreign version parse failure remains fail-closed"
 
 # Issue #350 Slice 5: typed plan state is localized only at presentation time.
-# Representative Unknown, Complete, Incomplete, Ready, RequiresCheck, and
-# Blocked states must retain their independent dimensions in Japanese.
+# Slice 4 replaces the former unassessed relation fixture with a complete
+# NoMatch while leaving detailed relation prose to Issue #353 Slice 5.
 command -v localedef >/dev/null 2>&1 ||
     fail_case "localedef is required for plan localization coverage"
 locale_root=$tmp_dir/locale
@@ -1306,15 +1304,15 @@ LANGUAGE=ja \
     run_ok plan plan-metadata-risk-root
 assert_exact_line "プラン状態:" "$stdout_file"
 assert_exact_line "  構築状態: 構築済み" "$stdout_file"
-assert_exact_line "  完全性: 不明" "$stdout_file"
+assert_exact_line "  完全性: 完全" "$stdout_file"
 assert_exact_line "  プロバイダー判断: 一意" "$stdout_file"
 assert_exact_line "  取得の実行準備: 準備完了" "$stdout_file"
-assert_exact_line "  ビルドの実行準備: 確認が必要" "$stdout_file"
-assert_exact_line "  インストールの実行準備: 確認が必要" "$stdout_file"
-assert_contains "宣言済み関係（実際の関係は未評価）" "$stdout_file"
-assert_contains "必要な対応: 宣言済み関係を確認" "$stdout_file"
-assert_before "確認が必要な詳細:" "ビルド計画:" "$stdout_file"
-echo "  ok: Japanese plan presentation preserves typed semantic dimensions"
+assert_exact_line "  ビルドの実行準備: 準備完了" "$stdout_file"
+assert_exact_line "  インストールの実行準備: 準備完了" "$stdout_file"
+assert_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" "$stdout_file"
+assert_not_contains "実際の関係は未評価" "$stdout_file"
+assert_not_contains "確認が必要な詳細:" "$stdout_file"
+echo "  ok: Japanese plan presentation preserves typed NoMatch readiness"
 
 setup_case plan-localized-split-readiness
 export MOGUET_TEST_INSPECTION_SCENARIO=plan-split-only-readiness

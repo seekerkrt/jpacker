@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-13 19:03+0900\n"
+"POT-Creation-Date: 2026-08-15 10:25+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -2498,9 +2498,6 @@ msgstr "制約の実行準備"
 msgid "resolution failure"
 msgstr "解決失敗"
 
-msgid "declared relation (actual relation unassessed)"
-msgstr "宣言済み関係（実際の関係は未評価）"
-
 msgid "split package"
 msgstr "分割パッケージ"
 
@@ -2682,9 +2679,6 @@ msgstr "取得対象:"
 msgid "Selected provided dependencies:"
 msgstr "選択済みの提供依存関係:"
 
-msgid "Conflicts/replaces metadata requires manual review before build/install; fetch is allowed."
-msgstr "競合/置換メタデータはビルド/インストール前に手動確認が必要です。取得は実行できます。"
-
 #. TRANSLATORS: The first placeholder is the
 #. literal command name "upgrade-all"; the
 #. second is a runtime option token.
@@ -2725,9 +2719,6 @@ msgstr "{}依存関係:"
 
 msgid "Unknown dependencies:"
 msgstr "不明な依存関係:"
-
-msgid "Conflicts/replaces metadata is separate from dependency resolution and requires manual review."
-msgstr "競合/置換メタデータは依存関係の解決とは別扱いであり、手動確認が必要です。"
 
 #, c++-format
 msgid "Failed to plan build order for {}: {}"
@@ -4573,8 +4564,8 @@ msgid "Cannot execute build plan for {}; cyclic dependencies: {}"
 msgstr "{}のビルド計画を実行できません。循環依存: {}"
 
 #, c++-format
-msgid "Cannot execute build plan for {}; conflicts/replaces metadata requires manual review: {}"
-msgstr "{}のビルド計画を実行できません。競合/置換メタデータは手動確認が必要です: {}"
+msgid "Cannot execute build plan for {}; package relation assessment requires manual review: {}"
+msgstr "{}のビルド計画を実行できません。パッケージ関係の評価結果は手動確認が必要です: {}"
 
 #, c++-format
 msgid "Cannot execute singular install plan for {}; split package targets require the {} set lifecycle: {}"
@@ -8240,6 +8231,15 @@ msgstr "{}のデフォルト状態ログを段階{}で安全に使用できま�
 
 msgid "Unknown state log error code."
 msgstr "不明な状態ログエラーコードです。"
+
+#~ msgid "declared relation (actual relation unassessed)"
+#~ msgstr "宣言済み関係（実際の関係は未評価）"
+
+#~ msgid "Conflicts/replaces metadata requires manual review before build/install; fetch is allowed."
+#~ msgstr "競合/置換メタデータはビルド/インストール前に手動確認が必要です。取得は実行できます。"
+
+#~ msgid "Conflicts/replaces metadata is separate from dependency resolution and requires manual review."
+#~ msgstr "競合/置換メタデータは依存関係の解決とは別扱いであり、手動確認が必要です。"
 
 #, c++-format
 #~ msgid "{} does not accept target operands: {}"

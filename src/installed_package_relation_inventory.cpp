@@ -1,5 +1,6 @@
 #include "installed_package_relation_inventory.hpp"
 
+#include <exception>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -33,23 +34,20 @@ PackageRelationObservationFailureKind inventory_failure_kind(
     if(const auto* metadata = std::get_if<PackageMetadataFailure>(&reason);
        metadata != nullptr) {
         switch(metadata->code) {
-            case PackageMetadataErrorCode::InitializationFailed:
-            case PackageMetadataErrorCode::LocalDatabaseUnavailable:
-            case PackageMetadataErrorCode::ConfigurationUnavailable:
-                return PackageRelationObservationFailureKind::
-                        SourceUnavailable;
-            case PackageMetadataErrorCode::ConfigurationMalformed:
-            case PackageMetadataErrorCode::InvalidPackageName:
-                return PackageRelationObservationFailureKind::
-                        InvalidIdentity;
-            case PackageMetadataErrorCode::MalformedMetadata:
-                return PackageRelationObservationFailureKind::
-                        MalformedMetadata;
-            case PackageMetadataErrorCode::QueryFailed:
-            case PackageMetadataErrorCode::SyncDatabaseUnavailable:
-            case PackageMetadataErrorCode::RepositoryNotConfigured:
-                return PackageRelationObservationFailureKind::
-                        PartialSourceFailure;
+        case PackageMetadataErrorCode::InitializationFailed:
+        case PackageMetadataErrorCode::LocalDatabaseUnavailable:
+        case PackageMetadataErrorCode::ConfigurationUnavailable:
+            return PackageRelationObservationFailureKind::SourceUnavailable;
+        case PackageMetadataErrorCode::ConfigurationMalformed:
+        case PackageMetadataErrorCode::InvalidPackageName:
+            return PackageRelationObservationFailureKind::InvalidIdentity;
+        case PackageMetadataErrorCode::MalformedMetadata:
+            return PackageRelationObservationFailureKind::MalformedMetadata;
+        case PackageMetadataErrorCode::QueryFailed:
+        case PackageMetadataErrorCode::SyncDatabaseUnavailable:
+        case PackageMetadataErrorCode::RepositoryNotConfigured:
+            return PackageRelationObservationFailureKind::
+                    PartialSourceFailure;
         }
     }
     return PackageRelationObservationFailureKind::MalformedMetadata;
@@ -62,6 +60,28 @@ std::string inventory_failure_diagnostic(
         return metadata->diagnostic;
     }
     return "Installed package provides metadata is malformed.";
+}
+
+PackageRelationObservationSet unavailable_configuration_observations(
+        PackageRelationObservationFailureKind kind,
+        std::string diagnostic) {
+    const PackageRelationObservationCompleteness completeness =
+            kind == PackageRelationObservationFailureKind::MalformedMetadata ||
+                    kind == PackageRelationObservationFailureKind::
+                                    InvalidIdentity
+            ? PackageRelationObservationCompleteness::Invalid
+            : PackageRelationObservationCompleteness::Unavailable;
+    return PackageRelationObservationSet{
+            completeness,
+            {},
+            {},
+            {},
+            {PackageRelationObservationFailure{
+                    kind,
+                    PackageRelationObservationRole::Installed,
+                    std::nullopt,
+                    std::nullopt,
+                    std::move(diagnostic)}}};
 }
 
 } // namespace
@@ -200,4 +220,22 @@ PackageRelationObservationSet project_installed_relation_observations(
                     PackageRelationSourceIdentity{failure.source},
                     failure.package_name,
                     inventory_failure_diagnostic(failure.reason)}}};
+}
+
+PackageRelationObservationSet query_installed_package_relation_observations() {
+    try {
+        const PacmanDatabasePaths paths = resolve_pacman_database_paths();
+        return project_installed_relation_observations(
+                query_installed_package_relations(paths));
+    } catch(const PackageMetadataError& error) {
+        const InstalledPackageRelationInventoryFailureReason reason =
+                error.failure();
+        return unavailable_configuration_observations(
+                inventory_failure_kind(reason),
+                inventory_failure_diagnostic(reason));
+    } catch(const std::exception& error) {
+        return unavailable_configuration_observations(
+                PackageRelationObservationFailureKind::SourceUnavailable,
+                error.what());
+    }
 }

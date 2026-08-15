@@ -42,3 +42,8 @@ InstalledPackageRelationInventoryResult query_installed_package_relations(
 
 PackageRelationObservationSet project_installed_relation_observations(
         const InstalledPackageRelationInventoryResult& inventory);
+
+// Resolves the configured local database once and returns an owned observation
+// set. Configuration/query failure is retained as typed evidence and is never
+// represented as a successful empty inventory.
+PackageRelationObservationSet query_installed_package_relation_observations();

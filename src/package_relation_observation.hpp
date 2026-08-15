@@ -194,6 +194,12 @@ struct PackageRelationMatchingEvidence {
     bool operator==(const PackageRelationMatchingEvidence&) const = default;
 };
 
+// Validates the owned observation structure without comparing it to a
+// declaration target or version constraint.
+[[nodiscard]] std::optional<PackageRelationMatchInvalidReason>
+validate_package_relation_observation(
+        const PackageRelationObservedPackage& observed_package) noexcept;
+
 PackageRelationMatchEvidence match_declared_package_relation(
         const DeclaredPackageRelation& relation,
         const PackageRelationObservedPackage& observed_package);
@@ -201,6 +207,12 @@ PackageRelationMatchEvidence match_declared_package_relation(
 PackageRelationMatchingEvidence match_declared_package_relation(
         const DeclaredPackageRelation& relation,
         const PackageRelationObservationSet& observations);
+
+// Assessment needs the authoritative per-package result so multiple matching
+// targets are retained independently. The identity/version decision remains
+// owned by this observation module rather than being reconstructed downstream.
+[[nodiscard]] bool package_relation_match_is_confirmed(
+        const PackageRelationMatchEvidence& evidence) noexcept;
 
 // This answers identity/version matching only. In particular, a matching
 // RepositoryCandidate is diagnostic input and is not an active conflict.

@@ -239,9 +239,11 @@ PlanPresentationReason project_plan_reason(
                                             PlanDeclaredRelationReason>) {
                     projected.kind =
                             PlanPresentationReasonKind::DeclaredRelation;
-                    projected.detail = reason.assessment;
-                    projected.subject = reason.metadata.package_name;
-                    projected.package_base = reason.metadata.package_base;
+                    projected.detail = reason.assessment.kind;
+                    projected.subject = reason.assessment.declaring_package
+                                                .package_name;
+                    projected.package_base =
+                            reason.assessment.declaring_package.package_base;
                 } else if constexpr(std::is_same_v<
                                             Reason,
                                             PlanSplitPackageReason>) {
@@ -1462,6 +1464,14 @@ PresentationProjection project_build_plan_presentation(
     }
 
     for(const ExecutionReadinessReason& readiness_reason : install.reasons) {
+        const auto* relation = std::get_if<PlanDeclaredRelationReason>(
+                &readiness_reason.reason);
+        if(relation != nullptr &&
+           relation->assessment.kind ==
+                   PackageRelationAssessmentKind::
+                           ConfirmedNoMatchingCurrentOrPlannedTarget) {
+            continue;
+        }
         PlanPresentationReason reason = project_plan_reason(
                 plan, ExecutionCapability::Install, readiness_reason);
         PresentationItem* item = find_plan_item(items, reason);

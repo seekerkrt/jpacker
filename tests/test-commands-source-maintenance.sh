@@ -968,14 +968,19 @@ run_fail build split-metadata-ambiguous-root
 assert_contains "ambiguous providers" "$output_file"
 assert_not_contains "conflicts/replaces metadata" "$output_file"
 
-setup_case sync-plan-metadata-before-split
+setup_case sync-plan-no-match-reaches-split
 run_fail -S --aur split-metadata-root
-assert_contains "conflicts/replaces metadata requires manual review" "$output_file"
+assert_contains \
+    "PackageBase artifact selection failed before package transaction." \
+    "$output_file"
+assert_not_contains \
+    "package relation assessment requires manual review" "$output_file"
 
 setup_case sync-plan-provider-before-metadata-split
 run_fail -S --aur split-metadata-ambiguous-root
 assert_contains "ambiguous providers" "$output_file"
-assert_not_contains "conflicts/replaces metadata requires manual review" "$output_file"
+assert_not_contains \
+    "package relation assessment requires manual review" "$output_file"
 
 setup_case build-execution-failure
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root

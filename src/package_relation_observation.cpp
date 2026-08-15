@@ -274,30 +274,6 @@ PackageRelationVersionMatchKind aggregate_provided_version_matches(
     return PackageRelationVersionMatchKind::NotApplicable;
 }
 
-bool is_confirmed_match(
-        const PackageRelationMatchEvidence& evidence) noexcept {
-    if(evidence.identity_match ==
-       PackageRelationIdentityMatchKind::ExactPackage) {
-        return evidence.version_match ==
-                       PackageRelationVersionMatchKind::Unconstrained ||
-               evidence.version_match ==
-                       PackageRelationVersionMatchKind::Matched;
-    }
-    if(evidence.identity_match !=
-       PackageRelationIdentityMatchKind::ProvidedComponent) {
-        return false;
-    }
-    return std::any_of(
-            evidence.provided_capability_evidence.begin(),
-            evidence.provided_capability_evidence.end(),
-            [](const auto& capability) {
-                return capability.version_match ==
-                               PackageRelationVersionMatchKind::Unconstrained ||
-                       capability.version_match ==
-                               PackageRelationVersionMatchKind::Matched;
-            });
-}
-
 bool is_confirmed_nonmatch(
         const PackageRelationMatchEvidence& evidence) noexcept {
     if(evidence.invalid_reason.has_value()) return false;
@@ -340,6 +316,17 @@ bool source_has_complete_identity_coverage(
 }
 
 } // namespace
+
+std::optional<PackageRelationMatchInvalidReason>
+validate_package_relation_observation(
+        const PackageRelationObservedPackage& observed_package) noexcept {
+    if(const auto invalid =
+               validate_observation_without_capabilities(observed_package);
+       invalid.has_value()) {
+        return invalid;
+    }
+    return validate_capabilities(observed_package);
+}
 
 PackageRelationMatchEvidence match_declared_package_relation(
         const DeclaredPackageRelation& relation,
@@ -451,11 +438,36 @@ PackageRelationMatchingEvidence match_declared_package_relation(
     return evidence;
 }
 
+bool package_relation_match_is_confirmed(
+        const PackageRelationMatchEvidence& evidence) noexcept {
+    if(evidence.identity_match ==
+       PackageRelationIdentityMatchKind::ExactPackage) {
+        return evidence.version_match ==
+                       PackageRelationVersionMatchKind::Unconstrained ||
+               evidence.version_match ==
+                       PackageRelationVersionMatchKind::Matched;
+    }
+    if(evidence.identity_match !=
+       PackageRelationIdentityMatchKind::ProvidedComponent) {
+        return false;
+    }
+    return std::any_of(
+            evidence.provided_capability_evidence.begin(),
+            evidence.provided_capability_evidence.end(),
+            [](const auto& capability) {
+                return capability.version_match ==
+                               PackageRelationVersionMatchKind::Unconstrained ||
+                       capability.version_match ==
+                               PackageRelationVersionMatchKind::Matched;
+            });
+}
+
 bool package_relation_has_confirmed_match(
         const PackageRelationMatchingEvidence& evidence) noexcept {
     return std::any_of(
             evidence.package_evidence.begin(),
-            evidence.package_evidence.end(), is_confirmed_match);
+            evidence.package_evidence.end(),
+            package_relation_match_is_confirmed);
 }
 
 bool package_relation_has_complete_identity_coverage(

@@ -586,8 +586,10 @@ struct ConstraintFailureUnifiedPlanBlocker {
     UnifiedPlanBorrowedAuthorityReference<BuildPlanDependencyEdge> detail;
 };
 
+// Compatibility presentation leaf. Despite its legacy name, production
+// creation consumes the already-classified PlanReason and never raw metadata.
 struct MetadataRiskUnifiedPlanBlocker {
-    UnifiedPlanBorrowedAuthorityReference<BuildPlanMetadataRisk> detail;
+    PlanDeclaredRelationReason detail;
 };
 
 struct LocalDependencyPlanUnifiedPlanBlocker {

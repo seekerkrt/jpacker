@@ -1,6 +1,7 @@
 #include "cli_authority.hpp"
 #include "diagnostic_projection.hpp"
 #include "operation_state_model.hpp"
+#include "package_relation_assessment_fixture.hpp"
 #include "presentation_projection.hpp"
 
 #include <algorithm>
@@ -902,9 +903,16 @@ void test_build_plan_presentation_uses_shared_install_readiness() {
             PlannedPackageTarget{"risk-child", "risk-base", {}, {}});
     metadata.metadata_risks.push_back(BuildPlanMetadataRisk{
             "risk-child", "risk-base", {"declared-conflict"}, {}});
+    metadata.relation_assessments.push_back(
+            package_relation_assessment_fixture::
+                    confirmed_installed_conflict_reason(
+                            "risk-child", "risk-base",
+                            "declared-conflict")
+                    .assessment);
     expect_install_reason_projection_equivalence(
             metadata, PlanPresentationReasonKind::DeclaredRelation,
-            ExecutionReadinessState::RequiresCheck, "metadata risk");
+            ExecutionReadinessState::RequiresCheck,
+            "typed relation assessment");
 
     BuildPlan split;
     split.package_targets.push_back(

@@ -57,10 +57,18 @@ void append_build_plan_blockers(
                 UnifiedPlanBorrowedAuthorityReference<
                         AmbiguousProvidedDependency>(ambiguous)});
     }
-    for(const BuildPlanMetadataRisk& risk : plan.metadata_risks) {
-        observation.blockers.push_back(MetadataRiskUnifiedPlanBlocker{
-                UnifiedPlanBorrowedAuthorityReference<BuildPlanMetadataRisk>(
-                        risk)});
+    const PlanStateProjection state = project_build_plan_state(plan);
+    const ExecutionReadiness& install_readiness = execution_readiness(
+            state, ExecutionCapability::Install);
+    for(const auto& readiness_reason : install_readiness.reasons) {
+        const auto* relation = std::get_if<PlanDeclaredRelationReason>(
+                &readiness_reason.reason);
+        if(relation == nullptr ||
+           !readiness_reason.blocks_production_guard) {
+            continue;
+        }
+        observation.blockers.push_back(
+                MetadataRiskUnifiedPlanBlocker{*relation});
     }
     for(const BuildPlanDependencyEdge& edge : plan.dependency_edges) {
         if(edge.constraint_evaluation.has_value() &&
@@ -1350,6 +1358,7 @@ bool same_preflight_issue_identity(
        lhs.reason != rhs.reason || lhs.package_name != rhs.package_name ||
        lhs.package_base != rhs.package_base ||
        lhs.dependency_specification != rhs.dependency_specification ||
+       lhs.relation_reason != rhs.relation_reason ||
        lhs.build_plan_projection_issue.has_value() !=
                rhs.build_plan_projection_issue.has_value()) {
         return false;

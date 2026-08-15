@@ -1,5 +1,6 @@
 #include "dependency_plan.hpp"
 
+#include "build_plan_relation_assessment.hpp"
 #include "dependency_plan_projection_support.hpp"
 #include "dependency_provider.hpp"
 #include "dependency_spec.hpp"
@@ -2323,7 +2324,10 @@ BuildPlan resolve_build_plan_with_interaction(
                                       const ProviderSelectionCallback& selector) {
         return resolve_build_plan_once(targets, resolution_mode, selector);
     };
-    return resolve_with_provider_interaction(resolve_once, select_provider);
+    BuildPlan plan =
+            resolve_with_provider_interaction(resolve_once, select_provider);
+    finalize_build_plan_relation_assessments(plan);
+    return plan;
 }
 
 BuildPlan resolve_fetch_plan_once(
@@ -2380,7 +2384,10 @@ BuildPlan resolve_fetch_plan_with_interaction(
                                       const ProviderSelectionCallback& selector) {
         return resolve_fetch_plan_once(targets, selector);
     };
-    return resolve_with_provider_interaction(resolve_once, select_provider);
+    BuildPlan plan =
+            resolve_with_provider_interaction(resolve_once, select_provider);
+    finalize_build_plan_relation_assessments(plan);
+    return plan;
 }
 
 } // namespace
