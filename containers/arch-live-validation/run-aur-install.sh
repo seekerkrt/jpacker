@@ -1157,7 +1157,7 @@ assert_contains "Running: git clone $aur_git_url $package_base" \
     "$normalized_output"
 assert_contains "'makepkg' '--packagelist'" "$normalized_output"
 assert_contains "'makepkg' '-sc' '--noconfirm'" "$normalized_output"
-assert_contains "Running: LC_ALL=C 'pacman' '-U' '--print' '--print-format'" \
+assert_not_contains "Running: LC_ALL=C 'pacman' '-U' '--print' '--print-format'" \
     "$normalized_output"
 assert_contains "Running: 'sudo' 'pacman' '-U' '--noconfirm' '--'" \
     "$normalized_output"
@@ -1273,6 +1273,16 @@ case "$original_artifact" in
         fail 'gateway original artifact path escaped the exact workspace boundary'
         ;;
 esac
+artifact_identity_query_prefix="Running: LC_ALL=C 'pacman' '-Qp' '--color' 'never' '--'"
+debug_artifact=${original_artifact%/*}/$AUR_CASE_DEBUG_PACKAGE_NAME-$expected_version-$expected_architecture.pkg.tar.zst
+assert_contains "$artifact_identity_query_prefix '$original_artifact'" \
+    "$normalized_output"
+assert_contains "$artifact_identity_query_prefix '$debug_artifact'" \
+    "$normalized_output"
+artifact_identity_query_count=$(grep -F -c -- \
+    "$artifact_identity_query_prefix" "$normalized_output")
+[ "$artifact_identity_query_count" -eq 2 ] ||
+    fail "production queried $artifact_identity_query_count artifact identities instead of 2"
 [ ! -e "$original_artifact" ] && [ ! -L "$original_artifact" ] ||
     fail 'production did not clean the original artifact workspace'
 [ ! -e "$(dirname "$original_artifact")" ] ||
@@ -1321,10 +1331,9 @@ awk -F '\t' '
     $3 != "root" || $4 != "root" { exit 1 }
 ' "$evidence_directory/archive-members.tsv" ||
     fail 'gateway accepted an unsafe archive member identity'
-package_query_format=$(printf '%%n\t%%v')
-package_query=$(pacman -U --print --print-format "$package_query_format" -- \
+package_query=$(LC_ALL=C pacman -Qp --color never -- \
     "$staged_artifact") || fail 'real non-root package query of staged artifact failed'
-[ "$package_query" = "$(printf '%s\t%s' "$package_name" "$expected_version")" ] ||
+[ "$package_query" = "$package_name $expected_version" ] ||
     fail 'staged artifact identity query drift'
 evidence_directories=$case_root/evidence-directories.raw
 validation_capture_output "$evidence_directories" \
