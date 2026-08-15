@@ -111,7 +111,13 @@ exit-status effectはそれぞれ独立したdimensionである。successful-unv
 <a id="compat-conflicts-replaces"></a>
 ## AUR conflicts / replaces summary
 
-AUR RPCの`Conflicts` / `Replaces`はdependency resolutionとは分離したmetadata riskとしてraw valueを保持し、actual relationは`DeclaredMetadataActualRelationUnassessed`のままである。`-Si`はmetadataとして表示し、`deps` / `plan`はdependency分類とは別のwarning / incomplete reasonとして表示する。`fetch`はunresolved dependency、未選択ambiguous provider、cycleがなければ取得を許可するが、build / install routeはriskをclone、fetch、makepkg、pacman transactionより前にblocking reasonとして扱う。Moguetはinstalled DBとmetadataを独自照合してconflictを解決せず、削除、置換、provider選択を自動実行しない。active relation evaluationはこのcompatibility surfaceの責務ではない。
+AUR RPC、`.SRCINFO`等から得た`Conflicts` / `Replaces`宣言は、dependency resolutionとは分離したtyped metadataとして保持する。Moguetはread-onlyなinstalled package databaseとplanned targetを観測し、package name、PackageBase、source / root attribution、version、provided componentを保ったままversion付きrelationをtransaction前に分類する。public diagnostic、build / install readiness、execution preflightはこのtyped assessmentを共通authorityとし、rendererやrouteごとにraw declarationを再parse・再判定しない。
+
+classificationは、installed packageとのconfirmed conflict、planned targetとのconfirmed conflict、reviewが必要なpotential replacement impact、judgment不能な`Unknown`、invalid metadata / observation、complete observationによるconfirmed no matching current / planned targetを区別する。replacement matchはautomatic replacementの予告や許可ではない。`Unknown`とinvalid result、およびdeclarationはあるがassessment未完了のfallbackはfail closedとし、「一致対象なし」へ丸めない。completeな観測がpackageとprovided componentのいずれにも一致しないと確認した場合だけrelation guardを解除する。この結果もdeclaration自体が存在しないという意味ではない。
+
+`-Si`はsource metadataとして`Conflicts` / `Replaces`を表示し、installed / planned stateを必要とする判定はplan / build preflightへ延期したことを明示する。`deps` / `plan`はtyped assessmentとreadinessをread-onlyに表示し、既存inspection commandのstatus contractへ新しいexit codeを追加しない。standalone `fetch`はfetch readinessが満たされる限りsource取得だけを行えるが、relation assessmentはBuild / Install readinessを許可しない。blocking conflict、potential replacement、`Unknown`、invalid、assessment未完了の各resultは、source install、local source route、AUR updateを含むexecutionをmakepkg、sudo、pacman install transactionより前に停止する。dry-run / unified planは同じblocking truthを`Blocked`とnon-zero statusへ投影する。complete no-matchだけならrelationを理由にblockせず、他のguardがなければ`Ready` / successを維持する。
+
+Moguetが所有するのはmetadata observation、typed classification、pre-transaction diagnostic、safety stopまでである。automatic package removal、automatic replacement、automatic conflict resolution、replacement targetやproviderのimplicit selection、full dependency / conflict solverの置換、libalpm transaction prepare / commitは行わない。`pacman` / libalpmが最終transaction authorityであり、Moguetのpreflight successはtransaction successを意味しない。`--noconfirm`もrelation guardをbypassせず、自動削除・自動置換を許可しない。
 
 <a id="compat-plan-size"></a>
 ## Planのofficial package size summary

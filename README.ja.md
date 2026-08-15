@@ -56,11 +56,11 @@ packageは`jpacker` command aliasを提供しません。AUR publicationは将�
 
 Moguet v2.xは公開済みで利用できますが、完成済みの一般向けAUR helperではなく、
 development-phaseのproductのままです。basicなpacman wrapper、AUR source build、
-update、package別のsource-build preferenceは現在すでに動作しますが、AUR support全体を
-構成するdependency solver、provider / conflict / replaces / version constraint対応、
-edge case対応といったより広い範囲は段階的に実装中で、UXも成熟途上です。Moguetは既存AUR
-helperと同等の自動解決能力・完成度を約束しません。unsupportedまたはambiguousなcaseは、
-推測せずfail-closedで停止します。v2.xは、Moguetのsource-aware入口、安全境界、検証基盤を
+update、package別のsource-build preferenceは現在すでに動作しますが、AUR support全体と
+edge case対応は段階的に実装中で、UXも成熟途上です。Moguetはfull dependency solverや
+provider / conflictの自動解決を再実装せずpacman-firstを維持し、既存AUR helperと同等の
+自動解決能力・完成度を約束しません。unsupportedまたはambiguousなcaseは、推測せず
+fail-closedで停止します。v2.xは、Moguetのsource-aware入口、安全境界、検証基盤を
 築く公開開発期です。v3.0.0は、Moguet固有のbuild-profileとPKGBUILD差分workflowが揃う
 地点であり、projectは内部的にこれをMoguetの本格的な正式就役と位置付けています。詳細な
 計画はrelease roadmap（[issue #344](https://github.com/seekerkrt/moguet/issues/344)）
@@ -82,6 +82,16 @@ helperと同等の自動解決能力・完成度を約束しません。unsuppor
   `Invalid` / `Conflicting`はfail-closedです。`fetch`、build、install、upgrade、local buildは
   `Unsatisfied` / `Unknown`の場合、clone、fetch、source mutation、build、sudo、pacman、transaction
   より前に停止します。
+- AURの`Conflicts` / `Replaces`宣言は、provided componentとversion付きrelationを含め、
+  build / install前にinstalled packageとplanned packageへ照合します。diagnosticはinstalled
+  packageとのconflictとplanned targetとのconflictを分け、matching replacementはreviewが
+  必要なpotential impactとしてだけ表示します。Moguetはpackageの削除、replacement targetの
+  選択、conflict解決を自動実行しません。
+- relation assessmentが利用不能（`Unknown`）またはinvalidならfail-closedとし、absenceとして
+  表示しません。completeな観測でcurrent / planned packageまたはprovided componentに一致が
+  ないと確認できた場合だけ、そのrelation guardを解除します。宣言自体は残り、transaction
+  authorityはpacman / libalpmです。`-Si`はsource metadataを表示し、このstatefulな判定を
+  plan / build preflightへ明示的に延期します。
 - 複数provider candidateが残る場合、interactive TTYではsource-aware candidateを番号付きで
   表示し、exactly oneの明示選択を要求します。defaultはありません。empty input、`q`、
   `quit`、`cancel`、EOFは選択を取り消し、invalid / out-of-range inputは再入力します。
@@ -125,10 +135,11 @@ helperと同等の自動解決能力・完成度を約束しません。unsuppor
   selectionを行います。AUR providerを含むcandidate setは、このsingular compatibility
   routeでそのproviderのPackageBaseをscheduleできないためambiguousのままsystem / source
   execution前に停止します。
-- 未解決dependency、未選択のambiguous provider、cycle、安全に解決できないconflicts /
-  replaces、証明できないartifact identityは、対応するmutation前に拒否します。
+- 未解決dependency、未選択のambiguous provider、cycle、blockingなconflict / replacement
+  assessment、証明できないartifact identityは、対応するmutation前に拒否します。
 - `--noconfirm`は対話停止を避ける指定であり、「すべてyes」ではありません。source
-  selection、plan、identity、conflict、ownershipのguardを突破しません。
+  selection、plan、identity、conflict、ownershipのguardを突破せず、自動削除や自動置換を
+  許可しません。
 - 複数phaseのupgradeは単一atomic transactionではありません。failure時は後続処理を
   止めますが、完了済みpackage transactionをrollbackしません。install成功後にcleanup
   だけ失敗した場合、packageはinstall済みの可能性があるため、結果を確認せず再試行

@@ -620,6 +620,109 @@ def assert_canonical_syntax_present(
         fail(f"{label} is missing canonical syntax: {', '.join(missing)}")
 
 
+def assert_document_contract(
+    path: Path,
+    required_fragments: tuple[str, ...],
+    forbidden_fragments: tuple[str, ...] = (),
+) -> None:
+    text = " ".join(read_text(path).split())
+    compact_text = text.replace(" ", "")
+    missing = [
+        fragment
+        for fragment in required_fragments
+        if fragment not in text and fragment.replace(" ", "") not in compact_text
+    ]
+    forbidden = [fragment for fragment in forbidden_fragments if fragment in text]
+    if missing:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} is missing required contract text: "
+            + ", ".join(repr(fragment) for fragment in missing)
+        )
+    if forbidden:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} retains obsolete contract text: "
+            + ", ".join(repr(fragment) for fragment in forbidden)
+        )
+
+
+def check_package_relation_documentation() -> None:
+    obsolete = (
+        "DeclaredMetadataActualRelationUnassessed",
+        "actual relation: unassessed (#353)",
+        "conflicts/replacements that Moguet cannot resolve",
+        "安全に解決できないconflicts / replacesがあるplan",
+    )
+    contracts = {
+        REPOSITORY_ROOT / "README.md": (
+            "AUR `Conflicts` and `Replaces` declarations are assessed before build and install",
+            "including provided components and versioned relations",
+            "potential impact that requires review",
+            "does not remove a package, select a replacement target, or resolve a conflict automatically",
+            "unavailable (`Unknown`) or invalid relation assessment fails closed",
+            "complete observation that confirms no matching current or planned package or provided component",
+            "transaction authority",
+            "never authorizes automatic removal or replacement",
+        ),
+        REPOSITORY_ROOT / "README.ja.md": (
+            "AURの`Conflicts` / `Replaces`宣言",
+            "provided componentとversion付きrelation",
+            "reviewが必要なpotential impact",
+            "packageの削除、replacement targetの選択、conflict解決を自動実行しません",
+            "relation assessmentが利用不能（`Unknown`）またはinvalidならfail-closed",
+            "current / planned packageまたはprovided componentに一致がないと確認できた場合だけ",
+            "transaction authorityはpacman / libalpm",
+            "自動削除や自動置換を許可しません",
+        ),
+        REPOSITORY_ROOT / "docs/COMPATIBILITY.md": (
+            "metadata observation、typed classification、pre-transaction diagnostic、safety stop",
+            "automatic package removal、automatic replacement、automatic conflict resolution",
+            "full dependency / conflict solverの置換",
+            "libalpm transaction prepare / commit",
+            "replacement matchはautomatic replacementの予告や許可ではない",
+            "`Unknown`とinvalid result",
+            "completeな観測がpackageとprovided componentのいずれにも一致しない",
+            "dry-run / unified planは同じblocking truthを`Blocked`とnon-zero statusへ投影する",
+        ),
+        REPOSITORY_ROOT / "man/moguet.1.in": (
+            "including provided components and versioned relations",
+            "Moguet does not remove, replace, or resolve packages automatically",
+            "Unavailable or invalid judgments fail closed and are not reported as absence",
+            "complete observation with no matching current or planned package or provided component",
+            "Confirmed installed or planned conflicts",
+            "potential replacement impacts can leave plan completeness Complete",
+            "build and install require review and remain blocked by the safety guard",
+            "Moguet does not resolve them automatically",
+            "unavailable or not-yet-completed relation judgment",
+            "completeness Unknown and fails closed",
+            "Invalid relation metadata or observation",
+            "completeness Incomplete and blocks build and install",
+            "complete observation with no matching current or planned target",
+            "adds no relation blocker",
+            "pacman/libalpm remains the transaction authority",
+        ),
+        REPOSITORY_ROOT / "man/ja/moguet.1.in": (
+            "provided componentとversion付きrelation",
+            "packageの削除・置換・conflict解決を自動実行しません",
+            "利用不能またはinvalidなjudgmentはfail-closedとし、absenceとして表示しません",
+            "current / planned packageとprovided componentのいずれにも一致しない場合だけ",
+            "確認済みのinstalled / planned conflict",
+            "potential replacement impactがあっても",
+            "plan completenessはCompleteのままになり得ます",
+            "build / installは確認が必要で、safety guardにより停止します",
+            "Moguetはこれらを自動解決しません",
+            "relation judgmentが利用不能または未完了",
+            "completenessはUnknownとなり、fail-closed",
+            "relation metadataまたはobservationがinvalid",
+            "completenessはIncompleteとなり、build / installをblock",
+            "complete observationでcurrent / planned targetにmatchがなければ",
+            "relation blockerはありません",
+            "transaction authorityはpacman / libalpm",
+        ),
+    }
+    for path, required in contracts.items():
+        assert_document_contract(path, required, obsolete)
+
+
 def markdown_canonical_grammar(path: Path) -> tuple[str, ...]:
     text = read_text(path)
     begin_marker = "<!-- CLI CANONICAL GRAMMAR BEGIN -->"
@@ -756,6 +859,7 @@ def main() -> int:
                 f"documented={documented}, expected={schema.canonical_grammar}"
             )
 
+    check_package_relation_documentation()
     check_generated_completions(schema)
     print("public-documentation-check: all checks passed")
     return 0

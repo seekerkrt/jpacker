@@ -313,6 +313,16 @@ void test_relation_inventory_is_snapshotted_once_and_no_match_releases_guard() {
                     stub::captured_commands() ==
                             std::vector<std::string>{DATABASE_PATH_COMMAND},
             "Installed relation inventory was repeated or lost attribution");
+    expect(
+            conflict_issue.diagnostic.find(
+                    "Installed conflict confirmed") != std::string::npos &&
+                    conflict_issue.diagnostic.find(
+                            "matched installed package installed-conflict") !=
+                            std::string::npos &&
+                    conflict_issue.diagnostic.find(
+                            "build/install is blocked before mutation") !=
+                            std::string::npos,
+            "Installed relation preflight diagnostic lost public attribution");
     expect_no_forbidden_operations();
 
     stub::reset();

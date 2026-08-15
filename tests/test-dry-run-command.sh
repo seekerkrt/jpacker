@@ -513,6 +513,48 @@ fi
 assert_protected_storage_unchanged
 assert_read_only_commands
 
+setup_case local-build-relation-no-match
+local_source=$case_dir/local-source
+cp -a "$repo_root/tests/fixtures/unified-plan-local-blocked" "$local_source"
+touch "$local_source/.SRCINFO"
+printf '\tconflicts = absent-local-component\n' >> "$local_source/.SRCINFO"
+before_snapshot=$case_dir/local-before
+after_snapshot=$case_dir/local-after
+snapshot_local_tree "$local_source" "$before_snapshot"
+start_mutation_sentinel "$local_source"
+if (cd "$case_work_dir" &&
+        "$repository_test_binary" build --local "$local_source" --dry-run) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+assert_expected_observation \
+    Ready 1 \
+    "Request: unified-plan-local-blocked (invocation index: 0)" \
+    "$status" "local build with a complete no-match relation assessment"
+if ! grep -F -- "     Source: local" "$output_file" >/dev/null ||
+   ! grep -F -- \
+       "Confirmed no matching current or planned target" \
+       "$output_file" >/dev/null ||
+   ! grep -F -- "source: local source" "$output_file" >/dev/null ||
+   ! grep -F -- "this relation does not block build/install" \
+       "$output_file" >/dev/null
+then
+    echo "local dry-run lost its typed package-relation result" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+snapshot_local_tree "$local_source" "$after_snapshot"
+if ! cmp -s "$before_snapshot" "$after_snapshot"; then
+    echo "local relation dry-run changed source file list, content, or identity" >&2
+    diff -u "$before_snapshot" "$after_snapshot" >&2 || true
+    exit 1
+fi
+assert_protected_storage_unchanged
+assert_read_only_commands
+
 setup_case local-build-metadata-required
 unsafe_local_component=$(printf \
     'local-source-before\nM4-RAW-NEXT-LINE\\literal\033]0;LOCAL-OSC\007\302\205\342\200\250')

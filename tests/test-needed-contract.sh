@@ -631,7 +631,7 @@ while IFS='|' read -r guard_name guard_target expected; do
     assert_cache_entry_absent "$guard_target"
     assert_normal_request_log_nonempty
 done <<'GUARDS'
-relation-assessment|planned-conflict-root|package relation assessment requires manual review
+relation-assessment|planned-conflict-root|Planned-target conflict confirmed
 unresolved|unresolved-root|unresolved dependencies
 ambiguous-provider|ambiguous-root|ambiguous providers
 cycle|cycle-root|cyclic dependencies

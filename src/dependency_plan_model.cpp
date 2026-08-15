@@ -1,6 +1,7 @@
 #include "dependency_plan.hpp"
 
 #include "localization.hpp"
+#include "package_relation_presentation.hpp"
 
 #include <algorithm>
 #include <sstream>
@@ -66,21 +67,6 @@ std::string join_split_package_target_summaries(
         values.push_back(split_package_target_summary(target));
     }
     return join_guard_summary_values(values);
-}
-
-std::string relation_assessment_summary(
-        const PackageRelationAssessment& assessment) {
-    std::string package_display =
-            assessment.declaring_package.package_name;
-    if(assessment.declaring_package.package_base.has_value() &&
-       *assessment.declaring_package.package_base != package_display) {
-        package_display += " (base: " +
-                *assessment.declaring_package.package_base + ")";
-    }
-    return package_display + " [" +
-            std::string(package_relation_assessment_kind_token(
-                    assessment.kind)) +
-            "]";
 }
 
 std::optional<PlanSelectedProviderIdentityConflictReason>
@@ -529,9 +515,9 @@ void throw_production_guard_reason(
     if(const auto* relation =
                std::get_if<PlanDeclaredRelationReason>(&reason)) {
         throw std::runtime_error(localization::format_translated_message(
-                "Cannot execute build plan for {}; package relation assessment requires manual review: {}",
-                target, relation_assessment_summary(
-                                relation->assessment)));
+                "Cannot execute build plan for {}; {}", target,
+                package_relation_assessment_diagnostic_display(
+                        relation->assessment)));
     }
     if(std::holds_alternative<PlanSplitPackageReason>(reason)) {
         throw std::runtime_error(localization::format_translated_message(

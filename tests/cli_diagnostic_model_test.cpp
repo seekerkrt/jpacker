@@ -2,6 +2,7 @@
 #include "diagnostic_projection.hpp"
 #include "operation_state_model.hpp"
 #include "package_relation_assessment_fixture.hpp"
+#include "package_relation_presentation.hpp"
 #include "presentation_projection.hpp"
 
 #include <algorithm>
@@ -17,6 +18,281 @@ namespace {
 
 void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
+}
+
+void expect_contains(
+        const std::string& value, std::string_view expected,
+        const std::string& context) {
+    expect(
+            value.find(expected) != std::string::npos,
+            context + " is missing: " + std::string(expected));
+}
+
+void expect_not_contains(
+        const std::string& value, std::string_view unexpected,
+        const std::string& context) {
+    expect(
+            value.find(unexpected) == std::string::npos,
+            context + " unexpectedly contains: " + std::string(unexpected));
+}
+
+PackageRelationAssessment relation_presentation_fixture() {
+    return package_relation_assessment_fixture::
+            confirmed_installed_conflict_reason(
+                    "risk-child", "risk-base", "virtual-api", "root-a")
+                    .assessment;
+}
+
+PackageRelationObservedCapability observed_capability(
+        const std::string& specification,
+        ObservedVersionSource source) {
+    const ProviderCapabilityParseResult parsed =
+            parse_provider_capability(specification);
+    expect(
+            parsed.capability() != nullptr,
+            "Package-relation presentation capability fixture did not parse");
+    const ProviderCapability capability = *parsed.capability();
+    return PackageRelationObservedCapability{
+            capability,
+            ObservedVersion::available(
+                    source, capability.version().value_or("1"))};
+}
+
+void expect_no_internal_relation_tokens(
+        const std::string& diagnostic, const std::string& context) {
+    for(const std::string_view token : {
+                "DeclaredRelation",
+                "ConfirmedInstalledConflict",
+                "ConfirmedPlannedTargetConflict",
+                "PotentialReplacement",
+                "ConfirmedNoMatchingCurrentOrPlannedTarget"}) {
+        expect_not_contains(diagnostic, token, context);
+    }
+}
+
+void test_package_relation_public_diagnostics() {
+    PackageRelationAssessment installed = relation_presentation_fixture();
+    PackageRelationMatchEvidence& installed_match =
+            installed.attributed_package_evidence.value();
+    installed_match.observed_package.package_name = "installed-provider";
+    installed_match.observed_package.provides = {
+            observed_capability(
+                    "virtual-api=3",
+                    ObservedVersionSource::InstalledProviderCapability)};
+    installed_match.identity_match =
+            PackageRelationIdentityMatchKind::ProvidedComponent;
+    installed_match.version_match =
+            PackageRelationVersionMatchKind::Unconstrained;
+    installed_match.provided_capability_evidence = {
+            PackageRelationProvidedCapabilityMatchEvidence{
+                    0, PackageRelationVersionMatchKind::Unconstrained}};
+    const std::string installed_diagnostic =
+            package_relation_assessment_diagnostic_display(installed);
+    expect_contains(
+            installed_diagnostic, "Installed conflict confirmed",
+            "installed conflict diagnostic");
+    expect_contains(
+            installed_diagnostic, "declaring package risk-child",
+            "installed conflict declaring identity");
+    expect_contains(
+            installed_diagnostic, "matched installed package installed-provider",
+            "installed conflict matched identity");
+    expect_contains(
+            installed_diagnostic, "provided component virtual-api=3",
+            "installed conflict matched component");
+    expect_contains(
+            installed_diagnostic, "installed package database",
+            "installed conflict source context");
+    expect_contains(
+            installed_diagnostic, "blocked before mutation",
+            "installed conflict stop reason");
+    expect_no_internal_relation_tokens(
+            installed_diagnostic, "installed conflict diagnostic");
+
+    PackageRelationAssessment planned = relation_presentation_fixture();
+    planned.kind = PackageRelationAssessmentKind::
+            ConfirmedPlannedTargetConflict;
+    PackageRelationObservedPackage& planned_match =
+            planned.attributed_package_evidence->observed_package;
+    planned_match.package_name = "planned-child";
+    planned_match.package_base = "planned-base";
+    planned_match.source = PackageRelationAurSourceIdentity{
+            "planned-child", "planned-base"};
+    planned_match.role = PackageRelationObservationRole::PlannedTarget;
+    planned_match.roots = {{1, "root-b"}};
+    const std::string planned_diagnostic =
+            package_relation_assessment_diagnostic_display(planned);
+    expect_contains(
+            planned_diagnostic, "Planned-target conflict confirmed",
+            "planned conflict diagnostic");
+    expect_contains(
+            planned_diagnostic,
+            "matched planned package planned-child (PackageBase: planned-base",
+            "planned conflict child/base attribution");
+    expect_contains(
+            planned_diagnostic, "input #2 requested root-b",
+            "planned conflict root attribution");
+    expect_contains(
+            planned_diagnostic, "AUR source planned-child",
+            "planned conflict source context");
+    expect_no_internal_relation_tokens(
+            planned_diagnostic, "planned conflict diagnostic");
+
+    PackageRelationAssessment replacement = relation_presentation_fixture();
+    replacement.kind = PackageRelationAssessmentKind::PotentialReplacement;
+    replacement.declaration = DeclaredPackageRelation{
+            "replacement-child", "replacement-base",
+            PackageRelationKind::Replacement, "legacy-api>=2", "legacy-api",
+            DependencyVersionConstraint{
+                    DependencyVersionRelation::GreaterThanOrEqual, "2"}};
+    replacement.declaring_package.package_name = "replacement-child";
+    replacement.declaring_package.package_base = "replacement-base";
+    replacement.attributed_package_evidence->observed_package.package_name =
+            "legacy-provider";
+    const std::string replacement_diagnostic =
+            package_relation_assessment_diagnostic_display(replacement);
+    expect_contains(
+            replacement_diagnostic, "Potential replacement impact",
+            "replacement diagnostic");
+    expect_contains(
+            replacement_diagnostic, "declares replacement legacy-api>=2",
+            "replacement versioned declaration");
+    expect_contains(
+            replacement_diagnostic, "is a replacement candidate",
+            "replacement candidate semantics");
+    expect_contains(
+            replacement_diagnostic, "no automatic replacement is performed",
+            "replacement non-mutation semantics");
+    expect_contains(
+            replacement_diagnostic, "review is required",
+            "replacement review semantics");
+    expect_not_contains(
+            replacement_diagnostic, "conflict confirmed",
+            "replacement diagnostic");
+    expect_no_internal_relation_tokens(
+            replacement_diagnostic, "replacement diagnostic");
+
+    PackageRelationAssessment no_match = relation_presentation_fixture();
+    no_match.kind = PackageRelationAssessmentKind::
+            ConfirmedNoMatchingCurrentOrPlannedTarget;
+    no_match.attributed_package_evidence.reset();
+    no_match.attributed_observation_failure.reset();
+    no_match.active_evidence.observation_completeness =
+            PackageRelationObservationCompleteness::Complete;
+    const std::string no_match_diagnostic =
+            package_relation_assessment_diagnostic_display(no_match);
+    expect_contains(
+            no_match_diagnostic,
+            "Confirmed no matching current or planned target",
+            "no-match diagnostic");
+    expect_contains(
+            no_match_diagnostic, "declares conflict virtual-api",
+            "no-match declaration retention");
+    expect_contains(
+            no_match_diagnostic, "complete current/planned observation",
+            "no-match completeness");
+    expect_contains(
+            no_match_diagnostic, "does not block build/install",
+            "no-match readiness semantics");
+    expect_not_contains(
+            no_match_diagnostic, "no conflict",
+            "no-match diagnostic");
+    expect_no_internal_relation_tokens(
+            no_match_diagnostic, "no-match diagnostic");
+
+    PackageRelationAssessment unknown = relation_presentation_fixture();
+    unknown.kind = PackageRelationAssessmentKind::Unknown;
+    unknown.attributed_package_evidence.reset();
+    unknown.active_evidence.observation_completeness =
+            PackageRelationObservationCompleteness::Unavailable;
+    unknown.attributed_observation_failure =
+            PackageRelationObservationFailure{
+                    PackageRelationObservationFailureKind::SourceUnavailable,
+                    PackageRelationObservationRole::Installed,
+                    PackageRelationInstalledDatabaseIdentity{
+                            "/", "/var/lib/pacman"},
+                    std::nullopt, "installed inventory failed"};
+    const std::string unknown_diagnostic =
+            package_relation_assessment_diagnostic_display(unknown);
+    expect_contains(
+            unknown_diagnostic, "Relation judgment unavailable",
+            "unknown diagnostic");
+    expect_contains(
+            unknown_diagnostic,
+            "source unavailable: installed inventory failed",
+            "unknown failure detail");
+    expect_contains(
+            unknown_diagnostic, "not a confirmed absence",
+            "unknown absence semantics");
+    expect_contains(
+            unknown_diagnostic, "build/install is blocked",
+            "unknown fail-closed semantics");
+    expect_not_contains(
+            unknown_diagnostic,
+            "Confirmed no matching current or planned target",
+            "unknown diagnostic");
+    expect_no_internal_relation_tokens(
+            unknown_diagnostic, "unknown diagnostic");
+
+    PackageRelationAssessment invalid = relation_presentation_fixture();
+    invalid.kind = PackageRelationAssessmentKind::Invalid;
+    invalid.attributed_package_evidence->observed_package.package_name =
+            "invalid-old-self";
+    invalid.attributed_package_evidence->identity_match =
+            PackageRelationIdentityMatchKind::InvalidInput;
+    invalid.attributed_package_evidence->invalid_reason =
+            PackageRelationMatchInvalidReason::InvalidRootAttribution;
+    invalid.active_evidence.observation_completeness =
+            PackageRelationObservationCompleteness::Invalid;
+    const std::string invalid_diagnostic =
+            package_relation_assessment_diagnostic_display(invalid);
+    expect_contains(
+            invalid_diagnostic, "Invalid relation metadata or observation",
+            "invalid diagnostic");
+    expect_contains(
+            invalid_diagnostic, "invalid-old-self",
+            "invalid old-self identity");
+    expect_contains(
+            invalid_diagnostic, "root attribution is invalid",
+            "invalid reason detail");
+    expect_contains(
+            invalid_diagnostic, "fail-closed",
+            "invalid fail-closed semantics");
+    expect_not_contains(
+            invalid_diagnostic,
+            "Confirmed no matching current or planned target",
+            "invalid old-self diagnostic");
+    expect_no_internal_relation_tokens(
+            invalid_diagnostic, "invalid diagnostic");
+
+    PackageRelationAssessment declared = relation_presentation_fixture();
+    declared.kind = PackageRelationAssessmentKind::DeclaredRelation;
+    declared.attributed_package_evidence.reset();
+    declared.attributed_observation_failure.reset();
+    declared.active_evidence.observation_completeness =
+            PackageRelationObservationCompleteness::Unavailable;
+    const std::string declared_diagnostic =
+            package_relation_assessment_diagnostic_display(declared);
+    expect_contains(
+            declared_diagnostic, "Declared relation awaiting assessment",
+            "declared fallback diagnostic");
+    expect_contains(
+            declared_diagnostic, "assessment is incomplete",
+            "declared fallback completeness");
+    expect_contains(
+            declared_diagnostic, "fail-closed policy",
+            "declared fallback stop reason");
+    expect_no_internal_relation_tokens(
+            declared_diagnostic, "declared fallback diagnostic");
+
+    // A valid installed old-self reaches the same complete NoMatch wording;
+    // structural invalidity remains a distinct fail-closed diagnostic.
+    expect_not_contains(
+            no_match_diagnostic, "conflict confirmed",
+            "valid installed old-self no-match diagnostic");
+    expect_not_contains(
+            invalid_diagnostic, "does not block build/install",
+            "invalid installed old-self diagnostic");
 }
 
 void test_rich_cli_operation_contract() {
@@ -1643,6 +1919,8 @@ int main() {
                  test_rich_cli_operation_contract);
         run_case("rich CLI option/ownership contract",
                  test_rich_cli_option_and_ownership_contract);
+        run_case("package relation public diagnostics",
+                 test_package_relation_public_diagnostics);
         run_case("typed diagnostic projection",
                  test_diagnostic_projection_preserves_typed_reasons);
         run_case("operation outcome/state observation",

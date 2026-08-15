@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-15 10:25+0900\n"
+"POT-Creation-Date: 2026-08-15 14:42+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1091,9 +1091,6 @@ msgstr ""
 #. TRANSLATORS: The placeholder is a literal dependency specification.
 #, c++-format
 msgid "Ambiguous provider summary has no matching dependency edge: {}"
-msgstr ""
-
-msgid "Package declares conflicts or replaces metadata that requires policy."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
@@ -2504,6 +2501,9 @@ msgstr ""
 msgid "resolution failure"
 msgstr ""
 
+msgid "package relation assessment"
+msgstr ""
+
 msgid "split package"
 msgstr ""
 
@@ -2647,6 +2647,9 @@ msgstr ""
 
 #, c++-format
 msgid "    replaces: {}"
+msgstr ""
+
+msgid "Package relation assessments:"
 msgstr ""
 
 msgid "Ambiguous provided dependencies:"
@@ -3243,6 +3246,13 @@ msgstr ""
 
 #, c++-format
 msgid "Replaces        : {}"
+msgstr ""
+
+msgid "deferred to planning and build preflight"
+msgstr ""
+
+#, c++-format
+msgid "Relation Check  : {}"
 msgstr ""
 
 #, c++-format
@@ -4571,7 +4581,7 @@ msgid "Cannot execute build plan for {}; cyclic dependencies: {}"
 msgstr ""
 
 #, c++-format
-msgid "Cannot execute build plan for {}; package relation assessment requires manual review: {}"
+msgid "Cannot execute build plan for {}; {}"
 msgstr ""
 
 #, c++-format
@@ -5078,12 +5088,12 @@ msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
 #, c++-format
-msgid "Classify {} dependencies and show constraint results"
+msgid "Classify {} dependencies and show constraint and conflict/replacement assessments"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
 #, c++-format
-msgid "Show the {} build-order plan and constraint completeness"
+msgid "Show the {} build-order plan, constraint completeness, and conflict/replacement assessments"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are literal git commands and the AUR identity.
@@ -5169,6 +5179,9 @@ msgstr ""
 msgid "Reject unsupported routes and do not create state, cache, or workspaces"
 msgstr ""
 
+msgid "Show assessed conflict/replacement blockers before any supported mutation"
+msgstr ""
+
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
 msgid "Prompt to review {} and {} files"
@@ -5188,6 +5201,9 @@ msgstr ""
 #. TRANSLATORS: pacman and makepkg are literal external-program identities.
 #, c++-format
 msgid "Pass this option to {} and {}"
+msgstr ""
+
+msgid "Do not bypass conflict/replacement safety stops or perform automatic replacement"
 msgstr ""
 
 #. TRANSLATORS: pacman, AUR, and -S are literal identities or CLI tokens.
@@ -5585,6 +5601,184 @@ msgid "Repository package group metadata contains an invalid group name."
 msgstr ""
 
 msgid "Repository package group contains an invalid package source."
+msgstr ""
+
+msgid "not observed"
+msgstr ""
+
+msgid "conflict"
+msgstr ""
+
+msgid "replacement"
+msgstr ""
+
+msgid "invalid relation kind"
+msgstr ""
+
+msgid "planned"
+msgstr ""
+
+msgid "repository-context"
+msgstr ""
+
+msgid "unknown-role"
+msgstr ""
+
+msgid "complete"
+msgstr ""
+
+msgid "partial"
+msgstr ""
+
+msgid "unavailable"
+msgstr ""
+
+msgid "invalid"
+msgstr ""
+
+msgid "installed package database"
+msgstr ""
+
+#, c++-format
+msgid "configured repository {} (order #{})"
+msgstr ""
+
+#. TRANSLATORS: The first and third placeholders are
+#. the literal source and package-base field names.
+#, c++-format
+msgid "{} source {} ({}: {})"
+msgstr ""
+
+msgid "local source"
+msgstr ""
+
+#, c++-format
+msgid "input #{} requested {}"
+msgstr ""
+
+#. TRANSLATORS: The second placeholder is the literal package-base
+#. field name.
+#, c++-format
+msgid "{} ({}: {})"
+msgstr ""
+
+#, c++-format
+msgid "roots: {}"
+msgstr ""
+
+#, c++-format
+msgid "{} [{}]"
+msgstr ""
+
+#, c++-format
+msgid "exact package component {} (version unavailable)"
+msgstr ""
+
+#, c++-format
+msgid "exact package component {} (version {})"
+msgstr ""
+
+#, c++-format
+msgid "provided component {}"
+msgstr ""
+
+msgid "no matching component evidence"
+msgstr ""
+
+msgid "invalid component evidence"
+msgstr ""
+
+msgid "source unavailable"
+msgstr ""
+
+msgid "source observation incomplete"
+msgstr ""
+
+msgid "source identity invalid"
+msgstr ""
+
+msgid "metadata malformed"
+msgstr ""
+
+msgid "declaration target is invalid"
+msgstr ""
+
+msgid "package identity is invalid"
+msgstr ""
+
+msgid "source role is inconsistent"
+msgstr ""
+
+msgid "source identity is inconsistent"
+msgstr ""
+
+msgid "version source is inconsistent"
+msgstr ""
+
+msgid "provided component is malformed"
+msgstr ""
+
+msgid "version metadata is invalid"
+msgstr ""
+
+msgid "root attribution is invalid"
+msgstr ""
+
+msgid "observation is invalid"
+msgstr ""
+
+#, c++-format
+msgid "{}: {}"
+msgstr ""
+
+#, c++-format
+msgid "package {}: {}"
+msgstr ""
+
+#, c++-format
+msgid "version judgment unavailable for package {} through {}"
+msgstr ""
+
+#, c++-format
+msgid "version evidence invalid for package {} through {}"
+msgstr ""
+
+#, c++-format
+msgid "observation completeness: {}"
+msgstr ""
+
+msgid "current or planned"
+msgstr ""
+
+#, c++-format
+msgid "Installed conflict confirmed: declaring package {} declares conflict {} for target component {}; matched installed package {} through {}; build/install is blocked before mutation."
+msgstr ""
+
+#, c++-format
+msgid "Planned-target conflict confirmed: declaring package {} declares conflict {} for target component {}; matched planned package {} through {}; build/install is blocked before mutation."
+msgstr ""
+
+#, c++-format
+msgid "Potential replacement impact: declaring package {} declares replacement {} for target component {}; matched {} package {} through {} is a replacement candidate; review is required and no automatic replacement is performed; build/install is blocked before mutation."
+msgstr ""
+
+#, c++-format
+msgid "Confirmed no matching current or planned target: declaring package {} declares {} {} for target component {}; complete current/planned observation found no matching package or provided component; this relation does not block build/install."
+msgstr ""
+
+#, c++-format
+msgid "Relation judgment unavailable: declaring package {} declares {} {} for target component {}; current/planned observation is {}; {}; this is not a confirmed absence, so build/install is blocked."
+msgstr ""
+
+#, c++-format
+msgid "Invalid relation metadata or observation: declaring package {} declares {} {} for target component {}; {}; invalid input is fail-closed, so build/install is blocked."
+msgstr ""
+
+#, c++-format
+msgid "Declared relation awaiting assessment: declaring package {} declares {} {} for target component {}; current/planned assessment is incomplete, so build/install remains blocked under the fail-closed policy."
+msgstr ""
+
+msgid "Invalid relation metadata or observation."
 msgstr ""
 
 #, c++-format
@@ -6970,12 +7164,6 @@ msgstr ""
 msgid "User config error: '{}': key '{}' (line {}, column {}): unsupported value '{}'; accepted values: {}, {}, {}"
 msgstr ""
 
-msgid "unavailable"
-msgstr ""
-
-msgid "not observed"
-msgstr ""
-
 msgid "NoOp"
 msgstr ""
 
@@ -7097,10 +7285,6 @@ msgstr ""
 
 #, c++-format
 msgid "system/source: {}"
-msgstr ""
-
-#, c++-format
-msgid "{}: {}"
 msgstr ""
 
 msgid "provider"
@@ -7263,6 +7447,16 @@ msgstr ""
 msgid "A resolved dependency edge is missing its stored constraint result."
 msgstr ""
 
+msgid "     Package relation assessments: None"
+msgstr ""
+
+msgid "     Package relation assessments:"
+msgstr ""
+
+#, c++-format
+msgid "       {}. {}"
+msgstr ""
+
 #, c++-format
 msgid "A {} is missing its effective architecture."
 msgstr ""
@@ -7312,10 +7506,6 @@ msgid "     Local dependency failures: None"
 msgstr ""
 
 msgid "     Local dependency failures:"
-msgstr ""
-
-#, c++-format
-msgid "       {}. {}"
 msgstr ""
 
 msgid "Dependency authorities:"
@@ -7916,6 +8106,10 @@ msgid "An {} route preflight blocker has no affected identity or diagnostic deta
 msgstr ""
 
 #, c++-format
+msgid "{} route preflight failure ({}); package: {}; {}: {}; dependency: {}; artifact projection: {}; relation assessment: {}"
+msgstr ""
+
+#, c++-format
 msgid "{} route preflight failure ({}); package: {}; {}: {}; dependency: {}; artifact projection: {}; diagnostic: {}"
 msgstr ""
 
@@ -8044,15 +8238,8 @@ msgstr ""
 msgid "constraint failure blocker ({}); parent: {} ({}: {}); dependency: {}; dependency kind: {}; role: {}; resolved package: {} ({}: {}); selected candidate: {}; selected provider: {}; stored result: {}"
 msgstr ""
 
-msgid "A metadata risk blocker is missing its package identity."
-msgstr ""
-
 #, c++-format
-msgid "A metadata risk blocker is missing its {} identity."
-msgstr ""
-
-#, c++-format
-msgid "metadata risk blocker ({}); package: {} ({}: {}); conflicts: {}; replaces: {}"
+msgid "package relation blocker: {}"
 msgstr ""
 
 msgid "Blockers:"

@@ -15,6 +15,7 @@
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "package_metadata.hpp"
+#include "package_relation_presentation.hpp"
 #include "presentation_projection.hpp"
 #include "pkgbuild_export.hpp"
 #include "repository_query.hpp"
@@ -526,9 +527,8 @@ std::string plan_presentation_reason_label(
     case PlanPresentationReasonKind::DependencyCycle:
         return localization::translate_message("dependency cycle");
     case PlanPresentationReasonKind::DeclaredRelation:
-        // Slice 5 owns the localized public wording. This Slice only replaces
-        // the factually false "unassessed" label with a stable typed label.
-        return "package relation assessment";
+        return localization::translate_message(
+                "package relation assessment");
     case PlanPresentationReasonKind::SplitPackage:
         return localization::translate_message("split package");
     case PlanPresentationReasonKind::IncompleteProviderCandidate:
@@ -976,8 +976,6 @@ void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks) 
     }
 }
 
-// Slice 5 owns localized prose. Slice 4 exposes the stable typed result and
-// keeps raw metadata above as presentation-only compatibility detail.
 void print_relation_assessment_group(
         const std::vector<PackageRelationAssessment>& assessments,
         const std::optional<std::string>& declaring_package = std::nullopt) {
@@ -989,22 +987,15 @@ void print_relation_assessment_group(
             continue;
         }
         if(!printed_header) {
-            std::cout << "Relation assessments:" << std::endl;
+            std::cout << localization::translate_message(
+                                 "Package relation assessments:")
+                      << std::endl;
             printed_header = true;
         }
-        std::cout << "  " << assessment.declaring_package.package_name
-                  << ": " << assessment.declaration.raw_specification()
-                  << " -> "
-                  << package_relation_assessment_kind_token(assessment.kind)
+        std::cout << "  - "
+                  << package_relation_assessment_diagnostic_display(
+                             assessment)
                   << std::endl;
-        if(assessment.attributed_package_evidence.has_value()) {
-            const auto& matched =
-                    assessment.attributed_package_evidence->observed_package;
-            std::cout << "    matched package: " << matched.package_name
-                      << "; target component: "
-                      << assessment.declaration.target_component()
-                      << std::endl;
-        }
     }
 }
 

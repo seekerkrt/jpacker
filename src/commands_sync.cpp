@@ -187,6 +187,11 @@ void print_aur_info(const AurPackageInfo& pkg) {
                          join_display_values(pkg.Replaces))
               << std::endl;
     std::cout << localization::format_translated_message(
+                         "Relation Check  : {}",
+                         localization::translate_message(
+                                 "deferred to planning and build preflight"))
+              << std::endl;
+    std::cout << localization::format_translated_message(
                          "Maintainer      : {}",
                          pkg.Maintainer.empty()
                                  ? localization::translate_message("None")

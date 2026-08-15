@@ -4,6 +4,7 @@
 #include "dependency_spec.hpp"
 #include "localization.hpp"
 #include "package_identifier.hpp"
+#include "package_relation_presentation.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -1102,7 +1103,8 @@ void inspect_unresolved_cycles_and_risks(
         }
         AurUpdateExecutionIssue issue = make_localized_execution_issue(
                 AurUpdateExecutionReason::ConflictsOrReplacesUnresolved,
-                "Package declares conflicts or replaces metadata that requires policy.",
+                package_relation_assessment_diagnostic_display(
+                        relation->assessment),
                 relation->assessment.declaring_package.package_name,
                 relation->assessment.declaring_package.package_base,
                 std::nullopt);

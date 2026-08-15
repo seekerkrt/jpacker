@@ -21,6 +21,13 @@ fail() {
     exit 1
 }
 
+assert_contains() {
+    pattern=$1
+    file=$2
+    grep -F -- "$pattern" "$file" >/dev/null ||
+        fail "missing expected help text: $pattern"
+}
+
 for command_name in python3 bash zsh fish localedef; do
     command -v "$command_name" >/dev/null 2>&1 ||
         fail "$command_name is required."
@@ -80,6 +87,25 @@ LANGUAGE=ja \
     "$test_binary" -h > "$japanese_help_short" 2>&1
 cmp -s "$japanese_help" "$japanese_help_short" ||
     fail 'Japanese -h and --help output differ.'
+
+assert_contains \
+    'Classify AUR dependencies and show constraint and conflict/replacement assessments' \
+    "$english_help"
+assert_contains \
+    'Show assessed conflict/replacement blockers before any supported mutation' \
+    "$english_help"
+assert_contains \
+    'Do not bypass conflict/replacement safety stops or perform automatic replacement' \
+    "$english_help"
+assert_contains \
+    'AURの依存関係を分類し、制約と競合/置換の判定結果を表示' \
+    "$japanese_help"
+assert_contains \
+    '対応する変更の前に判定済みの競合/置換ブロッカーを表示' \
+    "$japanese_help"
+assert_contains \
+    '競合/置換の安全停止を回避せず、自動置換も行いません' \
+    "$japanese_help"
 
 version_short=$tmp_dir/version-short
 version_long=$tmp_dir/version-long
