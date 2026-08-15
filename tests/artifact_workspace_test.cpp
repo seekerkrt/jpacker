@@ -1225,7 +1225,8 @@ void expect_assignment(
 }
 
 void test_owned_pkgdest_and_environment_policy(
-        const ValidatedCacheRoot& root, const ValidatedCachePath& checkout) {
+        const ValidatedCacheRoot& root, const ValidatedCachePath& checkout,
+        const TestEnvironment& test_environment) {
     SourceBuildEnvironment source_environment{{
             {"FIRST", "alpha value"},
             {"EMPTY", ""},
@@ -1282,6 +1283,24 @@ void test_owned_pkgdest_and_environment_policy(
             forward_context.command_environment_prefix().find("EMPTY=''") !=
                     std::string::npos,
             "Forward policy omitted an empty assignment");
+
+    test_environment.clear_makepkg_logs();
+    const fs::path omit_artifact_path =
+            workspace.path() / "omit-policy.pkg.tar.zst";
+    write_file(
+            test_environment.packagelist_output_file(),
+            omit_artifact_path.string() + "\n");
+    static_cast<void>(query_makepkg_packagelist(workspace, omit_context));
+    expect_equal(
+            "Omit policy makepkg argv",
+            read_file(test_environment.argv_log()),
+            "argv-begin\n"
+            "arg[0]=<--packagelist>\n"
+            "arg[1]=<FIRST=alpha value>\n"
+            "arg[2]=<DUP=first>\n"
+            "arg[3]=<DUP=second'value>\n"
+            "arg[4]=<PKGDEST=" + workspace.canonical_path().string() + ">\n"
+            "argv-end\n");
 }
 
 void test_shared_makepkg_context_and_packagelist_adapter(
@@ -1316,9 +1335,19 @@ void test_shared_makepkg_context_and_packagelist_adapter(
             "makepkg argv log", read_file(test_environment.argv_log()),
             "argv-begin\n"
             "arg[0]=<--packagelist>\n"
+            "arg[1]=<FIRST=alpha value>\n"
+            "arg[2]=<EMPTY=>\n"
+            "arg[3]=<DUP=first>\n"
+            "arg[4]=<DUP=second'value>\n"
+            "arg[5]=<PKGDEST=" + workspace.canonical_path().string() + ">\n"
             "argv-end\n"
             "argv-begin\n"
             "arg[0]=<-sc>\n"
+            "arg[1]=<FIRST=alpha value>\n"
+            "arg[2]=<EMPTY=>\n"
+            "arg[3]=<DUP=first>\n"
+            "arg[4]=<DUP=second'value>\n"
+            "arg[5]=<PKGDEST=" + workspace.canonical_path().string() + ">\n"
             "argv-end\n");
     expect_equal(
             "makepkg cwd log", read_file(test_environment.cwd_log()),
@@ -2016,7 +2045,8 @@ int main(int argc, char* argv[]) {
 
         test_structured_pkgdest_rejections();
         test_inherited_pkgdest_rejections();
-        test_owned_pkgdest_and_environment_policy(root, checkout);
+        test_owned_pkgdest_and_environment_policy(
+                root, checkout, test_environment);
         test_shared_makepkg_context_and_packagelist_adapter(
                 root, checkout, test_environment);
         test_build_only_requires_query_bound_expected(

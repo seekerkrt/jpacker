@@ -62,16 +62,34 @@ bool split_env_assignment(
     return is_valid_env_key(key);
 }
 
-std::string serialize_source_build_environment(
+std::vector<std::string> materialize_source_build_environment_assignment_words(
         const SourceBuildEnvironment& environment,
         SourceEnvironmentEmptyValuePolicy empty_value_policy) {
-    std::string serialized;
-    for(const auto& assignment : environment.ordered_assignments) {
+    std::vector<std::string> assignment_words;
+    assignment_words.reserve(environment.ordered_assignments.size());
+    for(const SourceEnvironmentAssignment& assignment :
+        environment.ordered_assignments) {
         if(assignment.value.empty() &&
            empty_value_policy == SourceEnvironmentEmptyValuePolicy::Omit) {
             continue;
         }
-        serialized += assignment.key + "=" + shell_words::quote(assignment.value) + " ";
+        assignment_words.push_back(assignment.key + "=" + assignment.value);
+    }
+    return assignment_words;
+}
+
+std::string serialize_source_build_environment(
+        const SourceBuildEnvironment& environment,
+        SourceEnvironmentEmptyValuePolicy empty_value_policy) {
+    std::string serialized;
+    for(const std::string& assignment_word :
+        materialize_source_build_environment_assignment_words(
+                environment, empty_value_policy)) {
+        const std::size_t separator = assignment_word.find('=');
+        serialized += assignment_word.substr(0, separator) + "=" +
+                      shell_words::quote(
+                              assignment_word.substr(separator + 1)) +
+                      " ";
     }
     return serialized;
 }

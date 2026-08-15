@@ -651,6 +651,7 @@ void test_query_and_exact_build_only_command(
             "arg[1]=<--noconfirm>\n"
             "arg[2]=<-f>\n"
             "arg[3]=<-C>\n"
+            "arg[4]=<PKGDEST=" + workspace.canonical_path().string() + ">\n"
             "argv-end\n");
     expect_equal(
             "multiple build-only cwd",
