@@ -553,7 +553,8 @@ int trusted_git_fetch_origin(
         const std::string& expected_remote_url) {
     return run_managed_git(
             checkout, expected_remote_url,
-            {"fetch", "--no-recurse-submodules", "origin"},
+            {"fetch", "--no-auto-maintenance", "--no-recurse-submodules",
+             "origin"},
             "git fetch origin");
 }
 

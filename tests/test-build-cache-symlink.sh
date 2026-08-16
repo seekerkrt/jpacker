@@ -135,6 +135,8 @@ setup_case() {
     unset MOGUET_TEST_GIT_CLONE_FIXTURE_DIR
     unset MOGUET_TEST_GIT_CONFIG_RAW_OUTPUT_FILE
     unset MOGUET_TEST_GIT_CONFIG_RAW_OUTPUT_EXIT_CODE
+    unset MOGUET_TEST_GIT_FETCH_ARGV_LOG
+    unset MOGUET_TEST_GIT_FETCH_AUTO_MAINTENANCE_DIR
     unset MOGUET_TEST_TRUSTED_GIT_UNSAFE_MARKER
     unset MOGUET_TEST_TRUSTED_GIT_FETCH_MARKER
     unset MOGUET_TEST_TRUSTED_GIT_ENVIRONMENT_LOG
@@ -439,6 +441,47 @@ assert_path_absent() {
     if [ -e "$path" ] || [ -L "$path" ]; then
         fail "expected path to be absent: $path"
     fi
+}
+
+assert_fetch_argv_log() {
+    fetch_argv_log=$1
+    expected_fetch_count=$2
+    suppression_mode=$3
+    expected_fetch_argv_log=$case_dir/expected-fetch-argv.log
+    : > "$expected_fetch_argv_log"
+    fetch_index=0
+    while [ "$fetch_index" -lt "$expected_fetch_count" ]; do
+        printf '%s\n' \
+            'argv-begin' \
+            'arg=<fetch>' >> "$expected_fetch_argv_log"
+        if [ "$suppression_mode" = "suppressed" ]; then
+            printf '%s\n' 'arg=<--no-auto-maintenance>' >> \
+                "$expected_fetch_argv_log"
+        fi
+        printf '%s\n' \
+            'arg=<--no-recurse-submodules>' \
+            'arg=<origin>' \
+            'argv-end' >> "$expected_fetch_argv_log"
+        fetch_index=$((fetch_index + 1))
+    done
+    if ! cmp -s "$expected_fetch_argv_log" "$fetch_argv_log"; then
+        echo "unexpected managed fetch argv" >&2
+        diff -u "$expected_fetch_argv_log" "$fetch_argv_log" >&2 || true
+        exit 1
+    fi
+}
+
+wait_for_marker() {
+    marker_path=$1
+    marker_description=$2
+    marker_attempt=0
+    while [ ! -e "$marker_path" ]; do
+        marker_attempt=$((marker_attempt + 1))
+        if [ "$marker_attempt" -gt 500 ]; then
+            fail "timed out waiting for $marker_description: $marker_path"
+        fi
+        sleep 0.01
+    done
 }
 
 assert_symlink_rejection() {
@@ -814,6 +857,100 @@ assert_descendant_rejection "$case_dir/output" "$entry_path/clean-root.install" 
 assert_no_cache_mutation_commands
 
 # --- Trusted Git environment and repository binding ---
+
+# The stub models Git's detached automatic-maintenance lifetime directly. The
+# ready/release handshake proves that an unsuppressed fetch parent can return
+# while its background child still has checkout mutation pending; it does not
+# try to force a literal ENOENT into production descendant validation.
+setup_case trusted-git-fetch-auto-maintenance-unsuppressed-fixture
+create_regular_repo "$entry_path"
+fetch_argv_log=$case_dir/fetch-argv.log
+maintenance_dir=$case_dir/auto-maintenance
+mkdir "$maintenance_dir"
+: > "$fetch_argv_log"
+if ! env -i \
+    PATH=/usr/bin:/bin \
+    LC_ALL=C \
+    LANG=C \
+    GIT_CONFIG_NOSYSTEM=1 \
+    GIT_CONFIG_SYSTEM=/dev/null \
+    GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_TERMINAL_PROMPT=0 \
+    GIT_ASKPASS=/bin/false \
+    SSH_ASKPASS=/bin/false \
+    GIT_PAGER=cat \
+    PAGER=cat \
+    GIT_ATTR_NOSYSTEM=1 \
+    MOGUET_TEST_TRUSTED_GIT_BOUNDARY=1 \
+    MOGUET_TEST_TRUSTED_GIT_DISPLAY_COMMAND='git fetch origin' \
+    MOGUET_TEST_COMMAND_LOG="$command_log" \
+    MOGUET_TEST_TRUSTED_GIT_UNSAFE_MARKER="$outside_dir/unsafe-environment-marker" \
+    MOGUET_TEST_GIT_FETCH_ARGV_LOG="$fetch_argv_log" \
+    MOGUET_TEST_GIT_FETCH_AUTO_MAINTENANCE_DIR="$maintenance_dir" \
+    "$repo_root/tests/stubs/git" \
+    --no-pager \
+    --git-dir="$entry_path/.git" \
+    --work-tree="$entry_path" \
+    fetch --no-recurse-submodules origin \
+    > "$case_dir/output" 2>&1; then
+    fail "unsuppressed managed fetch fixture failed"
+fi
+assert_fetch_argv_log "$fetch_argv_log" 1 unsuppressed
+assert_command "git fetch origin"
+assert_path_absent "$outside_dir/unsafe-environment-marker"
+if [ ! -f "$maintenance_dir/ready" ] ||
+   [ ! -f "$maintenance_dir/active" ]; then
+    fail "unsuppressed fetch returned without pending background maintenance"
+fi
+maintenance_mutation_marker=$entry_path/.git/.moguet-test-auto-maintenance-mutation
+assert_path_absent "$maintenance_mutation_marker"
+: > "$maintenance_dir/release"
+wait_for_marker "$maintenance_dir/done" "background maintenance completion"
+assert_path_absent "$maintenance_dir/active"
+assert_path_absent "$maintenance_dir/timeout"
+if [ ! -f "$maintenance_mutation_marker" ]; then
+    fail "background maintenance did not mutate after fetch return"
+fi
+
+# Production must pass the canonical suppression option in the operation argv,
+# while preserving the concise user-facing display command.
+setup_case trusted-git-fetch-auto-maintenance-suppressed
+create_regular_repo "$entry_path"
+fetch_argv_log=$case_dir/fetch-argv.log
+maintenance_dir=$case_dir/auto-maintenance
+mkdir "$maintenance_dir"
+: > "$fetch_argv_log"
+export MOGUET_TEST_GIT_FETCH_ARGV_LOG=$fetch_argv_log
+export MOGUET_TEST_GIT_FETCH_AUTO_MAINTENANCE_DIR=$maintenance_dir
+run_ok "$case_dir/output" fetch clean-root
+assert_command "git fetch origin"
+assert_fetch_argv_log "$fetch_argv_log" 1 suppressed
+assert_path_absent "$maintenance_dir/ready"
+assert_path_absent "$maintenance_dir/active"
+assert_path_absent "$maintenance_dir/done"
+assert_path_absent "$maintenance_dir/timeout"
+assert_path_absent "$entry_path/.git/.moguet-test-auto-maintenance-mutation"
+
+# Reusing the same validated checkout must keep every managed fetch synchronous
+# with respect to Git-originated maintenance work.
+setup_case trusted-git-repeated-fetch-auto-maintenance-suppressed
+create_regular_repo "$entry_path"
+fetch_argv_log=$case_dir/fetch-argv.log
+maintenance_dir=$case_dir/auto-maintenance
+mkdir "$maintenance_dir"
+: > "$fetch_argv_log"
+export MOGUET_TEST_GIT_FETCH_ARGV_LOG=$fetch_argv_log
+export MOGUET_TEST_GIT_FETCH_AUTO_MAINTENANCE_DIR=$maintenance_dir
+run_ok "$case_dir/first-output" fetch clean-root
+assert_command "git fetch origin"
+run_ok "$case_dir/second-output" fetch clean-root
+assert_command "git fetch origin"
+assert_fetch_argv_log "$fetch_argv_log" 2 suppressed
+assert_path_absent "$maintenance_dir/ready"
+assert_path_absent "$maintenance_dir/active"
+assert_path_absent "$maintenance_dir/done"
+assert_path_absent "$maintenance_dir/timeout"
+assert_path_absent "$entry_path/.git/.moguet-test-auto-maintenance-mutation"
 
 for environment_case in \
     git-dir git-work-tree git-common-dir git-object-directory \
