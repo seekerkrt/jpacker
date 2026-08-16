@@ -1,7 +1,112 @@
-# Moguet v2.2.0
+# Moguet v2.3.0
 
 This tracked file is the source of truth for release bodies. The English and
 Japanese sections for each release describe the same scope.
+
+## English
+
+Moguet v2.3.0 strengthens release validation, unifies public CLI diagnostics,
+and makes source builds safer for repository PackageBases and per-package
+customization. It preserves pacman / libalpm as transaction authority and
+stops fail closed when Moguet cannot establish a safe pre-transaction result.
+
+### Validation reliability and release-gate clarity
+
+- Validation commands preserve producer failures instead of allowing later
+  formatting or status work to mask them.
+- Focused and incremental validation tracks dependencies and build signatures
+  so stale binaries are not accepted as current evidence.
+- The canonical release gate retains full host coverage without duplicating
+  release-only checks, while host, offline/current-Arch container, and live
+  provider / AUR / local lanes have explicit responsibilities.
+
+### Coherent public CLI and transaction diagnostics
+
+- The parser, help, man pages, and Bash / Zsh / Fish completions derive their
+  public operation and option surface from a shared authority.
+- Source-aware diagnostics project typed readiness and outcomes through a
+  consistent hierarchy of summary, attention, and necessary detail.
+- `Conflicts` and `Replaces` receive a typed pre-transaction assessment against
+  installed and planned packages, provided components, and applicable version
+  relations. Unknown, invalid, or incomplete observations fail closed rather
+  than being treated as absence.
+- A matching replacement is shown as potential impact that requires review.
+  Moguet does not automatically remove packages, choose replacements, or
+  resolve conflicts; pacman / libalpm remain transaction authority.
+
+### Repository PackageBase artifact-selection safety
+
+- Official-repository source builds require a strict repository package and
+  PackageBase identity, build each PackageBase once, and validate every
+  produced artifact.
+- Only requested `Explicit` child packages are selected for installation;
+  sibling and debug artifacts are not installed implicitly.
+- Unknown, duplicate, or otherwise unsafe artifact identity fails closed. This
+  allows multiple-artifact PackageBases such as OBS Studio to be handled
+  without broadening install selection.
+
+### Effective per-package build customization
+
+- `build <pkg> [V=K...]` supports either a package-specific complete override
+  or a local modification layered on the existing `makepkg.conf` baseline.
+- A tested one-off assignment can be carried into a persistent `add-src`
+  preference without rewriting the system-wide `makepkg.conf`.
+- Assignments are applied after makepkg loads its configuration so they remain
+  effective overrides.
+- Whether variables such as `CFLAGS` or `CXXFLAGS` affect a result still
+  depends on the PKGBUILD and upstream build system; this release does not
+  recommend any optimization flag.
+
+## 日本語
+
+Moguet v2.3.0はrelease validationを強化し、public CLI diagnosticを一貫させ、
+repository PackageBaseとpackage単位customizationのsource buildをより安全にする
+releaseです。package transactionのauthorityはpacman / libalpmに維持し、安全な
+transaction前判定を確立できない場合はfail-closedで停止します。
+
+### validation reliabilityとrelease gateの明確化
+
+- validation commandはproducer failureを保持し、後続のformattingやstatus処理に
+  failureをmaskさせません。
+- focused / incremental validationはdependencyとbuild signatureを追跡し、stale binaryを
+  current evidenceとして受け入れません。
+- canonical release gateはrelease-only checkを重複させずにfull host coverageを維持し、
+  host、offline/current Arch container、live provider / AUR / local laneの責務を
+  明確に分けます。
+
+### 一貫したpublic CLIとtransaction前diagnostic
+
+- parser、help、man page、Bash / Zsh / Fish completionは、public operation / option
+  surfaceをshared authorityから導出します。
+- source-aware diagnosticは、typed readinessとoutcomeをsummary、attention、必要なdetailの
+  一貫した階層へ投影します。
+- `Conflicts` / `Replaces`は、installed / planned package、provided component、適用可能な
+  version relationに対してtransaction前にtyped評価します。Unknown、invalid、または
+  incompleteなobservationはabsenceとして扱わずfail-closedにします。
+- matching replacementはreviewが必要なpotential impactとして表示します。Moguetはpackageの
+  remove、replacementの選択、conflict解決を自動化せず、pacman / libalpmをtransaction
+  authorityとして維持します。
+
+### repository PackageBaseのartifact選択安全性
+
+- official repository source-buildではstrictなrepository package / PackageBase identityを
+  必須とし、各PackageBaseを1回buildして、生成された全artifactを検証します。
+- install対象に選ぶのはrequested `Explicit` child packageだけで、sibling / debug artifactを
+  暗黙にinstallしません。
+- unknown、duplicate、その他unsafeなartifact identityはfail-closedになります。これにより
+  OBS Studioのようなmultiple-artifact PackageBaseでもinstall選択を広げずに扱えます。
+
+### 実際に有効になるpackage単位build customization
+
+- `build <pkg> [V=K...]`では、package単位のcomplete override、または既存
+  `makepkg.conf` baselineを継承したlocal modificationを指定できます。
+- one-offで確認したassignmentをpersistentな`add-src` preferenceへ移行でき、system-wideの
+  `makepkg.conf`自体は書き換えません。
+- assignmentはmakepkgがconfigを読み込んだ後に適用するため、effective overrideとして残ります。
+- `CFLAGS` / `CXXFLAGS`等が実際の結果へ反映されるかはPKGBUILDとupstream build systemに
+  依存し、このreleaseは特定のoptimization flagを推奨しません。
+
+# Moguet v2.2.0
 
 ## English
 

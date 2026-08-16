@@ -44,11 +44,12 @@ Moguet v2.0.1は、採用済みXDG storage契約のうちsource-preference部分
 preferenceは実行user自身のXDG config contextだけを使い、公開済みv2.0.0のtag、Release、
 release noteは歴史的記録のまま変更しません。
 
-Moguet v2.2.0は最新releaseです。ambiguous providerのinstalled state表示を明示化し、
-repository、AUR、provider、localのobservationをまたぐversion constraintを検証し、
-supported workflow向けの統一human-readable planとglobal `--dry-run`を追加しました。
-利用者から見える変更の全体は
-[v2.2.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.2.0)を参照してください。
+Moguet v2.3.0は最新releaseです。validationとrelease reliabilityを強化し、public CLIと
+diagnosticを整合させ、`Conflicts` / `Replaces`をtransaction前にtyped評価します。
+official repository source-buildではmultiple-artifact PackageBaseからrequested packageを
+安全に選択でき、package単位のbuild assignmentはmakepkgがconfigを読み込んだ後も
+effectiveになります。利用者から見える変更の全体は
+[v2.3.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.3.0)を参照してください。
 
 canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ちます。Moguet
 packageは`jpacker` command aliasを提供しません。AUR publicationは将来の別判断であり、
