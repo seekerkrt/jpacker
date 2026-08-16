@@ -86,6 +86,58 @@ if [ -n "${MOGUET_TEST_TRUSTED_GIT_BOUNDARY:-}" ] &&
 fi
 
 config_worktree=${trusted_git_worktree:-$PWD}
+if [ "${1:-}" = "fetch" ]; then
+    fetch_no_auto_maintenance_count=0
+    if [ -n "${MOGUET_TEST_GIT_FETCH_ARGV_LOG:-}" ]; then
+        printf '%s\n' 'argv-begin' >> "$MOGUET_TEST_GIT_FETCH_ARGV_LOG"
+    fi
+    for fetch_argument in "$@"; do
+        if [ "$fetch_argument" = "--no-auto-maintenance" ]; then
+            fetch_no_auto_maintenance_count=$((fetch_no_auto_maintenance_count + 1))
+        fi
+        if [ -n "${MOGUET_TEST_GIT_FETCH_ARGV_LOG:-}" ]; then
+            printf 'arg=<%s>\n' "$fetch_argument" >> \
+                "$MOGUET_TEST_GIT_FETCH_ARGV_LOG"
+        fi
+    done
+    if [ -n "${MOGUET_TEST_GIT_FETCH_ARGV_LOG:-}" ]; then
+        printf '%s\n' 'argv-end' >> "$MOGUET_TEST_GIT_FETCH_ARGV_LOG"
+    fi
+
+    if [ -n "${MOGUET_TEST_GIT_FETCH_AUTO_MAINTENANCE_DIR:-}" ] &&
+       [ "$fetch_no_auto_maintenance_count" -eq 0 ]; then
+        maintenance_dir=$MOGUET_TEST_GIT_FETCH_AUTO_MAINTENANCE_DIR
+        [ -d "$maintenance_dir" ] || exit 1
+        maintenance_mutation_marker=$config_worktree/.git/.moguet-test-auto-maintenance-mutation
+        (
+            : > "$maintenance_dir/active" || exit 1
+            : > "$maintenance_dir/ready" || exit 1
+            maintenance_attempt=0
+            while [ ! -e "$maintenance_dir/release" ]; do
+                maintenance_attempt=$((maintenance_attempt + 1))
+                if [ "$maintenance_attempt" -gt 1000 ]; then
+                    printf '%s\n' 'release marker timeout' > \
+                        "$maintenance_dir/timeout"
+                    rm -f "$maintenance_dir/active"
+                    : > "$maintenance_dir/done"
+                    exit 0
+                fi
+                /usr/bin/sleep 0.01
+            done
+            printf '%s\n' 'background maintenance mutation' > \
+                "$maintenance_mutation_marker" || exit 1
+            rm -f "$maintenance_dir/active" || exit 1
+            : > "$maintenance_dir/done" || exit 1
+        ) </dev/null >/dev/null 2>&1 &
+
+        maintenance_attempt=0
+        while [ ! -e "$maintenance_dir/ready" ]; do
+            maintenance_attempt=$((maintenance_attempt + 1))
+            [ "$maintenance_attempt" -le 500 ] || exit 1
+            /usr/bin/sleep 0.01
+        done
+    fi
+fi
 if [ "$1" = "symbolic-ref" ]; then
     if [ -n "${MOGUET_TEST_GIT_SYMBOLIC_REF:-}" ]; then
         printf '%s\n' "$MOGUET_TEST_GIT_SYMBOLIC_REF"
