@@ -508,15 +508,19 @@ void expect_work_item(
             work_item.required_targets.size() == 1,
             context + ": ordinary work item required target count differs");
     const RequiredPackageArtifactTarget& required_target =
-            require_singular_required_package_target(work_item);
+            work_item.required_targets.front();
     expect(
             required_target.package_base == package_name &&
                     required_target.package_name == package_name &&
                     required_target.desired_reason == desired_reason,
             context + ": required target identity or reason differs");
     expect(
-            work_item.is_build_plan_entry,
-            context + ": BuildPlan marker differs");
+            work_item.required_target_provenance ==
+                            RequiredTargetProvenance::
+                                    AurBuildPlanProjection &&
+                    work_item.artifact_lifecycle_intent ==
+                            ArtifactLifecycleIntent::PackageBaseSet,
+            context + ": BuildPlan provenance or lifecycle intent differs");
     expect(
             !work_item.uses_system_update_baseline,
             context + ": system update baseline marker differs");

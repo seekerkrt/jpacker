@@ -4,7 +4,9 @@
 #include "dependency_constraint.hpp"
 #include "dependency_provider.hpp"
 #include "package_constraint_metadata.hpp"
+#include "package_relation_assessment.hpp"
 
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <optional>
@@ -210,8 +212,8 @@ struct IncompleteProviderCandidateSet {
     bool operator==(const IncompleteProviderCandidateSet&) const = default;
 };
 
-// AUR package が宣言する conflicts / replaces を、解決済みと誤認せず plan に残す。
-// POLICY(#150): v1.x では installed/repo DB との照合や置換先選択を行わず、raw metadata を保持する。
+// Raw relation strings remain for compatibility/presentation only. Production
+// safety is exclusively projected from relation_assessments below.
 struct BuildPlanMetadataRisk {
     std::string              package_name;
     std::string              package_base;
@@ -224,12 +226,18 @@ struct BuildPlan {
     std::vector<BuildPlanEntry>              order;
     std::vector<RootTargetIdentity>           root_targets;
     std::vector<PlannedPackageTarget>         package_targets;
+    std::vector<PlannedPackageRelationObservation>
+            planned_relation_observations;
+    std::vector<PackageRelationAssessment>   relation_assessments;
     std::vector<BuildPlanDependencyEdge>      dependency_edges;
     std::vector<BuildPlanResolutionFailure>   resolution_failures;
     std::vector<BuildPlanSplitPackageTarget> split_package_targets;
     std::vector<BuildPlanProvidedDependency> provided;
     std::vector<BuildPlanMetadataRisk>       metadata_risks;
     std::vector<AmbiguousProvidedDependency> ambiguous_providers;
+    // Interactive provider selection が明示的に取消された dependency。
+    // candidate ambiguity は残しつつ、decision の typed evidence を失わない。
+    std::vector<std::string>                 cancelled_provider_dependencies;
     std::vector<std::string>                 unresolved;
     std::vector<std::string>                 cycles;
     std::vector<IncompleteProviderCandidateSet>
@@ -239,6 +247,150 @@ struct BuildPlan {
     std::optional<std::vector<std::string>> configured_repository_order =
             std::nullopt;
 };
+
+enum class PlanConstruction {
+    Constructed,
+    Failed,
+};
+
+enum class PlanCompleteness {
+    Complete,
+    Incomplete,
+    Unknown,
+};
+
+enum class ProviderDecision {
+    Unique,
+    Selected,
+    Ambiguous,
+    Cancelled,
+    Unavailable,
+};
+
+enum class ExecutionCapability {
+    Fetch,
+    Build,
+    Install,
+};
+
+enum class ExecutionReadinessState {
+    NotAssessed,
+    Ready,
+    RequiresCheck,
+    Blocked,
+    Unknown,
+};
+
+enum class PlanRequiredAction {
+    None,
+    CorrectPlanAuthority,
+    ResolveDependency,
+    SelectProvider,
+    ObtainMetadata,
+    ReviewDeclaredRelations,
+    UsePackageBaseSetLifecycle,
+};
+
+enum class PlanConstraintAuthorityIssueKind {
+    MissingRequirement,
+    RequirementIdentityChanged,
+    SourceIdentityInconsistent,
+    MissingEvaluation,
+    InvalidEvaluation,
+    ConflictingEvaluation,
+};
+
+struct PlanConstraintAuthorityReason {
+    PlanConstraintAuthorityIssueKind kind;
+    std::size_t                      edge_index;
+    std::string                      dependency_specification;
+    std::optional<ConstraintSatisfaction> satisfaction;
+};
+
+struct PlanSelectedProviderIdentityConflictReason {
+    ProvidedDependency existing;
+    ProvidedDependency selected;
+};
+
+struct PlanConstraintReadinessReason {
+    std::size_t            edge_index;
+    std::string            dependency_specification;
+    ConstraintSatisfaction satisfaction;
+};
+
+struct PlanResolutionReason {
+    BuildPlanResolutionFailure failure;
+};
+
+struct PlanUnresolvedDependencyReason {
+    std::string dependency;
+};
+
+struct PlanAmbiguousProviderReason {
+    AmbiguousProvidedDependency dependency;
+};
+
+struct PlanDependencyCycleReason {
+    std::string dependency;
+};
+
+struct PlanDeclaredRelationReason {
+    PackageRelationAssessment assessment;
+
+    bool operator==(const PlanDeclaredRelationReason&) const = default;
+};
+
+struct PlanSplitPackageReason {
+    BuildPlanSplitPackageTarget target;
+};
+
+struct PlanIncompleteProviderCandidateReason {
+    IncompleteProviderCandidateSet candidate_set;
+};
+
+using PlanReason = std::variant<
+        PlanConstraintAuthorityReason,
+        PlanSelectedProviderIdentityConflictReason,
+        PlanConstraintReadinessReason,
+        PlanResolutionReason,
+        PlanUnresolvedDependencyReason,
+        PlanAmbiguousProviderReason,
+        PlanDependencyCycleReason,
+        PlanDeclaredRelationReason,
+        PlanSplitPackageReason,
+        PlanIncompleteProviderCandidateReason>;
+
+struct ExecutionReadinessReason {
+    PlanReason               reason;
+    ExecutionReadinessState  state = ExecutionReadinessState::NotAssessed;
+    bool                     blocks_production_guard = false;
+    PlanRequiredAction       required_action = PlanRequiredAction::None;
+};
+
+struct ExecutionReadiness {
+    ExecutionCapability             capability = ExecutionCapability::Fetch;
+    ExecutionReadinessState         state =
+            ExecutionReadinessState::NotAssessed;
+    bool                            is_blocked_by_production_guard = false;
+    std::vector<ExecutionReadinessReason> reasons;
+    std::vector<PlanRequiredAction> required_actions;
+};
+
+struct PlanStateProjection {
+    PlanConstruction                construction =
+            PlanConstruction::Constructed;
+    PlanCompleteness                completeness =
+            PlanCompleteness::Complete;
+    ProviderDecision                provider_decision =
+            ProviderDecision::Unique;
+    std::vector<PlanReason>         completeness_reasons;
+    std::array<ExecutionReadiness, 3> readiness;
+};
+
+PlanStateProjection project_build_plan_state(const BuildPlan& plan);
+const ExecutionReadiness& execution_readiness(
+        const PlanStateProjection& projection,
+        ExecutionCapability capability) noexcept;
 
 std::vector<std::string> collect_build_dependencies(const AurPackageInfo& pkg);
 std::vector<TypedPackageDependency> collect_typed_build_dependencies(const AurPackageInfo& pkg);

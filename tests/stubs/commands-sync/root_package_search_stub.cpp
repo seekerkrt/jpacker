@@ -113,6 +113,22 @@ RootPackageSearchSnapshot presentation_snapshot(
     return snapshot;
 }
 
+RootPackageSearchSnapshot alternative_conflict_snapshot(
+        RootPackageSearchScope scope) {
+    RootPackageSearchSnapshot snapshot;
+    if(includes_repository(scope)) {
+        snapshot.candidates.push_back(repository_candidate(
+                "core", "shared-alternative", "3.0-1",
+                "repository alternative fixture"));
+    }
+    if(includes_aur(scope)) {
+        snapshot.candidates.push_back(aur_candidate(
+                "shared-alternative", "shared-alternative-base", "4.0-1",
+                "AUR alternative fixture"));
+    }
+    return snapshot;
+}
+
 RootPackageSearchSnapshot scope_snapshot(RootPackageSearchScope scope) {
     RootPackageSearchSnapshot snapshot;
     if(includes_repository(scope)) {
@@ -192,6 +208,9 @@ RootPackageSearchResult search_root_package_candidates(
 
     if(query == "select-presentation") {
         return presentation_snapshot(scope);
+    }
+    if(query == "select-alternative-conflict") {
+        return alternative_conflict_snapshot(scope);
     }
     if(query == "select-scope") return scope_snapshot(scope);
     if(query == "select-repository") {

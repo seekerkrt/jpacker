@@ -3,6 +3,12 @@
 set -eu
 
 repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
+current_package_fixture=$repo_root/tests/fixtures/current-package
+current_package_contract=$current_package_fixture/contract.env
+runtime_dependency_authority=$current_package_fixture/runtime-dependencies.txt
+build_dependency_authority=$current_package_fixture/build-dependencies.txt
+install_payload_authority=$current_package_fixture/install-payload.txt
 tmp_dir=$(mktemp -d)
 
 cleanup() {
@@ -13,6 +19,53 @@ trap cleanup EXIT INT TERM
 fail() {
     printf 'package-transition-test: %s\n' "$*" >&2
     exit 1
+}
+
+for authority_file in \
+    "$current_package_contract" \
+    "$runtime_dependency_authority" \
+    "$build_dependency_authority" \
+    "$install_payload_authority"
+do
+    [ -f "$authority_file" ] && [ ! -L "$authority_file" ] &&
+        [ -s "$authority_file" ] ||
+        fail "current package authority must be a non-empty regular non-symlink: $authority_file"
+done
+# shellcheck source=fixtures/current-package/contract.env
+. "$current_package_contract"
+
+sha256_file() {
+    if checksum_output=$(sha256sum -- "$1"); then
+        printf '%s\n' "${checksum_output%% *}"
+        return 0
+    else
+        return $?
+    fi
+}
+
+count_command_output_lines() {
+    count_label=$1
+    shift
+    count_raw=$tmp_dir/$count_label.raw
+    if validation_capture_output "$count_raw" "$@"; then
+        wc -l <"$count_raw"
+        return 0
+    else
+        count_status=$?
+    fi
+    fail "$count_label producer failed with status $count_status; raw=$count_raw"
+}
+
+grep_fixed_matches() {
+    match_pattern=$1
+    match_file=$2
+    if grep -Fo -- "$match_pattern" "$match_file"; then
+        return 0
+    else
+        match_status=$?
+    fi
+    [ "$match_status" -eq 1 ] && return 0
+    return "$match_status"
 }
 
 assert_source_archive_input() {
@@ -69,34 +122,86 @@ assert_mode() {
 write_regular_manifest() {
     manifest_root=$1
     manifest_output=$2
+    if validation_capture_sorted_output \
+        "$manifest_output.raw" "$manifest_output" \
+        write_regular_manifest_raw "$manifest_root"; then
+        return 0
+    else
+        manifest_status=$?
+    fi
+    fail "regular manifest producer failed with status $manifest_status; raw=$manifest_output.raw"
+}
 
+write_regular_manifest_raw() {
+    manifest_root=$1
     (
-        cd "$manifest_root"
-        find . -type f ! -path './.*' -print | LC_ALL=C sort
-    ) >"$manifest_output"
+        cd "$manifest_root" || exit $?
+        find . -type f ! -path './.*' -print || exit $?
+    )
 }
 
 write_directory_manifest() {
     manifest_root=$1
     manifest_output=$2
+    manifest_raw=$manifest_output.raw
+    manifest_temporary=$manifest_output.tmp.$$
+    if validation_capture_output "$manifest_raw" \
+        write_directory_manifest_raw "$manifest_root"; then
+        :
+    else
+        manifest_status=$?
+        fail "directory manifest producer failed with status $manifest_status; raw=$manifest_raw"
+    fi
+    if LC_ALL=C sort -r "$manifest_raw" >"$manifest_temporary"; then
+        mv "$manifest_temporary" "$manifest_output"
+    else
+        manifest_status=$?
+        rm -f "$manifest_temporary" >/dev/null 2>&1 || :
+        fail "directory manifest normalization failed with status $manifest_status"
+    fi
+}
 
+write_directory_manifest_raw() {
+    manifest_root=$1
     (
-        cd "$manifest_root"
-        find . -type d ! -path . ! -path './.*' -print | LC_ALL=C sort -r
-    ) >"$manifest_output"
+        cd "$manifest_root" || exit $?
+        find . -type d ! -path . ! -path './.*' -print || exit $?
+    )
 }
 
 write_checksum_snapshot() {
     snapshot_root=$1
     snapshot_output=$2
+    snapshot_paths_raw=$snapshot_output.paths.raw
+    snapshot_paths=$snapshot_output.paths
+    snapshot_temporary=$snapshot_output.tmp.$$
+    if validation_capture_sorted_output \
+        "$snapshot_paths_raw" "$snapshot_paths" \
+        write_checksum_paths_raw "$snapshot_root"; then
+        :
+    else
+        snapshot_status=$?
+        fail "checksum path producer failed with status $snapshot_status; raw=$snapshot_paths_raw"
+    fi
+    if (
+        cd "$snapshot_root" || exit $?
+        while IFS= read -r snapshot_path; do
+            sha256sum "$snapshot_path" || exit $?
+        done <"$snapshot_paths"
+    ) >"$snapshot_temporary"; then
+        mv "$snapshot_temporary" "$snapshot_output"
+    else
+        snapshot_status=$?
+        fail "checksum producer failed with status $snapshot_status; partial=$snapshot_temporary"
+    fi
+}
 
+write_checksum_paths_raw() {
+    snapshot_root=$1
     (
-        cd "$snapshot_root"
-        find . -type f -print | LC_ALL=C sort |
-            while IFS= read -r snapshot_path; do
-                sha256sum "$snapshot_path"
-            done
-    ) >"$snapshot_output"
+        cd "$snapshot_root" || exit $?
+        find . -type f -print || exit $?
+    )
 }
 
 assert_snapshot_matches() {
@@ -196,8 +301,15 @@ assert_metadata_set() {
     metadata_file=$1
     metadata_key=$2
     expected_values=$3
-    actual_values=$(metadata_values "$metadata_file" "$metadata_key" |
-        LC_ALL=C sort)
+    metadata_raw=$tmp_dir/metadata-$metadata_key.raw
+    metadata_sorted=$tmp_dir/metadata-$metadata_key.sorted
+    if validation_capture_sorted_output "$metadata_raw" "$metadata_sorted" \
+        metadata_values "$metadata_file" "$metadata_key"; then
+        actual_values=$(cat "$metadata_sorted")
+    else
+        metadata_status=$?
+        fail "$metadata_key producer failed with status $metadata_status; raw=$metadata_raw"
+    fi
     [ "$actual_values" = "$expected_values" ] || {
         printf 'package-transition-test: %s mismatch\nexpected:\n%s\nactual:\n%s\n' \
             "$metadata_key" "$expected_values" "$actual_values" >&2
@@ -241,8 +353,8 @@ prepare_test_pkgbuild() {
     cp "$production_pkgbuild" "$package_work/PKGBUILD"
     cp "$(dirname "$production_pkgbuild")/VERSION" "$package_work/VERSION"
 
-    source_occurrences=$(grep -Fo -- "$production_source" \
-        "$package_work/PKGBUILD" | wc -l | tr -d '[:space:]')
+    source_occurrences=$(count_command_output_lines production-source-occurrences \
+        grep_fixed_matches "$production_source" "$package_work/PKGBUILD")
     [ "$source_occurrences" = 1 ] ||
         fail "$production_pkgbuild must contain exactly one production source URL"
     sed -i "s|$production_source|$fixture_source|" \
@@ -355,6 +467,11 @@ if [ -n "$current_source_archive_input" ]; then
     assert_source_archive_input current "$current_source_archive_input"
 fi
 
+[ -f "$repo_root/VERSION" ] && [ ! -L "$repo_root/VERSION" ] ||
+    fail 'current VERSION must be a regular non-symlink'
+current_version=$(tr -d '[:space:]' <"$repo_root/VERSION")
+[ -n "$current_version" ] || fail 'current VERSION is empty'
+
 v1_source=$tmp_dir/jpacker-v1.16.0-source
 v1_makepkg_work=$tmp_dir/jpacker-v1.16.0-makepkg
 v1_package_destination=$tmp_dir/jpacker-v1.16.0-packages
@@ -363,20 +480,16 @@ v1_manifest=$tmp_dir/jpacker-v1.16.0-files.txt
 v1_directory_manifest=$tmp_dir/jpacker-v1.16.0-directories.txt
 v1_removable_manifest=$tmp_dir/jpacker-v1.16.0-removable-files.txt
 
-v2_source=$tmp_dir/moguet-v2.2.0-source
-v2_source_manifest=$tmp_dir/moguet-v2.2.0-source-files.txt
-v2_makepkg_work=$tmp_dir/moguet-v2.2.0-makepkg
-v2_package_destination=$tmp_dir/moguet-v2.2.0-packages
-v2_archive_root=$tmp_dir/moguet-v2.2.0-archive-root
-v2_manifest=$tmp_dir/moguet-v2.2.0-files.txt
-v2_directory_manifest=$tmp_dir/moguet-v2.2.0-directories.txt
+v2_source=$tmp_dir/$PACKAGE_NAME-v$current_version-source
+v2_source_manifest=$tmp_dir/$PACKAGE_NAME-v$current_version-source-files.txt
+v2_makepkg_work=$tmp_dir/$PACKAGE_NAME-v$current_version-makepkg
+v2_package_destination=$tmp_dir/$PACKAGE_NAME-v$current_version-packages
+v2_archive_root=$tmp_dir/$PACKAGE_NAME-v$current_version-archive-root
+v2_manifest=$tmp_dir/$PACKAGE_NAME-v$current_version-files.txt
+v2_directory_manifest=$tmp_dir/$PACKAGE_NAME-v$current_version-directories.txt
 
 coinstall_root=$tmp_dir/coinstall-root
 transition_root=$tmp_dir/transition-root
-
-current_version=$(tr -d '[:space:]' <"$repo_root/VERSION")
-[ "$current_version" = 2.2.0 ] ||
-    fail "current VERSION is $current_version; expected 2.2.0"
 
 if [ -n "$legacy_source_archive_input" ]; then
     v1_source_archive=$legacy_source_archive_input
@@ -404,18 +517,32 @@ if [ -n "$current_source_archive_input" ]; then
 else
     # Preserve the issue branch's dirty edits and tracked deletions while
     # keeping .git, ignored build output, binaries, and package artifacts out.
-    git -C "$repo_root" ls-files --cached --others --exclude-standard |
-        while IFS= read -r source_path; do
+    v2_source_paths_raw=$v2_source_manifest.raw
+    v2_source_manifest_temporary=$v2_source_manifest.tmp
+    if validation_capture_output "$v2_source_paths_raw" \
+        git -C "$repo_root" ls-files \
+        --cached --others --exclude-standard; then
+        :
+    else
+        source_status=$?
+        fail "current source path producer failed with status $source_status; raw=$v2_source_paths_raw"
+    fi
+    if while IFS= read -r source_path; do
             case "$source_path" in
-                .git|.git/*|build|build/*|moguet|*.pkg.tar.*|*.src.tar.*)
+                .git|.git/*|build|build/*|"$COMMAND_NAME"|*.pkg.tar.*|*.src.tar.*)
                     continue
                     ;;
             esac
             if [ -f "$repo_root/$source_path" ] ||
                 [ -L "$repo_root/$source_path" ]; then
-                printf '%s\n' "$source_path"
+                printf '%s\n' "$source_path" || exit $?
             fi
-        done >"$v2_source_manifest"
+        done <"$v2_source_paths_raw" >"$v2_source_manifest_temporary"; then
+        mv "$v2_source_manifest_temporary" "$v2_source_manifest"
+    else
+        source_status=$?
+        fail "current source manifest normalization failed with status $source_status; partial=$v2_source_manifest_temporary"
+    fi
     [ -s "$v2_source_manifest" ] || fail 'current source manifest is empty'
     while IFS= read -r source_path; do
         mkdir -p "$v2_source/$(dirname "$source_path")"
@@ -425,7 +552,7 @@ fi
 
 assert_absent "$v2_source/.git"
 assert_absent "$v2_source/build"
-assert_absent "$v2_source/moguet"
+assert_absent "$v2_source/$COMMAND_NAME"
 assert_absent "$v2_source/config/jpacker.conf"
 cmp -s "$repo_root/tests/test-package-transition.sh" \
     "$v2_source/tests/test-package-transition.sh" ||
@@ -434,11 +561,14 @@ first_package_artifact=$(find "$v2_source" -type f \
     \( -name '*.pkg.tar.*' -o -name '*.src.tar.*' \) -print -quit)
 [ -z "$first_package_artifact" ] ||
     fail "source fixture contains package artifact $first_package_artifact"
+v2_source_version=$(tr -d '[:space:]' < "$v2_source/VERSION")
+[ "$v2_source_version" = "$current_version" ] ||
+    fail "current source VERSION is $v2_source_version; expected $current_version"
 
-initialize_fixture_repository "$v2_source" v2.2.0
+initialize_fixture_repository "$v2_source" "v$current_version"
 prepare_test_pkgbuild "$repo_root/PKGBUILD" "$v2_source" \
     "$v2_makepkg_work" \
-    'git+https://github.com/seekerkrt/moguet.git'
+    "git+$PROJECT_REPOSITORY_URL.git"
 
 mkdir -p \
     "$v1_package_destination" \
@@ -454,7 +584,7 @@ run_logged 'jpacker v1.16.0 clean package build' "$tmp_dir/v1-makepkg.log" \
         "$tmp_dir/v1-source-packages" \
         "$tmp_dir/v1-logs" \
         "$tmp_dir/v1-xdg-cache"
-run_logged 'Moguet v2.2.0 clean package build' "$tmp_dir/v2-makepkg.log" \
+run_logged "$PROJECT_NAME v$current_version clean package build" "$tmp_dir/v2-makepkg.log" \
     run_makepkg_fixture \
         "$v2_makepkg_work" \
         "$tmp_dir/v2-build" \
@@ -465,22 +595,27 @@ run_logged 'Moguet v2.2.0 clean package build' "$tmp_dir/v2-makepkg.log" \
         "$tmp_dir/v2-xdg-cache"
 
 v1_package_archive=$v1_package_destination/jpacker-1.16.0-1-x86_64.pkg.tar.zst
-v2_package_archive=$v2_package_destination/moguet-2.2.0-1-x86_64.pkg.tar.zst
+v2_package_archive=$v2_package_destination/$PACKAGE_NAME-$current_version-
+v2_package_archive=$v2_package_archive$PACKAGE_RELEASE-$PACKAGE_ARCHITECTURE.pkg.tar.zst
 [ -f "$v1_package_archive" ] ||
     fail "expected package archive is missing: $v1_package_archive"
 [ -f "$v2_package_archive" ] ||
     fail "expected package archive is missing: $v2_package_archive"
-[ "$(find "$v1_package_destination" -maxdepth 1 -type f \
-    -name '*.pkg.tar.*' | wc -l | tr -d '[:space:]')" = 1 ] ||
+[ "$(count_command_output_lines v1-package-archives \
+    find "$v1_package_destination" -maxdepth 1 -type f \
+    -name '*.pkg.tar.*')" = 1 ] ||
     fail 'v1 package build produced an unexpected archive set'
-[ "$(find "$v2_package_destination" -maxdepth 1 -type f \
-    -name '*.pkg.tar.*' | wc -l | tr -d '[:space:]')" = 1 ] ||
+[ "$(count_command_output_lines v2-package-archives \
+    find "$v2_package_destination" -maxdepth 1 -type f \
+    -name '*.pkg.tar.*')" = 1 ] ||
     fail 'v2 package build produced an unexpected archive set'
-printf '%s  %s\n' \
-    "$(sha256sum "$v1_package_archive" | awk '{ print $1 }')" \
+v1_package_hash=$(sha256_file "$v1_package_archive") ||
+    fail 'v1 package checksum producer failed'
+v2_package_hash=$(sha256_file "$v2_package_archive") ||
+    fail 'v2 package checksum producer failed'
+printf '%s  %s\n' "$v1_package_hash" \
     "$(basename "$v1_package_archive")" >"$tmp_dir/v1-package.sha256"
-printf '%s  %s\n' \
-    "$(sha256sum "$v2_package_archive" | awk '{ print $1 }')" \
+printf '%s  %s\n' "$v2_package_hash" \
     "$(basename "$v2_package_archive")" >"$tmp_dir/v2-package.sha256"
 
 bsdtar -xOf "$v1_package_archive" .PKGINFO >"$tmp_dir/v1.PKGINFO"
@@ -492,43 +627,83 @@ assert_metadata_single "$tmp_dir/v1.PKGINFO" license GPL-3.0-or-later
 assert_metadata_single "$tmp_dir/v1.PKGINFO" backup \
     etc/jpacker/jpacker.conf
 
-assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgname moguet
-assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgver 2.2.0-1
-assert_metadata_single "$tmp_dir/v2.PKGINFO" arch x86_64
-assert_metadata_single "$tmp_dir/v2.PKGINFO" license GPL-3.0-or-later
+assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgname "$PACKAGE_NAME"
+assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgver "$current_version-$PACKAGE_RELEASE"
+assert_metadata_single "$tmp_dir/v2.PKGINFO" arch "$PACKAGE_ARCHITECTURE"
+assert_metadata_single "$tmp_dir/v2.PKGINFO" license "$PACKAGE_LICENSE"
 for transition_key in backup conflict conflicts provides replaces
 do
     assert_metadata_absent "$tmp_dir/v2.PKGINFO" "$transition_key"
 done
 
-actual_libalpm_dependency=$(metadata_values "$tmp_dir/v2.PKGINFO" depend |
-    grep -E '^libalpm\.so(=[0-9]+-[0-9]+)?$' || :)
-[ -n "$actual_libalpm_dependency" ] &&
-    [ "$(printf '%s\n' "$actual_libalpm_dependency" | wc -l | tr -d '[:space:]')" = 1 ] ||
+v2_dependencies_raw=$tmp_dir/v2-dependencies.raw
+if validation_capture_output "$v2_dependencies_raw" \
+    metadata_values "$tmp_dir/v2.PKGINFO" depend; then
+    :
+else
+    dependency_status=$?
+    fail "v2 dependency producer failed with status $dependency_status; raw=$v2_dependencies_raw"
+fi
+
+libalpm_dependencies=$tmp_dir/v2-libalpm-dependencies.raw
+if grep -E '^libalpm\.so(=[0-9]+-[0-9]+)?$' \
+    "$v2_dependencies_raw" >"$libalpm_dependencies"; then
+    :
+else
+    grep_status=$?
+    case "$grep_status" in
+        1) : >"$libalpm_dependencies" ;;
+        *) fail "libalpm dependency filter failed with status $grep_status" ;;
+    esac
+fi
+if libalpm_dependency_count=$(wc -l <"$libalpm_dependencies"); then
+    :
+else
+    count_status=$?
+    fail "libalpm dependency count failed with status $count_status"
+fi
+[ "$libalpm_dependency_count" = 1 ] ||
     fail 'v2 package has an invalid libalpm soname dependency'
-normalized_dependencies=$(metadata_values "$tmp_dir/v2.PKGINFO" depend |
-    sed -E 's/^libalpm\.so(=[0-9]+-[0-9]+)?$/libalpm.so/' |
-    LC_ALL=C sort)
-expected_dependencies='curl
-git
-libalpm.so
-libarchive
-nano
-pacman
-sudo'
+
+normalized_dependencies_raw=$tmp_dir/v2-dependencies.normalized.raw
+normalized_dependencies_sorted=$tmp_dir/v2-dependencies.normalized.sorted
+if sed -E 's/^libalpm\.so(=[0-9]+-[0-9]+)?$/libalpm.so/' \
+    "$v2_dependencies_raw" >"$normalized_dependencies_raw"; then
+    :
+else
+    normalize_status=$?
+    fail "dependency normalization failed with status $normalize_status"
+fi
+if LC_ALL=C sort "$normalized_dependencies_raw" \
+    >"$normalized_dependencies_sorted"; then
+    normalized_dependencies=$(cat "$normalized_dependencies_sorted")
+else
+    sort_status=$?
+    fail "dependency sorting failed with status $sort_status"
+fi
+if expected_dependencies=$(cat "$runtime_dependency_authority"); then
+    :
+else
+    dependency_status=$?
+    fail "runtime dependency authority read failed with status $dependency_status"
+fi
 [ "$normalized_dependencies" = "$expected_dependencies" ] || {
     printf 'package-transition-test: depend mismatch\nexpected:\n%s\nactual:\n%s\n' \
         "$expected_dependencies" "$normalized_dependencies" >&2
     exit 1
 }
-expected_makedepends='nlohmann-json
-tomlplusplus'
+if expected_makedepends=$(cat "$build_dependency_authority"); then
+    :
+else
+    dependency_status=$?
+    fail "build dependency authority read failed with status $dependency_status"
+fi
 assert_metadata_set "$tmp_dir/v2.PKGINFO" makedepend "$expected_makedepends"
 
 assert_archive_layout "$v1_package_archive" \
     "$tmp_dir/v1-archive-listing.txt" usr/bin/jpacker
 assert_archive_layout "$v2_package_archive" \
-    "$tmp_dir/v2-archive-listing.txt" usr/bin/moguet
+    "$tmp_dir/v2-archive-listing.txt" "usr/bin/$COMMAND_NAME"
 bsdtar -xf "$v1_package_archive" -C "$v1_archive_root"
 bsdtar -xf "$v2_package_archive" -C "$v2_archive_root"
 assert_no_symlinks "$v1_archive_root"
@@ -538,34 +713,24 @@ write_directory_manifest "$v1_archive_root" "$v1_directory_manifest"
 write_regular_manifest "$v2_archive_root" "$v2_manifest"
 write_directory_manifest "$v2_archive_root" "$v2_directory_manifest"
 
-expected_v2_payload='./usr/bin/moguet
-./usr/share/bash-completion/completions/moguet
-./usr/share/doc/moguet/README.ja.md
-./usr/share/doc/moguet/README.md
-./usr/share/doc/moguet/THIRD_PARTY_NOTICES.md
-./usr/share/doc/moguet/docs/LICENSING.md
-./usr/share/doc/moguet/docs/migration/v1-to-v2.ja.md
-./usr/share/doc/moguet/docs/migration/v1-to-v2.md
-./usr/share/fish/vendor_completions.d/moguet.fish
-./usr/share/licenses/moguet/LICENSE
-./usr/share/licenses/moguet/bjoern-hoehrmann-utf8-MIT.txt
-./usr/share/licenses/moguet/curl.txt
-./usr/share/licenses/moguet/jpacker-MIT-legacy.txt
-./usr/share/licenses/moguet/nlohmann-json-MIT.txt
-./usr/share/licenses/moguet/tomlplusplus-MIT.txt
-./usr/share/locale/ja/LC_MESSAGES/moguet.mo
-./usr/share/man/ja/man1/moguet.1.gz
-./usr/share/man/man1/moguet.1.gz
-./usr/share/zsh/site-functions/_moguet'
-[ "$(cat "$v2_manifest")" = "$expected_v2_payload" ] || {
+expected_v2_payload=$tmp_dir/expected-v2-package-payload.txt
+if sed -e 's|^/|./|' -e '/\/share\/man\// s/\.1$/.1.gz/' \
+    "$install_payload_authority" >"$expected_v2_payload"; then
+    :
+else
+    payload_status=$?
+    fail "archive payload projection failed with status $payload_status"
+fi
+if ! cmp -s "$expected_v2_payload" "$v2_manifest"; then
     printf 'package-transition-test: package payload mismatch:\n%s\n' \
         "$(cat "$v2_manifest")" >&2
     exit 1
-}
+fi
 
-archive_binary_mode=$(stat -c '%a' "$v2_archive_root/usr/bin/moguet")
+archive_binary=$v2_archive_root/usr/bin/$COMMAND_NAME
+archive_binary_mode=$(stat -c '%a' "$archive_binary")
 [ "$archive_binary_mode" = 755 ] ||
-    fail "archived Moguet binary mode is $archive_binary_mode; expected 755"
+    fail "archived $PROJECT_NAME binary mode is $archive_binary_mode; expected 755"
 archive_home=$tmp_dir/archive-home
 archive_config_home=$tmp_dir/archive-xdg/config
 archive_state_home=$tmp_dir/archive-xdg/state
@@ -575,9 +740,9 @@ archive_version=$(LC_ALL=C \
     XDG_CONFIG_HOME="$archive_config_home" \
     XDG_STATE_HOME="$archive_state_home" \
     XDG_CACHE_HOME="$archive_cache_home" \
-    "$v2_archive_root/usr/bin/moguet" --version)
-[ "$archive_version" = 'Moguet v2.2.0' ] ||
-    fail "archived Moguet version mismatch: $archive_version"
+    "$archive_binary" --version)
+[ "$archive_version" = "$PROJECT_NAME v$current_version" ] ||
+    fail "archived $PROJECT_NAME version mismatch: $archive_version"
 assert_absent "$archive_config_home"
 assert_absent "$archive_state_home"
 assert_absent "$archive_cache_home"
@@ -621,15 +786,15 @@ bsdtar -xf "$v1_package_archive" -C "$coinstall_root" etc usr
 modified_legacy_config='NOEDIT=true
 NODIFF=true'
 legacy_preference='CFLAGS=-O3 -march=native'
-coinstall_config_dir=$coinstall_root/user-home/.config/moguet
+coinstall_config_dir=$coinstall_root/user-home/.config/$XDG_IDENTITY
 coinstall_source_preference_dir=$coinstall_config_dir/source-build.d
 coinstall_source_preference=$coinstall_source_preference_dir/fastfetch
 mkdir -p \
     "$coinstall_root/etc/jpacker/package.build" \
     "$coinstall_config_dir" \
-    "$coinstall_root/user-home/.local/state/moguet" \
-    "$coinstall_root/user-home/.cache/moguet" \
-    "$coinstall_root/usr/share/doc/moguet" \
+    "$coinstall_root/user-home/.local/state/$XDG_IDENTITY" \
+    "$coinstall_root/user-home/.cache/$XDG_IDENTITY" \
+    "$coinstall_root/usr/share/doc/$PACKAGE_NAME" \
     "$coinstall_root/usr/share/locale/ja/LC_MESSAGES"
 printf '%s\n' "$modified_legacy_config" \
     >"$coinstall_root/etc/jpacker/jpacker.conf"
@@ -643,11 +808,11 @@ install -d -m700 "$coinstall_source_preference_dir"
 install -m600 /dev/null "$coinstall_source_preference"
 printf '%s\n' 'CFLAGS=-O2 -pipe' >"$coinstall_source_preference"
 printf '%s\n' 'persistent state' \
-    >"$coinstall_root/user-home/.local/state/moguet/state.keep"
+    >"$coinstall_root/user-home/.local/state/$XDG_IDENTITY/state.keep"
 printf '%s\n' 'reproducible cache fixture' \
-    >"$coinstall_root/user-home/.cache/moguet/cache.keep"
+    >"$coinstall_root/user-home/.cache/$XDG_IDENTITY/cache.keep"
 printf '%s\n' 'foreign documentation' \
-    >"$coinstall_root/usr/share/doc/moguet/foreign-file.keep"
+    >"$coinstall_root/usr/share/doc/$PACKAGE_NAME/foreign-file.keep"
 printf '%s\n' 'foreign locale catalog' \
     >"$coinstall_root/usr/share/locale/ja/LC_MESSAGES/foreign-domain.mo"
 
@@ -684,14 +849,14 @@ assert_mode "$coinstall_source_preference" 600
 # config becomes .pacsave, while runtime-managed and foreign legacy data stays.
 mkdir -p "$transition_root"
 bsdtar -xf "$v1_package_archive" -C "$transition_root" etc usr
-transition_config_dir=$transition_root/user-home/.config/moguet
+transition_config_dir=$transition_root/user-home/.config/$XDG_IDENTITY
 transition_source_preference_dir=$transition_config_dir/source-build.d
 transition_source_preference=$transition_source_preference_dir/fastfetch
 mkdir -p \
     "$transition_root/etc/jpacker/package.build" \
     "$transition_config_dir" \
-    "$transition_root/user-home/.local/state/moguet" \
-    "$transition_root/user-home/.cache/moguet"
+    "$transition_root/user-home/.local/state/$XDG_IDENTITY" \
+    "$transition_root/user-home/.cache/$XDG_IDENTITY"
 printf '%s\n' "$modified_legacy_config" \
     >"$transition_root/etc/jpacker/jpacker.conf"
 printf '%s\n' "$legacy_preference" \
@@ -704,9 +869,9 @@ install -d -m700 "$transition_source_preference_dir"
 install -m600 /dev/null "$transition_source_preference"
 printf '%s\n' 'CFLAGS=-O2 -pipe' >"$transition_source_preference"
 printf '%s\n' 'persistent transition state' \
-    >"$transition_root/user-home/.local/state/moguet/state.keep"
+    >"$transition_root/user-home/.local/state/$XDG_IDENTITY/state.keep"
 printf '%s\n' 'transition cache fixture' \
-    >"$transition_root/user-home/.cache/moguet/cache.keep"
+    >"$transition_root/user-home/.cache/$XDG_IDENTITY/cache.keep"
 
 expected_legacy_after_removal=$tmp_dir/expected-legacy-after-removal
 mkdir -p "$expected_legacy_after_removal"
@@ -781,9 +946,20 @@ rollback_version=$(LC_ALL=C \
     sha256sum -c "$tmp_dir/v2-package.sha256" >/dev/null) ||
     fail 'v2 package archive changed during transition validation'
 
+if v2_payload_count=$(wc -l <"$v2_manifest"); then
+    :
+else
+    payload_count_status=$?
+    fail "verified payload count failed with status $payload_count_status"
+fi
+case "$v2_payload_count" in
+    ''|*[!0-9]*) fail "verified payload count is invalid: $v2_payload_count" ;;
+esac
+
 printf 'package-transition-test: actual v1/v2 package archives have 0 path conflicts\n'
 printf 'package-transition-test: v2 .PKGINFO identity/dependencies and transition metadata passed\n'
 printf 'package-transition-test: archive owners, modes, and entry types passed\n'
-printf 'package-transition-test: Moguet archive payload (19 regular files):\n'
+printf 'package-transition-test: %s archive payload (%s regular files):\n' \
+    "$PROJECT_NAME" "$v2_payload_count"
 sed 's|^\./|/|' "$v2_manifest"
 printf 'package-transition-test: all checks passed\n'

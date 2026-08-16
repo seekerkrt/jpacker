@@ -1,5 +1,7 @@
 #include "upgrade_all_operation.hpp"
 
+#include "operation_state_model.hpp"
+
 #include <algorithm>
 
 namespace {
@@ -24,7 +26,63 @@ PackageStateChange aur_package_state_change(
     return PackageStateChange::Unknown;
 }
 
+std::optional<NoOpBasis> upgrade_all_no_op_basis(
+        const UpgradeAllOperationResult& result,
+        PackageStateChange package_state_change) noexcept {
+    if(result.status != UpgradeAllOperationStatus::NoUpdates ||
+       !result.is_success() ||
+       package_state_change != PackageStateChange::NoChange) {
+        return std::nullopt;
+    }
+
+    const bool has_registered_source_work =
+            !result.system_source.registered_source_results.empty();
+    bool has_aur_target_work = false;
+    if(result.aur.operation_result.has_value()) {
+        const FilteredAurUpdateExecutionResult& filtered =
+                result.aur.operation_result.value();
+        has_aur_target_work =
+                !filtered.query_result.plan.entries.empty() ||
+                !filtered.target_adapter.entries.empty() ||
+                !filtered.reduced_operation_result.targets.empty();
+    }
+
+    return has_registered_source_work || has_aur_target_work
+            ? NoOpBasis::VerifiedUnchanged
+            : NoOpBasis::NoRelevantWork;
+}
+
 } // namespace
+
+OperationStateProjection project_upgrade_all_operation_state(
+        const UpgradeAllOperationResult& result) noexcept {
+    const PackageStateChange package_state_change =
+            result.package_state_change();
+
+    ObservationReason unverified_reason =
+            ObservationReason::ObservationNotPrepared;
+    if(result.system_source.system.before_snapshot_failure.has_value()) {
+        unverified_reason = ObservationReason::BeforeSnapshotUnavailable;
+    } else if(result.system_source.system.after_snapshot_failure.has_value()) {
+        unverified_reason = ObservationReason::AfterSnapshotUnavailable;
+    } else if(result.has_inconsistency()) {
+        unverified_reason = ObservationReason::InconsistentEvidence;
+    } else if(result.has_not_attempted_phase()) {
+        unverified_reason = ObservationReason::PhaseNotAttempted;
+    } else if(!result.is_success()) {
+        unverified_reason = ObservationReason::OperationFailed;
+    }
+
+    return project_operation_state(OperationStateProjectionInput{
+            result.is_success(),
+            upgrade_all_no_op_basis(result, package_state_change),
+            result.status == UpgradeAllOperationStatus::BlockedBeforeMutation,
+            result.has_partial_completion(),
+            result.status != UpgradeAllOperationStatus::BlockedBeforeMutation,
+            result.has_inconsistency(),
+            package_state_change,
+            unverified_reason});
+}
 
 bool UpgradeAllOperationResult::is_success() const noexcept {
     if(status != UpgradeAllOperationStatus::Completed &&

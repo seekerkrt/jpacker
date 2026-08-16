@@ -105,7 +105,11 @@ bool source_entries_match(
                    rhs.canonical_source_identity_key &&
            lhs.resolved_package_base == rhs.resolved_package_base &&
            lhs.preference_load_warnings == rhs.preference_load_warnings &&
-           lhs.source_kind == rhs.source_kind;
+           lhs.source_kind == rhs.source_kind &&
+           lhs.repository_identity == rhs.repository_identity &&
+           lhs.required_target_provenance ==
+                   rhs.required_target_provenance &&
+           lhs.artifact_lifecycle_intent == rhs.artifact_lifecycle_intent;
 }
 
 bool source_snapshots_match(

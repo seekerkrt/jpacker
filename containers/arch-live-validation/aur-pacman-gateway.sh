@@ -11,11 +11,12 @@ export LC_ALL=C
 real_pacman=/usr/libexec/moguet-live-aur/pacman.real
 stage_helper=/usr/libexec/moguet-live-aur/aur-stage-artifact.py
 metadata_helper=/usr/libexec/moguet-live-aur/aur-archive-metadata-check
+case_loader=/usr/libexec/moguet-live-aur/load-case.sh
 policy_root=/usr/share/moguet-live-aur/policy
 case_policy=$policy_root/aur-cases.tsv
-payload_static_policy=$policy_root/fetchfetch-payload-authority.tsv
-reference_manifest=/usr/libexec/moguet-live-aur/fixtures/fetchfetch-payload.tsv
-pkginfo_manifest=/usr/libexec/moguet-live-aur/fixtures/fetchfetch-pkginfo.tsv
+payload_static_policy=$policy_root/payload-authority.tsv
+reference_manifest=/usr/libexec/moguet-live-aur/fixtures/reference-payload.tsv
+pkginfo_manifest=/usr/libexec/moguet-live-aur/fixtures/reference-pkginfo.tsv
 evidence_root=/var/log/moguet-live-aur
 staging_root=/var/lib/moguet-live-aur/staging
 validation_user=moguet-validation
@@ -45,12 +46,12 @@ fi
 
 case_identity=${MOGUET_LIVE_AUR_CASE-}
 case "$case_identity" in
-    fetchfetch-install)
+    aur-install)
         negative_case=false
         ;;
-    fetchfetch-content-drift-test|fetchfetch-conflict-policy-test|\
-    fetchfetch-xattr-metadata-test|fetchfetch-acl-metadata-test|\
-    fetchfetch-pkgdesc-authority-test)
+    aur-content-drift-test|aur-conflict-policy-test|\
+    aur-xattr-metadata-test|aur-acl-metadata-test|\
+    aur-pkgdesc-authority-test)
         negative_case=true
         ;;
     *)
@@ -75,6 +76,8 @@ require_runtime_authority "$real_pacman" '0:0:755:regular file' 'real pacman'
 require_runtime_authority "$stage_helper" '0:0:555:regular file' 'staging helper'
 require_runtime_authority "$metadata_helper" \
     '0:0:555:regular file' 'archive metadata helper'
+require_runtime_authority "$case_loader" \
+    '0:0:555:regular file' 'AUR case loader'
 require_runtime_authority "$case_policy" '0:0:444:regular file' 'AUR case policy'
 require_runtime_authority "$payload_static_policy" \
     '0:0:444:regular file' 'static payload authority'
@@ -83,80 +86,17 @@ require_runtime_authority "$reference_manifest" \
 require_runtime_authority "$pkginfo_manifest" \
     '0:0:444:regular file' 'reference PKGINFO manifest'
 
-expected_header=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
-    '# package' package_base expected_version runtime_dependencies \
-    make_dependencies source_kind install_reason fallback_policy \
-    review_required expected_aur_git_head expected_pkgbuild_sha256 \
-    expected_srcinfo_sha256 expected_source_filename expected_source_url \
-    expected_source_sha256 expected_rpc_url_path \
-    expected_artifact_architecture)
-tab=$(printf '\tX')
-tab=${tab%X}
-policy_header=
-package_name=
-package_base=
-expected_version=
-runtime_dependencies=
-make_dependencies=
-source_kind=
-install_reason=
-fallback_policy=
-review_required=
-expected_aur_git_head=
-expected_pkgbuild_sha256=
-expected_srcinfo_sha256=
-expected_source_filename=
-expected_source_url=
-expected_source_sha256=
-expected_rpc_url_path=
-expected_architecture=
-extra_field=
-{
-    IFS= read -r policy_header || reject 'AUR case policy has no header'
-    IFS=$tab read -r \
-        package_name package_base expected_version runtime_dependencies \
-        make_dependencies source_kind install_reason fallback_policy \
-        review_required expected_aur_git_head expected_pkgbuild_sha256 \
-        expected_srcinfo_sha256 expected_source_filename expected_source_url \
-        expected_source_sha256 expected_rpc_url_path expected_architecture \
-        extra_field || reject 'AUR case policy has no case row'
-    if IFS= read -r _; then
-        reject 'AUR case policy contains more than one case row'
-    fi
-} < "$case_policy"
-
-[ "$policy_header" = "$expected_header" ] || reject 'AUR case policy header drift'
-[ -z "$extra_field" ] || reject 'AUR case policy contains extra columns'
-[ "$package_name" = fetchfetch ] || reject 'package identity drift'
-[ "$package_base" = fetchfetch ] || reject 'PackageBase identity drift'
-[ "$expected_version" = 2.0.0-1 ] || reject 'package version policy drift'
-[ "$runtime_dependencies" = glibc ] || reject 'runtime dependency policy drift'
-[ "$make_dependencies" = gcc,make ] || reject 'make dependency policy drift'
-[ "$source_kind" = single-release-archive ] || reject 'source-kind policy drift'
-[ "$install_reason" = Explicit ] || reject 'install-reason policy drift'
-[ "$fallback_policy" = reject ] || reject 'fallback policy drift'
-[ "$review_required" = required ] || reject 'review-required policy drift'
-[ "$expected_aur_git_head" = \
-    353dc8ea947734b85175158cda87e5d084585c3f ] ||
-    reject 'pinned AUR HEAD policy drift'
-[ "$expected_pkgbuild_sha256" = \
-    6b9e09ae9c297c5be32b1bd6a038172ad1400cd0f4a5867fe2393b468d964232 ] ||
-    reject 'pinned PKGBUILD policy drift'
-[ "$expected_srcinfo_sha256" = \
-    d685ae938e6cfe1d2001dba3772539564b2cd8e7b2d488e7e78d92762f411df1 ] ||
-    reject 'pinned .SRCINFO policy drift'
-[ "$expected_source_filename" = fetchfetch-2.0.0.tar.gz ] ||
-    reject 'source filename policy drift'
-[ "$expected_source_url" = \
-    https://github.com/spenserblack/fetchfetch/archive/v2.0.0.tar.gz ] ||
-    reject 'source URL policy drift'
-[ "$expected_source_sha256" = \
-    e67be2f63497b6f75017873e06935218a407e46023fe10f422fb259e92a7d7ae ] ||
-    reject 'source checksum policy drift'
-[ "$expected_rpc_url_path" = \
-    /cgit/aur.git/snapshot/fetchfetch.tar.gz ] ||
-    reject 'AUR RPC URLPath policy drift'
-[ "$expected_architecture" = x86_64 ] || reject 'artifact architecture policy drift'
+# shellcheck source=fixtures/aur/load-case.sh
+. "$case_loader"
+validation_load_aur_case "$case_policy" || reject 'AUR case policy is invalid'
+package_name=$AUR_CASE_PACKAGE_NAME
+package_base=$AUR_CASE_PACKAGE_BASE
+expected_version=$AUR_CASE_EXPECTED_VERSION
+runtime_dependencies=$AUR_CASE_RUNTIME_DEPENDENCIES
+make_dependencies=$AUR_CASE_MAKE_DEPENDENCIES
+source_kind=$AUR_CASE_SOURCE_KIND
+install_reason=$AUR_CASE_INSTALL_REASON
+expected_architecture=$AUR_CASE_EXPECTED_ARCHITECTURE
 
 if [ "$#" -ne 4 ] ||
     [ "$1" != -U ] ||
@@ -270,7 +210,9 @@ fi
 if ! /usr/bin/python3 -I "$stage_helper" validate \
     "$payload_static_policy" "$reference_manifest" "$pkginfo_manifest" \
     "$staged_artifact" \
-    "$evidence_directory" "$validation_gid"
+    "$evidence_directory" "$validation_gid" \
+    "$package_name" "$package_base" "$expected_version" \
+    "$runtime_dependencies" "$make_dependencies" "$expected_architecture"
 then
     reject 'staged artifact path, content, or PKGINFO validation failed'
 fi

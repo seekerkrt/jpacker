@@ -22,6 +22,13 @@ enum class ScriptedSourceExecutionKind {
     CacheFailure,
     CleanupFailure,
     UnknownFailure,
+    PackageBaseSuccess,
+    PackageBaseCleanupFailure,
+    PackageBaseSelectionFailure,
+    PackageBaseMixedReasonFailure,
+    PackageBasePhaseFailure,
+    PackageBaseTransactionFailure,
+    PackageBaseMetadataFailure,
 };
 
 struct ScriptedSourceExecution {
@@ -30,6 +37,20 @@ struct ScriptedSourceExecution {
     SourceBuildExecutionResult result;
     ArtifactInstallExecutionOutcome cleanup_outcome =
             ArtifactInstallExecutionOutcome::Installed;
+    std::string package_base;
+    std::vector<PackageBaseSourceBuildSelectedResult> selected_children;
+    std::vector<ArtifactPackageIdentity> unselected_artifacts;
+    PackageBaseArtifactIdentitySelectionFailure selection_failure;
+    MixedPackageBaseInstallReasonUnsupported mixed_reason_failure;
+    SeparatedPackageBaseSourceBuildFailurePhase phase =
+            SeparatedPackageBaseSourceBuildFailurePhase::Build;
+    PackageBaseArtifactInstallTransactionFailureKind transaction_failure_kind =
+            PackageBaseArtifactInstallTransactionFailureKind::UnknownException;
+    std::vector<PackageBaseArtifactInstallTransactionAttempt>
+            transaction_attempts;
+    std::optional<int> transaction_exit_code;
+    PackageMetadataFailure metadata_failure{
+            PackageMetadataErrorCode::QueryFailed, {}};
     std::string diagnostic;
 };
 
@@ -63,6 +84,9 @@ struct PhaseStubState {
     std::vector<stub::ConfigSnapshot> supported_option_configs;
     std::vector<stub::ConfigSnapshot> invocation_configs;
     std::vector<stub::SourceExecutionCall> source_calls;
+    std::vector<stub::SourcePreparationCall> source_preparation_calls;
+    std::vector<stub::PackageBaseSourceExecutionCall>
+            package_base_source_calls;
     std::vector<std::string> system_commands;
     std::optional<std::string> expectation_failure;
 };
@@ -90,12 +114,9 @@ stub::ConfigSnapshot snapshot_config(const AppConfig& config) {
 ResolvedSourceBuildIdentity default_identity(
         const std::string& package_name) {
     return ResolvedSourceBuildIdentity{
-            package_name,
-            package_name,
-            "repository:" + package_name,
-            "https://packages.example/" + package_name + ".git",
-            SourceBuildSourceKind::Repository,
-            false};
+            ResolvedRepositorySourceBuildIdentity{
+                    RepositoryPackagePresent{
+                            "core", 0, package_name, package_name}}};
 }
 
 } // namespace
@@ -185,7 +206,8 @@ void enqueue_preference_result(
 void set_source_identity(
         const std::string& package_name,
         ResolvedSourceBuildIdentity identity) {
-    g_state.identities[package_name] = std::move(identity);
+    g_state.identities.insert_or_assign(
+            package_name, std::move(identity));
     g_state.identity_failures.erase(package_name);
 }
 
@@ -300,6 +322,88 @@ void enqueue_source_unknown_failure() {
     g_state.source_executions.push_back(std::move(execution));
 }
 
+void enqueue_package_base_success(
+        std::string package_base,
+        std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
+        std::vector<ArtifactPackageIdentity> unselected_artifacts) {
+    ScriptedSourceExecution execution;
+    execution.kind = ScriptedSourceExecutionKind::PackageBaseSuccess;
+    execution.package_base = std::move(package_base);
+    execution.selected_children = std::move(selected_children);
+    execution.unselected_artifacts = std::move(unselected_artifacts);
+    g_state.source_executions.push_back(std::move(execution));
+}
+
+void enqueue_package_base_cleanup_failure(
+        std::string package_base,
+        std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
+        std::vector<ArtifactPackageIdentity> unselected_artifacts,
+        std::string diagnostic) {
+    ScriptedSourceExecution execution;
+    execution.kind = ScriptedSourceExecutionKind::PackageBaseCleanupFailure;
+    execution.package_base = std::move(package_base);
+    execution.selected_children = std::move(selected_children);
+    execution.unselected_artifacts = std::move(unselected_artifacts);
+    execution.diagnostic = std::move(diagnostic);
+    g_state.source_executions.push_back(std::move(execution));
+}
+
+void enqueue_package_base_selection_failure(
+        PackageBaseArtifactIdentitySelectionFailure failure,
+        std::string diagnostic) {
+    ScriptedSourceExecution execution;
+    execution.kind = ScriptedSourceExecutionKind::PackageBaseSelectionFailure;
+    execution.selection_failure = std::move(failure);
+    execution.diagnostic = std::move(diagnostic);
+    g_state.source_executions.push_back(std::move(execution));
+}
+
+void enqueue_package_base_mixed_reason_failure(
+        MixedPackageBaseInstallReasonUnsupported failure,
+        std::string diagnostic) {
+    ScriptedSourceExecution execution;
+    execution.kind =
+            ScriptedSourceExecutionKind::PackageBaseMixedReasonFailure;
+    execution.mixed_reason_failure = std::move(failure);
+    execution.diagnostic = std::move(diagnostic);
+    g_state.source_executions.push_back(std::move(execution));
+}
+
+void enqueue_package_base_phase_failure(
+        SeparatedPackageBaseSourceBuildFailurePhase phase,
+        std::string diagnostic) {
+    ScriptedSourceExecution execution;
+    execution.kind = ScriptedSourceExecutionKind::PackageBasePhaseFailure;
+    execution.phase = phase;
+    execution.diagnostic = std::move(diagnostic);
+    g_state.source_executions.push_back(std::move(execution));
+}
+
+void enqueue_package_base_transaction_failure(
+        PackageBaseArtifactInstallTransactionFailureKind failure_kind,
+        std::string package_base,
+        std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts,
+        std::optional<int> exit_code,
+        std::string diagnostic) {
+    ScriptedSourceExecution execution;
+    execution.kind =
+            ScriptedSourceExecutionKind::PackageBaseTransactionFailure;
+    execution.transaction_failure_kind = failure_kind;
+    execution.package_base = std::move(package_base);
+    execution.transaction_attempts = std::move(attempts);
+    execution.transaction_exit_code = exit_code;
+    execution.diagnostic = std::move(diagnostic);
+    g_state.source_executions.push_back(std::move(execution));
+}
+
+void enqueue_package_base_metadata_failure(
+        PackageMetadataFailure failure) {
+    ScriptedSourceExecution execution;
+    execution.kind = ScriptedSourceExecutionKind::PackageBaseMetadataFailure;
+    execution.metadata_failure = std::move(failure);
+    g_state.source_executions.push_back(std::move(execution));
+}
+
 void record_progress(const std::string& subject) {
     g_state.events.push_back(Event{EventKind::Progress, subject});
 }
@@ -318,6 +422,15 @@ const std::vector<ConfigSnapshot>& invocation_configs() {
 
 const std::vector<SourceExecutionCall>& source_execution_calls() {
     return g_state.source_calls;
+}
+
+const std::vector<SourcePreparationCall>& source_preparation_calls() {
+    return g_state.source_preparation_calls;
+}
+
+const std::vector<PackageBaseSourceExecutionCall>&
+package_base_source_execution_calls() {
+    return g_state.package_base_source_calls;
 }
 
 const std::vector<std::string>& system_commands() {
@@ -404,25 +517,37 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
         bool needed) {
     g_state.events.push_back(stub::Event{
             stub::EventKind::SourceWorkItemPreparation,
-            identity.requested_name});
-    auto failure = g_state.work_item_failures.find(identity.requested_name);
+            identity.requested_name()});
+    auto failure = g_state.work_item_failures.find(identity.requested_name());
     if(failure != g_state.work_item_failures.end()) {
         throw std::runtime_error(failure->second);
     }
 
     ProductionSourceBuildWorkItem work_item;
-    work_item.request.package_name = identity.requested_name;
-    work_item.request.checkout_name = identity.package_base;
-    work_item.request.git_url = identity.git_url;
+    work_item.request.package_name = identity.requested_name();
+    work_item.request.checkout_name = identity.package_base();
+    work_item.request.git_url = identity.git_url();
     work_item.request.custom_environment = std::move(environment);
     work_item.request.only_if_updated = only_if_updated;
     work_item.request.needed = needed;
     work_item.required_targets.push_back(RequiredPackageArtifactTarget{
-            identity.package_base,
-            identity.requested_name,
+            identity.package_base(),
+            identity.requested_name(),
             DesiredInstallReason::Explicit});
+    work_item.required_target_provenance =
+            identity.source_kind() == SourceBuildSourceKind::Repository
+            ? RequiredTargetProvenance::RepositoryExactPackageProjection
+            : RequiredTargetProvenance::AurBuildPlanProjection;
+    work_item.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::SingularCompatibility;
+    if(const auto* repository = identity.repository_identity();
+       repository != nullptr) {
+        work_item.repository_identity = *repository;
+        work_item.configured_repository_order =
+                repository->exact_package().configured_repository_order;
+    }
     work_item.uses_system_update_baseline =
-            identity.source_kind == SourceBuildSourceKind::Repository;
+            identity.source_kind() == SourceBuildSourceKind::Repository;
     return work_item;
 }
 
@@ -436,7 +561,7 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
             prepare_resolved_source_build_work_item(
             identity, std::move(environment), only_if_updated, needed);
     auto candidates = g_state.provider_candidates.find(
-            identity.requested_name);
+            identity.requested_name());
     if(candidates != g_state.provider_candidates.end()) {
         if(!select_provider) {
             throw std::runtime_error(
@@ -460,10 +585,34 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
         }
     }
     auto providers = g_state.selected_repository_providers.find(
-            identity.requested_name);
+            identity.requested_name());
     if(providers != g_state.selected_repository_providers.end()) {
         work_item.selected_repository_providers = providers->second;
     }
+    return work_item;
+}
+
+ProductionSourceBuildWorkItem prepare_registered_source_build_work_item(
+        const ResolvedSourceBuildIdentity& identity,
+        SourceBuildEnvironment environment,
+        const ProviderSelectionCallback& select_provider) {
+    ProductionSourceBuildWorkItem work_item =
+            prepare_resolved_source_build_work_item(
+                    identity, std::move(environment),
+                    identity.source_kind() == SourceBuildSourceKind::Aur,
+                    false, select_provider);
+    if(identity.source_kind() == SourceBuildSourceKind::Repository) {
+        work_item.artifact_lifecycle_intent =
+                ArtifactLifecycleIntent::PackageBaseSet;
+        work_item.request.only_if_updated = false;
+        work_item.uses_system_update_baseline = true;
+    } else {
+        work_item.artifact_lifecycle_intent =
+                ArtifactLifecycleIntent::SingularCompatibility;
+        work_item.request.only_if_updated = true;
+        work_item.uses_system_update_baseline = false;
+    }
+    work_item.request.needed = false;
     return work_item;
 }
 
@@ -507,6 +656,10 @@ PackageMetadataError::PackageMetadataError(PackageMetadataFailure failure)
 
 const PackageMetadataFailure& PackageMetadataError::failure() const noexcept {
     return failure_;
+}
+
+PacmanDatabasePaths resolve_pacman_database_paths() {
+    return PacmanDatabasePaths{"/stub/root", "/stub/database"};
 }
 
 struct PackageMetadataSession::Impl {
@@ -590,6 +743,28 @@ BuildPlan resolve_build_plan(
     return plan;
 }
 
+PlanStateProjection project_build_plan_state(const BuildPlan&) {
+    // This phase-characterization binary already replaces the BuildPlan
+    // execution guard below. It supplies an empty, already-projected readiness
+    // seam for unrelated unified-plan paths; relation classification remains
+    // covered by the dedicated production-model and unified-plan tests.
+    return PlanStateProjection{};
+}
+
+const ExecutionReadiness& execution_readiness(
+        const PlanStateProjection& projection,
+        ExecutionCapability capability) noexcept {
+    switch(capability) {
+    case ExecutionCapability::Fetch:
+        return projection.readiness[0];
+    case ExecutionCapability::Build:
+        return projection.readiness[1];
+    case ExecutionCapability::Install:
+        return projection.readiness[2];
+    }
+    return projection.readiness[0];
+}
+
 void require_executable_install_plan(
         const std::string&, const BuildPlan&) {
     if(g_state.build_plan_guard_failure.has_value()) {
@@ -613,6 +788,183 @@ SeparatedSourceBuildCleanupError::SeparatedSourceBuildCleanupError(
         const std::string& diagnostic)
     : std::runtime_error(diagnostic),
       install_outcome_(install_outcome) {
+}
+
+SourceBuildPreparationOutcome
+prepare_package_base_source_build_work_item_typed(
+        const ProductionSourceBuildWorkItem& work_item,
+        SourceBuildUpdatePolicy update_policy,
+        const AppConfig& config) {
+    if(work_item.required_targets.size() != 1 ||
+       work_item.request.package_name.empty() ||
+       work_item.request.package_name !=
+               work_item.required_targets.front().package_name ||
+       work_item.request.checkout_name !=
+               work_item.required_targets.front().package_base ||
+       work_item.required_target_provenance !=
+               RequiredTargetProvenance::RepositoryExactPackageProjection ||
+       work_item.artifact_lifecycle_intent !=
+               ArtifactLifecycleIntent::PackageBaseSet ||
+       work_item.request.only_if_updated || work_item.request.needed) {
+        fail_unexpected(
+                "Registered repository preparation received an inconsistent PackageBase work item.");
+    }
+
+    const stub::ConfigSnapshot config_snapshot = snapshot_config(config);
+    g_state.source_preparation_calls.push_back(stub::SourcePreparationCall{
+            work_item.request.package_name,
+            work_item.request.checkout_name,
+            work_item.request,
+            update_policy,
+            config_snapshot});
+    g_state.events.push_back(stub::Event{
+            stub::EventKind::SourcePreparation,
+            work_item.request.package_name});
+    // 既存phase testのsource単位観測はpreparation開始をexecution開始として保つ。
+    g_state.source_calls.push_back(stub::SourceExecutionCall{
+            work_item.request.package_name,
+            work_item.request.checkout_name,
+            work_item.request,
+            config_snapshot});
+    g_state.events.push_back(stub::Event{
+            stub::EventKind::SourceExecution,
+            work_item.request.package_name});
+
+    if(g_state.source_executions.empty()) {
+        fail_unexpected(
+                "Unexpected registered repository source preparation for " +
+                work_item.request.package_name + ".");
+    }
+    ScriptedSourceExecution& execution = g_state.source_executions.front();
+    if(execution.kind == ScriptedSourceExecutionKind::Success) {
+        if(execution.result.status == SourceBuildExecutionStatus::UpToDate) {
+            SourceBuildUpToDate outcome{
+                    std::move(execution.result.diagnostic)};
+            g_state.source_executions.pop_front();
+            return outcome;
+        }
+        if(execution.result.status ==
+           SourceBuildExecutionStatus::UpdateStatusUnknownSkipped) {
+            SourceBuildUpdateStatusUnknownSkipped outcome{
+                    execution.result.update_status_unknown_skip_reason
+                            .value_or(
+                                    SourceBuildUpdateStatusUnknownSkipReason::
+                                            NoConfirm),
+                    std::move(execution.result.diagnostic)};
+            g_state.source_executions.pop_front();
+            return outcome;
+        }
+    }
+    return PreparedSourceBuildNeedsBuild::
+            make_for_registered_source_build_test();
+}
+
+RegisteredSourcePackageBaseExecutionResult
+execute_prepared_package_base_source_build_work_item_typed(
+        const ProductionSourceBuildWorkItem& work_item,
+        PreparedSourceBuildNeedsBuild prepared,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config) {
+    static_cast<void>(prepared);
+    static_cast<void>(database_paths);
+    if(work_item.required_targets.size() != 1) {
+        fail_unexpected(
+                "Registered repository PackageBase execution received an inconsistent required target.");
+    }
+    g_state.package_base_source_calls.push_back(
+            stub::PackageBaseSourceExecutionCall{
+                    work_item.request.package_name,
+                    work_item.request.checkout_name,
+                    work_item.request,
+                    snapshot_config(config)});
+    g_state.events.push_back(stub::Event{
+            stub::EventKind::PackageBaseSourceExecution,
+            work_item.request.package_name});
+    if(g_state.source_executions.empty()) {
+        fail_unexpected(
+                "Unexpected registered repository PackageBase execution for " +
+                work_item.request.package_name + ".");
+    }
+
+    ScriptedSourceExecution execution =
+            std::move(g_state.source_executions.front());
+    g_state.source_executions.pop_front();
+    const RequiredPackageArtifactTarget& required =
+            work_item.required_targets.front();
+    const auto legacy_result = [&](ArtifactInstallExecutionOutcome outcome) {
+        return RegisteredSourcePackageBaseExecutionResult(
+                work_item.request.checkout_name,
+                std::vector<PackageBaseSourceBuildSelectedResult>{
+                        PackageBaseSourceBuildSelectedResult{
+                                ArtifactPackageIdentity{
+                                        required.package_name, "2.0-1"},
+                                required.desired_reason,
+                                outcome}},
+                std::vector<ArtifactPackageIdentity>{});
+    };
+
+    switch(execution.kind) {
+    case ScriptedSourceExecutionKind::Success:
+        if(execution.result.status == SourceBuildExecutionStatus::Installed) {
+            return legacy_result(ArtifactInstallExecutionOutcome::Installed);
+        }
+        if(execution.result.status ==
+           SourceBuildExecutionStatus::SkippedAsNeeded) {
+            return legacy_result(
+                    ArtifactInstallExecutionOutcome::SkippedAsNeeded);
+        }
+        fail_unexpected(
+                "Registered repository prepared execution received a closed preparation outcome.");
+    case ScriptedSourceExecutionKind::Failure:
+        throw RegisteredSourcePackageBasePhaseError(
+                SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                execution.diagnostic);
+    case ScriptedSourceExecutionKind::CacheFailure:
+        throw TrustedCacheError(TrustedCacheFailure{
+                TrustedCacheStage::RootRevalidation,
+                TrustedCacheErrorCode::ConcurrentReplacement,
+                std::nullopt});
+    case ScriptedSourceExecutionKind::CleanupFailure:
+        throw RegisteredSourcePackageBaseCleanupError(
+                legacy_result(execution.cleanup_outcome),
+                execution.diagnostic);
+    case ScriptedSourceExecutionKind::UnknownFailure:
+        throw UnknownSourceExecutionFailure{};
+    case ScriptedSourceExecutionKind::PackageBaseSuccess:
+        return RegisteredSourcePackageBaseExecutionResult(
+                std::move(execution.package_base),
+                std::move(execution.selected_children),
+                std::move(execution.unselected_artifacts));
+    case ScriptedSourceExecutionKind::PackageBaseCleanupFailure:
+        throw RegisteredSourcePackageBaseCleanupError(
+                RegisteredSourcePackageBaseExecutionResult(
+                        std::move(execution.package_base),
+                        std::move(execution.selected_children),
+                        std::move(execution.unselected_artifacts)),
+                execution.diagnostic);
+    case ScriptedSourceExecutionKind::PackageBaseSelectionFailure:
+        throw RegisteredSourcePackageBasePreparationError(
+                std::move(execution.selection_failure),
+                execution.diagnostic);
+    case ScriptedSourceExecutionKind::PackageBaseMixedReasonFailure:
+        throw RegisteredSourcePackageBasePreparationError(
+                std::move(execution.mixed_reason_failure),
+                execution.diagnostic);
+    case ScriptedSourceExecutionKind::PackageBasePhaseFailure:
+        throw RegisteredSourcePackageBasePhaseError(
+                execution.phase, execution.diagnostic);
+    case ScriptedSourceExecutionKind::PackageBaseTransactionFailure:
+        throw RegisteredSourcePackageTransactionError(
+                execution.transaction_failure_kind,
+                std::move(execution.package_base),
+                std::move(execution.transaction_attempts),
+                execution.transaction_exit_code,
+                execution.diagnostic);
+    case ScriptedSourceExecutionKind::PackageBaseMetadataFailure:
+        throw PackageMetadataError(std::move(execution.metadata_failure));
+    }
+    throw std::logic_error(
+            "Unknown scripted registered repository execution kind.");
 }
 
 SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
@@ -662,6 +1014,15 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
                     execution.diagnostic);
         case ScriptedSourceExecutionKind::UnknownFailure:
             throw UnknownSourceExecutionFailure{};
+        case ScriptedSourceExecutionKind::PackageBaseSuccess:
+        case ScriptedSourceExecutionKind::PackageBaseCleanupFailure:
+        case ScriptedSourceExecutionKind::PackageBaseSelectionFailure:
+        case ScriptedSourceExecutionKind::PackageBaseMixedReasonFailure:
+        case ScriptedSourceExecutionKind::PackageBasePhaseFailure:
+        case ScriptedSourceExecutionKind::PackageBaseTransactionFailure:
+        case ScriptedSourceExecutionKind::PackageBaseMetadataFailure:
+            fail_unexpected(
+                    "Registered AUR singular execution received a PackageBase script.");
     }
     throw std::logic_error("Unknown scripted source execution kind.");
 }

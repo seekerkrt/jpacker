@@ -13,6 +13,7 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 fixture_dir=$repo_root/tests/fixtures/pkgbuild-export
 tmp_dir=$(mktemp -d)
 normal_server_pid=
@@ -28,6 +29,34 @@ cleanup() {
     rm -rf "$tmp_dir"
 }
 trap cleanup EXIT INT TERM
+
+capture_command_output_value() {
+    output_label=$1
+    shift
+    output_raw=$case_dir/$output_label.raw
+    if validation_capture_output "$output_raw" "$@"; then
+        cat "$output_raw"
+        return 0
+    else
+        output_status=$?
+    fi
+    echo "$output_label producer failed with status $output_status; raw=$output_raw" >&2
+    return "$output_status"
+}
+
+count_command_output_lines() {
+    count_label=$1
+    shift
+    count_raw=$case_dir/$count_label.raw
+    if validation_capture_output "$count_raw" "$@"; then
+        wc -l <"$count_raw"
+        return 0
+    else
+        count_status=$?
+    fi
+    echo "$count_label producer failed with status $count_status; raw=$count_raw" >&2
+    return "$count_status"
+}
 
 wait_for_fixture() {
     port_file=$1
@@ -132,14 +161,21 @@ run_ok() {
     fi
 }
 
+run_in_work_dir() {
+    (cd "$work_dir" && "$test_binary" "$@")
+}
+
 run_fail() {
     : > "$command_log"
     : > "$stdout_file"
     : > "$stderr_file"
     : > "$normal_request_log"
     : > "$schema_request_log"
-    if (cd "$work_dir" && "$test_binary" "$@") </dev/null > "$stdout_file" 2> "$stderr_file"; then
-        echo "expected command to fail: $*" >&2
+    validation_run_command run_in_work_dir "$@" \
+        </dev/null >"$stdout_file" 2>"$stderr_file"
+    if ! validation_assert_status pkgbuild-export-business-failure 1 \
+        "$VALIDATION_COMMAND_STATUS" "$stdout_file" "$stderr_file" \
+        "$test_binary" "$@"; then
         sed -n '1,240p' "$stdout_file" >&2
         sed -n '1,240p' "$stderr_file" >&2
         cat "$command_log" >&2
@@ -245,7 +281,9 @@ assert_cache_root_absent() {
 
 assert_source_preference_unchanged() {
     preference_file=$source_preference_dir/clean-root
-    if [ "$(find "$source_preference_dir" -mindepth 1 -maxdepth 1 -print | wc -l)" -ne 1 ] ||
+    preference_count=$(count_command_output_lines source-preference-entries \
+        find "$source_preference_dir" -mindepth 1 -maxdepth 1 -print)
+    if [ "$preference_count" -ne 1 ] ||
        [ "$(cat "$preference_file")" != "source preference marker" ]; then
         echo "PKGBUILD export changed source-build preferences" >&2
         find "$source_preference_dir" -maxdepth 1 -print >&2 || true
@@ -265,11 +303,12 @@ assert_no_temporary_artifacts() {
 assert_export_git_commands() {
     package_base=$1
     validation_count=${2:-1}
-    clone_count=$(grep -F -c -- \
+    clone_count=$(validation_grep_count -F -c -- \
         "git clone --quiet -- https://aur.archlinux.org/$package_base.git " \
-        "$command_log" || true)
-    config_count=$(grep -E -c '^git -C .+ config --local --get remote\.origin\.url$' \
-        "$command_log" || true)
+        "$command_log")
+    config_count=$(validation_grep_count -E -c \
+        '^git -C .+ config --local --get remote\.origin\.url$' \
+        "$command_log")
     if [ "$clone_count" -ne 1 ] || [ "$config_count" -ne "$validation_count" ] || \
        [ "$(wc -l < "$command_log")" -ne $((validation_count + 1)) ]; then
         echo "unexpected export git command sequence for $package_base" >&2
@@ -296,27 +335,29 @@ assert_fixture_tree() {
 # Matrix A: exact operation、arity、option roleをnetwork/filesystem mutation前に固定する。
 setup_case cli-validation
 run_fail -G
-assert_contains "requires exactly one AUR package target" "$stderr_file"
-assert_contains "Usage: moguet -G <pkg>" "$stderr_file"
+assert_contains \
+    "Operation -G requires exactly one <pkg> operand." "$stderr_file"
 assert_command_log_empty
 assert_normal_request_log_empty
 assert_cache_root_absent
 
 run_fail -Gp
-assert_contains "requires exactly one AUR package target" "$stderr_file"
-assert_contains "Usage: moguet -Gp <pkg>" "$stderr_file"
+assert_contains \
+    "Operation -Gp requires exactly one <pkg> operand." "$stderr_file"
 assert_stdout_empty
 assert_command_log_empty
 assert_normal_request_log_empty
 assert_cache_root_absent
 
 run_fail -G clean-root risk-root
-assert_contains "requires exactly one AUR package target" "$stderr_file"
+assert_contains \
+    "Operation -G requires exactly one <pkg> operand." "$stderr_file"
 assert_command_log_empty
 assert_normal_request_log_empty
 
 run_fail -Gp clean-root risk-root
-assert_contains "requires exactly one AUR package target" "$stderr_file"
+assert_contains \
+    "Operation -Gp requires exactly one <pkg> operand." "$stderr_file"
 assert_stdout_empty
 assert_command_log_empty
 assert_normal_request_log_empty
@@ -424,7 +465,8 @@ run_ok --version
 assert_contains "Moguet v" "$stdout_file"
 assert_command_log_empty
 run_fail -Gp --help
-assert_contains "Unsupported option --help for operation -Gp" "$stderr_file"
+assert_contains \
+    "Operation -Gp requires exactly one <pkg> operand." "$stderr_file"
 assert_stdout_empty
 assert_command_log_empty
 
@@ -738,14 +780,24 @@ legacy_outside_cache_checksum=$(cksum "$legacy_outside_cache_dir/marker")
 export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_ok -Gp clean-root
 cmp -s "$fixture_dir/PKGBUILD" "$stdout_file"
-if [ "$(cksum "$outside_cache_dir/marker")" != "$outside_cache_checksum" ] ||
-   [ "$(find "$outside_cache_dir" -mindepth 1 -maxdepth 1 -print | wc -l)" -ne 1 ]; then
+outside_cache_checksum_after=$(capture_command_output_value \
+    outside-cache-checksum cksum "$outside_cache_dir/marker")
+outside_cache_entry_count=$(count_command_output_lines \
+    outside-cache-entries find "$outside_cache_dir" \
+    -mindepth 1 -maxdepth 1 -print)
+if [ "$outside_cache_checksum_after" != "$outside_cache_checksum" ] ||
+   [ "$outside_cache_entry_count" -ne 1 ]; then
     echo "-Gp followed or changed the active Moguet cache symlink" >&2
     find "$outside_cache_dir" -maxdepth 2 -print >&2 || true
     exit 1
 fi
-if [ "$(cksum "$legacy_outside_cache_dir/marker")" != "$legacy_outside_cache_checksum" ] ||
-   [ "$(find "$legacy_outside_cache_dir" -mindepth 1 -maxdepth 1 -print | wc -l)" -ne 1 ]; then
+legacy_outside_cache_checksum_after=$(capture_command_output_value \
+    legacy-outside-cache-checksum cksum "$legacy_outside_cache_dir/marker")
+legacy_outside_cache_entry_count=$(count_command_output_lines \
+    legacy-outside-cache-entries find "$legacy_outside_cache_dir" \
+    -mindepth 1 -maxdepth 1 -print)
+if [ "$legacy_outside_cache_checksum_after" != "$legacy_outside_cache_checksum" ] ||
+   [ "$legacy_outside_cache_entry_count" -ne 1 ]; then
     echo "-Gp followed or changed the legacy jpacker cache symlink" >&2
     find "$legacy_outside_cache_dir" -maxdepth 2 -print >&2 || true
     exit 1

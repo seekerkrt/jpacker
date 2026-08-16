@@ -3,6 +3,7 @@
 #include "aur_update_query.hpp"
 #include "commands_sync.hpp"
 #include "local_dependency_plan_projection.hpp"
+#include "package_relation_assessment_fixture.hpp"
 #include "source_install.hpp"
 #include "stubs/local-dependency-plan/query_stub.hpp"
 #include "system_source_upgrade.hpp"
@@ -131,6 +132,7 @@ BuildPlan build_plan_fixture() {
             ResolvedDependencyCandidate{RepositoryExactPackage{
                     ConfiguredRepositoryIdentity{"zeta", 0},
                     "repo-dependency",
+                    "repo-dependency",
                     ObservedVersion::available(
                             ObservedVersionSource::RepositoryExactPackage,
                             "1.4"),
@@ -214,6 +216,18 @@ LocalPackageMetadata local_build_plan_metadata_fixture() {
 
 void test_ready_rendering_and_identity_boundaries() {
     BuildPlan plan = build_plan_fixture();
+    PackageRelationAssessment no_match =
+            package_relation_assessment_fixture::
+                    confirmed_installed_conflict_reason(
+                            "aur-child", "aur-base", "absent-component")
+                    .assessment;
+    no_match.kind = PackageRelationAssessmentKind::
+            ConfirmedNoMatchingCurrentOrPlannedTarget;
+    no_match.attributed_package_evidence.reset();
+    no_match.attributed_observation_failure.reset();
+    no_match.active_evidence.observation_completeness =
+            PackageRelationObservationCompleteness::Complete;
+    plan.relation_assessments.push_back(std::move(no_match));
     LocalPackageMetadata local_metadata = local_metadata_fixture();
     const LocalSourceRootObservationIdentity local_identity =
             local_source_identity();
@@ -228,6 +242,7 @@ void test_ready_rendering_and_identity_boundaries() {
                     DesiredInstallReason::Explicit}};
     const RepositoryExactPackage repository_dependency{
             ConfiguredRepositoryIdentity{"zeta", 0},
+            "repo-dependency",
             "repo-dependency",
             ObservedVersion::available(
                     ObservedVersionSource::RepositoryExactPackage, "1.4"),
@@ -405,6 +420,17 @@ void test_ready_rendering_and_identity_boundaries() {
             "stored constraint display");
     expect_contains(
             rendered.text,
+            "Package relation assessments:\n       1. Confirmed no matching current or planned target",
+            "complete no-match relation authority");
+    expect_contains(
+            rendered.text, "this relation does not block build/install",
+            "complete no-match readiness wording");
+    expect_not_contains(
+            rendered.text,
+            "ConfirmedNoMatchingCurrentOrPlannedTarget",
+            "internal no-match enum token");
+    expect_contains(
+            rendered.text,
             "AUR BuildPlan unit #1 (PackageBase: aur-base)",
             "AUR build unit");
     expect_contains(
@@ -572,6 +598,7 @@ void test_constraint_second_authority_canary() {
             ResolvedDependencyCandidate{RepositoryExactPackage{
                     ConfiguredRepositoryIdentity{"core", 0},
                     "constraint-canary",
+                    "constraint-canary",
                     observed_version,
                     {}}},
             ConstraintEvaluation::satisfied()});
@@ -622,6 +649,14 @@ void test_cross_source_required_artifact_identity() {
             "repository-source-key";
     prepared_source.resolved_package_base = package_base;
     prepared_source.source_kind = SourceBuildSourceKind::Repository;
+    prepared_source.required_target_provenance =
+            RequiredTargetProvenance::RepositoryExactPackageProjection;
+    prepared_source.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::PackageBaseSet;
+    prepared_source.repository_identity =
+            ResolvedRepositorySourceBuildIdentity{
+                    RepositoryPackagePresent{
+                            "extra", 0, package_name, package_base}};
     const std::string prepared_requested_package = package_name;
     const std::string prepared_checkout_package_base = package_base;
     const std::vector<RequiredPackageArtifactTarget> prepared_targets = {
@@ -645,7 +680,9 @@ void test_cross_source_required_artifact_identity() {
     input.build_units.push_back(PreparedSystemSourceBuildUnitReference(
             std::cref(prepared_source),
             std::cref(prepared_requested_package),
-            std::cref(prepared_checkout_package_base), false, true,
+            std::cref(prepared_checkout_package_base),
+            RequiredTargetProvenance::RepositoryExactPackageProjection,
+            ArtifactLifecycleIntent::PackageBaseSet, true,
             std::cref(prepared_targets)));
     input.required_artifacts.emplace_back(
             AurPackageBaseBuildUnitReference(std::cref(aur_plan), 0),
@@ -658,7 +695,10 @@ void test_cross_source_required_artifact_identity() {
             PreparedSystemSourceBuildUnitReference(
                     std::cref(prepared_source),
                     std::cref(prepared_requested_package),
-                    std::cref(prepared_checkout_package_base), false, true,
+                    std::cref(prepared_checkout_package_base),
+                    RequiredTargetProvenance::
+                            RepositoryExactPackageProjection,
+                    ArtifactLifecycleIntent::PackageBaseSet, true,
                     std::cref(prepared_targets)),
             std::cref(prepared_targets[0]));
 
@@ -798,8 +838,10 @@ void test_blocker_variant_details() {
                             CandidateVersionUnavailable)});
     const BuildPlanDependencyEdge& constraint_edge =
             constraint_plan.dependency_edges[1];
-    const BuildPlanMetadataRisk metadata_risk{
-            "risk-child", "risk-base", {"conflict-a"}, {"replace-b"}};
+    const PlanDeclaredRelationReason relation_reason =
+            package_relation_assessment_fixture::
+                    confirmed_installed_conflict_reason(
+                            "risk-child", "risk-base", "conflict-a");
     const LocalDependencyPlanFailure local_dependency_failure{
             LocalDependencyPlanFailureKind::ConstraintMismatch,
             "local-parent",
@@ -832,6 +874,14 @@ void test_blocker_variant_details() {
             "route-base",
             "route-dependency>=1",
             "route preflight diagnostic"};
+    const AurUpdateExecutionIssue relation_route_issue{
+            AurUpdateExecutionReason::ConflictsOrReplacesUnresolved,
+            "risk-child",
+            "risk-base",
+            std::nullopt,
+            "DO-NOT-DUPLICATE-RELATION-DIAGNOSTIC",
+            std::nullopt,
+            relation_reason};
 
     const auto expect_blocker = [](
                                         UnifiedPlanBlocker blocker,
@@ -902,12 +952,12 @@ void test_blocker_variant_details() {
             constraint_text, "constraint-decoy-provider",
             "constraint blocker edge correlation");
     expect_blocker(
-            MetadataRiskUnifiedPlanBlocker{
-                    UnifiedPlanBorrowedAuthorityReference<
-                            BuildPlanMetadataRisk>(metadata_risk)},
-            {"MetadataRiskUnifiedPlanBlocker", "risk-child",
-             "PackageBase: risk-base", "conflicts: conflict-a",
-             "replaces: replace-b"},
+            MetadataRiskUnifiedPlanBlocker{relation_reason},
+            {"package relation blocker: Installed conflict confirmed",
+             "declaring package risk-child",
+             "PackageBase: risk-base", "declares conflict conflict-a",
+             "matched installed package conflict-a",
+             "build/install is blocked before mutation"},
             "metadata blocker");
     expect_blocker(
             LocalDependencyPlanUnifiedPlanBlocker{
@@ -956,6 +1006,20 @@ void test_blocker_variant_details() {
              "dependency: route-dependency>=1",
              "route preflight diagnostic"},
             "route preflight blocker");
+    const std::string relation_route_text = expect_blocker(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            AurUpdateExecutionIssue>(relation_route_issue)},
+            {"AurUpdateExecutionReason::ConflictsOrReplacesUnresolved",
+             "package: risk-child", "PackageBase: risk-base",
+             "relation assessment: Installed conflict confirmed",
+             "matched installed package conflict-a",
+             "build/install is blocked before mutation"},
+            "relation route preflight blocker");
+    expect_not_contains(
+            relation_route_text,
+            "DO-NOT-DUPLICATE-RELATION-DIAGNOSTIC",
+            "relation route preflight diagnostic duplication");
 }
 
 void test_invalid_root_search_snapshot_typed_details() {
@@ -2396,6 +2460,14 @@ void test_blocked_prepared_build_unit_missing_preference_is_not_duplicated() {
     source.canonical_source_identity_key = "partial-prepared-source-key";
     source.resolved_package_base = "partial-prepared-base";
     source.source_kind = SourceBuildSourceKind::Repository;
+    source.required_target_provenance =
+            RequiredTargetProvenance::RepositoryExactPackageProjection;
+    source.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::SingularCompatibility;
+    source.repository_identity = ResolvedRepositorySourceBuildIdentity{
+            RepositoryPackagePresent{
+                    "extra", 0, "partial-prepared-package",
+                    "partial-prepared-base"}};
     const std::string requested_package = "partial-prepared-package";
     const std::string checkout_package_base = "partial-prepared-base";
     const std::vector<RequiredPackageArtifactTarget> targets{
@@ -2409,7 +2481,9 @@ void test_blocked_prepared_build_unit_missing_preference_is_not_duplicated() {
     input.status = UnifiedPlanObservationStatus::Blocked;
     input.build_units.push_back(PreparedSystemSourceBuildUnitReference(
             std::cref(source), std::cref(requested_package),
-            std::cref(checkout_package_base), false, true,
+            std::cref(checkout_package_base),
+            RequiredTargetProvenance::RepositoryExactPackageProjection,
+            ArtifactLifecycleIntent::SingularCompatibility, true,
             std::cref(targets)));
     input.blockers.push_back(BuildPlanStateUnifiedPlanBlocker{
             UnifiedPlanBorrowedAuthorityReference<BuildPlan>(plan),
@@ -2497,16 +2571,23 @@ void test_slice_five_route_authority_rendering() {
             "AUR source preparation root identity");
 
     ResolvedSourceBuildIdentity source{
-            "repository-child", "repository-base", "repo:repository-base",
-            "https://example.invalid/repository-base.git",
-            SourceBuildSourceKind::Repository, true};
+            ResolvedRepositorySourceBuildIdentity{
+                    RepositoryPackagePresent{
+                            "extra", 0, "repository-child",
+                            "repository-base"}}};
     ProductionSourceBuildWorkItem work;
-    work.request.package_name = source.requested_name;
-    work.request.checkout_name = source.package_base;
-    work.request.git_url = source.git_url;
+    work.request.package_name = source.requested_name();
+    work.request.checkout_name = source.package_base();
+    work.request.git_url = source.git_url();
     work.required_targets.push_back(RequiredPackageArtifactTarget{
-            source.package_base, source.requested_name,
+            source.package_base(), source.requested_name(),
             DesiredInstallReason::Explicit});
+    work.required_target_provenance =
+            RequiredTargetProvenance::RepositoryExactPackageProjection;
+    work.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::PackageBaseSet;
+    work.repository_identity = *source.repository_identity();
+    work.uses_system_update_baseline = true;
     UnifiedPlanObservationInput remote_input;
     remote_input.status = UnifiedPlanObservationStatus::Ready;
     remote_input.build_units.push_back(
@@ -2527,7 +2608,7 @@ void test_slice_five_route_authority_rendering() {
             "standalone remote source build rendering incomplete");
     expect_contains(
             remote_rendered.text,
-            "repository source key repo:repository-base",
+            "repository source key repository:repository-base",
             "standalone remote source identity");
     expect_contains(
             remote_rendered.text,

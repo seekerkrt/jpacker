@@ -3,9 +3,12 @@
 set -eu
 
 repo_root=$(CDPATH='' cd "$(dirname "$0")/../.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
 fixture_root=$repo_root/containers/arch-live-validation/fixtures/local-package
 fixture_pkgbuild=$fixture_root/PKGBUILD
 fixture_contract=$fixture_root/contract.env
+fixture_expected_srcinfo=$fixture_root/expected.srcinfo
+fixture_payload_authority=$fixture_root/payload-authority.tsv
 pty_runner=$repo_root/tests/run-with-pty.py
 production_moguet=$repo_root/moguet
 case_root=$HOME/live-provider-cases
@@ -52,7 +55,7 @@ assert_count() {
     expected_count=$1
     pattern=$2
     checked_file=$3
-    actual_count=$(grep -F -c -- "$pattern" "$checked_file" || true)
+    actual_count=$(validation_grep_count -F -c -- "$pattern" "$checked_file")
     if [ "$actual_count" -ne "$expected_count" ]; then
         fail "expected $expected_count occurrences of '$pattern', observed $actual_count"
     fi
@@ -84,42 +87,99 @@ PY
     fi
 }
 
-tracked_fixture_manifest() {
+tracked_fixture_manifest_raw() {
     (
-        cd "$fixture_root"
-        sha256sum PKGBUILD contract.env
-        find . -mindepth 1 -maxdepth 1 -printf '%y %m %f\n' | LC_ALL=C sort
+        cd "$fixture_root" || exit $?
+        sha256sum \
+            PKGBUILD contract.env expected.srcinfo payload-authority.tsv ||
+            exit $?
+        find . -mindepth 1 -maxdepth 1 -printf '%y %m %f\n' || exit $?
+    )
+}
+
+tracked_fixture_manifest() {
+    manifest_raw=$(mktemp "$case_root/tracked-fixture.raw.XXXXXX")
+    manifest_sorted=$(mktemp "$case_root/tracked-fixture.sorted.XXXXXX")
+    if validation_capture_sorted_output "$manifest_raw" "$manifest_sorted" \
+        tracked_fixture_manifest_raw; then
+        cat "$manifest_sorted" || return $?
+        rm -f "$manifest_raw" "$manifest_sorted" || :
+        return 0
+    else
+        manifest_status=$?
+    fi
+    fail "tracked fixture manifest failed with status $manifest_status; raw=$manifest_raw"
+}
+
+package_database_paths_raw() {
+    (
+        cd /var/lib/pacman/local || exit $?
+        find . -mindepth 1 -printf '%P\n' || exit $?
+    )
+}
+
+sha256_file() {
+    if checksum_output=$(sha256sum -- "$1"); then
+        printf '%s\n' "${checksum_output%% *}"
+        return 0
+    else
+        return $?
+    fi
+}
+
+package_database_rows() {
+    sorted_paths=$1
+    (
+        cd /var/lib/pacman/local || exit $?
+        while IFS= read -r relative_path; do
+            database_path=./$relative_path
+            entry_type=$(find "$database_path" -prune -printf '%y') || exit $?
+            entry_mode=$(stat -c '%a' -- "$database_path") || exit $?
+            entry_owner_group=$(stat -c '%u:%g' -- "$database_path") || exit $?
+            content_hash=-
+            if [ "$entry_type" = f ]; then
+                content_hash=$(sha256_file "$database_path") || exit $?
+            fi
+            printf '%s\ttype=%s\tmode=%s\towner_group=%s\tsha256=%s\n' \
+                "$relative_path" "$entry_type" "$entry_mode" \
+                "$entry_owner_group" "$content_hash" || exit $?
+        done <"$sorted_paths"
     )
 }
 
 package_database_manifest() {
-    (
-        cd /var/lib/pacman/local
-        find . -mindepth 1 -printf '%P\n' |
-            LC_ALL=C sort |
-            while IFS= read -r relative_path; do
-                database_path=./$relative_path
-                entry_type=$(find "$database_path" -prune -printf '%y')
-                entry_mode=$(stat -c '%a' -- "$database_path")
-                entry_owner_group=$(stat -c '%u:%g' -- "$database_path")
-                content_hash=-
-                if [ "$entry_type" = f ]; then
-                    content_hash=$(sha256sum -- "$database_path" | awk '{ print $1 }')
-                fi
-                printf '%s\ttype=%s\tmode=%s\towner_group=%s\tsha256=%s\n' \
-                    "$relative_path" "$entry_type" "$entry_mode" \
-                    "$entry_owner_group" "$content_hash"
-            done
-    ) |
-        sha256sum
+    paths_raw=$(mktemp "$case_root/package-db-paths.raw.XXXXXX")
+    paths_sorted=$(mktemp "$case_root/package-db-paths.sorted.XXXXXX")
+    rows_file=$(mktemp "$case_root/package-db-rows.XXXXXX")
+    if validation_capture_sorted_output "$paths_raw" "$paths_sorted" \
+        package_database_paths_raw; then
+        :
+    else
+        manifest_status=$?
+        fail "package database path producer failed with status $manifest_status; raw=$paths_raw"
+    fi
+    if validation_capture_output "$rows_file" \
+        package_database_rows "$paths_sorted"; then
+        :
+    else
+        manifest_status=$?
+        fail "package database row producer failed with status $manifest_status; partial=$rows_file"
+    fi
+    if manifest_hash=$(sha256_file "$rows_file"); then
+        printf '%s  -\n' "$manifest_hash"
+    else
+        manifest_status=$?
+        fail "package database hash producer failed with status $manifest_status"
+    fi
+    rm -f "$paths_raw" "$paths_sorted" "$rows_file" || :
 }
 
 source_manifest() {
     manifest_root=$1
     (
-        cd "$manifest_root"
-        sha256sum PKGBUILD .SRCINFO
-        stat -c '%u:%g:%a:%F:%n' PKGBUILD .SRCINFO
+        cd "$manifest_root" || exit $?
+        sha256sum PKGBUILD .SRCINFO || exit $?
+        stat -c '%u:%g:%a:%F:%n' PKGBUILD .SRCINFO || exit $?
     )
 }
 
@@ -195,29 +255,29 @@ assert_runtime_sentinel_contract() {
     fi
     printf '%s\n' ':: live provider sentinel policy preflight'
     run_sentinel_policy_case \
-        sentinel-accept-rust 'accepted and blocked' \
-        -S --asdeps --needed -- extra/rust
+        sentinel-accept-first-provider 'accepted and blocked' \
+        -S --asdeps --needed -- "$first_provider_target"
     run_sentinel_policy_case \
-        sentinel-accept-rustup-noconfirm 'accepted and blocked' \
-        -S --asdeps --needed --noconfirm -- extra/rustup
+        sentinel-accept-second-provider-noconfirm 'accepted and blocked' \
+        -S --asdeps --needed --noconfirm -- "$second_provider_target"
     run_sentinel_policy_case \
         sentinel-reject-pacman-u 'rejected argv' \
         -U -- /tmp/package.pkg.tar.zst
     run_sentinel_policy_case \
         sentinel-reject-remove 'rejected argv' \
-        -R -- extra/rust
+        -R -- "$first_provider_target"
     run_sentinel_policy_case \
         sentinel-reject-syu 'rejected argv' \
         -Syu --noconfirm
     run_sentinel_policy_case \
         sentinel-reject-multiple 'rejected argv' \
-        -S --asdeps --needed -- extra/rust extra/rustup
+        -S --asdeps --needed -- "$first_provider_target" "$second_provider_target"
     run_sentinel_policy_case \
         sentinel-reject-unqualified 'rejected argv' \
-        -S --asdeps --needed -- rust
+        -S --asdeps --needed -- "$first_provider"
     run_sentinel_policy_case \
         sentinel-reject-option 'rejected argv' \
-        -S --asdeps --needed --overwrite '*' -- extra/rust
+        -S --asdeps --needed --overwrite '*' -- "$first_provider_target"
     run_sentinel_policy_case \
         sentinel-reject-unknown-target 'rejected argv' \
         -S --asdeps --needed -- extra/unknown-provider
@@ -241,6 +301,8 @@ prepare_case() {
     )
     assert_regular_non_symlink "$case_source/PKGBUILD" 'case PKGBUILD'
     assert_regular_non_symlink "$case_source/.SRCINFO" 'generated case .SRCINFO'
+    cmp -s "$fixture_expected_srcinfo" "$case_source/.SRCINFO" ||
+        fail 'generated case .SRCINFO differs from the independent fixture projection'
     source_owner=$(stat -c '%u' "$case_source/.SRCINFO")
     if [ "$source_owner" -ne "$(id -u)" ]; then
         fail "generated .SRCINFO is not validation-user-owned: $source_owner"
@@ -271,43 +333,54 @@ run_pty_case() {
     else
         case_status=$?
     fi
+    validation_assert_status "live-provider-$current_case" 1 "$case_status" \
+        "$case_output" "$case_output" python3 "$pty_runner" --timeout 90 -- \
+        "$production_moguet" "$@" ||
+        fail 'provider case returned a non-canonical business status'
 }
 
 run_non_tty_case() {
     piped_value=$1
     shift
+    non_tty_input=$case_directory/non-tty.input
+    printf '%s\n' "$piped_value" >"$non_tty_input"
     case_status=0
-    if printf '%s\n' "$piped_value" | env \
+    if env \
         HOME="$HOME" \
         XDG_CONFIG_HOME="$case_config" \
         XDG_CACHE_HOME="$case_cache" \
         XDG_STATE_HOME="$case_state" \
         MOGUET_LIVE_SENTINEL_CASE="$current_case" \
         "$production_moguet" "$@" \
-        >"$case_output" 2>&1; then
+        <"$non_tty_input" >"$case_output" 2>&1; then
         case_status=0
     else
         case_status=$?
     fi
+    validation_assert_status "live-provider-$current_case" 1 "$case_status" \
+        "$case_output" "$case_output" "$production_moguet" "$@" ||
+        fail 'non-TTY provider case returned a non-canonical business status'
 }
 
 assert_blocked_status() {
-    if [ "$case_status" -eq 0 ]; then
-        fail 'case unexpectedly succeeded'
-    fi
-    if [ "$case_status" -eq 124 ]; then
-        fail 'case timed out instead of failing closed'
-    fi
+    [ "$case_status" -eq 1 ] ||
+        fail "case returned $case_status instead of canonical status 1"
 }
 
 assert_no_source_or_install_execution() {
     assert_not_contains "Running: 'git'" "$case_output"
     assert_not_contains "Running: 'makepkg'" "$case_output"
     assert_not_contains "Running: 'sudo' 'pacman' '-U'" "$case_output"
-    if find "$case_cache" -type d \
+    workspace_probe=$case_directory/workspaces.raw
+    if validation_capture_output "$workspace_probe" find "$case_cache" -type d \
         \( -name '.local-source-workspace~-*' \
-        -o -name '.artifact-workspace~-*' \) -print |
-        grep . >/dev/null; then
+        -o -name '.artifact-workspace~-*' \) -print; then
+        :
+    else
+        workspace_status=$?
+        fail "workspace absence producer failed with status $workspace_status"
+    fi
+    if [ -s "$workspace_probe" ]; then
         fail 'source or artifact workspace exists after blocked phase'
     fi
     if [ -e "$case_source/src" ] || [ -e "$case_source/pkg" ]; then
@@ -340,13 +413,14 @@ parse_candidate_contract() {
     normalized_output=$parsed_output.normalized
     tr -d '\r' < "$parsed_output" > "$normalized_output"
 
-    dependency_header_count=$(grep -F -c \
-        ':: provider dependency=cargo' "$normalized_output" || true)
+    dependency_header_count=$(validation_grep_count -F -c \
+        ":: provider dependency=$REQUIRED_MAKE_DEPENDENCY" "$normalized_output")
     if [ "$dependency_header_count" -ne 1 ]; then
-        fail "expected one cargo provider header, observed $dependency_header_count"
+        fail "expected one provider header, observed $dependency_header_count"
     fi
 
-    presented_count=$(grep -E -c '^[0-9]+\) ' "$normalized_output" || true)
+    presented_count=$(validation_grep_count -E -c \
+        '^[0-9]+\) ' "$normalized_output")
     awk '
 /^[0-9]+\) / {
     number = $1
@@ -373,36 +447,51 @@ parse_candidate_contract() {
         fail "provider drift: expected exactly 2 parseable candidates, observed $presented_count/$parsed_count"
     fi
     if grep -F 'source=AUR' "$normalized_output" >/dev/null; then
-        fail 'provider drift: AUR candidate entered the cargo candidate set'
+        fail 'provider drift: AUR candidate entered the reviewed candidate set'
     fi
-    if [ "$(cut -f1 "$parsed_table" | LC_ALL=C sort -n | tr '\n' ' ')" != '1 2 ' ]; then
+    awk -F '\t' '
+        { numbers[$1]++ }
+        END {
+            for (number in numbers) number_count++
+            exit NR == 2 && number_count == 2 &&
+                numbers[1] == 1 && numbers[2] == 1 ? 0 : 1
+        }
+    ' "$parsed_table" ||
         fail 'provider presentation has duplicate, non-contiguous, or unsafe numbers'
-    fi
-    if [ "$(cut -f1 "$parsed_table" | LC_ALL=C sort -n | uniq | wc -l)" -ne 2 ]; then
+    awk -F '\t' '
+        { numbers[$1] = 1 }
+        END {
+            for (number in numbers) number_count++
+            exit number_count == 2 ? 0 : 1
+        }
+    ' "$parsed_table" ||
         fail 'provider presentation contains duplicate numbers'
-    fi
-    if [ "$(cut -f3 "$parsed_table" | LC_ALL=C sort | uniq | wc -l)" -ne 2 ]; then
+    awk -F '\t' '
+        { packages[$3] = 1 }
+        END {
+            for (package in packages) package_count++
+            exit package_count == 2 ? 0 : 1
+        }
+    ' "$parsed_table" ||
         fail 'provider candidate set contains duplicate package identities'
-    fi
     while IFS="$(printf '\t')" read -r \
         candidate_number candidate_source candidate_package \
         candidate_repository candidate_dependency; do
         if [ "$candidate_source" != repository ] ||
-            [ "$candidate_repository" != extra ] ||
-            [ "$candidate_dependency" != cargo ]; then
+            [ "$candidate_repository" != "$EXPECTED_PROVIDER_REPOSITORY" ] ||
+            [ "$candidate_dependency" != "$REQUIRED_MAKE_DEPENDENCY" ]; then
             fail "provider drift: unsafe candidate identity $candidate_number/$candidate_source/$candidate_repository/$candidate_dependency"
         fi
-        case "$candidate_package" in
-            rust|rustup)
-                ;;
-            *)
-                fail "provider drift: unexpected cargo provider $candidate_package"
-                ;;
+        case ",$EXPECTED_PROVIDER_PACKAGES," in
+            *,"$candidate_package",*) ;;
+            *) fail "provider drift: unexpected provider $candidate_package" ;;
         esac
     done < "$parsed_table"
-    if [ "$(awk -F '\t' '$3 == "rust" { count++ } END { print count + 0 }' "$parsed_table")" -ne 1 ] ||
-        [ "$(awk -F '\t' '$3 == "rustup" { count++ } END { print count + 0 }' "$parsed_table")" -ne 1 ]; then
-        fail 'provider drift: exact extra/rust and extra/rustup identities were not both present once'
+    if [ "$(awk -F '\t' -v package="$first_provider" \
+        '$3 == package { count++ } END { print count + 0 }' "$parsed_table")" -ne 1 ] ||
+        [ "$(awk -F '\t' -v package="$second_provider" \
+        '$3 == package { count++ } END { print count + 0 }' "$parsed_table")" -ne 1 ]; then
+        fail 'provider drift: reviewed provider identities were not both present once'
     fi
 }
 
@@ -435,7 +524,7 @@ assert_selection_failure_case() {
     expected_prompt_count=$1
     assert_blocked_status
     assert_same_candidate_presentation
-    assert_count "$expected_prompt_count" 'Select a provider from [1-2]' \
+    assert_count "$expected_prompt_count" "$provider_prompt" \
         "$case_output.normalized"
     assert_ambiguous_diagnostic
     assert_sentinel_absent "$current_case"
@@ -446,16 +535,16 @@ assert_selection_failure_case() {
 
 assert_selected_provider_transaction() {
     expected_package=$1
-    other_package=rust
-    if [ "$expected_package" = rust ]; then
-        other_package=rustup
+    other_package=$first_provider
+    if [ "$expected_package" = "$first_provider" ]; then
+        other_package=$second_provider
     fi
 
-    selected_install_intent="Installing selected repository providers: 'extra/$expected_package'"
-    selected_transaction_intent="Running: 'sudo' 'pacman' '-S' '--asdeps' '--needed' '--' 'extra/$expected_package'"
-    selected_sentinel_diagnostic="moguet-live-pacman-sentinel: accepted and blocked sudo pacman argv for extra/$expected_package"
-    other_install_intent="Installing selected repository providers: 'extra/$other_package'"
-    other_transaction_intent="Running: 'sudo' 'pacman' '-S' '--asdeps' '--needed' '--' 'extra/$other_package'"
+    selected_install_intent="Installing selected repository providers: '$EXPECTED_PROVIDER_REPOSITORY/$expected_package'"
+    selected_transaction_intent="Running: 'sudo' 'pacman' '-S' '--asdeps' '--needed' '--' '$EXPECTED_PROVIDER_REPOSITORY/$expected_package'"
+    selected_sentinel_diagnostic="moguet-live-pacman-sentinel: accepted and blocked sudo pacman argv for $EXPECTED_PROVIDER_REPOSITORY/$expected_package"
+    other_install_intent="Installing selected repository providers: '$EXPECTED_PROVIDER_REPOSITORY/$other_package'"
+    other_transaction_intent="Running: 'sudo' 'pacman' '-S' '--asdeps' '--needed' '--' '$EXPECTED_PROVIDER_REPOSITORY/$other_package'"
 
     assert_exact_message_count 1 "$selected_install_intent" "$case_output.normalized"
     assert_exact_message_count 1 "$selected_transaction_intent" "$case_output.normalized"
@@ -464,32 +553,36 @@ assert_selected_provider_transaction() {
     assert_exact_message_count 0 "$other_transaction_intent" "$case_output.normalized"
     assert_contains 'Failed to install selected repository providers.' "$case_output"
     assert_sentinel_log "$current_case" \
-        sudo pacman -S --asdeps --needed -- "extra/$expected_package"
+        sudo pacman -S --asdeps --needed -- \
+        "$EXPECTED_PROVIDER_REPOSITORY/$expected_package"
 }
 
 assert_valid_selection_case() {
     expected_package=$1
     assert_blocked_status
     assert_same_candidate_presentation
-    assert_count 1 'Select a provider from [1-2]' "$case_output.normalized"
+    assert_count 1 "$provider_prompt" "$case_output.normalized"
     assert_selected_provider_transaction "$expected_package"
     assert_common_case_integrity
 }
 
 assert_invalid_retry_selection_before_mutation() {
     selected_package=$1
-    if ! python3 - "$case_output.normalized" "$selected_package" <<'PY'
+    if ! python3 - "$case_output.normalized" "$selected_package" \
+        "$EXPECTED_PROVIDER_REPOSITORY" "$provider_prompt" \
+        "$provider_invalid_diagnostic" <<'PY'
 from pathlib import Path
 import sys
 
 output = Path(sys.argv[1]).read_bytes()
 selected_package = sys.argv[2].encode("ascii")
+repository = sys.argv[3].encode("ascii")
 
-invalid_diagnostic = b"Invalid choice. Enter a number from [1-2]"
-provider_prompt = b"Select a provider from [1-2]"
-install_intent = b"Installing selected repository providers: 'extra/" + selected_package + b"'"
+provider_prompt = sys.argv[4].encode("ascii")
+invalid_diagnostic = sys.argv[5].encode("ascii")
+install_intent = b"Installing selected repository providers: '" + repository + b"/" + selected_package + b"'"
 transaction_intent = (
-    b"Running: 'sudo' 'pacman' '-S' '--asdeps' '--needed' '--' 'extra/" +
+    b"Running: 'sudo' 'pacman' '-S' '--asdeps' '--needed' '--' '" + repository + b"/" +
     selected_package + b"'"
 )
 
@@ -527,22 +620,45 @@ PY
 
 assert_regular_non_symlink "$fixture_pkgbuild" 'tracked live PKGBUILD fixture'
 assert_regular_non_symlink "$fixture_contract" 'tracked live fixture contract'
+assert_regular_non_symlink "$fixture_expected_srcinfo" \
+    'tracked local expected .SRCINFO authority'
+assert_regular_non_symlink "$fixture_payload_authority" \
+    'tracked local payload authority'
 assert_regular_non_symlink "$pty_runner" 'production PTY helper'
 assert_regular_non_symlink "$production_moguet" 'production Moguet binary'
+# shellcheck source=fixtures/local-package/contract.env
+. "$fixture_contract"
+saved_ifs=$IFS
+IFS=,
+set -- $EXPECTED_PROVIDER_PACKAGES
+IFS=$saved_ifs
+[ "$#" -eq 2 ] || fail 'provider-selection lane requires exactly two reviewed providers'
+first_provider=$1
+second_provider=$2
+first_provider_target=$EXPECTED_PROVIDER_REPOSITORY/$first_provider
+second_provider_target=$EXPECTED_PROVIDER_REPOSITORY/$second_provider
+provider_prompt='Select a provider from [1-2]'
+provider_invalid_diagnostic='Invalid choice. Enter a number from [1-2]'
 if [ "$(id -u)" -eq 0 ]; then
     fail 'live provider runner must execute as an unprivileged validation user'
 fi
 if [ -e "$repo_root/.git" ]; then
     fail 'Docker build context leaked host .git metadata into the image'
 fi
-if find "$repo_root" -xdev \
+credential_probe=$case_root/credential-paths.raw
+mkdir -p "$case_root"
+if validation_capture_output "$credential_probe" find "$repo_root" -xdev \
     \( -name .ssh -o -name .gnupg -o -name .git-credentials \
-    -o -name .netrc -o -name docker.sock \) -print |
-    grep . >/dev/null; then
+    -o -name .netrc -o -name docker.sock \) -print; then
+    :
+else
+    credential_status=$?
+    fail "credential-path producer failed with status $credential_status"
+fi
+if [ -s "$credential_probe" ]; then
     fail 'Docker build context leaked credential or Docker socket state'
 fi
 
-mkdir -p "$case_root"
 tracked_fixture_before=$(tracked_fixture_manifest)
 tracked_pkgbuild_before=$(sha256sum "$fixture_pkgbuild")
 initial_package_database=$(package_database_manifest)
@@ -562,42 +678,49 @@ run_pty_case "$discovery_input" --noedit build --local "$case_source"
 assert_blocked_status
 discovery_table=$case_directory/candidates.tsv
 parse_candidate_contract "$case_output" "$discovery_table"
-rust_choice=$(awk -F '\t' '$3 == "rust" { print $1 }' "$discovery_table")
-rustup_choice=$(awk -F '\t' '$3 == "rustup" { print $1 }' "$discovery_table")
-if [ -z "$rust_choice" ] || [ -z "$rustup_choice" ] ||
-    [ "$rust_choice" = "$rustup_choice" ]; then
+first_provider_choice=$(awk -F '\t' -v package="$first_provider" \
+    '$3 == package { print $1 }' "$discovery_table")
+second_provider_choice=$(awk -F '\t' -v package="$second_provider" \
+    '$3 == package { print $1 }' "$discovery_table")
+if [ -z "$first_provider_choice" ] || [ -z "$second_provider_choice" ] ||
+    [ "$first_provider_choice" = "$second_provider_choice" ]; then
     fail 'provider choices could not be resolved from candidate identities'
 fi
-assert_count 1 'Select a provider from [1-2]' "$case_output.normalized"
+assert_count 1 "$provider_prompt" "$case_output.normalized"
 assert_ambiguous_diagnostic
 assert_sentinel_absent provider-discovery
 assert_not_contains "Running: 'sudo'" "$case_output"
 assert_common_case_integrity
 print_candidate_summary "$discovery_table"
-printf '  resolved choices from identities: extra/rust=%s extra/rustup=%s\n' \
-    "$rust_choice" "$rustup_choice"
+printf '  resolved choices from identities: %s/%s=%s %s/%s=%s\n' \
+    "$EXPECTED_PROVIDER_REPOSITORY" "$first_provider" "$first_provider_choice" \
+    "$EXPECTED_PROVIDER_REPOSITORY" "$second_provider" "$second_provider_choice"
 printf '%s\n' '  expected blocked phase: provider selection cancellation'
 
-printf '%s\n' ':: case=rust-selection'
-prepare_case rust-selection
-rust_input=$case_directory/input
-printf '%s\n' "$rust_choice" > "$rust_input"
-run_pty_case "$rust_input" --noedit build --local "$case_source"
-assert_valid_selection_case rust
+printf '%s\n' ':: case=first-provider-selection'
+prepare_case first-provider-selection
+first_provider_input=$case_directory/input
+printf '%s\n' "$first_provider_choice" > "$first_provider_input"
+run_pty_case "$first_provider_input" --noedit build --local "$case_source"
+assert_valid_selection_case "$first_provider"
 print_candidate_summary "$candidate_table"
-printf '  resolved choice: extra/rust=%s\n' "$rust_choice"
-printf '%s\n' '  sentinel argv: sudo pacman -S --asdeps --needed -- extra/rust'
+printf '  resolved choice: %s/%s=%s\n' \
+    "$EXPECTED_PROVIDER_REPOSITORY" "$first_provider" "$first_provider_choice"
+printf '  sentinel argv: sudo pacman -S --asdeps --needed -- %s/%s\n' \
+    "$EXPECTED_PROVIDER_REPOSITORY" "$first_provider"
 printf '%s\n' '  expected blocked phase: repository provider transaction'
 
-printf '%s\n' ':: case=rustup-selection'
-prepare_case rustup-selection
-rustup_input=$case_directory/input
-printf '%s\n' "$rustup_choice" > "$rustup_input"
-run_pty_case "$rustup_input" --noedit build --local "$case_source"
-assert_valid_selection_case rustup
+printf '%s\n' ':: case=second-provider-selection'
+prepare_case second-provider-selection
+second_provider_input=$case_directory/input
+printf '%s\n' "$second_provider_choice" > "$second_provider_input"
+run_pty_case "$second_provider_input" --noedit build --local "$case_source"
+assert_valid_selection_case "$second_provider"
 print_candidate_summary "$candidate_table"
-printf '  resolved choice: extra/rustup=%s\n' "$rustup_choice"
-printf '%s\n' '  sentinel argv: sudo pacman -S --asdeps --needed -- extra/rustup'
+printf '  resolved choice: %s/%s=%s\n' \
+    "$EXPECTED_PROVIDER_REPOSITORY" "$second_provider" "$second_provider_choice"
+printf '  sentinel argv: sudo pacman -S --asdeps --needed -- %s/%s\n' \
+    "$EXPECTED_PROVIDER_REPOSITORY" "$second_provider"
 printf '%s\n' '  expected blocked phase: repository provider transaction'
 
 printf '%s\n' ':: case=invalid-retry'
@@ -605,19 +728,19 @@ prepare_case invalid-retry
 invalid_input=$case_directory/input
 out_of_range_choice=3
 printf 'not-a-number\n0\n%s\n%s\n' \
-    "$out_of_range_choice" "$rust_choice" > "$invalid_input"
+    "$out_of_range_choice" "$first_provider_choice" > "$invalid_input"
 run_pty_case "$invalid_input" --noedit build --local "$case_source"
 assert_blocked_status
 assert_same_candidate_presentation
-assert_count 3 'Invalid choice. Enter a number from [1-2]' \
+assert_count 3 "$provider_invalid_diagnostic" \
     "$case_output.normalized"
-assert_count 4 'Select a provider from [1-2]' "$case_output.normalized"
-assert_selected_provider_transaction rust
-assert_invalid_retry_selection_before_mutation rust
+assert_count 4 "$provider_prompt" "$case_output.normalized"
+assert_selected_provider_transaction "$first_provider"
+assert_invalid_retry_selection_before_mutation "$first_provider"
 assert_common_case_integrity
 print_candidate_summary "$candidate_table"
 printf '  retry inputs: non-numeric, zero, out-of-range=%s; valid=%s\n' \
-    "$out_of_range_choice" "$rust_choice"
+    "$out_of_range_choice" "$first_provider_choice"
 printf '%s\n' '  retry prompts=4 invalid diagnostics=3 sentinel calls before valid=0'
 printf '%s\n' '  expected blocked phase: repository provider transaction after valid retry'
 
@@ -652,32 +775,36 @@ printf '%s\n' '  expected blocked phase: provider selection EOF cancellation'
 
 printf '%s\n' ':: case=non-tty-pipe'
 prepare_case non-tty-pipe
-run_non_tty_case "$rust_choice" --noedit build --local "$case_source"
+run_non_tty_case "$first_provider_choice" --noedit build --local "$case_source"
 assert_blocked_status
 tr -d '\r' < "$case_output" > "$case_output.normalized"
-assert_not_contains ':: provider dependency=cargo' "$case_output.normalized"
+assert_not_contains ":: provider dependency=$REQUIRED_MAKE_DEPENDENCY" \
+    "$case_output.normalized"
 assert_not_contains 'Select a provider from' "$case_output.normalized"
 assert_ambiguous_diagnostic
 assert_sentinel_absent non-tty-pipe
 assert_not_contains "Running: 'sudo'" "$case_output"
 assert_common_case_integrity
-printf '  piped candidate-like value: %s; consumed as selection: no\n' "$rust_choice"
+printf '  piped candidate-like value: %s; consumed as selection: no\n' \
+    "$first_provider_choice"
 printf '%s\n' '  expected blocked phase: non-TTY ambiguous provider guard'
 
 printf '%s\n' ':: case=noconfirm-tty'
 prepare_case noconfirm-tty
 noconfirm_input=$case_directory/input
-printf '%s\n' "$rust_choice" > "$noconfirm_input"
+printf '%s\n' "$first_provider_choice" > "$noconfirm_input"
 run_pty_case "$noconfirm_input" --noedit --noconfirm build --local "$case_source"
 assert_blocked_status
 tr -d '\r' < "$case_output" > "$case_output.normalized"
-assert_not_contains ':: provider dependency=cargo' "$case_output.normalized"
+assert_not_contains ":: provider dependency=$REQUIRED_MAKE_DEPENDENCY" \
+    "$case_output.normalized"
 assert_not_contains 'Select a provider from' "$case_output.normalized"
 assert_ambiguous_diagnostic
 assert_sentinel_absent noconfirm-tty
 assert_not_contains "Running: 'sudo'" "$case_output"
 assert_common_case_integrity
-printf '  TTY candidate-like value: %s; auto-selected: no\n' "$rust_choice"
+printf '  TTY candidate-like value: %s; auto-selected: no\n' \
+    "$first_provider_choice"
 printf '%s\n' '  expected blocked phase: --noconfirm ambiguous provider guard'
 
 final_tracked_fixture=$(tracked_fixture_manifest)

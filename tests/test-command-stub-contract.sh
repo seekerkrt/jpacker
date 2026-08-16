@@ -78,10 +78,35 @@ export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 export MOGUET_TEST_PACMAN_EXIT_CODE=0
 export MOGUET_TEST_SUDO_EXIT_CODE=0
 
+makepkg_argv_log=$tmp_dir/makepkg-argv.log
+expected_makepkg_argv_log=$tmp_dir/expected-makepkg-argv.log
+: > "$makepkg_argv_log"
+export MOGUET_TEST_MAKEPKG_ARGV_LOG=$makepkg_argv_log
+if ! "$repo_root/tests/stubs/makepkg" --printsrcinfo \
+    'FIRST=one value' EMPTY= 'FIRST=last=with=equals'; then
+    fail 'makepkg stub rejected valid trailing environment assignments'
+fi
+printf '%s\n' \
+    'argv-begin' \
+    'arg[0]=<--printsrcinfo>' \
+    'arg[1]=<FIRST=one value>' \
+    'arg[2]=<EMPTY=>' \
+    'arg[3]=<FIRST=last=with=equals>' \
+    'argv-end' > "$expected_makepkg_argv_log"
+if ! cmp -s "$expected_makepkg_argv_log" "$makepkg_argv_log"; then
+    fail 'makepkg stub did not preserve exact trailing assignment argv'
+fi
+
 expect_rejected 'legacy makepkg install argv' \
     "$repo_root/tests/stubs/makepkg" -sic
 expect_rejected 'makepkg --needed argv' \
     "$repo_root/tests/stubs/makepkg" -sc --needed
+expect_rejected 'makepkg non-assignment suffix' \
+    "$repo_root/tests/stubs/makepkg" --packagelist not-an-assignment
+expect_rejected 'makepkg invalid assignment key suffix' \
+    "$repo_root/tests/stubs/makepkg" --packagelist 9INVALID=value
+expect_rejected 'makepkg option after assignment suffix' \
+    "$repo_root/tests/stubs/makepkg" -sc VALID=value --noconfirm
 expect_rejected 'arbitrary sudo command' \
     "$repo_root/tests/stubs/sudo" arbitrary-command --unexpected
 expect_rejected 'unexpected pacman option through sudo' \
@@ -107,8 +132,8 @@ expect_rejected 'unexpected read-only pacman option' \
 expect_rejected 'unexpected sync read-only pacman option' \
     "$repo_root/tests/stubs/commands-sync/pacman" -Si target --unexpected
 expect_rejected 'identity query with extra argv' \
-    "$repo_root/tests/stubs/pacman" -U --print --print-format \
-        "$(printf '%s\t%s' '%n' '%v')" -- "$tmp_dir/artifact" extra
+    "$repo_root/tests/stubs/pacman" -Qp --color never -- \
+        "$tmp_dir/artifact" extra
 expect_rejected 'typed install with two reason options' \
     "$repo_root/tests/stubs/sudo" pacman -U --asdeps --asexplicit -- \
         "$tmp_dir/artifact"

@@ -1,5 +1,7 @@
 #include "app_config.hpp"
 #include "artifact_install_executor.hpp"
+#include "operation_state_model.hpp"
+#include "presentation_projection.hpp"
 #include "source_build.hpp"
 #include "stubs/upgrade-all-operation/operation_stub.hpp"
 #include "unified_plan_projection.hpp"
@@ -195,15 +197,11 @@ SourceBuildExecutionResult source_execution(
 
 ResolvedSourceBuildIdentity source_identity(
         const std::string& requested_name,
-        const std::string& package_base,
-        const std::string& canonical_key) {
+        const std::string& package_base) {
     return ResolvedSourceBuildIdentity{
-            requested_name,
-            package_base,
-            canonical_key,
-            "https://packages.example/" + package_base + ".git",
-            SourceBuildSourceKind::Repository,
-            false};
+            ResolvedRepositorySourceBuildIdentity{
+                    RepositoryPackagePresent{
+                            "core", 0, requested_name, package_base}}};
 }
 
 void configure_sources(
@@ -1407,7 +1405,7 @@ void test_cache_replacement_during_inventory_blocks_aur_query() {
             stub::repository_configuration_calls() == 1 &&
                     stub::inventory_calls() == 1 &&
                     stub::info_many_call_history().empty() &&
-                    stub::database_call_count() == 0 &&
+                    stub::database_call_count() == 1 &&
                     stub::resolver_call_count() == 0,
             "Foreign-inventory cache replacement crossed the next production stage");
     remove_cache_fixture(moved);
@@ -1419,6 +1417,9 @@ void test_cache_replacement_during_aur_query_blocks_preparation() {
     stub::set_preference_directory(preference_directory({}));
     stub::set_foreign_inventory(foreign_inventory({"query-root"}));
     enqueue_aur_query({{"query-root", "query-base"}});
+    stub::enqueue_database_paths(PacmanDatabasePaths{
+            "/upgrade-all-stub/root",
+            "/upgrade-all-stub/database"});
     stub::set_database_failure(PackageMetadataFailure{
             PackageMetadataErrorCode::LocalDatabaseUnavailable,
             "fixture later database failure"});
@@ -1462,7 +1463,7 @@ void test_cache_replacement_during_aur_query_blocks_preparation() {
     expect_aur_not_attempted(
             result, UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
             "AUR-query cache replacement");
-    expect(stub::database_call_count() == 0 &&
+    expect(stub::database_call_count() == 1 &&
                    stub::resolver_call_count() == 0 &&
                    stub::aur_execution_calls().empty(),
            "AUR-query cache replacement reached provider/database preparation");
@@ -1508,7 +1509,7 @@ void test_cache_replacement_during_filtered_planning_blocks_database() {
             "filtered-planning cache replacement");
     expect(
             stub::resolver_call_count() == 1 &&
-                    stub::database_call_count() == 0 &&
+                    stub::database_call_count() == 1 &&
                     stub::aur_execution_calls().empty(),
             "Filtered-planning cache replacement reached package-database preparation");
     remove_cache_fixture(moved);
@@ -1554,7 +1555,7 @@ void test_filtered_preparation_failure_keeps_stage_precedence() {
             "Filtered preparation failure lost same-stage precedence");
     expect(
             stub::resolver_call_count() == 1 &&
-                    stub::database_call_count() == 0 &&
+                    stub::database_call_count() == 1 &&
                     stub::aur_execution_calls().empty(),
             "Filtered preparation failure crossed the expected stage boundary");
     remove_cache_fixture(moved);
@@ -1609,7 +1610,7 @@ void test_strict_preference_failure_precedes_post_stage_cache_drift() {
             !moved.empty() &&
                     stub::strict_preference_read_history() ==
                             std::vector<std::string>{"strict-root"} &&
-                    stub::database_call_count() == 0 &&
+                    stub::database_call_count() == 1 &&
                     stub::aur_execution_calls().empty(),
             "Strict preference failure crossed the typed preparation boundary");
     remove_cache_fixture(moved);
@@ -1629,7 +1630,10 @@ void test_pacman_database_failure_precedes_post_stage_cache_drift() {
     const PackageMetadataFailure database_failure{
             PackageMetadataErrorCode::LocalDatabaseUnavailable,
             "fixture pacman database failure"};
-    stub::set_database_failure(database_failure);
+    stub::enqueue_database_paths(PacmanDatabasePaths{
+            "/upgrade-all-stub/root",
+            "/upgrade-all-stub/database"});
+    stub::enqueue_database_failure(database_failure);
     const AppConfig config;
     PreparedUpgradeAllOperation prepared = take_prepared(
             prepare_upgrade_all_operation(config),
@@ -1668,7 +1672,7 @@ void test_pacman_database_failure_precedes_post_stage_cache_drift() {
             !moved.empty() &&
                     stub::strict_preference_read_history() ==
                             std::vector<std::string>{"database-root"} &&
-                    stub::database_call_count() == 1 &&
+                    stub::database_call_count() == 2 &&
                     stub::aur_execution_calls().empty(),
             "Pacman database failure crossed the typed preparation boundary");
     remove_cache_fixture(moved);
@@ -1720,7 +1724,7 @@ void test_executable_preparation_cache_drift_blocks_aur_execution() {
             "executable preparation cache drift");
     expect(
             !moved.empty() && stub::resolver_call_count() == 1 &&
-                    stub::database_call_count() == 1 &&
+                    stub::database_call_count() == 2 &&
                     stub::aur_execution_calls().empty(),
             "Executable preparation cache drift reached AUR execution");
     remove_cache_fixture(moved);
@@ -1824,49 +1828,25 @@ void test_total_aur_query_failure_blocks_mutation() {
     stub::require_script_consumed();
 }
 
-void test_planner_conflict_blocks_before_preflight() {
-    stub::reset();
-    const std::vector<std::string> sources = {"source-a", "source-b"};
-    configure_sources(sources);
-    stub::set_source_identity(
-            "source-a",
-            source_identity("source-a", "source-a", "source://shared"));
-    stub::set_source_identity(
-            "source-b",
-            source_identity("source-b", "source-b", "source://shared"));
-    const AppConfig config;
-    PreparedUpgradeAllOperation prepared = take_prepared(
-            prepare_upgrade_all_operation(config),
-            "planner conflict fixture");
-    enqueue_post_source_metadata(sources);
-    stub::enqueue_source_success(
-            source_execution(SourceBuildExecutionStatus::UpToDate));
-    stub::enqueue_source_success(
-            source_execution(SourceBuildExecutionStatus::UpToDate));
-    stub::set_foreign_inventory(foreign_inventory({"aur-root"}));
-    enqueue_aur_query({{"aur-root", "aur-root"}});
-    return_build_plan(root_plan({{"aur-root", "aur-root"}}), {"aur-root"});
+void test_repository_source_key_is_derived_from_package_base() {
+    const ResolvedSourceBuildIdentity first =
+            source_identity("source-a", "source-base-a");
+    const ResolvedSourceBuildIdentity second =
+            source_identity("source-b", "source-base-b");
+    const ResolvedSourceBuildIdentity sibling =
+            source_identity("source-a-sibling", "source-base-a");
 
-    UpgradeAllOperationResult result =
-            execute_prepared_upgrade_all_operation(
-                    std::move(prepared), config);
     expect(
-            result.aur.operation_result.has_value(),
-            "Explicit source identity conflict lost filtered result: status=" +
-                    std::to_string(static_cast<int>(result.status)) +
-                    " issues=" + std::to_string(result.issues.size()));
-    expect(
-            result.has_planning_issue(),
-            "Explicit source identity conflict lost planning issue: planner=" +
-                    std::to_string(
-                            result.aur.operation_result->upgrade_all_plan.
-                                    issues.size()));
-    expect(!result.is_success(),
-           "Explicit source identity conflict was rounded to success");
-    expect(stub::resolver_call_count() == 1 &&
-                   stub::aur_execution_calls().empty(),
-           "Planner issue did not stop before AUR mutation");
-    stub::require_script_consumed();
+            first.canonical_source_key() == "repository:source-base-a" &&
+                    second.canonical_source_key() ==
+                            "repository:source-base-b" &&
+                    first.canonical_source_key() !=
+                            second.canonical_source_key() &&
+                    sibling.canonical_source_key() ==
+                            first.canonical_source_key() &&
+                    sibling.package_base() == first.package_base() &&
+                    sibling.requested_name() != first.requested_name(),
+            "Repository source key did not remain a PackageBase-derived identity");
 }
 
 void test_mapping_issue_blocks_aur_mutation() {
@@ -1922,7 +1902,7 @@ void test_preflight_blocker_stops_before_preparation_io() {
                     result.aur.operation_result.has_value() &&
                     !result.is_success(),
             "Preflight blocker was rounded to success");
-    expect(stub::database_call_count() == 0 &&
+    expect(stub::database_call_count() == 1 &&
                    stub::aur_execution_calls().empty(),
            "Preflight blocker crossed AUR preparation/mutation boundary");
     stub::require_script_consumed();
@@ -1980,17 +1960,118 @@ void test_no_updates_success_contract() {
                     !result.has_partial_completion() &&
                     !result.has_not_attempted_phase(),
             "NoUpdates conjunction was not enforced");
+    const OperationStateProjection projection =
+            project_upgrade_all_operation_state(result);
+    expect(
+            projection.outcome == OperationOutcome::NoOp &&
+                    projection.no_op_basis ==
+                            std::optional<NoOpBasis>{
+                                    NoOpBasis::VerifiedUnchanged},
+            "Registered-source UpToDate evidence lost its NoOp basis");
+    expect(
+            stub::source_preparation_calls().size() == 1 &&
+                    stub::source_preparation_calls().front().update_policy ==
+                            SourceBuildUpdatePolicy::OnlyIfUpdated &&
+                    stub::package_base_source_execution_calls().empty(),
+            "Upgrade-all UpToDate source crossed the closed preparation boundary");
     stub::require_script_consumed();
 }
 
-void test_system_unknown_does_not_reduce_to_no_updates() {
+void test_system_only_authoritative_unchanged_observation() {
     stub::reset();
     stub::set_preference_directory(preference_directory({}));
     stub::set_foreign_inventory({});
     const AppConfig config;
     PreparedUpgradeAllOperation prepared = take_prepared(
             prepare_upgrade_all_operation(config),
-            "system Unknown fixture");
+            "system-only unchanged fixture");
+
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    expect(
+            result.status == UpgradeAllOperationStatus::NoUpdates &&
+                    result.is_success() &&
+                    result.system_source.system.package_state_change ==
+                            PackageStateChange::NoChange &&
+                    result.package_state_change() ==
+                            PackageStateChange::NoChange,
+            "System-only authoritative no-change observation differs");
+    const OperationStateProjection operation_state =
+            project_upgrade_all_operation_state(result);
+    expect(
+            operation_state.outcome == OperationOutcome::NoOp &&
+                    operation_state.package_state.state ==
+                            PackageStateObservation::VerifiedUnchanged &&
+                    operation_state.no_op_basis ==
+                            std::optional<NoOpBasis>{
+                                    NoOpBasis::NoRelevantWork},
+            "System-only no-change evidence lost its typed NoOp basis");
+    const std::size_t metadata_open_count =
+            static_cast<std::size_t>(std::count_if(
+                    stub::events().begin(), stub::events().end(),
+                    [](const stub::Event& event) {
+                        return event.kind ==
+                                stub::EventKind::MetadataSessionOpen;
+                    }));
+    const std::size_t snapshot_count =
+            static_cast<std::size_t>(std::count_if(
+                    stub::events().begin(), stub::events().end(),
+                    [](const stub::Event& event) {
+                        return event.kind ==
+                                stub::EventKind::LocalPackageSnapshot;
+                    }));
+    expect(
+            stub::database_call_count() == 1 &&
+                    metadata_open_count == 2 && snapshot_count == 2,
+            "System-only pre/post observation did not use package metadata authority");
+    stub::require_script_consumed();
+}
+
+void test_system_only_changed_observation() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    stub::set_foreign_inventory({});
+    stub::enqueue_metadata_session(metadata_session(
+            {}, LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "system-only changed fixture");
+    stub::enqueue_metadata_session(metadata_session(
+            {}, LocalPackageVersionSnapshot{{"core", "2.0-1"}}));
+
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    const OperationStateProjection operation_state =
+            project_upgrade_all_operation_state(result);
+    expect(
+            result.status == UpgradeAllOperationStatus::Completed &&
+                    result.is_success() &&
+                    result.package_state_change() ==
+                            PackageStateChange::Changed &&
+                    operation_state.outcome == OperationOutcome::Succeeded &&
+                    operation_state.package_state.state ==
+                            PackageStateObservation::Changed &&
+                    !operation_state.no_op_basis.has_value(),
+            "System-only changed observation was flattened");
+    stub::require_script_consumed();
+}
+
+void test_system_only_observation_failure_remains_unverified() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    stub::set_foreign_inventory({});
+    stub::MetadataSessionScript failure;
+    failure.open_failure = PackageMetadataFailure{
+            PackageMetadataErrorCode::LocalDatabaseUnavailable,
+            "fixture system-only observation failure"};
+    stub::enqueue_metadata_session(std::move(failure));
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "system-only unverified fixture");
 
     UpgradeAllOperationResult result =
             execute_prepared_upgrade_all_operation(
@@ -2002,7 +2083,56 @@ void test_system_unknown_does_not_reduce_to_no_updates() {
                             PackageStateChange::Unknown &&
                     result.package_state_change() ==
                             PackageStateChange::Unknown,
-            "Unknown system package state was rounded to NoUpdates");
+            "Observation failure was rounded to failure or NoUpdates");
+    const OperationStateProjection operation_state =
+            project_upgrade_all_operation_state(result);
+    const PresentationProjection presentation =
+            project_upgrade_all_presentation(result);
+    expect(
+            operation_state.outcome == OperationOutcome::Succeeded &&
+                    operation_state.package_state.state ==
+                            PackageStateObservation::Unverified &&
+                    operation_state.package_state.reason ==
+                            ObservationReason::BeforeSnapshotUnavailable,
+            "System-only observation failure lost its typed unverified state");
+    expect(
+            presentation.summary_counts.total == 1 &&
+                    presentation.summary_counts.attention_required == 1 &&
+                    presentation.summary_counts.unverified == 1 &&
+                    presentation.attention_items.size() == 1 &&
+                    presentation.full_items.size() == 1,
+            "System-only successful-unverified result fell through presentation");
+    const PresentationItem& observation =
+            presentation.attention_items.front();
+    const auto outcome_reason = std::find_if(
+            observation.upgrade_all_reasons.begin(),
+            observation.upgrade_all_reasons.end(),
+            [](const UpgradeAllPresentationReason& reason) {
+                const OperationOutcome* outcome =
+                        std::get_if<OperationOutcome>(&reason.reason);
+                return outcome != nullptr &&
+                       *outcome == OperationOutcome::Succeeded;
+            });
+    expect(
+            observation.package_state ==
+                            std::optional<PackageStateObservationValue>{
+                                    operation_state.package_state} &&
+                    observation.source_kind ==
+                            DiagnosticSourceKind::Pacman &&
+                    !observation.requested_package.has_value() &&
+                    !observation.package_base.has_value() &&
+                    !observation.canonical_source_identity.has_value() &&
+                    observation.diagnostic_class ==
+                            DiagnosticClass::RequiresCheck &&
+                    observation.requires_check &&
+                    !observation.is_blocking &&
+                    outcome_reason !=
+                            observation.upgrade_all_reasons.end() &&
+                    outcome_reason->phase ==
+                            UpgradeAllOperationPhase::System &&
+                    outcome_reason->source_kind ==
+                            DiagnosticSourceKind::Pacman,
+            "System-only observation failure lost typed reason or attribution");
     stub::require_script_consumed();
 }
 
@@ -2059,6 +2189,185 @@ void test_source_updated_only() {
                     result.package_state_change() ==
                             PackageStateChange::Changed,
             "Source-only package change was not aggregated");
+    expect(
+            stub::source_preparation_calls().size() == 1 &&
+                    stub::package_base_source_execution_calls().size() == 1 &&
+                    stub::source_preparation_calls().front().package_name ==
+                            "updated-source" &&
+                    stub::package_base_source_execution_calls().front()
+                                    .package_name ==
+                            "updated-source" &&
+                    stub::package_base_source_execution_calls().front()
+                                    .database_paths.root_dir ==
+                            stub::source_execution_calls().front()
+                                    .database_paths.root_dir &&
+                    stub::package_base_source_execution_calls().front()
+                                    .database_paths.db_path ==
+                            stub::source_execution_calls().front()
+                                    .database_paths.db_path,
+            "Upgrade-all registered repository route did not preserve prepare/Set execution authority");
+    stub::require_script_consumed();
+}
+
+void test_registered_package_base_result_and_composition() {
+    stub::reset();
+    const std::string requested_child = "registered-child";
+    const std::string package_base = "registered-suite";
+    const std::string aur_root = "aur-root";
+    const AppConfig config;
+
+    stub::set_preference_directory(
+            preference_directory({requested_child}));
+    SourcePreferenceLoaded preference = loaded_preference(requested_child);
+    preference.environment.ordered_assignments = {
+            {"FIRST_FLAG", "first value"},
+            {"SECOND_FLAG", "second value"}};
+    stub::enqueue_preference_result(
+            requested_child, std::move(preference));
+    stub::set_source_identity(
+            requested_child,
+            source_identity(requested_child, package_base));
+    stub::enqueue_metadata_session(metadata_session(
+            {requested_child},
+            LocalPackageVersionSnapshot{{requested_child, "1.0-1"}}));
+
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "registered PackageBase composition fixture");
+    enqueue_post_source_metadata(
+            {requested_child},
+            LocalPackageVersionSnapshot{{requested_child, "1.0-1"}});
+    stub::enqueue_package_base_source_success(
+            package_base,
+            ArtifactPackageIdentity{requested_child, "4.2-3"},
+            {ArtifactPackageIdentity{"registered-sibling", "4.2-3"},
+             ArtifactPackageIdentity{"registered-child-debug", "4.2-3"}});
+    stub::set_foreign_inventory(
+            foreign_inventory({requested_child, aur_root}));
+    enqueue_aur_query({
+            {requested_child, package_base},
+            {aur_root, aur_root}});
+    return_build_plan(root_plan({{aur_root, aur_root}}), {aur_root});
+    stub::enqueue_aur_success(ArtifactInstallExecutionOutcome::Installed);
+
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+
+    const RegisteredSourceUpgradeResult& registered =
+            result.system_source.registered_source_results.front();
+    expect(
+            result.is_success() &&
+                    registered.status ==
+                            RegisteredSourceUpgradeStatus::Updated &&
+                    registered.package_base_execution.has_value() &&
+                    registered.package_base_execution->package_base ==
+                            package_base &&
+                    registered.package_base_execution->selected_child.identity.
+                                    package_name == requested_child &&
+                    registered.package_base_execution->selected_child.identity.
+                                    full_version == "4.2-3" &&
+                    registered.package_base_execution->selected_child.
+                                    desired_reason ==
+                            DesiredInstallReason::Explicit &&
+                    registered.package_base_execution->selected_child.outcome ==
+                            ArtifactInstallExecutionOutcome::Installed &&
+                    registered.package_base_execution->unselected_artifacts.
+                                    size() == 2 &&
+                    registered.package_base_execution->unselected_artifacts[0].
+                                    package_name == "registered-sibling" &&
+                    registered.package_base_execution->unselected_artifacts[0].
+                                    full_version == "4.2-3" &&
+                    registered.package_base_execution->unselected_artifacts[1].
+                                    package_name ==
+                            "registered-child-debug" &&
+                    registered.package_base_execution->unselected_artifacts[1].
+                                    full_version == "4.2-3",
+            "Registered PackageBase aggregate lost selected or unselected identities");
+
+    const auto environment_matches = [](
+                                             const SourceBuildRequest& request) {
+        const auto& assignments =
+                request.custom_environment.ordered_assignments;
+        return request.empty_value_policy ==
+                               SourceEnvironmentEmptyValuePolicy::Omit &&
+               assignments.size() == 2 &&
+               assignments[0].key == "FIRST_FLAG" &&
+               assignments[0].value == "first value" &&
+               assignments[1].key == "SECOND_FLAG" &&
+               assignments[1].value == "second value";
+    };
+    expect(
+            stub::source_preparation_calls().size() == 1 &&
+                    stub::package_base_source_execution_calls().size() == 1 &&
+                    stub::source_preparation_calls().front().package_name ==
+                            requested_child &&
+                    stub::source_preparation_calls().front().package_base ==
+                            package_base &&
+                    stub::source_preparation_calls().front().update_policy ==
+                            SourceBuildUpdatePolicy::OnlyIfUpdated &&
+                    environment_matches(
+                            stub::source_preparation_calls().front().request) &&
+                    stub::package_base_source_execution_calls().front().
+                                    package_name == requested_child &&
+                    stub::package_base_source_execution_calls().front().
+                                    package_base == package_base &&
+                    environment_matches(
+                            stub::package_base_source_execution_calls().front().
+                                    request),
+            "Registered custom environment or PackageBase execution count changed");
+
+    expect(
+            result.foreign_inventory.inventory.size() == 2 &&
+                    result.foreign_inventory.inventory[0].name ==
+                            requested_child &&
+                    result.foreign_inventory.inventory[1].name == aur_root &&
+                    result.has_duplicate_exclusions() &&
+                    result.duplicate_excluded_aur_targets.size() == 1 &&
+                    result.duplicate_excluded_aur_targets[0].query_entry.
+                                    installed_name == requested_child &&
+                    stub::info_many_call_history() ==
+                            std::vector<std::vector<std::string>>{
+                                    {requested_child, aur_root}} &&
+                    stub::aur_execution_calls().size() == 1 &&
+                    stub::aur_execution_calls().front().package_base ==
+                            aur_root &&
+                    stub::aur_execution_calls().front().plan_package_names ==
+                            std::vector<std::string>{aur_root},
+            "Fresh inventory filtering rebuilt an explicit registered source");
+
+    expect(
+            event_position(
+                    stub::EventKind::SourcePreparation,
+                    requested_child) <
+                            event_position(
+                                    stub::EventKind::PackageBaseSourceExecution,
+                                    requested_child) &&
+                    event_position(
+                            stub::EventKind::PackageBaseSourceExecution,
+                            requested_child) <
+                            event_position(
+                                    stub::EventKind::ForeignInventoryQuery,
+                                    "foreign-inventory") &&
+                    event_position(
+                            stub::EventKind::ForeignInventoryQuery,
+                            "foreign-inventory") <
+                            event_position(
+                                    stub::EventKind::AurInfoMany,
+                                    "aur-info-many") &&
+                    event_position(
+                            stub::EventKind::AurInfoMany,
+                            "aur-info-many") <
+                            event_position(
+                                    stub::EventKind::BuildPlanResolution,
+                                    "build-plan") &&
+                    event_position(
+                            stub::EventKind::BuildPlanResolution,
+                            "build-plan") <
+                            event_position(
+                                    stub::EventKind::AurCheckout,
+                                    aur_root),
+            "Registered PackageBase and filtered AUR phase order changed");
     stub::require_script_consumed();
 }
 
@@ -2270,6 +2579,14 @@ void test_source_no_change_and_aur_no_change() {
                     result.package_state_change() ==
                             PackageStateChange::NoChange,
             "All-NoChange execution did not satisfy NoUpdates contract");
+    const OperationStateProjection projection =
+            project_upgrade_all_operation_state(result);
+    expect(
+            projection.outcome == OperationOutcome::NoOp &&
+                    projection.no_op_basis ==
+                            std::optional<NoOpBasis>{
+                                    NoOpBasis::VerifiedUnchanged},
+            "AUR SkippedAsNeeded/NoChange evidence lost its NoOp basis");
     stub::require_script_consumed();
 }
 
@@ -2285,7 +2602,7 @@ void test_duplicate_exclusion_uses_prepared_source_intent() {
     stub::set_source_identity(
             "duplicate-root",
             source_identity(
-                    "duplicate-root", "changed-base", "source://changed"));
+                    "duplicate-root", "changed-base"));
     enqueue_post_source_metadata(sources);
     stub::enqueue_source_success(
             source_execution(SourceBuildExecutionStatus::UpToDate));
@@ -2476,8 +2793,8 @@ void test_aur_cleanup_failure_partial_and_not_attempted() {
 }
 
 void test_constructed_no_source_no_updates_helper_fixture() {
-    // PR2のsourceなしproduction resultはsystem stateをUnknownにするため、
-    // pure aggregate helperのNoChange conjunctionだけをconstructed resultで固定する。
+    // Pure aggregate helper keeps NoRelevantWork distinct from the
+    // production system-only authoritative snapshot fixture above.
     UpgradeAllOperationResult result;
     result.status = UpgradeAllOperationStatus::NoUpdates;
     result.stopped_phase = UpgradeAllOperationPhase::None;
@@ -2506,6 +2823,48 @@ void test_constructed_no_source_no_updates_helper_fixture() {
                     !result.has_external_satisfaction() &&
                     !result.has_inconsistency(),
             "Constructed no-source NoUpdates helper semantics differ");
+
+    const OperationStateProjection projection =
+            project_upgrade_all_operation_state(result);
+    expect(
+            projection.outcome == OperationOutcome::NoOp &&
+                    projection.no_op_basis ==
+                            std::optional<NoOpBasis>{
+                                    NoOpBasis::NoRelevantWork} &&
+                    projection.package_state.state ==
+                            PackageStateObservation::VerifiedUnchanged,
+            "Verified NoUpdates did not project to NoOp + VerifiedUnchanged");
+}
+
+void test_constructed_aur_no_change_noop_basis_fixture() {
+    UpgradeAllOperationResult result;
+    result.status = UpgradeAllOperationStatus::NoUpdates;
+    result.stopped_phase = UpgradeAllOperationPhase::None;
+    result.system_source.status = SystemSourceUpgradeStatus::Completed;
+    result.system_source.stopped_phase = SystemSourceUpgradePhase::None;
+    result.system_source.system.status = SystemUpgradePhaseStatus::Completed;
+    result.system_source.system.package_state_change =
+            PackageStateChange::NoChange;
+    result.foreign_inventory.status =
+            UpgradeAllForeignInventoryPhaseStatus::Completed;
+    result.aur.status = UpgradeAllAurPhaseStatus::NoUpdates;
+    result.aur.operation_result.emplace();
+    AurUpdateOperationResult& aur =
+            result.aur.operation_result->reduced_operation_result;
+    aur.status = AurUpdateOperationStatus::NoUpdates;
+    AurUpdateOperationTargetResult target;
+    target.update.installed_name = "unchanged-aur";
+    target.status = AurUpdateOperationTargetStatus::NoChange;
+    aur.targets.push_back(std::move(target));
+
+    const OperationStateProjection projection =
+            project_upgrade_all_operation_state(result);
+    expect(
+            projection.outcome == OperationOutcome::NoOp &&
+                    projection.no_op_basis ==
+                            std::optional<NoOpBasis>{
+                                    NoOpBasis::VerifiedUnchanged},
+            "AUR-only NoChange evidence was treated as no relevant work");
 }
 
 UpgradeAllOperationResult make_constructed_completed_helper_fixture(
@@ -2538,6 +2897,17 @@ void test_constructed_completed_unknown_success_fixture() {
                     result.package_state_change() ==
                             PackageStateChange::Unknown,
             "Completed + Unknown package state must remain successful");
+
+    const OperationStateProjection projection =
+            project_upgrade_all_operation_state(result);
+    expect(
+            projection.outcome == OperationOutcome::Succeeded &&
+                    projection.outcome != OperationOutcome::NoOp &&
+                    projection.package_state.state ==
+                            PackageStateObservation::Unverified &&
+                    projection.package_state.reason ==
+                            ObservationReason::ObservationNotPrepared,
+            "Completed + Unknown was flattened to NoOp or failure");
 }
 
 void test_constructed_provider_transaction_unknown_reaches_aggregate() {
@@ -2780,8 +3150,8 @@ int main() {
                 "total AUR query failure",
                 test_total_aur_query_failure_blocks_mutation);
         run_case(
-                "planner identity conflict",
-                test_planner_conflict_blocks_before_preflight);
+                "repository source key derivation",
+                test_repository_source_key_is_derived_from_package_base);
         run_case(
                 "filtered mapping issue",
                 test_mapping_issue_blocks_aur_mutation);
@@ -2793,10 +3163,19 @@ int main() {
                 test_preparation_blocker_stops_before_aur_mutation);
         run_case("NoUpdates success", test_no_updates_success_contract);
         run_case(
-                "system Unknown is not NoUpdates",
-                test_system_unknown_does_not_reduce_to_no_updates);
+                "system-only authoritative unchanged observation",
+                test_system_only_authoritative_unchanged_observation);
+        run_case(
+                "system-only changed observation",
+                test_system_only_changed_observation);
+        run_case(
+                "system-only observation failure remains Unverified",
+                test_system_only_observation_failure_remains_unverified);
         run_case("system Changed only", test_system_changed_only);
         run_case("source Updated only", test_source_updated_only);
+        run_case(
+                "registered PackageBase result and composition",
+                test_registered_package_base_result_and_composition);
         run_case(
                 "AUR Updated only and fresh inventory",
                 test_aur_updated_only_and_fresh_inventory);
@@ -2824,6 +3203,9 @@ int main() {
         run_case(
                 "constructed no-source NoUpdates helpers",
                 test_constructed_no_source_no_updates_helper_fixture);
+        run_case(
+                "constructed AUR NoChange NoOp basis",
+                test_constructed_aur_no_change_noop_basis_fixture);
         run_case(
                 "constructed Completed Unknown success",
                 test_constructed_completed_unknown_success_fixture);

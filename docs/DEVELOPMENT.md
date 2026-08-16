@@ -4,7 +4,9 @@ Moguetは、`main` / `develop` / `feature/*` / `fix/*` / `docs/*` / `release/*`�
 
 branch / tag同期のownerはGitHub Actionsのmirror workflowとする。同じrefをGitHubとGitLabへ二重に手動pushせず、GitHubをauthority、GitLabをmirror destinationとして扱う。
 
-バージョン番号の付け方は [VERSIONING.md](VERSIONING.md) を参照する。
+バージョン番号の付け方は [VERSIONING.md](VERSIONING.md) を参照する。developmentからrelease
+candidateまでのvalidation selection、approval evidence、evidence reuse / invalidation、review closureは
+[VALIDATION.md](VALIDATION.md)をpolicy authorityとする。
 
 ## Branches
 
@@ -65,9 +67,16 @@ Issue ごとの作業ブランチ。
     git pull --ff-only origin develop
     git switch -c feature/issue-XX-topic
 
-作業後:
+実装中は`VALIDATION.md`のrisk classificationに従い、incremental buildとaffected / focused
+targetを使う。例:
 
-    make clean && make
+    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target test-<affected-area>
+
+Slice completionでは変更contractのfocused supersetと必要なhost / deterministic regressionを確認する。
+PR / merge approvalのcanonical host gateは次の1回である。同じcandidateの有効なevidenceがある場合は、
+`VALIDATION.md`のinvalidation ruleに従って不要な再実行を避ける。
+
+    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target test-host-release
     git diff --check
     git status --short
 
@@ -175,6 +184,25 @@ Slice 2とSlice 3で移行した上記10 targetのobject分離は次を満たす
 - `CXX`、`CPPFLAGS`、`CXXFLAGS`、`LDFLAGS`のoverrideを維持する。ccacheをruntime / packageの
   必須dependencyにせず、mold等のlinkerも既定または必須にしない。
 
+#### Direct compile/link testのdependency契約
+
+重量級10件以外のMakefile-direct test binary 63件は、既存の単一compile/link invocationを維持する。
+objectを重量級targetや別profileと共有せず、各binaryが
+`build/tests/dep/<binary-name>/`以下に`dependencies.d`、`compile.signature`、
+`link.signature`を所有する。
+
+- depfileは各targetと同じsource、macro、include path、compiler flagsで`-MM -MP`を実行して生成し、
+  実際に読んだproject / test-support headerだけをbinary prerequisiteへ戻す。全`src/*.hpp`を
+  一律prerequisiteにはしない。
+- compile signatureはeffective `CXX`、compile arguments、source / fake / stub setを記録する。
+  link signatureはeffective `CXX`、対象targetが実際に使う`LDFLAGS`、library、ordered build inputを
+  記録する。内容が変わらないstampのmtimeは更新しない。
+- source、tracked header、compile profileの変更時はそのbinaryだけを再compile/linkし、unchanged
+  rerunでは再利用する。depfileを失ったtargetは、空のplaceholderを先に作ってbinaryをstaleにし、
+  compile成功時にcompiler outputで置き換える。
+- direct targetのccache適用範囲と`LDFLAGS`適用範囲はこの変更で広げない。source composition、
+  fake / stub ownership、link library、既存link firewallをtargetごとに維持する。
+
 #### ccache・optional linkerの利用
 
 ccacheを導入済みの開発環境では、compile wrapperを明示して有効化する。
@@ -248,6 +276,16 @@ Slice 1時点のrecipeではccacheが全callをlink invocationと判定したた
 Slice 2 / 3の実装後も同じtarget集合についてdefault clean、incremental、isolated cold / warm ccache、
 test behavior、link firewallを測定し、このbaselineと比較する。
 
+### Host validation execution graph
+
+`test`はfull host A–Dを所有し、`release-check-exclusive`はversion、license、packaging、tracked
+Markdownのrelease固有4 checkerだけを所有する。`test-host-release`は同じtop-level runで`test`を
+完了してから`release-check-exclusive`を1回実行するため、A–DとGを重複なく構成できる。
+実行段階とevidenceの扱いは[VALIDATION.md](VALIDATION.md)を正とする。
+
+既存`release-check`のstandalone互換性は維持し、従来のA–D subset prerequisiteを完了してから同じ
+`release-check-exclusive`へ委譲する。`release-check`単独をfull A–Dへ拡張したものではない。
+
 ### Arch Linux container validation
 
 実機Arch Linuxでの最終smoke testより前に、official `archlinux:latest`を使う隔離laneを
@@ -267,12 +305,17 @@ default build contextからsource snapshotだけをcontainer内へcopyし、host
 config / cacheは共有せず、`--privileged`も使用しない。package transition testのlegacy sourceは
 local `v1.16.0` tagからtemporary archiveとして生成し、Git metadataとは分離したnamed build
 contextで渡す。build、test、release validationはcontainer固有のHOME / XDG directoryを使う
-一般userとして、次の順で実行する。
+一般userとして実行する。image buildがclean production buildを1回所有し、runtimeはそのbinaryが
+存在することを確認してfull host A–Dとrelease固有Gを1回ずつ実行する。
+
+image build:
 
     env -u MAKEFLAGS -u MFLAGS make clean
     env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target
-    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target test
-    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target release-check
+
+runtime:
+
+    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target test-host-release
 
 Docker command、daemon、image build、またはvalidation stepが失敗した場合、diagnosticとnon-zero
 statusをhostへ返す。実行containerは成功時・失敗時とも`--rm`で破棄し、temporary legacy archiveも
@@ -303,29 +346,28 @@ static `test-live-contract`として確認するが、networkやcontainer runtim
 
 リリース準備後:
 
-    make clean
-    make
-    make test
-    make release-check
+    env -u MAKEFLAGS -u MFLAGS make clean
+    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target
+    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target test-host-release
+    env -u MAKEFLAGS -u MFLAGS make test-container
+    env -u MAKEFLAGS -u MFLAGS make test-container-live
     git diff --check
+
+ccache / mold parityは必要なreleaseでの追加validationであり、上記default gateの代替にしない。
+それぞれのexact compile / link scopeとclean / incremental条件を`VALIDATION.md`に従って記録する。
 
     git status --short
 
     git add -- \
         VERSION \
-        README.ja.md \
         README.md \
+        README.ja.md \
         RELEASE_NOTES.md \
         docs/DEVELOPMENT.md \
-        man/ja/moguet.1 \
         man/moguet.1 \
-        po/ja.po \
+        man/ja/moguet.1 \
         po/moguet.pot \
-        scripts/check-license-compliance.sh \
-        scripts/check-packaging-metadata.sh \
-        scripts/extract-release-notes.sh \
-        tests/test-install-layout.sh \
-        tests/test-package-transition.sh
+        po/ja.po
 
     git diff --cached --name-only | LC_ALL=C sort
     git status --short
@@ -334,11 +376,14 @@ static `test-live-contract`として確認するが、networkやcontainer runtim
 
     gh pr create --base main --head release/vX.Y.Z
 
-上記の`git add`は、現在のv2.2.0 release preparationでstage対象とするpathを1件ずつ明示した
+上記の`git add`は、現在のv2.3.0 release preparationでstage対象とするpathを1件ずつ明示した
 current release用のexact path setです。`git add .`や代表pathだけのpartial listへ置き換えません。commit前に
 cached path一覧をこのreleaseのdiffと再照合し、release scopeのunstaged / untracked pathや
-unrelatedなstaged pathがないことを確認します。現在のv2.2.0 release preparationでは、上記の
-14-path listがstage対象のcurrent release scopeのauthorityです。v2.1.0固有の履歴は、下記の
+unrelatedなstaged pathがないことを確認します。現在のv2.3.0 release preparationでは、上記の
+9-path listがstage対象のcurrent release scopeのauthorityです。`PKGBUILD`はroot `VERSION`を動的に
+読み、published tagへprojectします。man templateは`@VERSION@` authorityを維持し、completionは
+version independent、`po/POTFILES.in`はsource inventory変更なしのため、これらはcurrent listへ
+含めません。v2.1.0固有の履歴は、下記の
 `v2.1.0 post-release closure`として別に扱い、current listの根拠にはしません。将来のrelease
 では、このlistを流用せず、そのreleaseで監査済みのexact path setへ置き換えます。
 

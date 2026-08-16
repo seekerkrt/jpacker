@@ -322,19 +322,28 @@ std::string expected_makepkg_command(
         const fs::path& artifact_workspace,
         const std::vector<std::string>& arguments,
         const SourceBuildEnvironment& source_environment = {}) {
+    std::vector<std::string> command_words{"makepkg"};
+    command_words.insert(
+            command_words.end(), arguments.begin(), arguments.end());
+    for(const SourceEnvironmentAssignment& assignment :
+        source_environment.ordered_assignments) {
+        command_words.push_back(assignment.key + "=" + assignment.value);
+    }
+    command_words.push_back("PKGDEST=" + artifact_workspace.string());
+
     std::string command = expected_environment_prefix(
                                   artifact_workspace,
                                   source_environment) +
-                          expected_shell_quote("makepkg");
-    for(const std::string& argument : arguments) {
-        command += " " + expected_shell_quote(argument);
+                          expected_shell_quote(command_words.front());
+    for(std::size_t index = 1; index < command_words.size(); ++index) {
+        command += " " + expected_shell_quote(command_words[index]);
     }
     return command;
 }
 
 std::string expected_identity_command(const fs::path& artifact_path) {
     const std::vector<std::string> arguments = {
-            "pacman", "-U", "--print", "--print-format", "%n\t%v", "--",
+            "pacman", "-Qp", "--color", "never", "--",
             artifact_path.string()};
     std::string command = "LC_ALL=C";
     for(const std::string& argument : arguments) {
@@ -570,7 +579,7 @@ void observe_artifact_workspace_creation(const fs::path& workspace_path) {
                 CapturedCommandResult{
                         query_failure
                                 ? std::string{}
-                                : identity_names[index] + "\t1.0-1\n",
+                                : identity_names[index] + " 1.0-1\n",
                         query_failure ? 31 : 0});
         if(query_failure) break;
     }

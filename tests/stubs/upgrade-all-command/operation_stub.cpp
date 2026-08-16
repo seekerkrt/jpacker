@@ -378,16 +378,54 @@ UpgradeAllOperationResult make_success_result(
                        : AurUpdateOperationStatus::Completed);
 }
 
+UpgradeAllOperationResult make_snapshot_unavailable_result(
+        bool is_before_snapshot) {
+    UpgradeAllOperationResult result = make_success_result(
+            UpgradeAllOperationStatus::Completed,
+            PackageStateChange::Unknown);
+    const std::string snapshot_position =
+            is_before_snapshot ? "before" : "after";
+    const PackageMetadataFailure failure{
+            PackageMetadataErrorCode::QueryFailed,
+            "fixture " + snapshot_position + " snapshot unavailable"};
+    if(is_before_snapshot) {
+        result.system_source.system.before_snapshot_failure = failure;
+    } else {
+        result.system_source.system.after_snapshot_failure = failure;
+    }
+
+    const std::string diagnostic =
+            "Failed to snapshot local package versions " +
+            snapshot_position + " the system upgrade: " +
+            failure.diagnostic;
+    SystemSourceUpgradeIssue issue;
+    issue.kind =
+            SystemSourceUpgradeIssueKind::SystemPackageSnapshotUnavailable;
+    issue.impact = SystemSourceUpgradeIssueImpact::ObservabilityOnly;
+    issue.phase = SystemSourceUpgradePhase::System;
+    issue.package_metadata_failure = failure;
+    issue.diagnostic = diagnostic;
+    result.system_source.issues.push_back(std::move(issue));
+
+    SystemSourceUpgradeDiagnostic detail;
+    detail.phase = SystemSourceUpgradePhase::System;
+    detail.stops_execution = false;
+    detail.diagnostic = diagnostic;
+    result.system_source.diagnostics.push_back(std::move(detail));
+    return result;
+}
+
 RegisteredSourcePreferenceSnapshot make_source_snapshot(
         std::size_t index,
-        const std::string& package_name) {
+        const std::string& package_name,
+        const std::optional<std::string>& resolved_package_base) {
     RegisteredSourcePreferenceSnapshot snapshot;
     snapshot.original_preference_index = index;
     snapshot.preference_package_name = package_name;
     snapshot.entry_path = "/fixture/preferences/" + package_name;
     snapshot.canonical_source_identity_key =
             "repository:https://sources.example/" + package_name;
-    snapshot.resolved_package_base = package_name + "-base";
+    snapshot.resolved_package_base = resolved_package_base;
     return snapshot;
 }
 
@@ -421,11 +459,13 @@ void add_source(
     result.prepared_snapshot.system_source.registered_sources.push_back(
             make_source_snapshot(
                     source.original_preference_index,
-                    source.preference_package_name));
+                    source.preference_package_name,
+                    source.resolved_package_base));
     result.system_source.prepared_snapshot.registered_sources.push_back(
             make_source_snapshot(
                     source.original_preference_index,
-                    source.preference_package_name));
+                    source.preference_package_name,
+                    source.resolved_package_base));
     result.system_source.registered_source_results.push_back(
             std::move(source));
 }
@@ -643,6 +683,26 @@ UpgradeAllOperationResult make_blocked_result() {
                     RegisteredSourceUpgradeFailureKind::PreferenceUnavailable,
                     PackageStateChange::NoChange,
                     "fixture source preparation failed"));
+    SystemSourceUpgradeIssue blocking_issue;
+    blocking_issue.kind =
+            SystemSourceUpgradeIssueKind::SourceWorkItemPreparationFailed;
+    blocking_issue.impact =
+            SystemSourceUpgradeIssueImpact::BlocksExecution;
+    blocking_issue.phase = SystemSourceUpgradePhase::Preparation;
+    blocking_issue.original_preference_index = 1;
+    blocking_issue.preference_package_name = "source-incomplete";
+    blocking_issue.resolved_package_base = "source-incomplete-base";
+    blocking_issue.diagnostic = "fixture blocking system/source issue";
+    result.system_source.issues.push_back(blocking_issue);
+
+    SystemSourceUpgradeDiagnostic blocking_detail;
+    blocking_detail.phase = SystemSourceUpgradePhase::Preparation;
+    blocking_detail.original_preference_index = 1;
+    blocking_detail.preference_package_name = "source-incomplete";
+    blocking_detail.resolved_package_base = "source-incomplete-base";
+    blocking_detail.stops_execution = true;
+    blocking_detail.diagnostic = blocking_issue.diagnostic;
+    result.system_source.diagnostics.push_back(std::move(blocking_detail));
     result.foreign_inventory.status =
             UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
     result.foreign_inventory.not_attempted_reason =
@@ -849,6 +909,32 @@ UpgradeAllOperationResult make_aur_skip_result() {
     non_aur_issue.package_name = "non-aur-foreign";
     non_aur.preflight_issues.push_back(std::move(non_aur_issue));
     filtered.reduced_operation_result.targets.push_back(std::move(non_aur));
+    return result;
+}
+
+UpgradeAllOperationResult make_many_current_one_attention_result() {
+    UpgradeAllOperationResult result = make_aur_skip_result();
+    FilteredAurUpdateExecutionResult& filtered =
+            *result.aur.operation_result;
+    for(std::size_t index = 0; index < 48; ++index) {
+        AurUpdateOperationTargetResult current = make_aur_target(
+                "current-package-" + std::to_string(index),
+                AurUpdateOperationTargetStatus::Skipped);
+        current.update.classification = AurUpdateClassification::UpToDate;
+        current.update.aur_package->version_relation =
+                AurVersionRelation::SameAsInstalled;
+        filtered.reduced_operation_result.targets.push_back(
+                std::move(current));
+    }
+
+    AurUpdateOperationTargetResult attention = make_aur_target(
+            "attention-package",
+            AurUpdateOperationTargetStatus::Unsupported,
+            "attention-suite");
+    attention.update.classification =
+            AurUpdateClassification::MetadataUnavailable;
+    filtered.reduced_operation_result.targets.push_back(
+            std::move(attention));
     return result;
 }
 
@@ -1177,6 +1263,52 @@ UpgradeAllOperationResult make_aur_split_multiple_result() {
     filtered.reduced_operation_result.targets.push_back(std::move(target));
     filtered.reduced_operation_result.execution_work_items.push_back(
             std::move(work_item));
+    return result;
+}
+
+UpgradeAllOperationResult make_registered_package_base_result() {
+    UpgradeAllOperationResult result = make_success_result(
+            UpgradeAllOperationStatus::Completed,
+            PackageStateChange::Changed);
+
+    RegisteredSourceUpgradeResult distinct = make_source_result(
+            0,
+            "registered-child",
+            RegisteredSourceUpgradeStatus::Updated,
+            RegisteredSourceUpgradeFailureKind::None,
+            PackageStateChange::Changed);
+    distinct.resolved_package_base = "registered-suite";
+    distinct.package_base_execution =
+            RegisteredSourcePackageBaseExecutionSnapshot{
+                    "registered-suite",
+                    PackageBaseSourceBuildSelectedResult{
+                            ArtifactPackageIdentity{
+                                    "registered-child", "4.2-3"},
+                            DesiredInstallReason::Explicit,
+                            ArtifactInstallExecutionOutcome::Installed},
+                    {ArtifactPackageIdentity{
+                             "registered-sibling", "4.2-3"},
+                     ArtifactPackageIdentity{
+                             "registered-child-debug", "4.2-3"}}};
+    add_source(result, std::move(distinct));
+
+    RegisteredSourceUpgradeResult ordinary = make_source_result(
+            1,
+            "registered-ordinary",
+            RegisteredSourceUpgradeStatus::Updated,
+            RegisteredSourceUpgradeFailureKind::None,
+            PackageStateChange::Changed);
+    ordinary.resolved_package_base = "registered-ordinary";
+    ordinary.package_base_execution =
+            RegisteredSourcePackageBaseExecutionSnapshot{
+                    "registered-ordinary",
+                    PackageBaseSourceBuildSelectedResult{
+                            ArtifactPackageIdentity{
+                                    "registered-ordinary", "1.0-2"},
+                            DesiredInstallReason::Explicit,
+                            ArtifactInstallExecutionOutcome::Installed},
+                    {}};
+    add_source(result, std::move(ordinary));
     return result;
 }
 
@@ -1854,10 +1986,19 @@ UpgradeAllOperationResult result_for_scenario(const std::string& scenario) {
     if(scenario == "aur-split-multiple") {
         return make_aur_split_multiple_result();
     }
+    if(scenario == "registered-packagebase-result") {
+        return make_registered_package_base_result();
+    }
     if(scenario == "completed-no-change") {
         return make_success_result(
                 UpgradeAllOperationStatus::Completed,
                 PackageStateChange::NoChange);
+    }
+    if(scenario == "before-snapshot-unavailable") {
+        return make_snapshot_unavailable_result(true);
+    }
+    if(scenario == "after-snapshot-unavailable") {
+        return make_snapshot_unavailable_result(false);
     }
     if(scenario == "completed-unknown") {
         return make_success_result(
@@ -1866,6 +2007,9 @@ UpgradeAllOperationResult result_for_scenario(const std::string& scenario) {
     }
     if(scenario == "aur-skips") {
         return make_aur_skip_result();
+    }
+    if(scenario == "many-current-one-attention") {
+        return make_many_current_one_attention_result();
     }
     if(scenario == "duplicate-exclusions") {
         return make_duplicate_exclusion_result();

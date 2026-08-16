@@ -7,6 +7,7 @@
 #include "cache_authority.hpp"
 #include "checkout_fetch.hpp"
 #include "cli_authority.hpp"
+#include "cli_runtime_contract.hpp"
 #include "dependency_plan.hpp"
 #include "dependency_provider.hpp"
 #include "dependency_spec.hpp"
@@ -14,8 +15,11 @@
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "package_metadata.hpp"
+#include "package_relation_presentation.hpp"
+#include "presentation_projection.hpp"
 #include "pkgbuild_export.hpp"
 #include "repository_query.hpp"
+#include "runtime_diagnostic.hpp"
 #include "trusted_cache.hpp"
 
 #include <algorithm>
@@ -42,23 +46,23 @@ const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 
 std::string deps_usage() {
     return localization::format_translated_message(
-            // TRANSLATORS: The placeholders are the command, operation, option, and operand tokens.
-            "Usage: {} {} [{}] {}", application_identity::COMMAND_NAME,
-            "deps", "--recursive", "<pkg>");
+            // TRANSLATORS: The placeholders are the command and complete operation syntax.
+            "Usage: {} {}", application_identity::COMMAND_NAME,
+            cli_operation_syntax(cli_authority::OperationId::Deps));
 }
 
 std::string plan_usage() {
     return localization::format_translated_message(
-            // TRANSLATORS: The placeholders are the command, operation, and operand tokens.
-            "Usage: {} {} {}", application_identity::COMMAND_NAME, "plan",
-            "<pkg>");
+            // TRANSLATORS: The placeholders are the command and complete operation syntax.
+            "Usage: {} {}", application_identity::COMMAND_NAME,
+            cli_operation_syntax(cli_authority::OperationId::Plan));
 }
 
 std::string fetch_usage() {
     return localization::format_translated_message(
-            // TRANSLATORS: The placeholders are the command, operation, and operand tokens.
-            "Usage: {} {} {}", application_identity::COMMAND_NAME, "fetch",
-            "<pkg>");
+            // TRANSLATORS: The placeholders are the command and complete operation syntax.
+            "Usage: {} {}", application_identity::COMMAND_NAME,
+            cli_operation_syntax(cli_authority::OperationId::Fetch));
 }
 
 using RepositoryPackageLookupIdentity =
@@ -330,6 +334,10 @@ void print_repository_package_sizes(
                          "Repository package sizes:")
               << std::endl;
     std::set<RepositoryPackageDisplayIdentity> displayed_packages;
+    std::uint64_t package_size_total = 0;
+    std::uint64_t installed_size_total = 0;
+    bool totals_available = true;
+    std::vector<std::string> unavailable_details;
     for(const auto& lookup : lookups) {
         const RepositoryPackageQueryResult& result =
                 query_repository_package_cached(context, lookup);
@@ -338,34 +346,54 @@ void print_repository_package_sizes(
             RepositoryPackageDisplayIdentity display_identity{
                     metadata->repository_name, metadata->package_name};
             if(!displayed_packages.insert(display_identity).second) continue;
-
-            std::cout << "  " << metadata->repository_name << "/"
-                      << metadata->package_name << std::endl;
-            std::cout << localization::format_translated_message(
-                                 "    Package size   : {}",
-                                 format_iec_bytes(
-                                         metadata->package_size_bytes))
-                      << std::endl;
-            std::cout << localization::format_translated_message(
-                                 "    Installed size : {}",
-                                 format_iec_bytes(
-                                         metadata->installed_size_bytes))
-                      << std::endl;
+            if(package_size_total >
+                       std::numeric_limits<std::uint64_t>::max() -
+                               metadata->package_size_bytes ||
+               installed_size_total >
+                       std::numeric_limits<std::uint64_t>::max() -
+                               metadata->installed_size_bytes) {
+                totals_available = false;
+                continue;
+            }
+            package_size_total += metadata->package_size_bytes;
+            installed_size_total += metadata->installed_size_bytes;
             continue;
         }
 
-        std::cout << "  " << repository_package_lookup_display(lookup) << std::endl;
         if(std::holds_alternative<PackageNotFound>(result)) {
-            std::cout << localization::translate_message(
-                                 "    Metadata       : not found")
-                      << std::endl;
+            unavailable_details.push_back(
+                    repository_package_lookup_display(lookup) +
+                    ": " + localization::translate_message("not found"));
             continue;
         }
 
         const PackageMetadataFailure& failure =
                 std::get<PackageMetadataFailure>(result);
-        std::cout << "    "
-                  << repository_metadata_unavailable_display(failure.code)
+        unavailable_details.push_back(
+                repository_package_lookup_display(lookup) + ": " +
+                repository_metadata_unavailable_display(failure.code));
+    }
+
+    std::cout << localization::format_translated_message(
+                         "  packages: {}", displayed_packages.size())
+              << std::endl;
+    if(totals_available) {
+        std::cout << localization::format_translated_message(
+                             "    Package size   : {}",
+                             format_iec_bytes(package_size_total))
+                  << std::endl;
+        std::cout << localization::format_translated_message(
+                             "    Installed size : {}",
+                             format_iec_bytes(installed_size_total))
+                  << std::endl;
+    } else {
+        std::cout << localization::translate_message(
+                             "    totals: unavailable (overflow)")
+                  << std::endl;
+    }
+    for(const std::string& detail : unavailable_details) {
+        std::cout << localization::format_translated_message(
+                             "  attention: {}", detail)
                   << std::endl;
     }
 }
@@ -385,6 +413,230 @@ std::string join_comma_display_values(const std::vector<std::string>& values) {
         ss << values[i];
     }
     return ss.str();
+}
+
+std::string plan_construction_label(PlanConstruction construction) {
+    switch(construction) {
+    case PlanConstruction::Constructed:
+        return localization::translate_message("Constructed");
+    case PlanConstruction::Failed:
+        return localization::translate_message("Failed");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown plan construction state."));
+}
+
+std::string plan_completeness_label(PlanCompleteness completeness) {
+    switch(completeness) {
+    case PlanCompleteness::Complete:
+        return localization::translate_message("Complete");
+    case PlanCompleteness::Incomplete:
+        return localization::translate_message("Incomplete");
+    case PlanCompleteness::Unknown:
+        return localization::translate_message("Unknown");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown plan completeness state."));
+}
+
+std::string provider_decision_label(ProviderDecision decision) {
+    switch(decision) {
+    case ProviderDecision::Unique:
+        return localization::translate_message("Unique");
+    case ProviderDecision::Selected:
+        return localization::translate_message("Selected");
+    case ProviderDecision::Ambiguous:
+        return localization::translate_message("Ambiguous");
+    case ProviderDecision::Cancelled:
+        return localization::translate_message("Cancelled");
+    case ProviderDecision::Unavailable:
+        return localization::translate_message("Unavailable");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown provider decision state."));
+}
+
+std::string execution_capability_label(ExecutionCapability capability) {
+    switch(capability) {
+    case ExecutionCapability::Fetch:
+        return localization::translate_message("Fetch");
+    case ExecutionCapability::Build:
+        return localization::translate_message("Build");
+    case ExecutionCapability::Install:
+        return localization::translate_message("Install");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown execution capability."));
+}
+
+std::string execution_readiness_label(ExecutionReadinessState readiness) {
+    switch(readiness) {
+    case ExecutionReadinessState::NotAssessed:
+        return localization::translate_message("Not assessed");
+    case ExecutionReadinessState::Ready:
+        return localization::translate_message("Ready");
+    case ExecutionReadinessState::RequiresCheck:
+        return localization::translate_message("Requires check");
+    case ExecutionReadinessState::Blocked:
+        return localization::translate_message("Blocked");
+    case ExecutionReadinessState::Unknown:
+        return localization::translate_message("Unknown");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown execution readiness state."));
+}
+
+std::string plan_required_action_label(PlanRequiredAction action) {
+    switch(action) {
+    case PlanRequiredAction::None:
+        return localization::translate_message("None");
+    case PlanRequiredAction::CorrectPlanAuthority:
+        return localization::translate_message("Correct plan authority");
+    case PlanRequiredAction::ResolveDependency:
+        return localization::translate_message("Resolve dependency");
+    case PlanRequiredAction::SelectProvider:
+        return localization::translate_message("Select provider");
+    case PlanRequiredAction::ObtainMetadata:
+        return localization::translate_message("Obtain metadata");
+    case PlanRequiredAction::ReviewDeclaredRelations:
+        return localization::translate_message("Review declared relations");
+    case PlanRequiredAction::UsePackageBaseSetLifecycle:
+        return localization::translate_message(
+                "Use the package-base set lifecycle");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown plan required action."));
+}
+
+std::string plan_presentation_reason_label(
+        PlanPresentationReasonKind kind) {
+    switch(kind) {
+    case PlanPresentationReasonKind::ConstraintAuthority:
+        return localization::translate_message("constraint authority");
+    case PlanPresentationReasonKind::SelectedProviderIdentityConflict:
+        return localization::translate_message(
+                "selected provider identity conflict");
+    case PlanPresentationReasonKind::ConstraintReadiness:
+        return localization::translate_message("constraint readiness");
+    case PlanPresentationReasonKind::ResolutionFailure:
+        return localization::translate_message("resolution failure");
+    case PlanPresentationReasonKind::UnresolvedDependency:
+        return localization::translate_message("unresolved dependency");
+    case PlanPresentationReasonKind::AmbiguousProvider:
+        return localization::translate_message("ambiguous provider");
+    case PlanPresentationReasonKind::DependencyCycle:
+        return localization::translate_message("dependency cycle");
+    case PlanPresentationReasonKind::DeclaredRelation:
+        return localization::translate_message(
+                "package relation assessment");
+    case PlanPresentationReasonKind::SplitPackage:
+        return localization::translate_message("split package");
+    case PlanPresentationReasonKind::IncompleteProviderCandidate:
+        return localization::translate_message(
+                "incomplete provider candidate");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown plan presentation reason."));
+}
+
+std::size_t unconstrained_dependency_count(const BuildPlan& plan) {
+    return static_cast<std::size_t>(std::count_if(
+            plan.dependency_edges.begin(), plan.dependency_edges.end(),
+            [](const BuildPlanDependencyEdge& edge) {
+                return edge.constraint_evaluation.has_value() &&
+                       edge.constraint_evaluation->satisfaction() ==
+                               ConstraintSatisfaction::Unconstrained;
+            }));
+}
+
+void print_plan_state_summary(
+        const BuildPlan& plan,
+        const PlanStateProjection& state,
+        const PresentationProjection& presentation) {
+    std::cout << localization::translate_message("Plan state:") << std::endl;
+    std::cout << localization::format_translated_message(
+                         "  construction: {}",
+                         plan_construction_label(state.construction))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "  completeness: {}",
+                         plan_completeness_label(state.completeness))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "  provider decision: {}",
+                         provider_decision_label(state.provider_decision))
+              << std::endl;
+    for(ExecutionCapability capability : {
+                ExecutionCapability::Fetch,
+                ExecutionCapability::Build,
+                ExecutionCapability::Install}) {
+        const ExecutionReadiness& readiness =
+                execution_readiness(state, capability);
+        std::cout << localization::format_translated_message(
+                             "  {} readiness: {}",
+                             execution_capability_label(capability),
+                             execution_readiness_label(readiness.state))
+                  << std::endl;
+    }
+    std::cout << localization::format_translated_message(
+                         "  items: {} total, {} normal, {} attention-required",
+                         presentation.summary_counts.total,
+                         presentation.summary_counts.normal,
+                         presentation.summary_counts.attention_required)
+              << std::endl;
+    const std::size_t unconstrained = unconstrained_dependency_count(plan);
+    if(unconstrained != 0) {
+        std::cout << localization::format_translated_message(
+                             "  normal unconstrained dependencies: {}",
+                             unconstrained)
+                  << std::endl;
+    }
+}
+
+void print_plan_attention_details(
+        const PresentationProjection& presentation) {
+    if(presentation.attention_items.empty()) return;
+
+    std::cout << std::endl
+              << localization::translate_message(
+                         "Attention-required details:")
+              << std::endl;
+    for(const PresentationItem& item : presentation.attention_items) {
+        std::cout << localization::format_translated_message(
+                             "  - package: {}",
+                             item.requested_package.value_or(
+                                     localization::translate_message(
+                                             "<plan-wide>")))
+                  << std::endl;
+        if(item.package_base.has_value() &&
+           item.package_base != item.requested_package) {
+            std::cout << "    PackageBase: " << item.package_base.value()
+                      << std::endl;
+        }
+        if(item.diagnostic_class.has_value()) {
+            std::cout << localization::format_translated_message(
+                                 "    diagnostic: {}",
+                                 diagnostic_class_label(
+                                         item.diagnostic_class.value()))
+                      << std::endl;
+        }
+        for(const PlanPresentationReason& reason : item.plan_reasons) {
+            std::cout << localization::format_translated_message(
+                                 "    {}: {}",
+                                 execution_capability_label(reason.capability),
+                                 execution_readiness_label(reason.readiness))
+                      << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "      reason: {}",
+                                 plan_presentation_reason_label(reason.kind))
+                      << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "      required action: {}",
+                                 plan_required_action_label(
+                                         reason.required_action))
+                      << std::endl;
+        }
+    }
 }
 
 std::string aur_git_url_for_package_base(const std::string& package_base) {
@@ -531,7 +783,8 @@ void print_selected_provider_group(
 void print_constraint_evaluations(
         const BuildPlan& plan,
         const std::optional<std::string>& parent_package_name =
-                std::nullopt) {
+                std::nullopt,
+        bool suppress_unconstrained = false) {
     bool printed_header = false;
     for(const auto& edge : plan.dependency_edges) {
         if(parent_package_name.has_value() &&
@@ -539,6 +792,11 @@ void print_constraint_evaluations(
             continue;
         }
         if(!edge.constraint_evaluation.has_value()) continue;
+        if(suppress_unconstrained &&
+           edge.constraint_evaluation->satisfaction() ==
+                   ConstraintSatisfaction::Unconstrained) {
+            continue;
+        }
         if(!printed_header) {
             std::cout << std::endl
                       << localization::translate_message(
@@ -718,7 +976,89 @@ void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks) 
     }
 }
 
+void print_relation_assessment_group(
+        const std::vector<PackageRelationAssessment>& assessments,
+        const std::optional<std::string>& declaring_package = std::nullopt) {
+    bool printed_header = false;
+    for(const auto& assessment : assessments) {
+        if(declaring_package.has_value() &&
+           assessment.declaring_package.package_name !=
+                   declaring_package.value()) {
+            continue;
+        }
+        if(!printed_header) {
+            std::cout << localization::translate_message(
+                                 "Package relation assessments:")
+                      << std::endl;
+            printed_header = true;
+        }
+        std::cout << "  - "
+                  << package_relation_assessment_diagnostic_display(
+                             assessment)
+                  << std::endl;
+    }
+}
+
 void print_build_plan(const BuildPlan& plan) {
+    const PlanStateProjection state = project_build_plan_state(plan);
+    const PresentationProjection presentation =
+            project_build_plan_presentation(plan);
+    print_plan_state_summary(plan, state, presentation);
+    print_plan_attention_details(presentation);
+
+    // The generic projection keeps the typed reason/capability hierarchy.
+    // Route-owned details below retain candidates, raw declared metadata, and
+    // diagnostics that must not be discarded by aggregation.
+    if(!plan.ambiguous_providers.empty()) {
+        std::cout << std::endl;
+        print_ambiguous_provider_group(
+                localization::translate_message(
+                        "Ambiguous provided dependencies:"),
+                plan.ambiguous_providers);
+    }
+    if(!plan.split_package_targets.empty()) {
+        std::cout << std::endl;
+        std::cout << localization::translate_message(
+                             "Split package install targets:")
+                  << std::endl;
+        for(const auto& target : plan.split_package_targets) {
+            std::cout << localization::format_translated_message(
+                                 "  - {} (base: {})", target.package_name,
+                                 target.package_base)
+                      << std::endl;
+        }
+    }
+    if(!plan.metadata_risks.empty()) {
+        std::cout << std::endl;
+        print_metadata_risk_group(plan.metadata_risks);
+    }
+    if(!plan.relation_assessments.empty()) {
+        std::cout << std::endl;
+        print_relation_assessment_group(plan.relation_assessments);
+    }
+    if(!plan.unresolved.empty()) {
+        std::cout << std::endl;
+        std::cout << localization::translate_message(
+                             "Unresolved dependencies:")
+                  << std::endl;
+        for(const auto& dependency : plan.unresolved) {
+            std::cout << "  - " << dependency << std::endl;
+        }
+    }
+    print_incomplete_provider_candidate_sets(plan);
+    if(!plan.cycles.empty()) {
+        std::cout << std::endl;
+        std::cout << localization::translate_message(
+                             "Cyclic dependencies:")
+                  << std::endl;
+        for(const auto& dependency : plan.cycles) {
+            std::cout << "  - " << dependency << std::endl;
+        }
+    }
+    print_constraint_evaluations(plan, std::nullopt, true);
+    print_resolution_failures(plan);
+
+    std::cout << std::endl;
     std::cout << localization::translate_message("Build plan:") << std::endl;
     if(plan.order.empty()) {
         std::cout << localization::translate_message("  None") << std::endl;
@@ -761,86 +1101,20 @@ void print_build_plan(const BuildPlan& plan) {
                       << std::endl;
         }
     }
+}
 
-    if(!plan.ambiguous_providers.empty()) {
-        std::cout << std::endl;
-        print_ambiguous_provider_group(
-                localization::translate_message(
-                        "Ambiguous provided dependencies:"),
-                plan.ambiguous_providers);
-    }
-
-    if(!plan.split_package_targets.empty()) {
-        std::cout << std::endl;
-        std::cout << localization::translate_message(
-                             "Split package install targets:")
-                  << std::endl;
-        for(const auto& target : plan.split_package_targets) {
-            std::cout << localization::format_translated_message(
-                                 "  - {} (base: {})", target.package_name,
-                                 target.package_base)
-                      << std::endl;
+void retain_cancelled_provider_decisions(
+        BuildPlan& plan,
+        const std::shared_ptr<ProviderSelectionSession>& selection) {
+    if(!selection) return;
+    for(const AmbiguousProvidedDependency& dependency :
+        plan.ambiguous_providers) {
+        if(selection->was_cancelled(dependency.dependency)) {
+            add_unique_value(
+                    plan.cancelled_provider_dependencies,
+                    dependency.dependency);
         }
     }
-
-    if(!plan.metadata_risks.empty()) {
-        std::cout << std::endl;
-        print_metadata_risk_group(plan.metadata_risks);
-    }
-
-    if(!plan.unresolved.empty()) {
-        std::cout << std::endl;
-        std::cout << localization::translate_message(
-                             "Unresolved dependencies:")
-                  << std::endl;
-        for(const auto& dependency : plan.unresolved) {
-            std::cout << "  - " << dependency << std::endl;
-        }
-    }
-
-    print_incomplete_provider_candidate_sets(plan);
-
-    if(!plan.cycles.empty()) {
-        std::cout << std::endl;
-        std::cout << localization::translate_message(
-                             "Cyclic dependencies:")
-                  << std::endl;
-        for(const auto& dependency : plan.cycles) {
-            std::cout << "  - " << dependency << std::endl;
-        }
-    }
-
-    if(!plan.unresolved.empty() || !plan.ambiguous_providers.empty() ||
-       !plan.cycles.empty() || !plan.metadata_risks.empty() ||
-       !plan.incomplete_provider_candidate_sets.empty() ||
-       has_incomplete_constraint_evaluations(plan)) {
-        std::cout << std::endl;
-        std::cout << localization::translate_message(
-                             "Plan status: incomplete")
-                  << std::endl;
-        if(!plan.unresolved.empty())
-            std::cout << localization::translate_message(
-                                 "  unresolved dependencies remain")
-                      << std::endl;
-        if(!plan.ambiguous_providers.empty())
-            std::cout << localization::translate_message(
-                                 "  ambiguous providers are not selected")
-                      << std::endl;
-        if(!plan.cycles.empty())
-            std::cout << localization::translate_message(
-                                 "  cyclic dependencies detected")
-                      << std::endl;
-        if(!plan.metadata_risks.empty())
-            std::cout << localization::translate_message(
-                                 "  conflicts/replaces metadata is not resolved automatically")
-                      << std::endl;
-        if(has_incomplete_constraint_evaluations(plan))
-            std::cout << localization::translate_message(
-                                 "  dependency constraints are incomplete")
-                      << std::endl;
-    }
-    print_constraint_evaluations(plan);
-    print_resolution_failures(plan);
 }
 
 void print_fetch_plan(const BuildPlan& plan) {
@@ -906,8 +1180,10 @@ void print_fetch_plan(const BuildPlan& plan) {
     if(!plan.metadata_risks.empty()) {
         std::cout << std::endl;
         print_metadata_risk_group(plan.metadata_risks);
-        Logger::warn(localization::translate_message(
-                "Conflicts/replaces metadata requires manual review before build/install; fetch is allowed."));
+    }
+    if(!plan.relation_assessments.empty()) {
+        std::cout << std::endl;
+        print_relation_assessment_group(plan.relation_assessments);
     }
 }
 
@@ -1026,8 +1302,17 @@ int cmd_deps(
             if(!metadata_risks.empty()) {
                 std::cout << std::endl;
                 print_metadata_risk_group(metadata_risks);
-                Logger::warn(localization::translate_message(
-                        "Conflicts/replaces metadata is separate from dependency resolution and requires manual review."));
+            }
+            if(std::any_of(
+                       invocation_plan.relation_assessments.begin(),
+                       invocation_plan.relation_assessments.end(),
+                       [&info](const PackageRelationAssessment& assessment) {
+                           return assessment.declaring_package.package_name ==
+                                  info->Name;
+                       })) {
+                std::cout << std::endl;
+                print_relation_assessment_group(
+                        invocation_plan.relation_assessments, info->Name);
             }
             print_incomplete_provider_candidate_sets(invocation_plan);
             print_constraint_evaluations(invocation_plan, info->Name);
@@ -1081,6 +1366,8 @@ int cmd_plan(
     try {
         BuildPlan plan = resolve_build_plan_for_preflight(
                 targets, select_provider);
+        retain_cancelled_provider_decisions(
+                plan, config.provider_selection);
         print_build_plan(plan);
         print_repository_package_sizes(plan, metadata_context);
     } catch(const std::exception& error) {

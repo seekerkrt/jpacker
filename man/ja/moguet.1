@@ -1,4 +1,4 @@
-.TH MOGUET 1 "August 2026" "Moguet 2.2.0" "ユーザーコマンド"
+.TH MOGUET 1 "August 2026" "Moguet 2.3.0" "ユーザーコマンド"
 .\" parity:name
 .SH 名前
 .na
@@ -13,7 +13,7 @@ moguet \- 検証済みsource buildを備えたpacman-first AUR helper
 .RI [ targets... ]
 .
 .B moguet
-.B -S --select
+.B -S --select [--needed]
 .I query
 .
 .B moguet
@@ -69,6 +69,18 @@ pacmanだけで完結するoperationは、Moguetが消費しないcompatibleなp
 targetがAUR / source-build routeへ進む場合、意味を維持できないoptionは黙って
 無視せずexternal mutation前に拒否します。
 command / option tokenはlocale非依存です。
+closed Moguet grammarはremote / local buildのprimary operand 1件より後にenvironment
+assignmentだけを許し、extra bare build operandを拒否します。
+.BR upgrade 、
+.BR upgrade-aur 、
+.BR upgrade-all 、
+.BR clean 、
+.B list-src
+はtarget operandを拒否します。
+.BR deps 、
+.BR plan 、
+.BR fetch
+およびellipsis付きsource-maintenance formはmulti-targetを維持します。
 .
 .\" parity:commands
 .SH コマンド
@@ -147,8 +159,8 @@ build、installを行いません。
 global / pacman optionはunsupportedです。
 .
 .TP
-.B "deps [--recursive] <pkg>"
-AURのruntime、make、check dependencyを分類します。
+.B "deps [--recursive] <pkg>..."
+1件以上のpackageについてAURのruntime、make、check dependencyを分類します。
 .B --recursive
 を付けるとexact AUR dependencyとuser-selected AUR providerを再帰的に辿ります。
 installed dependency、official dependency、unique provider、selected official repository
@@ -159,22 +171,38 @@ interactive TTYではsource-aware provider candidateを選択でき、user-selec
 未解決のambiguityを区別して表示します。
 constraintのresult / reasonを表示します。Unsatisfied / Unknownはwarning付きでread-only
 commandを継続し、Invalid / Conflictingはfail-closedです。
+conflict / replacement宣言についても、宣言元packageと一致したinstalled / planned packageを
+含むcurrent typed assessmentを表示します。このread-only commandはreplacementやconflict
+resolutionを実行しません。
 clone、build、install、build order計算は行いません。
 .
 .TP
-.B "plan <pkg>"
-AUR build-order planとdirect official repository package sizeを表示します。
-unknown dependency、未選択のambiguous provider、cycle、安全に解決できないconflicts /
-replacesがあるplanはincompleteです。
+.B "plan <pkg>..."
+1件以上のpackageについてAUR build-order planとdirect official repository package
+sizeを表示します。
+unknown dependency、未選択のambiguous provider、cycleがあるplanはincompleteです。
 unique resolve、user-selected provider、未選択のambiguous providerを区別します。
 size metadataが利用できなくてもplan bodyを省略しません。
 Unsatisfied / Unknownのdependency constraintはplanをincompleteとし、result / reasonを
 表示します。Invalid / Conflictingはplan constructionをfail-closedにします。
+planはinstalled conflict、planned-target conflict、potential replacement impact、利用不能または
+未完了のjudgment、invalidなmetadata / observation、complete observationによるcurrent / planned
+targetのno-matchを区別します。
+確認済みのinstalled / planned conflictやpotential replacement impactがあっても、plan
+completenessはCompleteのままになり得ますが、build / installは確認が必要で、safety guardにより
+停止します。
+Moguetはこれらを自動解決しません。
+relation judgmentが利用不能または未完了ならcompletenessはUnknownとなり、fail-closedです。
+relation metadataまたはobservationがinvalidならcompletenessはIncompleteとなり、build / installを
+blockします。
+complete observationでcurrent / planned targetにmatchがなければ、relation blockerはありません。
+これらはcommand statusの独自taxonomyを追加しません。
 clone、build、installは行いません。
 .
 .TP
-.B "fetch <pkg>"
-complete inspection planが必要とするAUR PackageBase repositoryを取得します。
+.B "fetch <pkg>..."
+1件以上のpackageについてcomplete inspection planが必要とするAUR PackageBase
+repositoryを取得します。
 selected AUR providerのPackageBaseも含め、selected official repository providerはclone
 しません。
 Unsatisfied / Unknownのdependency constraintはclone / fetch開始前に停止します。
@@ -184,18 +212,20 @@ Unsatisfied / Unknownのdependency constraintはclone / fetch開始前に停止�
 だけを実行し、pull、merge、reset、working tree更新、build、installを行いません。
 .
 .TP
-.B "add-src <pkg> [V=K]"
-package 1件のsource-build preferenceとoptional build environment assignmentを
-登録します。
+.B "add-src <item>..."
+ordered itemから1件以上のsource-build preferenceを登録します。package itemはpreferenceを
+開始し、後続の
+.I V=K
+itemは次のpackage itemまでそのpackageへ属します。
 v2 config fileはsource-preference tableではありません。
 最初のwriteは、必要な場合にmanaged XDG directoryを作成します。
 .
 .TP
-.B "edit-src <pkg>"
+.B "edit-src <pkg>..."
 .B VISUAL
 または
 .B EDITOR
-を使って既存source-build preferenceを編集するか、新規作成します。
+を使って1件以上の既存source-build preferenceを編集するか、新規作成します。
 editor実行後にfailureとなった場合は、安全に保持できるedited temporary fileを残し、そのpathを
 表示します。
 .
@@ -205,19 +235,19 @@ registered source-build preferenceと表示可能なenvironment assignmentを一
 entryを1件でも表示する前にdirectory snapshot全体をvalidateします。
 .
 .TP
-.B "del-src <pkg>"
-binary packageをreinstallせず、source-build preference 1件を削除します。
+.B "del-src <pkg>..."
+binary packageをreinstallせず、source-build preferenceを1件以上削除します。
 entryがmissingならpreference directoryを作成せずに成功します。
 .
 .TP
-.B "revert <pkg>"
-source-build preference 1件を削除し、configured official repositoryにtargetがあれば
-official binary packageをreinstallします。
+.B "revert <pkg>..."
+source-build preferenceを1件以上削除し、configured official repositoryにtargetがあれば
+対応するofficial binary packageをreinstallします。
 preferenceがmissingでもdirectoryを作成せず、repository reinstallは省略しません。
 confirm前に表示されたpacman transactionをreviewしてください。
 .
 .TP
-.B "-S <pkg>"
+.B "-S <pkg> | -S --select [--needed] <query>"
 packageをinstallします。
 Auto routingはofficial repositoryを優先し、適用可能なsource preferenceを尊重し、
 それ以外ではAURを検討します。
@@ -229,6 +259,9 @@ Auto routingはofficial repositoryを優先し、適用可能なsource preferenc
 を指定すると、1つのoperandをexact package targetではなく検索queryとして扱い、
 source-awareなofficial repository / AUR candidateを表示して、interactiveな明示選択を
 要求します。
+このrouteでは
+.B --needed
+をroute-owned final installationだけへ適用します。
 .
 .TP
 .B "-Syu"
@@ -253,6 +286,8 @@ package情報を表示します。
 Auto modeはofficial repository情報を優先し、packageが存在しない場合だけexact AUR
 metadataへfallbackします。
 source selectorはlookupを指定sourceへ限定します。
+AUR metadataではdeclared conflict / replacementをmetadataとして表示し、installed / planned
+assessmentをplan / build preflightへ延期したことを明示します。
 .
 .TP
 .B "-Qua"
@@ -261,6 +296,9 @@ packageも表示します。
 pacman-compatible queryであり、
 .B upgrade-aur
 の実行とは別です。
+上記のpacman-compatible formはdelegated open grammarの例であり、closed allowlistでは
+ありません。Moguetが消費しないargumentは、選択routeが意味を維持できる場合にpacmanが
+所有します。
 .\" PUBLIC COMMANDS END
 .
 .\" parity:options
@@ -608,6 +646,15 @@ authoritativeに確定できなければ、対応するexternal mutation前に�
 でguardを突破しません。
 .
 .PP
+build / install前に、Moguetはprovided componentとversion付きrelationを含め、declared
+conflict / replacementをinstalled / planned packageへ照合します。diagnosticはinstalled
+conflictとplanned target conflictを区別します。matching replacementはreviewが必要な
+potential impactにすぎず、Moguetはpackageの削除・置換・conflict解決を自動実行しません。
+利用不能またはinvalidなjudgmentはfail-closedとし、absenceとして表示しません。completeな
+観測でcurrent / planned packageとprovided componentのいずれにも一致しない場合だけrelation
+guardを解除します。宣言は残り、transaction authorityはpacman / libalpmです。
+.
+.PP
 複数dependency providerが残る場合、interactive TTYではsource-aware candidateを番号付きで
 表示し、defaultなしでexactly oneの選択を要求します。empty input、q、quit、cancel、EOFは
 取消とし、invalid / out-of-range inputは再入力します。non-TTYと
@@ -644,10 +691,29 @@ targetを1つのrepository transactionとして先に実行し、成功した場
 rollbackしません。
 .
 .PP
-registered source phaseは、candidateがすべてofficial repository由来の場合だけprovider
-selectionを行います。AUR providerを含むcandidate setは、そのproviderのPackageBaseを
-singular source lifecycleでscheduleできないため、ambiguousのままsystem / source
+registered AUR routeは、candidateがすべてofficial repository由来の場合だけprovider
+selectionを行います。AUR providerを含むcandidate setは、このsingular compatibility
+routeでそのproviderのPackageBaseをscheduleできないため、ambiguousのままsystem / source
 execution前にfail-closedで停止します。
+.
+.PP
+official repository source identityはconfigured libalpmのexact snapshotをauthorityとします。
+confirmed
+.B NotFound
+だけがAUR fallbackを許し、query、config、metadata failureをabsenceとして扱わず停止します。
+standalone official buildは
+.BR PackageBaseSet 、
+registered official sourceは
+.B OnlyIfUpdated
+preparation後のPackageBaseSetを使います。authoritativeなPackageBaseを1回buildし、requested
+explicit childだけをinstallして、sibling / debug outputをunselectedかつnot installedとして
+表示します。sync repository routeは既存
+.B --needed
+付きの
+.BR SingularCompatibility 、
+registered AURは既存provider / split-package guard付きの
+.B SingularCompatibility
+のままです。
 .
 .PP
 .B deps

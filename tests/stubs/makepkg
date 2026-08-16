@@ -1,14 +1,39 @@
 #!/bin/sh
 set -eu
 
+is_makepkg_environment_assignment() {
+    case ${1:-} in
+        *=*) makepkg_assignment_key=${1%%=*} ;;
+        *) return 1 ;;
+    esac
+    case $makepkg_assignment_key in
+        [A-Za-z_]* )
+            case $makepkg_assignment_key in
+                *[!A-Za-z0-9_]*) return 1 ;;
+            esac
+            ;;
+        *) return 1 ;;
+    esac
+    return 0
+}
+
+require_makepkg_environment_assignments() {
+    for makepkg_assignment in "$@"; do
+        is_makepkg_environment_assignment "$makepkg_assignment" || exit 2
+    done
+}
+
 require_makepkg_argv() {
-    if [ "$#" -eq 1 ] && [ "${1:-}" = "--packagelist" ]; then
-        return 0
+    if [ "$#" -lt 1 ]; then
+        exit 2
     fi
-    if [ "$#" -eq 1 ] && [ "${1:-}" = "--printsrcinfo" ]; then
-        return 0
+    if [ "${1:-}" = "--packagelist" ] ||
+        [ "${1:-}" = "--printsrcinfo" ]; then
+        shift
+        require_makepkg_environment_assignments "$@"
+        return
     fi
-    if [ "$#" -lt 1 ] || [ "${1:-}" != "-sc" ]; then
+    if [ "${1:-}" != "-sc" ]; then
         exit 2
     fi
 
@@ -22,13 +47,22 @@ require_makepkg_argv() {
     if [ "${1:-}" = "-C" ]; then
         shift
     fi
-    if [ "$#" -ne 0 ]; then
-        exit 2
-    fi
+    require_makepkg_environment_assignments "$@"
 }
 
-printf 'makepkg %s\n' "$*" >> "$MOGUET_TEST_COMMAND_LOG"
+log_makepkg_options() {
+    printf 'makepkg' >> "$MOGUET_TEST_COMMAND_LOG"
+    for makepkg_option in "$@"; do
+        if is_makepkg_environment_assignment "$makepkg_option"; then
+            break
+        fi
+        printf ' %s' "$makepkg_option" >> "$MOGUET_TEST_COMMAND_LOG"
+    done
+    printf '\n' >> "$MOGUET_TEST_COMMAND_LOG"
+}
+
 require_makepkg_argv "$@"
+log_makepkg_options "$@"
 
 argument_index=0
 if [ -n "${MOGUET_TEST_MAKEPKG_ARGV_LOG:-}" ]; then

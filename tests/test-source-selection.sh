@@ -14,6 +14,7 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -119,15 +120,22 @@ run_ok() {
     fi
 }
 
-run_fail() {
+run_status() {
+    expected_status=$1
+    shift
     : > "$command_log"
     : > "$request_log"
-    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected command to fail: $*" >&2
+    if ! validation_expect_status source-selection-expected-failure \
+        "$expected_status" \
+        "$output_file" "$output_file" "$test_binary" "$@" </dev/null; then
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
     fi
+}
+
+run_fail() {
+    run_status 1 "$@"
 }
 
 assert_contains() {
@@ -234,7 +242,8 @@ assert_command_pattern() {
 assert_command_pattern_count() {
     expected_count=$1
     expected_pattern=$2
-    actual_count=$(grep -Ec -- "$expected_pattern" "$command_log" || true)
+    actual_count=$(validation_grep_count -Ec -- \
+        "$expected_pattern" "$command_log")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected command pattern count: $actual_count (expected $expected_count)" >&2
         echo "pattern: $expected_pattern" >&2
@@ -723,13 +732,13 @@ assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command "pacman-conf --verbose RootDir DBPath"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc --noconfirm"
-assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern '^pacman -Qp --color never -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern_count 1 '^pacman-conf --verbose RootDir DBPath$'
 assert_command_pattern_count 0 '^pacman-conf --repo-list$'
 assert_command_pattern_count 1 '^makepkg --packagelist$'
 assert_command_pattern_count 1 '^makepkg -sc --noconfirm$'
-assert_command_pattern_count 1 '^pacman -U --print --print-format '
+assert_command_pattern_count 1 '^pacman -Qp --color never '
 assert_command_pattern_count 1 '^sudo pacman -U --noconfirm -- '
 assert_command_absent "pacman -Si clean-root"
 assert_request_log_nonempty
@@ -785,7 +794,7 @@ while IFS='|' read -r case_name target expected; do
     assert_request_log_nonempty
     assert_cache_entry_absent "$target"
 done <<'AUR_GUARDS'
-metadata-risk|risk-root|conflicts/replaces metadata requires manual review
+relation-assessment|planned-conflict-root|Planned-target conflict confirmed
 ambiguous-provider|ambiguous-root|ambiguous providers
 unresolved-dependency|unresolved-root|unresolved dependencies
 cyclic-plan|cycle-root|cyclic dependencies
@@ -882,7 +891,7 @@ fi
 
 setup_case repo-install-missing
 export MOGUET_TEST_SUDO_EXIT_CODE=42
-run_fail -S --repo clean-root
+run_status 42 -S --repo clean-root
 assert_only_command "sudo pacman -S clean-root"
 assert_no_source_build_commands
 assert_request_log_empty
@@ -947,7 +956,7 @@ assert_command "git clone https://gitlab.archlinux.org/archlinux/packaging/packa
 assert_command "pacman-conf --verbose RootDir DBPath"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc --noconfirm"
-assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern '^pacman -Qp --color never -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_repository_read_counts 1 1
 assert_contains "Loading custom build flags from $preference_dir/clean-root." "$output_file"
@@ -978,7 +987,7 @@ assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command "pacman-conf --verbose RootDir DBPath"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc --noconfirm"
-assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern '^pacman -Qp --color never -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_repository_read_counts 1 1
 assert_request_log_nonempty
@@ -1001,7 +1010,7 @@ assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command "pacman-conf --verbose RootDir DBPath"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc --noconfirm"
-assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern '^pacman -Qp --color never -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_repository_read_counts 2 1
 assert_request_log_nonempty
@@ -1051,7 +1060,7 @@ assert_request_log_empty
 
 setup_case repo-search-missing
 export MOGUET_TEST_PACMAN_EXIT_CODE=7
-run_fail -Ss --repo keyword
+run_status 7 -Ss --repo keyword
 assert_only_command "pacman -Ss keyword"
 assert_request_log_empty
 

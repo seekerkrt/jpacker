@@ -37,11 +37,25 @@ struct ConfiguredRepositoryIdentity {
 struct RepositoryProviderCapability {
     ProviderCapability capability;
     ObservedVersion    provided_version;
+
+    bool operator==(const RepositoryProviderCapability&) const = default;
 };
+
+using ProviderCapabilityMetadataProjectionResult = std::variant<
+        std::vector<RepositoryProviderCapability>,
+        DependencyConstraintParseFailure>;
+
+// libalpm由来のowned provide metadataを一度だけtyped capabilityへ変換する。
+// Installed / repository adapterは同じparser authorityを共有する。
+ProviderCapabilityMetadataProjectionResult
+project_package_metadata_provides(
+        const std::vector<RepositoryProvidedPackageMetadata>& metadata,
+        ObservedVersionSource version_source);
 
 struct RepositoryExactPackage {
     ConfiguredRepositoryIdentity             repository;
     std::string                              package_name;
+    std::string                              package_base;
     ObservedVersion                          package_version;
     std::vector<RepositoryProviderCapability> provides;
 };

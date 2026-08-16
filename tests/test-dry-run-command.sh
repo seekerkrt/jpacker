@@ -7,10 +7,12 @@ export LANG LC_ALL
 unset LANGUAGE
 
 test_binary=$1
+repository_test_binary=$2
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 
 tmp_dir=$(mktemp -d)
 server_pid=
@@ -56,25 +58,34 @@ require_exact_test_command git "$repo_root/tests/stubs/git"
 MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 export MOGUET_TEST_AUR_RPC_BASE_URL
 
+snapshot_protected_storage_raw() {
+    for snapshot_tree in \
+        "$XDG_CONFIG_HOME" \
+        "$XDG_STATE_HOME" \
+        "$XDG_CACHE_HOME" \
+        "$TMPDIR" \
+        "$case_work_dir"
+    do
+        printf 'tree=%s\n' "$snapshot_tree" || return $?
+        find "$snapshot_tree" -printf '%p|%y\n' || return $?
+        find "$snapshot_tree" -exec \
+            stat --format='%n|%F|%d|%i|%u|%g|%a|%s|%Y|%Z' -- {} + || return $?
+        find "$snapshot_tree" -type f -exec sha256sum -- {} + || return $?
+    done
+}
+
 snapshot_protected_storage() {
     snapshot_destination=$1
-    {
-        for snapshot_tree in \
-            "$XDG_CONFIG_HOME" \
-            "$XDG_STATE_HOME" \
-            "$XDG_CACHE_HOME" \
-            "$TMPDIR" \
-            "$case_work_dir"
-        do
-            printf 'tree=%s\n' "$snapshot_tree"
-            find "$snapshot_tree" -printf '%p|%y\n' | LC_ALL=C sort
-            find "$snapshot_tree" -exec \
-                stat --format='%n|%F|%d|%i|%u|%g|%a|%s|%Y|%Z' -- {} + |
-                LC_ALL=C sort
-            find "$snapshot_tree" -type f -exec sha256sum -- {} + |
-                LC_ALL=C sort
-        done
-    } > "$snapshot_destination"
+    if validation_capture_sorted_output \
+        "$snapshot_destination.raw" "$snapshot_destination" \
+        snapshot_protected_storage_raw; then
+        return 0
+    else
+        snapshot_status=$?
+    fi
+    printf 'protected storage snapshot producer failed with status %s; raw=%s\n' \
+        "$snapshot_status" "$snapshot_destination.raw" >&2
+    exit 1
 }
 
 prepare_canary_tree() {
@@ -150,6 +161,7 @@ setup_case() {
     unset MOGUET_TEST_PACMAN_Q_OUTPUT
     unset MOGUET_TEST_PACMAN_Q_OUTPUT_FILE
     unset MOGUET_TEST_PACKAGE_METADATA_STATE_FILE
+    unset MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG
     unset MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE
     unset MOGUET_TEST_MAKEPKG_PRINTSRCINFO_EXIT_CODE
     unset MOGUET_TEST_MAKEPKG_SRCINFO_OUTPUT_FILE
@@ -245,7 +257,13 @@ assert_read_only_commands() {
             'pacman-conf --verbose RootDir DBPath'|\
             'pacman-conf --repo-list'|\
             'pacman -Si clean-root'|\
-            'pacman -Qm') ;;
+            'pacman -Qm'|\
+            'alpm initialize'|\
+            'alpm sync-register core'|\
+            'alpm sync-valid core'|\
+            'alpm sync-cache core'|\
+            'alpm sync-query core/repository-root'|\
+            'alpm release') ;;
             *)
                 echo "dry-run crossed a forbidden or unapproved process boundary" >&2
                 echo "$command" >&2
@@ -337,18 +355,46 @@ run_supported() {
 snapshot_local_tree() {
     source_tree=$1
     destination=$2
+    if validation_capture_sorted_output "$destination.raw" "$destination" \
+        snapshot_local_tree_raw "$source_tree"; then
+        return 0
+    else
+        snapshot_status=$?
+    fi
+    printf 'local tree snapshot producer failed with status %s; raw=%s\n' \
+        "$snapshot_status" "$destination.raw" >&2
+    exit 1
+}
+
+snapshot_local_tree_raw() {
+    source_tree=$1
     {
-        find "$source_tree" -mindepth 1 -printf '%P\n' | LC_ALL=C sort
+        find "$source_tree" -mindepth 1 -printf '%P\n' || return $?
         find "$source_tree" -mindepth 1 -exec \
-            stat --format='%n|%F|%d|%i|%u|%g|%a|%s|%Y|%Z' -- {} + |
-            LC_ALL=C sort
-        find "$source_tree" -type f -exec sha256sum -- {} + |
-            LC_ALL=C sort
-    } > "$destination"
+            stat --format='%n|%F|%d|%i|%u|%g|%a|%s|%Y|%Z' -- {} + || return $?
+        find "$source_tree" -type f -exec sha256sum -- {} + || return $?
+    }
 }
 
 assert_no_raw_local_terminal_payload() {
-    local_output_hex=$(od -An -v -tx1 "$output_file" | tr '\n' ' ')
+    local_output_hex_raw=$case_dir/local-output.hex.raw
+    if validation_capture_output "$local_output_hex_raw" \
+        od -An -v -tx1 "$output_file"; then
+        :
+    else
+        hex_status=$?
+        printf 'terminal payload producer failed with status %s; raw=%s\n' \
+            "$hex_status" "$local_output_hex_raw" >&2
+        exit 1
+    fi
+    if local_output_hex=$(tr '\n' ' ' <"$local_output_hex_raw"); then
+        :
+    else
+        hex_status=$?
+        printf 'terminal payload normalization failed with status %s\n' \
+            "$hex_status" >&2
+        exit 1
+    fi
     for local_raw_sequence in \
         '1b' \
         '07' \
@@ -396,6 +442,38 @@ run_supported \
     "Identity: AUR/clean-root (PackageBase: clean-root)" \
     --dry-run build clean-root --dry-run
 
+# Issue #406 Slice 3: strict repository metadata selects the standalone
+# PackageBase-set projection. Ready therefore proves the route-specific Set
+# canary accepted it, while the sentinel proves observation stayed read-only.
+setup_case remote-repository-build
+repository_metadata_state=$case_dir/repository-metadata-state
+printf 'core repository-root 1 1\n' > "$repository_metadata_state"
+export MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE=$repository_metadata_state
+export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+MOGUET_TEST_PACMAN_REPO_PACKAGES=repository-root
+export MOGUET_TEST_PACMAN_REPO_PACKAGES
+: > "$command_log"
+start_mutation_sentinel
+if (cd "$case_work_dir" &&
+        "$repository_test_binary" --dry-run build repository-root) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+if ! grep -F -- "Unified plan:" "$output_file" >/dev/null; then
+    echo "standalone repository dry-run did not render a unified observation" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+assert_expected_observation \
+    Ready 1 \
+    "repository source key repository:repository-root (requested package: repository-root; checkout PackageBase: repository-root)" \
+    "$status" "standalone repository PackageBase-set build"
+assert_protected_storage_unchanged
+assert_read_only_commands
+
 setup_case local-build
 local_source=$case_dir/local-source
 cp -a "$repo_root/tests/fixtures/unified-plan-local-blocked" "$local_source"
@@ -429,6 +507,48 @@ fi
 snapshot_local_tree "$local_source" "$after_snapshot"
 if ! cmp -s "$before_snapshot" "$after_snapshot"; then
     echo "local dry-run changed source file list, content, or identity" >&2
+    diff -u "$before_snapshot" "$after_snapshot" >&2 || true
+    exit 1
+fi
+assert_protected_storage_unchanged
+assert_read_only_commands
+
+setup_case local-build-relation-no-match
+local_source=$case_dir/local-source
+cp -a "$repo_root/tests/fixtures/unified-plan-local-blocked" "$local_source"
+touch "$local_source/.SRCINFO"
+printf '\tconflicts = absent-local-component\n' >> "$local_source/.SRCINFO"
+before_snapshot=$case_dir/local-before
+after_snapshot=$case_dir/local-after
+snapshot_local_tree "$local_source" "$before_snapshot"
+start_mutation_sentinel "$local_source"
+if (cd "$case_work_dir" &&
+        "$repository_test_binary" build --local "$local_source" --dry-run) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+assert_expected_observation \
+    Ready 1 \
+    "Request: unified-plan-local-blocked (invocation index: 0)" \
+    "$status" "local build with a complete no-match relation assessment"
+if ! grep -F -- "     Source: local" "$output_file" >/dev/null ||
+   ! grep -F -- \
+       "Confirmed no matching current or planned target" \
+       "$output_file" >/dev/null ||
+   ! grep -F -- "source: local source" "$output_file" >/dev/null ||
+   ! grep -F -- "this relation does not block build/install" \
+       "$output_file" >/dev/null
+then
+    echo "local dry-run lost its typed package-relation result" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+snapshot_local_tree "$local_source" "$after_snapshot"
+if ! cmp -s "$before_snapshot" "$after_snapshot"; then
+    echo "local relation dry-run changed source file list, content, or identity" >&2
     diff -u "$before_snapshot" "$after_snapshot" >&2 || true
     exit 1
 fi

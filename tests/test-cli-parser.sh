@@ -13,6 +13,7 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -102,8 +103,8 @@ run_ok() {
 
 run_fail() {
     : > "$command_log"
-    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected command to fail: $*" >&2
+    if ! validation_expect_status cli-parser-business-failure 1 \
+        "$output_file" "$output_file" "$test_binary" "$@" </dev/null; then
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -142,7 +143,7 @@ assert_command() {
 assert_command_count() {
     expected=$1
     expected_count=$2
-    actual_count=$(grep -Fxc -- "$expected" "$command_log" || true)
+    actual_count=$(validation_grep_count -Fxc -- "$expected" "$command_log")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected command count for: $expected" >&2
         echo "expected $expected_count, got $actual_count" >&2
@@ -214,7 +215,7 @@ assert_no_mutation_commands() {
 assert_only_sudo_command() {
     expected=$1
     assert_command_count "$expected" 1
-    sudo_count=$(grep -c '^sudo ' "$command_log" || true)
+    sudo_count=$(validation_grep_count -c '^sudo ' "$command_log")
     if [ "$sudo_count" -ne 1 ]; then
         echo "unexpected additional sudo command(s)" >&2
         cat "$command_log" >&2
@@ -390,7 +391,10 @@ assert_dry_run_rejected dry-run-sync-pacman-option \
     --dry-run -S --config custom.conf clean-root
 assert_dry_run_rejected dry-run-sync-end-of-options \
     --dry-run -S -- clean-root
-assert_dry_run_rejected dry-run-targetless-fetch --dry-run fetch
+setup_case dry-run-targetless-fetch
+run_fail --dry-run fetch
+assert_contains "Invalid: Usage: moguet fetch <pkg>..." "$output_file"
+assert_pre_log_exit
 assert_dry_run_rejected dry-run-fetch-pacman-option \
     --dry-run fetch --needed clean-root
 assert_dry_run_rejected dry-run-fetch-end-of-options \
@@ -401,8 +405,6 @@ assert_dry_run_rejected dry-run-build-end-of-options \
     --dry-run build -- clean-root
 assert_dry_run_rejected dry-run-local-build-extra-option \
     --dry-run build --local . --needed
-assert_dry_run_rejected dry-run-upgrade-target \
-    --dry-run upgrade clean-root
 assert_dry_run_rejected dry-run-upgrade-end-of-options \
     --dry-run upgrade --
 
@@ -569,6 +571,19 @@ setup_case help-operation
 run_ok --help
 assert_contains "USAGE" "$output_file"
 assert_contains \
+    "build <pkg> [V=K...] | build --local <directory> [V=K...]" \
+    "$output_file"
+assert_contains "upgrade-all" "$output_file"
+assert_contains "clean" "$output_file"
+assert_contains "deps [--recursive] <pkg>..." "$output_file"
+assert_contains "plan <pkg>..." "$output_file"
+assert_contains "fetch <pkg>..." "$output_file"
+assert_contains "add-src <item>..." "$output_file"
+assert_contains "edit-src <pkg>..." "$output_file"
+assert_contains "list-src" "$output_file"
+assert_contains "del-src <pkg>..." "$output_file"
+assert_contains "revert <pkg>..." "$output_file"
+assert_contains \
     "Unsupported for separated source builds; no dependency cleanup is performed" \
     "$output_file"
 assert_pre_log_exit
@@ -585,8 +600,66 @@ assert_pre_log_exit
 
 setup_case targetless-custom-operation
 run_fail plan
-assert_contains "Usage: moguet plan <pkg>" "$output_file"
+assert_contains "Invalid: Usage: moguet plan <pkg>..." "$output_file"
 assert_pre_log_exit
+
+# Matrix I2 / Issue #350 Slice 3: productionとdry-runは同じrich operand
+# contractを参照する。ignored bare operandはdispatch前にcompatibility
+# correctionとしてrejectし、delegated pacmanのopen grammarは上のmatrixを維持する。
+assert_operand_contract_rejected() {
+    case_name=$1
+    expected=$2
+    shift 2
+
+    setup_case "$case_name"
+    run_fail "$@"
+    assert_contains "Invalid: $expected" "$output_file"
+    assert_pre_log_exit
+}
+
+assert_operand_contract_rejected remote-build-extra-target \
+    "Operation build requires exactly one <pkg> operand." \
+    build clean-root extra-target
+assert_operand_contract_rejected dry-run-remote-build-extra-target \
+    "Operation build requires exactly one <pkg> operand." \
+    --dry-run build clean-root extra-target
+assert_operand_contract_rejected upgrade-target \
+    "Operation upgrade does not accept target operands." \
+    upgrade ignored-target
+assert_operand_contract_rejected dry-run-upgrade-target-contract \
+    "Operation upgrade does not accept target operands." \
+    --dry-run upgrade ignored-target
+assert_operand_contract_rejected clean-target \
+    "Operation clean does not accept target operands." \
+    clean ignored-target
+assert_operand_contract_rejected list-src-target \
+    "Operation list-src does not accept target operands." \
+    list-src ignored-target
+
+setup_case multi-target-deps
+run_ok deps clean-root conflict-only
+assert_contains "clean-root" "$output_file"
+assert_contains "conflict-only" "$output_file"
+
+setup_case multi-target-plan
+run_ok plan clean-root conflict-only
+assert_contains "Plan state:" "$output_file"
+assert_contains "clean-root" "$output_file"
+assert_contains "conflict-only" "$output_file"
+
+setup_case multi-target-fetch
+run_ok fetch clean-root conflict-only
+assert_contains "Fetch targets:" "$output_file"
+assert_contains "https://aur.archlinux.org/clean-root.git" "$command_log"
+assert_contains "https://aur.archlinux.org/conflict-only.git" "$command_log"
+
+setup_case multi-target-source-maintenance
+run_ok add-src maintenance-one maintenance-two CFLAGS=-O2
+assert_contains "Added maintenance-one to source-build list." "$output_file"
+assert_contains "Added maintenance-two to source-build list." "$output_file"
+run_ok del-src maintenance-one maintenance-two
+assert_contains "Removing maintenance-one from list..." "$output_file"
+assert_contains "Removing maintenance-two from list..." "$output_file"
 
 # POLICY(#335): semantic `--` is accepted only by target-bearing source-
 # preference operations so a leading-hyphen package reaches their validator.
@@ -878,7 +951,9 @@ assert_pre_log_exit
 
 setup_case local-name-as-opaque-operand
 run_fail build -- --local .
-assert_contains "Unsupported build option: --" "$output_file"
+assert_contains \
+    "Invalid: Operation build requires exactly one <pkg> operand." \
+    "$output_file"
 assert_not_contains "supported only with operation build" "$output_file"
 assert_pre_log_exit
 

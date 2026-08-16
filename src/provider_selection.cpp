@@ -230,6 +230,13 @@ bool ProviderSelectionSession::is_interactive() const noexcept {
     return is_interactive_;
 }
 
+bool ProviderSelectionSession::was_cancelled(
+        const std::string& dependency) const {
+    const std::string dependency_name = dependency_package_name(dependency);
+    return !dependency_name.empty() &&
+           cancelled_dependencies_.contains(dependency_name);
+}
+
 std::shared_ptr<ProviderSelectionSession> make_provider_selection_session(
         bool no_confirm) {
     const bool is_interactive =

@@ -1,5 +1,6 @@
 #include "local_dependency_plan_projection.hpp"
 
+#include "build_plan_relation_assessment.hpp"
 #include "dependency_constraint.hpp"
 #include "dependency_plan_projection_support.hpp"
 #include "dependency_spec.hpp"
@@ -209,6 +210,90 @@ std::optional<ProviderCapability> provider_capability_from_relation(
     return ProviderCapability(
             relation.raw_value, relation.target->name,
             relation.target->version);
+}
+
+std::optional<DependencyVersionConstraint> relation_constraint_from_target(
+        const Target& target) {
+    if(!target.comparison.has_value()) {
+        if(target.version.has_value()) {
+            throw std::logic_error(
+                    "Local relation version is missing its comparison.");
+        }
+        return std::nullopt;
+    }
+    if(!target.version.has_value()) {
+        throw std::logic_error(
+                "Local relation comparison is missing its version.");
+    }
+    return DependencyVersionConstraint(
+            relation_from_local_comparison(target.comparison.value()),
+            target.version.value());
+}
+
+std::vector<PlannedPackageRelationObservation>
+project_local_relation_observations(
+        const LocalPackageMetadata& metadata,
+        const std::vector<EffectiveChild>& children,
+        const PackageRelationLocalSourceIdentity& source) {
+    std::vector<PlannedPackageRelationObservation> observations;
+    const std::string package_version = local_package_version(metadata);
+    for(const auto& child : children) {
+        if(!child.architecture_supported) continue;
+
+        PlannedPackageRelationObservation observation{
+                PackageRelationObservedPackage{
+                        child.package_name,
+                        metadata.package_base,
+                        ObservedVersion::available(
+                                ObservedVersionSource::LocalExactPackage,
+                                package_version),
+                        {},
+                        source,
+                        PackageRelationObservationRole::PlannedTarget,
+                        {}},
+                {}};
+        for(const Relation* relation : child.relations) {
+            if(relation->kind == RelationKind::Provides) {
+                const std::optional<ProviderCapability> capability =
+                        provider_capability_from_relation(*relation);
+                if(!capability.has_value()) continue;
+                observation.package.provides.push_back(
+                        PackageRelationObservedCapability{
+                                capability.value(),
+                                capability->version().has_value()
+                                        ? ObservedVersion::available(
+                                                  ObservedVersionSource::
+                                                          LocalProviderCapability,
+                                                  capability->version().value())
+                                        : ObservedVersion::unknown(
+                                                  ObservedVersionSource::
+                                                          LocalProviderCapability,
+                                                  ObservedVersionUnknownReason::
+                                                          UnversionedProviderCapability)});
+                continue;
+            }
+            if(relation->kind != RelationKind::Conflicts &&
+               relation->kind != RelationKind::Replaces) {
+                continue;
+            }
+            if(!relation->target.has_value() ||
+               relation->target->kind != TargetKind::Package) {
+                continue;
+            }
+            observation.declarations.push_back(DeclaredPackageRelation(
+                    child.package_name,
+                    metadata.package_base,
+                    relation->kind == RelationKind::Conflicts
+                            ? PackageRelationKind::Conflict
+                            : PackageRelationKind::Replacement,
+                    relation->raw_value,
+                    relation->target->name,
+                    relation_constraint_from_target(
+                            relation->target.value())));
+        }
+        observations.push_back(std::move(observation));
+    }
+    return observations;
 }
 
 void add_typed_dependency(
@@ -1015,4 +1100,60 @@ LocalBuildPlan resolve_local_build_plan(
     return LocalBuildPlan(
             std::move(plan), metadata, effective_architecture,
             std::move(internal_edges), std::move(failures));
+}
+
+LocalBuildPlan resolve_local_build_plan(
+        const LocalPackageMetadata& metadata,
+        const std::string& effective_architecture,
+        PackageRelationLocalSourceIdentity source) {
+    return resolve_local_build_plan(
+            metadata, effective_architecture, std::move(source),
+            ProviderSelectionCallback{});
+}
+
+LocalBuildPlan resolve_local_build_plan(
+        const LocalPackageMetadata& metadata,
+        const std::string& effective_architecture,
+        PackageRelationLocalSourceIdentity source,
+        const ProviderSelectionCallback& select_provider) {
+    if(effective_architecture.empty()) {
+        throw std::invalid_argument(
+                "Effective architecture must not be empty.");
+    }
+    if(source.canonical_root.empty()) {
+        throw std::invalid_argument(
+                "Local relation source root must not be empty.");
+    }
+    LocalBuildPlan plan = resolve_local_build_plan(
+            metadata, effective_architecture, select_provider);
+    std::vector<PlannedPackageRelationObservation> observations =
+            project_local_relation_observations(
+                    metadata,
+                    collect_effective_children(
+                            metadata, effective_architecture),
+                    source);
+    for(auto& observation : observations) {
+        const PlannedPackageTarget* target = nullptr;
+        for(const auto& candidate : plan.build_plan_.package_targets) {
+            if(candidate.package_name == observation.package.package_name &&
+               candidate.package_base == observation.package.package_base) {
+                target = &candidate;
+                break;
+            }
+        }
+        if(target == nullptr) {
+            throw std::logic_error(
+                    "Local relation observation has no planned package target.");
+        }
+        for(const auto& root : target->roots) {
+            add_package_relation_root_attribution(
+                    observation.package,
+                    PackageRelationRootAttribution{
+                            root.invocation_index, root.requested_name});
+        }
+        plan.build_plan_.planned_relation_observations.push_back(
+                std::move(observation));
+    }
+    finalize_build_plan_relation_assessments(plan.build_plan_);
+    return plan;
 }

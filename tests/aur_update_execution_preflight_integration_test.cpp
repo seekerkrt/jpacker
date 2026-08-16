@@ -1,4 +1,5 @@
 #include "aur_update_execution_preflight.hpp"
+#include "alpm_stub.hpp"
 #include "integration_stub.hpp"
 
 #include <algorithm>
@@ -48,6 +49,19 @@ bool has_reason(
         if(issue.reason == reason) return true;
     }
     return false;
+}
+
+const AurUpdateExecutionIssue& relation_issue(
+        const AurUpdateExecutionTarget& target) {
+    const auto found = std::find_if(
+            target.issues.begin(), target.issues.end(),
+            [](const AurUpdateExecutionIssue& issue) {
+                return issue.relation_reason.has_value();
+            });
+    if(found == target.issues.end()) {
+        throw std::runtime_error("Typed relation preflight issue is missing");
+    }
+    return *found;
 }
 
 class FixtureRoot {
@@ -257,6 +271,118 @@ void test_ordinary_aur_dependency_failure_is_owned_and_read_only() {
     expect_no_forbidden_operations();
 }
 
+void test_relation_inventory_is_snapshotted_once_and_no_match_releases_guard() {
+    FixtureRoot fixture("relation-assessment");
+    fixture.enter();
+    const fs::path database_path = fixture.root() / "database";
+
+    stub::reset();
+    package_metadata_test_stub::set_local_packages({
+            {"installed-conflict", "1", ALPM_PKG_REASON_EXPLICIT, {}}});
+    stub::enqueue_captured_command_result(
+            DATABASE_PATH_COMMAND,
+            CapturedCommandResult{
+                    "RootDir = " + fixture.root().string() +
+                            "\nDBPath = " + database_path.string() + "\n",
+                    0});
+    const AurUpdateExecutionPreflight conflict =
+            resolve_aur_update_execution_preflight(
+                    AurUpdatePlan{{update_entry(
+                            "relation-installed-root",
+                            InstalledPackageReason::Explicit)}});
+    expect(
+            conflict.targets.front().status ==
+                            AurUpdateExecutionTargetStatus::Unsupported,
+            "Installed relation conflict did not stop production preflight");
+    const AurUpdateExecutionIssue& conflict_issue =
+            relation_issue(conflict.targets.front());
+    expect(
+            conflict_issue.relation_reason->assessment.kind ==
+                            PackageRelationAssessmentKind::
+                                    ConfirmedInstalledConflict &&
+                    conflict_issue.relation_reason->assessment
+                                    .attributed_package_evidence
+                                    ->observed_package.package_name ==
+                            "installed-conflict" &&
+                    package_metadata_test_stub::initialize_call_count() == 1 &&
+                    package_metadata_test_stub::local_database_call_count() ==
+                            1 &&
+                    package_metadata_test_stub::package_cache_call_count() ==
+                            1 &&
+                    package_metadata_test_stub::release_call_count() == 1 &&
+                    stub::captured_commands() ==
+                            std::vector<std::string>{DATABASE_PATH_COMMAND},
+            "Installed relation inventory was repeated or lost attribution");
+    expect(
+            conflict_issue.diagnostic.find(
+                    "Installed conflict confirmed") != std::string::npos &&
+                    conflict_issue.diagnostic.find(
+                            "matched installed package installed-conflict") !=
+                            std::string::npos &&
+                    conflict_issue.diagnostic.find(
+                            "build/install is blocked before mutation") !=
+                            std::string::npos,
+            "Installed relation preflight diagnostic lost public attribution");
+    expect_no_forbidden_operations();
+
+    stub::reset();
+    package_metadata_test_stub::set_empty_package_cache();
+    stub::enqueue_captured_command_result(
+            DATABASE_PATH_COMMAND,
+            CapturedCommandResult{
+                    "RootDir = " + fixture.root().string() +
+                            "\nDBPath = " + database_path.string() + "\n",
+                    0});
+    const AurUpdateExecutionPreflight no_match =
+            resolve_aur_update_execution_preflight(
+                    AurUpdatePlan{{update_entry(
+                            "relation-no-match-root",
+                            InstalledPackageReason::Explicit)}});
+    expect(
+            no_match.targets.front().status ==
+                            AurUpdateExecutionTargetStatus::Executable &&
+                    no_match.build_plan.has_value() &&
+                    no_match.build_plan->relation_assessments.size() == 1 &&
+                    no_match.build_plan->relation_assessments.front().kind ==
+                            PackageRelationAssessmentKind::
+                                    ConfirmedNoMatchingCurrentOrPlannedTarget &&
+                    !has_reason(
+                            no_match.targets.front(),
+                            AurUpdateExecutionReason::
+                                    ConflictsOrReplacesUnresolved),
+            "Successful empty inventory did not release only the relation guard");
+    expect_no_forbidden_operations();
+}
+
+void test_relation_inventory_failure_is_unknown_and_fail_closed() {
+    FixtureRoot fixture("relation-query-failure");
+    fixture.enter();
+    stub::reset();
+    stub::enqueue_captured_command_result(
+            DATABASE_PATH_COMMAND,
+            CapturedCommandResult{"", 73});
+
+    const AurUpdateExecutionPreflight preflight =
+            resolve_aur_update_execution_preflight(
+                    AurUpdatePlan{{update_entry(
+                            "relation-query-failure-root",
+                            InstalledPackageReason::Explicit)}});
+    const AurUpdateExecutionIssue& issue =
+            relation_issue(preflight.targets.front());
+    expect(
+            preflight.targets.front().status ==
+                            AurUpdateExecutionTargetStatus::Unsupported &&
+                    issue.relation_reason->assessment.kind ==
+                            PackageRelationAssessmentKind::Unknown &&
+                    issue.relation_reason->assessment
+                            .attributed_observation_failure.has_value() &&
+                    package_metadata_test_stub::initialize_call_count() == 0 &&
+                    stub::captured_commands() ==
+                            std::vector<std::string>{DATABASE_PATH_COMMAND},
+            "Installed inventory query failure became empty inventory or retried");
+    expect_no_forbidden_operations();
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -269,6 +395,10 @@ int main(int argc, char** argv) {
             test_repository_metadata_failure_is_fail_closed();
         } else if(case_name == "aur-failure") {
             test_ordinary_aur_dependency_failure_is_owned_and_read_only();
+        } else if(case_name == "relation-assessment") {
+            test_relation_inventory_is_snapshotted_once_and_no_match_releases_guard();
+        } else if(case_name == "relation-query-failure") {
+            test_relation_inventory_failure_is_unknown_and_fail_closed();
         } else {
             throw std::runtime_error("Unknown integration case: " + case_name);
         }

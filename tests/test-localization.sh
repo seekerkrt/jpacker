@@ -259,6 +259,14 @@ assert_remaining_scope_english() {
     assert_line 'owner_sync=Repository      : aur' "$output_file"
     assert_line 'owner_aur=Checking AUR updates for 7 foreign packages...' "$output_file"
     assert_line 'owner_upgrade=excluded from AUR update: {package-name}' "$output_file"
+    assert_line 'relation_installed=Installed conflict confirmed: declaring package declaring-a declares conflict legacy-a>=2 for target component legacy-a; matched installed package installed-a through provided-a=3; build/install is blocked before mutation.' "$output_file"
+    assert_line 'relation_planned=Planned-target conflict confirmed: declaring package declaring-p declares conflict planned-api for target component planned-api; matched planned package planned-child through exact-planned; build/install is blocked before mutation.' "$output_file"
+    assert_line 'relation_replacement=Potential replacement impact: declaring package declaring-r declares replacement legacy-r for target component legacy-r; matched installed package installed-r through exact-r is a replacement candidate; review is required and no automatic replacement is performed; build/install is blocked before mutation.' "$output_file"
+    assert_line 'relation_no_match=Confirmed no matching current or planned target: declaring package declaring-n declares conflict absent-n for target component absent-n; complete current/planned observation found no matching package or provided component; this relation does not block build/install.' "$output_file"
+    assert_line 'relation_unknown=Relation judgment unavailable: declaring package declaring-u declares conflict unknown-u>=2 for target component unknown-u; current/planned observation is unavailable; inventory-u; this is not a confirmed absence, so build/install is blocked.' "$output_file"
+    assert_line 'relation_invalid=Invalid relation metadata or observation: declaring package declaring-i declares replacement invalid-i for target component invalid-i; invalid-old-self; invalid input is fail-closed, so build/install is blocked.' "$output_file"
+    assert_line 'relation_declared=Declared relation awaiting assessment: declaring package declaring-d declares conflict declared-d for target component declared-d; current/planned assessment is incomplete, so build/install remains blocked under the fail-closed policy.' "$output_file"
+    assert_line 'relation_check=Relation Check  : deferred to planning and build preflight' "$output_file"
 }
 
 assert_remaining_scope_japanese() {
@@ -272,6 +280,14 @@ assert_remaining_scope_japanese() {
     assert_line 'owner_sync=リポジトリ        : aur' "$output_file"
     assert_line 'owner_aur=AURの更新を外部パッケージ7個について確認しています...' "$output_file"
     assert_line 'owner_upgrade=AUR更新から除外: {package-name}' "$output_file"
+    assert_line 'relation_installed=インストール済みパッケージとの競合を確認: 宣言元パッケージdeclaring-aは競合 legacy-a>=2 を宣言（対象コンポーネント: legacy-a）; インストール済みパッケージinstalled-aがprovided-a=3として一致; ビルド/インストールは変更前に停止します。' "$output_file"
+    assert_line 'relation_planned=計画中の対象との競合を確認: 宣言元パッケージdeclaring-pは競合 planned-api を宣言（対象コンポーネント: planned-api）; 計画中のパッケージplanned-childがexact-plannedとして一致; ビルド/インストールは変更前に停止します。' "$output_file"
+    assert_line 'relation_replacement=置換候補による影響: 宣言元パッケージdeclaring-rは置換 legacy-r を宣言（対象コンポーネント: legacy-r）; インストール済みパッケージinstalled-rがexact-rとして置換候補に一致; ユーザーの確認が必要で、自動置換は行いません; ビルド/インストールは変更前に停止します。' "$output_file"
+    assert_line 'relation_no_match=現在または計画中の一致対象なしを確認: 宣言元パッケージdeclaring-nは競合 absent-n を宣言（対象コンポーネント: absent-n）; 現在/計画中の状態を完全に観測した結果、一致するパッケージまたは提供コンポーネントはありません; この関係だけを理由にビルド/インストールを停止しません。' "$output_file"
+    assert_line 'relation_unknown=関係を確定できません: 宣言元パッケージdeclaring-uは競合 unknown-u>=2 を宣言（対象コンポーネント: unknown-u）; 現在/計画中の観測状態: 利用不可; inventory-u; 一致対象なしを確認した結果ではないため、ビルド/インストールを停止します。' "$output_file"
+    assert_line 'relation_invalid=関係メタデータまたは観測が不正です: 宣言元パッケージdeclaring-iは置換 invalid-i を宣言（対象コンポーネント: invalid-i）; invalid-old-self; 不正な入力は安全側に扱い、ビルド/インストールを停止します。' "$output_file"
+    assert_line 'relation_declared=宣言済み関係の判定待ち: 宣言元パッケージdeclaring-dは競合 declared-d を宣言（対象コンポーネント: declared-d）; 現在/計画中の判定が未完了のため、安全側にビルド/インストールを停止します。' "$output_file"
+    assert_line 'relation_check=関係の判定        : 計画またはビルドの事前検査まで保留' "$output_file"
 }
 
 assert_english_messages() {

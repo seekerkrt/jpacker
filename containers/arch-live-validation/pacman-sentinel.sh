@@ -5,6 +5,7 @@ set -C
 
 readonly_sentinel_status=86
 log_root=/var/log/moguet-live-validation
+contract_file=/usr/libexec/moguet-live-validation/contract.env
 
 reject() {
     printf '%s\n' "moguet-live-pacman-sentinel: rejected argv ($1)" >&2
@@ -15,13 +16,29 @@ if [ "$(/usr/bin/id -u)" -ne 0 ]; then
     reject 'effective user is not root'
 fi
 
+contract_metadata=$(/usr/bin/stat -c '%U:%G:%a:%F' "$contract_file")
+if [ "$contract_metadata" != 'root:root:444:regular file' ]; then
+    reject 'fixture contract ownership or mode changed'
+fi
+# shellcheck source=fixtures/local-package/contract.env
+. "$contract_file"
+case "$EXPECTED_PROVIDER_PACKAGES" in
+    *,*,*|,*|*,|'')
+        reject 'fixture contract must name exactly two reviewed providers'
+        ;;
+esac
+first_provider=${EXPECTED_PROVIDER_PACKAGES%%,*}
+second_provider=${EXPECTED_PROVIDER_PACKAGES#*,}
+first_provider_target=$EXPECTED_PROVIDER_REPOSITORY/$first_provider
+second_provider_target=$EXPECTED_PROVIDER_REPOSITORY/$second_provider
+
 case_name=${MOGUET_LIVE_SENTINEL_CASE-}
 case "$case_name" in
-    sentinel-accept-rust|sentinel-accept-rustup-noconfirm|\
+    sentinel-accept-first-provider|sentinel-accept-second-provider-noconfirm|\
     sentinel-reject-pacman-u|sentinel-reject-remove|sentinel-reject-syu|\
     sentinel-reject-multiple|sentinel-reject-unqualified|\
     sentinel-reject-option|sentinel-reject-unknown-target|\
-    provider-discovery|rust-selection|rustup-selection|invalid-retry|\
+    provider-discovery|first-provider-selection|second-provider-selection|invalid-retry|\
     cancel-empty|cancel-q|provider-eof|non-tty-pipe|noconfirm-tty)
         ;;
     *)
@@ -71,13 +88,10 @@ else
     reject 'expected exactly one target and the fixed option set'
 fi
 
-case "$selected_target" in
-    extra/rust|extra/rustup)
-        ;;
-    *)
-        reject 'target is not an allowed repo-qualified provider'
-        ;;
-esac
+if [ "$selected_target" != "$first_provider_target" ] &&
+    [ "$selected_target" != "$second_provider_target" ]; then
+    reject 'target is not an allowed repo-qualified provider'
+fi
 
 printf '%s\n' \
     "moguet-live-pacman-sentinel: accepted and blocked sudo pacman argv for $selected_target" >&2

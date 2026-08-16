@@ -91,11 +91,22 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
     if(package_name == "provider-root" || package_name == "deps-provider-root") {
         return package_info(package_name, {"moguet-inspect-203-virtual-provider"});
     }
+    if(package_name == "provider-constraint-root") {
+        return package_info(
+                package_name,
+                {"moguet-inspect-350-virtual-provider>=1"});
+    }
     if(package_name == "moguet-inspect-203-virtual-provider") {
         return std::nullopt;
     }
+    if(package_name == "moguet-inspect-350-virtual-provider") {
+        return std::nullopt;
+    }
     if(package_name == "provider-z" || package_name == "provider-a") {
-        return package_info(package_name, {}, {"moguet-inspect-203-virtual-provider"});
+        return package_info(
+                package_name, {},
+                {"moguet-inspect-203-virtual-provider",
+                 "moguet-inspect-350-virtual-provider=2"});
     }
 
     if(package_name == "fetch-preflight-root") {
@@ -124,6 +135,34 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
     }
     if(package_name == "constraint-leaf") {
         return package_info(package_name);
+    }
+    if(package_name == "plan-metadata-risk-root") {
+        AurPackageInfo info = package_info(package_name);
+        info.Conflicts = {"legacy-risk-package"};
+        info.Replaces = {"replaced-risk-package"};
+        return info;
+    }
+    if(package_name == "plan-split-child") {
+        AurPackageInfo info = package_info(package_name);
+        info.PackageBase = "plan-split-suite";
+        return info;
+    }
+    if(package_name == "plan-density-root") {
+        std::vector<std::string> dependencies;
+        for(std::size_t index = 0; index < 32; ++index) {
+            dependencies.push_back(
+                    "normal-dependency-" + std::to_string(index));
+        }
+        dependencies.push_back("attention-risk-child");
+        return package_info(package_name, dependencies);
+    }
+    if(package_name.starts_with("normal-dependency-")) {
+        return package_info(package_name);
+    }
+    if(package_name == "attention-risk-child") {
+        AurPackageInfo info = package_info(package_name);
+        info.Conflicts = {"attention-conflict"};
+        return info;
     }
     if(package_name == "constraint-unknown-root") {
         return package_info(package_name, {"constraint-virtual>=3"});
@@ -329,6 +368,9 @@ std::vector<std::string> AurClient::search_names_by_provides(
     }
     if(provided_name == "moguet-inspect-203-virtual-provider") {
         // POLICY: AUR RPC order is significant to the provider presentation contract.
+        return {"provider-z", "provider-a"};
+    }
+    if(provided_name == "moguet-inspect-350-virtual-provider") {
         return {"provider-z", "provider-a"};
     }
     if(provided_name == "identity-aur-virtual") {

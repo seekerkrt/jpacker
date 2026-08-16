@@ -4,8 +4,12 @@
 #include "aur_update_cli_presentation.hpp"
 #include "cli_authority.hpp"
 #include "cli_parser.hpp"
+#include "cli_runtime_contract.hpp"
 #include "localization.hpp"
 #include "logging.hpp"
+#include "operation_state_model.hpp"
+#include "presentation_projection.hpp"
+#include "runtime_diagnostic.hpp"
 #include "upgrade_all_operation.hpp"
 
 #include <algorithm>
@@ -15,6 +19,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -26,32 +31,6 @@ constexpr std::string_view PKGDEST_KEY = "PKGDEST";
 constexpr std::string_view AUR_SERVICE = "AUR";
 constexpr std::string_view COMMAND_NAME = "upgrade-all";
 constexpr std::string_view PACMAN_COMMAND = "pacman";
-
-std::string package_state_label(PackageStateChange state) {
-    switch(state) {
-    case PackageStateChange::NoChange:
-        return localization::translate_message("no change");
-    case PackageStateChange::Changed:
-        return localization::translate_message("changed");
-    case PackageStateChange::Unknown:
-        return localization::translate_message("unknown");
-    }
-    throw std::logic_error(localization::translate_message(
-            "Unknown package-state change value."));
-}
-
-std::string aggregate_package_state_label(PackageStateChange state) {
-    switch(state) {
-    case PackageStateChange::NoChange:
-        return localization::translate_message("no package state change");
-    case PackageStateChange::Changed:
-        return localization::translate_message("package state changed");
-    case PackageStateChange::Unknown:
-        return localization::translate_message("package state change unknown");
-    }
-    throw std::logic_error(localization::translate_message(
-            "Unknown aggregate package-state change value."));
-}
 
 std::string aggregate_status_label(UpgradeAllOperationStatus status) {
     switch(status) {
@@ -145,56 +124,59 @@ std::string aggregate_phase_label(UpgradeAllOperationPhase phase) {
             "Unknown {} operation phase.", COMMAND_NAME));
 }
 
-std::string not_attempted_reason_label(
-        UpgradeAllNotAttemptedReason reason) {
-    switch(reason) {
-    case UpgradeAllNotAttemptedReason::PreparationBlocked:
-        return localization::translate_message("preparation blocked");
-    case UpgradeAllNotAttemptedReason::SystemFailure:
-        return localization::translate_message("system failure");
-    case UpgradeAllNotAttemptedReason::SourceFailure:
-        return localization::translate_message("source failure");
-    case UpgradeAllNotAttemptedReason::SourceCleanupFailure:
-        return localization::translate_message("source cleanup failure");
-    case UpgradeAllNotAttemptedReason::SystemSourceIncomplete:
-        return localization::translate_message("system/source phase incomplete");
-    case UpgradeAllNotAttemptedReason::ForeignInventoryFailure:
-        return localization::translate_message("foreign inventory failure");
-    case UpgradeAllNotAttemptedReason::CacheAuthorityFailure:
-        return localization::translate_message("cache authority failure");
-    case UpgradeAllNotAttemptedReason::PriorAggregateInconsistency:
-        return localization::translate_message("prior aggregate inconsistency");
-    }
-    throw std::logic_error(localization::format_translated_message(
-            // TRANSLATORS: The placeholders are the literal command name
-            // "upgrade-all" and enum state "NotAttempted".
-            "Unknown {} {} reason.", COMMAND_NAME, "NotAttempted"));
-}
-
-std::string aur_phase_status_label(UpgradeAllAurPhaseStatus status) {
-    switch(status) {
+void validate_aur_phase_presentation_boundary(
+        const UpgradeAllAurPhaseResult& aur) {
+    switch(aur.status) {
     case UpgradeAllAurPhaseStatus::NotAttempted:
-        return localization::translate_message("not attempted");
     case UpgradeAllAurPhaseStatus::NoUpdates:
-        return localization::translate_message("no updates");
     case UpgradeAllAurPhaseStatus::Completed:
-        return localization::translate_message("completed");
     case UpgradeAllAurPhaseStatus::BlockedBeforeExecution:
-        return localization::translate_message("blocked before execution");
     case UpgradeAllAurPhaseStatus::StoppedOnProviderTransactionFailure:
-        return localization::translate_message(
-                "stopped after repository provider transaction failure");
     case UpgradeAllAurPhaseStatus::StoppedOnWorkItemFailure:
-        return localization::translate_message("stopped on work-item failure");
     case UpgradeAllAurPhaseStatus::StoppedAfterCleanupFailure:
-        return localization::translate_message("stopped after cleanup failure");
     case UpgradeAllAurPhaseStatus::InconsistentResult:
-        return localization::translate_message("inconsistent result");
+        break;
+    default:
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholders are the literal command name
+                // "upgrade-all" and service name "AUR".
+                "Unknown {} {} phase status.", COMMAND_NAME, AUR_SERVICE));
+    }
+
+    if(aur.not_attempted_reason.has_value()) {
+        switch(aur.not_attempted_reason.value()) {
+        case UpgradeAllNotAttemptedReason::PreparationBlocked:
+        case UpgradeAllNotAttemptedReason::SystemFailure:
+        case UpgradeAllNotAttemptedReason::SourceFailure:
+        case UpgradeAllNotAttemptedReason::SourceCleanupFailure:
+        case UpgradeAllNotAttemptedReason::SystemSourceIncomplete:
+        case UpgradeAllNotAttemptedReason::ForeignInventoryFailure:
+        case UpgradeAllNotAttemptedReason::CacheAuthorityFailure:
+        case UpgradeAllNotAttemptedReason::PriorAggregateInconsistency:
+            break;
+        default:
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholders are the literal command
+                    // name "upgrade-all" and enum state "NotAttempted".
+                    "Unknown {} {} reason.", COMMAND_NAME,
+                    "NotAttempted"));
+        }
+    }
+
+    if(!aur.operation_result.has_value()) return;
+    switch(aur.operation_result->reduced_operation_result.status) {
+    case AurUpdateOperationStatus::NoUpdates:
+    case AurUpdateOperationStatus::Completed:
+    case AurUpdateOperationStatus::BlockedBeforeExecution:
+    case AurUpdateOperationStatus::StoppedOnProviderTransactionFailure:
+    case AurUpdateOperationStatus::StoppedOnWorkItemFailure:
+    case AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure:
+    case AurUpdateOperationStatus::InconsistentResult:
+        return;
     }
     throw std::logic_error(localization::format_translated_message(
-            // TRANSLATORS: The placeholders are the literal command name
-            // "upgrade-all" and service name "AUR".
-            "Unknown {} {} phase status.", COMMAND_NAME, AUR_SERVICE));
+            // TRANSLATORS: The placeholder is the literal service name "AUR".
+            "Unknown {} update operation status.", AUR_SERVICE));
 }
 
 std::string system_phase_status_label(SystemUpgradePhaseStatus status) {
@@ -237,42 +219,6 @@ std::string source_failure_label(
     }
     throw std::logic_error(localization::translate_message(
             "Unknown registered source failure kind."));
-}
-
-std::string source_diagnostic_or_reason(
-        const RegisteredSourceUpgradeResult& source) {
-    if(source.diagnostic.has_value() && !source.diagnostic->empty()) {
-        return *source.diagnostic;
-    }
-    return std::string(source_failure_label(source.failure_kind));
-}
-
-std::string source_status_label(
-        const RegisteredSourceUpgradeResult& source) {
-    switch(source.status) {
-    case RegisteredSourceUpgradeStatus::Updated:
-        return localization::translate_message("updated");
-    case RegisteredSourceUpgradeStatus::NoChange:
-        return localization::translate_message("no change");
-    case RegisteredSourceUpgradeStatus::Failed:
-        return localization::format_translated_message(
-                "failed: {}", source_diagnostic_or_reason(source));
-    case RegisteredSourceUpgradeStatus::UpdatedCleanupFailed:
-        return localization::translate_message("updated, but cleanup failed");
-    case RegisteredSourceUpgradeStatus::NoChangeCleanupFailed:
-        return localization::translate_message("no package change, but cleanup failed");
-    case RegisteredSourceUpgradeStatus::NotAttempted:
-        return localization::format_translated_message(
-                "not attempted: {}", source_diagnostic_or_reason(source));
-    case RegisteredSourceUpgradeStatus::Unsupported:
-        return localization::format_translated_message(
-                "unsupported: {}", source_diagnostic_or_reason(source));
-    case RegisteredSourceUpgradeStatus::Incomplete:
-        return localization::format_translated_message(
-                "incomplete: {}", source_diagnostic_or_reason(source));
-    }
-    throw std::logic_error(localization::translate_message(
-            "Unknown registered source status."));
 }
 
 std::string system_source_phase_label(SystemSourceUpgradePhase phase) {
@@ -334,6 +280,19 @@ std::string system_issue_impact_label(
         return localization::translate_message("affects success");
     case SystemSourceUpgradeIssueImpact::BlocksExecution:
         return localization::translate_message("blocks execution");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown system/source issue impact."));
+}
+
+DiagnosticSeverity system_issue_severity(
+        SystemSourceUpgradeIssueImpact impact) {
+    switch(impact) {
+    case SystemSourceUpgradeIssueImpact::ObservabilityOnly:
+        return DiagnosticSeverity::Warning;
+    case SystemSourceUpgradeIssueImpact::AffectsSuccess:
+    case SystemSourceUpgradeIssueImpact::BlocksExecution:
+        return DiagnosticSeverity::Error;
     }
     throw std::logic_error(localization::translate_message(
             "Unknown system/source issue impact."));
@@ -869,83 +828,6 @@ bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
             "Unknown {} update preflight reason.", AUR_SERVICE));
 }
 
-std::string target_reason_label(const AurUpdateOperationTargetResult& target) {
-    if(!target.preflight_issues.empty()) {
-        return std::string(
-                preflight_reason_label(target.preflight_issues.front().reason));
-    }
-    if(!target.preparation_issues.empty()) {
-        return std::string(preparation_reason_label(
-                target.preparation_issues.front().reason));
-    }
-    return localization::translate_message("reason unavailable");
-}
-
-std::string aur_target_status_label(
-        const AurUpdateOperationTargetResult& target,
-        AurUpdateOperationStatus operation_status) {
-    switch(target.status) {
-    case AurUpdateOperationTargetStatus::Updated:
-        return localization::translate_message("updated");
-    case AurUpdateOperationTargetStatus::NoChange:
-        return localization::translate_message("no change");
-    case AurUpdateOperationTargetStatus::Skipped:
-        return localization::format_translated_message(
-                "skipped: {}", target_reason_label(target));
-    case AurUpdateOperationTargetStatus::Unsupported:
-        return localization::format_translated_message(
-                "unsupported: {}", target_reason_label(target));
-    case AurUpdateOperationTargetStatus::Incomplete:
-        return localization::format_translated_message(
-                "incomplete: {}", target_reason_label(target));
-    case AurUpdateOperationTargetStatus::Failed:
-        return localization::format_translated_message(
-                "failed: {}", aur_update_cli_target_failure_summary(target));
-    case AurUpdateOperationTargetStatus::UpdatedCleanupFailed:
-        return localization::translate_message("updated, but cleanup failed");
-    case AurUpdateOperationTargetStatus::NoChangeCleanupFailed:
-        return localization::translate_message("no package change, but cleanup failed");
-    case AurUpdateOperationTargetStatus::NotAttempted:
-        if(operation_status == AurUpdateOperationStatus::
-                                       StoppedOnProviderTransactionFailure) {
-            return localization::translate_message(
-                    "not attempted: repository provider transaction failed");
-        }
-        if(target.execution_failure_kind ==
-           AurUpdateWorkItemFailureKind::PriorWorkItemStopped) {
-            return localization::translate_message(
-                    "not attempted: prior work item stopped");
-        }
-        switch(operation_status) {
-        case AurUpdateOperationStatus::BlockedBeforeExecution:
-            return localization::translate_message(
-                    "not attempted: operation blocked before execution");
-        case AurUpdateOperationStatus::InconsistentResult:
-            return localization::translate_message(
-                    "not attempted: result inconsistent");
-        case AurUpdateOperationStatus::
-                StoppedOnProviderTransactionFailure:
-            return localization::translate_message(
-                    "not attempted: repository provider transaction failed");
-        case AurUpdateOperationStatus::StoppedOnWorkItemFailure:
-        case AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure:
-            return localization::translate_message(
-                    "not attempted: prior work item stopped");
-        case AurUpdateOperationStatus::NoUpdates:
-        case AurUpdateOperationStatus::Completed:
-            return localization::translate_message(
-                    "not attempted: result inconsistent");
-        }
-        throw std::logic_error(localization::format_translated_message(
-                // TRANSLATORS: The placeholder is the literal service name
-                // "AUR".
-                "Unknown {} update operation status.", AUR_SERVICE));
-    }
-    throw std::logic_error(localization::format_translated_message(
-            // TRANSLATORS: The placeholder is the literal service name "AUR".
-            "Unknown {} update target status.", AUR_SERVICE));
-}
-
 std::string join_strings(const std::vector<std::string>& values) {
     std::string joined;
     for(std::size_t index = 0; index < values.size(); ++index) {
@@ -961,137 +843,434 @@ std::string join_query_package_names(
                                  : join_strings(package_names);
 }
 
-void print_system_phase(const SystemSourceUpgradeResult& result) {
+std::string operation_outcome_label(OperationOutcome outcome) {
+    switch(outcome) {
+    case OperationOutcome::Succeeded:
+        return localization::translate_message("Succeeded");
+    case OperationOutcome::NoOp:
+        return localization::translate_message("No operation needed");
+    case OperationOutcome::Blocked:
+        return localization::translate_message("Blocked");
+    case OperationOutcome::PartialFailure:
+        return localization::translate_message("Partial failure");
+    case OperationOutcome::Failed:
+        return localization::translate_message("Failed");
+    case OperationOutcome::NotAttempted:
+        return localization::translate_message("Not attempted");
+    case OperationOutcome::Inconsistent:
+        return localization::translate_message("Inconsistent");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown operation outcome."));
+}
+
+std::string package_state_observation_label(
+        PackageStateObservation observation) {
+    switch(observation) {
+    case PackageStateObservation::Changed:
+        return localization::translate_message("Changed");
+    case PackageStateObservation::VerifiedUnchanged:
+        return localization::translate_message("Verified unchanged");
+    case PackageStateObservation::Unverified:
+        return localization::translate_message("Unverified");
+    case PackageStateObservation::NotObserved:
+        return localization::translate_message("Not observed");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown package-state observation."));
+}
+
+std::string observation_reason_label(ObservationReason reason) {
+    switch(reason) {
+    case ObservationReason::BeforeSnapshotUnavailable:
+        return localization::translate_message(
+                "Before snapshot unavailable");
+    case ObservationReason::AfterSnapshotUnavailable:
+        return localization::translate_message(
+                "After snapshot unavailable");
+    case ObservationReason::ObservationNotPrepared:
+        return localization::translate_message("Observation not prepared");
+    case ObservationReason::PhaseNotAttempted:
+        return localization::translate_message("Phase not attempted");
+    case ObservationReason::OperationFailed:
+        return localization::translate_message("Operation failed");
+    case ObservationReason::AuthorityFailure:
+        return localization::translate_message("Authority failure");
+    case ObservationReason::InconsistentEvidence:
+        return localization::translate_message("Inconsistent evidence");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown observation reason."));
+}
+
+std::string no_op_basis_label(NoOpBasis basis) {
+    switch(basis) {
+    case NoOpBasis::NoRelevantWork:
+        return localization::translate_message("No relevant work");
+    case NoOpBasis::VerifiedUnchanged:
+        return localization::translate_message("Verified unchanged");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown no-op basis."));
+}
+
+std::string diagnostic_required_action_label(
+        DiagnosticRequiredAction action) {
+    switch(action) {
+    case DiagnosticRequiredAction::None:
+        return localization::translate_message("None");
+    case DiagnosticRequiredAction::CorrectInput:
+        return localization::translate_message("Correct input");
+    case DiagnosticRequiredAction::SelectCandidate:
+        return localization::translate_message("Select a candidate");
+    case DiagnosticRequiredAction::EnableInteraction:
+        return localization::translate_message("Enable interaction");
+    case DiagnosticRequiredAction::RetryQuery:
+        return localization::translate_message("Retry the query");
+    case DiagnosticRequiredAction::InspectMetadata:
+        return localization::translate_message("Inspect metadata");
+    case DiagnosticRequiredAction::ConfirmEvaluation:
+        return localization::translate_message("Confirm evaluation");
+    case DiagnosticRequiredAction::ResolveBlocker:
+        return localization::translate_message("Resolve the blocker");
+    case DiagnosticRequiredAction::InspectPartialResult:
+        return localization::translate_message("Inspect the partial result");
+    case DiagnosticRequiredAction::ReportInconsistency:
+        return localization::translate_message("Report the inconsistency");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown diagnostic required action."));
+}
+
+std::string foreign_inventory_status_label(
+        UpgradeAllForeignInventoryPhaseStatus status) {
+    switch(status) {
+    case UpgradeAllForeignInventoryPhaseStatus::NotAttempted:
+        return localization::translate_message(
+                "foreign inventory not attempted");
+    case UpgradeAllForeignInventoryPhaseStatus::Completed:
+        return localization::translate_message("foreign inventory completed");
+    case UpgradeAllForeignInventoryPhaseStatus::Failed:
+        return localization::translate_message("foreign inventory failed");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown foreign inventory status."));
+}
+
+std::string registered_source_status_reason_label(
+        RegisteredSourceUpgradeStatus status) {
+    switch(status) {
+    case RegisteredSourceUpgradeStatus::Updated:
+        return localization::translate_message("registered source updated");
+    case RegisteredSourceUpgradeStatus::NoChange:
+        return localization::translate_message("registered source unchanged");
+    case RegisteredSourceUpgradeStatus::Failed:
+        return localization::translate_message("registered source failed");
+    case RegisteredSourceUpgradeStatus::UpdatedCleanupFailed:
+        return localization::translate_message(
+                "registered source updated; cleanup failed");
+    case RegisteredSourceUpgradeStatus::NoChangeCleanupFailed:
+        return localization::translate_message(
+                "registered source unchanged; cleanup failed");
+    case RegisteredSourceUpgradeStatus::NotAttempted:
+        return localization::translate_message(
+                "registered source not attempted");
+    case RegisteredSourceUpgradeStatus::Unsupported:
+        return localization::translate_message(
+                "registered source unsupported");
+    case RegisteredSourceUpgradeStatus::Incomplete:
+        return localization::translate_message(
+                "registered source incomplete");
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown registered-source status."));
+}
+
+std::string aur_target_status_reason_label(
+        AurUpdateOperationTargetStatus status) {
+    switch(status) {
+    case AurUpdateOperationTargetStatus::Updated:
+        return localization::format_translated_message(
+                "{} target updated", AUR_SERVICE);
+    case AurUpdateOperationTargetStatus::NoChange:
+        return localization::format_translated_message(
+                "{} target unchanged", AUR_SERVICE);
+    case AurUpdateOperationTargetStatus::Skipped:
+        return localization::format_translated_message(
+                "{} target skipped", AUR_SERVICE);
+    case AurUpdateOperationTargetStatus::Unsupported:
+        return localization::format_translated_message(
+                "{} target unsupported", AUR_SERVICE);
+    case AurUpdateOperationTargetStatus::Incomplete:
+        return localization::format_translated_message(
+                "{} target incomplete", AUR_SERVICE);
+    case AurUpdateOperationTargetStatus::Failed:
+        return localization::format_translated_message(
+                "{} target failed", AUR_SERVICE);
+    case AurUpdateOperationTargetStatus::UpdatedCleanupFailed:
+        return localization::format_translated_message(
+                "{} target updated; cleanup failed", AUR_SERVICE);
+    case AurUpdateOperationTargetStatus::NoChangeCleanupFailed:
+        return localization::format_translated_message(
+                "{} target unchanged; cleanup failed", AUR_SERVICE);
+    case AurUpdateOperationTargetStatus::NotAttempted:
+        return localization::format_translated_message(
+                "{} target not attempted", AUR_SERVICE);
+    }
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal service name "AUR".
+            "Unknown {} update target status.", AUR_SERVICE));
+}
+
+std::string presentation_boundary_reason_label(
+        UpgradeAllPresentationBoundaryReason reason) {
+    switch(reason) {
+    case UpgradeAllPresentationBoundaryReason::AggregateDiagnostic:
+        return localization::translate_message("aggregate diagnostic");
+    case UpgradeAllPresentationBoundaryReason::AurPhaseDiagnostic:
+        return localization::format_translated_message(
+                "{} phase diagnostic", AUR_SERVICE);
+    case UpgradeAllPresentationBoundaryReason::AurQueryFailure:
+        return localization::format_translated_message(
+                "{} query failure", AUR_SERVICE);
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown presentation boundary reason."));
+}
+
+std::string upgrade_all_presentation_reason_label(
+        const UpgradeAllPresentationReasonValue& reason) {
+    return std::visit(
+            [](const auto& typed_reason) -> std::string {
+                using Reason = std::decay_t<decltype(typed_reason)>;
+                if constexpr(std::is_same_v<
+                                     Reason,
+                                     UpgradeAllPresentationBoundaryReason>) {
+                    return presentation_boundary_reason_label(typed_reason);
+                } else if constexpr(std::is_same_v<Reason, OperationOutcome>) {
+                    return operation_outcome_label(typed_reason);
+                } else if constexpr(std::is_same_v<
+                                            Reason,
+                                            UpgradeAllOperationStatus>) {
+                    return aggregate_status_label(typed_reason);
+                } else if constexpr(std::is_same_v<
+                                            Reason,
+                                            UpgradeAllOperationIssueKind>) {
+                    return aggregate_issue_kind_label(typed_reason);
+                } else if constexpr(std::is_same_v<
+                                            Reason,
+                                            SystemUpgradePhaseStatus>) {
+                    return system_phase_status_label(typed_reason);
+                } else if constexpr(std::is_same_v<
+                                            Reason,
+                                            UpgradeAllForeignInventoryPhaseStatus>) {
+                    return foreign_inventory_status_label(typed_reason);
+                } else if constexpr(std::is_same_v<
+                                            Reason,
+                                            PackageMetadataErrorCode>) {
+                    return package_metadata_error_label(typed_reason);
+                } else if constexpr(std::is_same_v<
+                                            Reason,
+                                            RegisteredSourceUpgradeStatus>) {
+                    return registered_source_status_reason_label(typed_reason);
+                } else if constexpr(std::is_same_v<
+                                            Reason,
+                                            RegisteredSourceUpgradeFailureKind>) {
+                    return source_failure_label(typed_reason);
+                } else if constexpr(std::is_same_v<
+                                            Reason,
+                                            AurUpdatePreparationReason>) {
+                    return preparation_reason_label(typed_reason);
+                } else if constexpr(std::is_same_v<
+                                            Reason,
+                                            UpgradeAllPlanningIssueKind>) {
+                    return planning_issue_kind_label(typed_reason);
+                } else if constexpr(std::is_same_v<
+                                            Reason,
+                                            AurUpdateOperationReductionReason>) {
+                    return reduction_reason_label(typed_reason);
+                } else if constexpr(std::is_same_v<
+                                            Reason,
+                                            FilteredAurUpdateOperationIssueKind>) {
+                    return filtered_issue_kind_label(typed_reason);
+                } else if constexpr(std::is_same_v<
+                                            Reason,
+                                            AurUpdateOperationTargetStatus>) {
+                    return aur_target_status_reason_label(typed_reason);
+                } else {
+                    // The carrier still retains the exact typed enum. Existing
+                    // route detail below prints its route-owned diagnostic.
+                    return localization::format_translated_message(
+                            "{} work-item failure", AUR_SERVICE);
+                }
+            },
+            reason);
+}
+
+void print_upgrade_all_summary(
+        const OperationStateProjection& operation_state,
+        const PresentationProjection& presentation) {
     std::cout << localization::format_translated_message(
-                         "system: {}",
-                         system_phase_status_label(result.system.status))
+                         "{} summary:", COMMAND_NAME)
               << std::endl;
     std::cout << localization::format_translated_message(
-                         "package state: {}",
-                         package_state_label(result.system.package_state_change))
+                         "  operation outcome: {}",
+                         operation_outcome_label(operation_state.outcome))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "  package state observation: {}",
+                         package_state_observation_label(
+                                 operation_state.package_state.state))
+              << std::endl;
+    const bool reason_is_presented_as_attention =
+            operation_state.outcome == OperationOutcome::Succeeded &&
+            operation_state.package_state.state ==
+                    PackageStateObservation::Unverified;
+    if(operation_state.package_state.reason.has_value() &&
+       !reason_is_presented_as_attention) {
+        std::cout << localization::format_translated_message(
+                             "  observation reason: {}",
+                             observation_reason_label(
+                                     operation_state.package_state.reason.value()))
+                  << std::endl;
+    }
+    if(operation_state.no_op_basis.has_value()) {
+        std::cout << localization::format_translated_message(
+                             "  no-op basis: {}",
+                             no_op_basis_label(
+                                     operation_state.no_op_basis.value()))
+                  << std::endl;
+    }
+    std::cout << localization::format_translated_message(
+                         "  items: {} total, {} normal, {} attention-required",
+                         presentation.summary_counts.total,
+                         presentation.summary_counts.normal,
+                         presentation.summary_counts.attention_required)
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "  update candidates: {}, blockers: {}, requires-check: {}, failures: {}",
+                         presentation.summary_counts.update_candidates,
+                         presentation.summary_counts.blockers,
+                         presentation.summary_counts.requires_check,
+                         presentation.summary_counts.failures)
               << std::endl;
 }
 
-void print_registered_sources(const SystemSourceUpgradeResult& result) {
-    if(result.registered_source_results.empty()) {
-        std::cout << localization::translate_message(
-                             "registered source packages: none")
-                  << std::endl;
-        return;
-    }
+void print_upgrade_all_attention(
+        const PresentationProjection& presentation) {
+    if(presentation.attention_items.empty()) return;
 
-    // POLICY(#281): vector順はprepared preference snapshot順。表示側で
-    // sort/deduplicateせず、各preferenceへexactly one outcomeを出す。
-    for(const RegisteredSourceUpgradeResult& source :
-        result.registered_source_results) {
-        const std::string package_name = source.preference_package_name.empty()
-                ? localization::translate_message("<unknown preference>")
-                : source.preference_package_name;
-        std::cout << localization::format_translated_message(
-                             "registered source: {}: {}", package_name,
-                             source_status_label(source))
-                  << std::endl;
-        if(source.resolved_package_base.has_value()) {
-            // NO_TRANSLATE(Issue #308): PackageBase is a schema field name,
-            // and the value is a package identity.
-            std::cout << "  " << PACKAGE_BASE_FIELD << ": "
-                      << *source.resolved_package_base << std::endl;
-        }
-        if(source.canonical_source_identity_key.has_value()) {
-            std::cout << localization::format_translated_message(
-                                 "  canonical source identity: {}",
-                                 *source.canonical_source_identity_key)
-                      << std::endl;
-        }
-    }
-}
-
-void print_aur_phase(
-        const UpgradeAllAurPhaseResult& aur,
-        const AurUpdateCliPresentation* presentation) {
-    if(aur.status == UpgradeAllAurPhaseStatus::NotAttempted) {
-        if(!aur.not_attempted_reason.has_value()) {
-            throw std::logic_error(localization::format_translated_message(
-                    // TRANSLATORS: The placeholders are the literal service
-                    // name "AUR" and enum state "NotAttempted".
-                    "The {} phase is {} without a typed reason.", AUR_SERVICE,
-                    "NotAttempted"));
-        }
-        const std::string reason =
-                not_attempted_reason_label(*aur.not_attempted_reason);
-        // TRANSLATORS: The first placeholder is the literal service name
-        // "AUR"; the second is a localized reason.
-        std::cout << localization::format_translated_message(
-                             "{} phase not attempted: {}", AUR_SERVICE, reason)
-                  << std::endl;
-        return;
-    }
-
-    const std::string phase_status = aur_phase_status_label(aur.status);
-    // TRANSLATORS: The first placeholder is the literal service name "AUR";
-    // the second is a localized phase status.
-    std::cout << localization::format_translated_message(
-                         "{} phase: {}", AUR_SERVICE, phase_status)
+    std::cout << std::endl
+              << localization::translate_message(
+                         "Attention-required details:")
               << std::endl;
-    if(!aur.operation_result.has_value()) {
-        // TRANSLATORS: The placeholder is the literal service name "AUR".
-        std::cout << localization::format_translated_message(
-                             "{} targets: unavailable", AUR_SERVICE)
-                  << std::endl;
-        return;
-    }
-
-    const AurUpdateOperationResult& operation =
-            aur.operation_result->reduced_operation_result;
-    if(operation.targets.empty()) {
-        // TRANSLATORS: The placeholder is the literal service name "AUR".
-        std::cout << localization::format_translated_message(
-                             "{} targets: none", AUR_SERVICE)
-                  << std::endl;
-    } else {
-        for(const AurUpdateOperationTargetResult& target : operation.targets) {
-            const std::string status =
-                    aur_target_status_label(target, operation.status);
-            // TRANSLATORS: The first placeholder is the literal service name
-            // "AUR"; the others are a package name and localized status.
+    for(const PresentationItem& item : presentation.attention_items) {
+        std::cout << "  - ";
+        if(item.requested_package.has_value()) {
             std::cout << localization::format_translated_message(
-                                 "{} target: {}: {}", AUR_SERVICE,
-                                 target.update.installed_name, status)
+                    "package: {}", item.requested_package.value());
+        } else if(item.source_kind != DiagnosticSourceKind::Unspecified) {
+            std::cout << localization::format_translated_message(
+                    "source: {}",
+                    diagnostic_source_label(item.source_kind));
+        } else {
+            std::cout << localization::translate_message("operation-wide");
+        }
+        std::cout << std::endl;
+        if(item.package_base.has_value() &&
+           item.package_base != item.requested_package) {
+            std::cout << "    PackageBase: " << item.package_base.value()
                       << std::endl;
-            if(target.package_base.has_value()) {
-                // NO_TRANSLATE(Issue #308): PackageBase is a schema field
-                // name, and the value is a package identity.
-                std::cout << "  " << PACKAGE_BASE_FIELD << ": "
-                          << *target.package_base << std::endl;
+        }
+        if(item.repository.has_value()) {
+            std::cout << localization::format_translated_message(
+                                 "    repository: {}",
+                                 item.repository.value())
+                      << std::endl;
+        }
+        if(item.canonical_source_identity.has_value()) {
+            std::cout << localization::format_translated_message(
+                                 "    canonical source identity: {}",
+                                 item.canonical_source_identity.value())
+                      << std::endl;
+        }
+        if(item.local_root.has_value()) {
+            std::cout << localization::format_translated_message(
+                                 "    local root: {}",
+                                 item.local_root->string())
+                      << std::endl;
+        }
+        if(item.package_state.has_value()) {
+            std::cout << localization::format_translated_message(
+                                 "    package state: {}",
+                                 package_state_observation_label(
+                                         item.package_state->state))
+                      << std::endl;
+            if(item.package_state->reason.has_value()) {
+                std::cout << localization::format_translated_message(
+                                     "    observation reason: {}",
+                                     observation_reason_label(
+                                             item.package_state->reason.value()))
+                          << std::endl;
             }
         }
+        if(item.diagnostic_class.has_value()) {
+            std::cout << localization::format_translated_message(
+                                 "    diagnostic: {}",
+                                 diagnostic_class_label(
+                                         item.diagnostic_class.value()))
+                      << std::endl;
+        }
+        if(item.is_update_candidate) {
+            std::cout << localization::translate_message(
+                                 "    update candidate")
+                      << std::endl;
+        }
+        if(item.is_blocking) {
+            std::cout << localization::translate_message("    blocking")
+                      << std::endl;
+        }
+        if(item.requires_check) {
+            std::cout << localization::translate_message(
+                                 "    requires check")
+                      << std::endl;
+        }
+        if(item.requires_manual_action) {
+            std::cout << localization::translate_message(
+                                 "    manual action required")
+                      << std::endl;
+        }
+        for(const PresentationArtifactIdentity& artifact :
+            item.selected_artifacts) {
+            std::cout << localization::format_translated_message(
+                                 "    selected artifact: {} {}",
+                                 artifact.package_name,
+                                 artifact.full_version)
+                      << std::endl;
+        }
+        for(const PresentationArtifactIdentity& artifact :
+            item.unselected_artifacts) {
+            std::cout << localization::format_translated_message(
+                                 "    unselected artifact: {} {}",
+                                 artifact.package_name,
+                                 artifact.full_version)
+                      << std::endl;
+        }
+        for(const UpgradeAllPresentationReason& reason :
+            item.upgrade_all_reasons) {
+            std::cout << localization::format_translated_message(
+                                 "    reason [{}]: {}",
+                                 aggregate_phase_label(reason.phase),
+                                 upgrade_all_presentation_reason_label(
+                                         reason.reason))
+                      << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "      required action: {}",
+                                 diagnostic_required_action_label(
+                                         reason.required_action))
+                      << std::endl;
+        }
     }
-    if(presentation == nullptr) return;
-    for(const std::string& line : presentation->summary_lines) {
-        std::cout << line << std::endl;
-    }
-}
-
-bool has_foreign_inventory_failure(
-        const UpgradeAllForeignInventoryPhaseResult& inventory) noexcept {
-    return inventory.status == UpgradeAllForeignInventoryPhaseStatus::Failed ||
-           inventory.failure.has_value() || inventory.diagnostic.has_value();
-}
-
-void print_aur_phase(
-        const UpgradeAllOperationResult& result,
-        const AurUpdateCliPresentation* presentation) {
-    // POLICY(#281): inventory failureを含むsynthetic resultでも、AUR mutationが
-    // 完了したような表示へ丸めない。直接fieldをtyped source of truthにする。
-    if(has_foreign_inventory_failure(result.foreign_inventory)) {
-        // TRANSLATORS: The placeholder is the literal service name "AUR".
-        std::cout << localization::format_translated_message(
-                             "{} phase not attempted: foreign inventory failure",
-                             AUR_SERVICE)
-                  << std::endl;
-        return;
-    }
-    print_aur_phase(result.aur, presentation);
 }
 
 void print_duplicate_exclusions(const UpgradeAllOperationResult& result) {
@@ -1297,7 +1476,8 @@ void print_system_issues_and_diagnostics(
             message = localization::format_translated_message(
                     "system/source issue: {} ({}, {})", kind, impact, phase);
         }
-        Logger::error(message);
+        report_runtime_diagnostic(RuntimeDiagnosticPresentation{
+                system_issue_severity(issue.impact), std::move(message)});
         issue_diagnostics.insert(diagnostic_key(
                 system_source_phase_label(issue.phase), issue.diagnostic));
     }
@@ -1498,6 +1678,12 @@ void print_adapter_issues(const UpgradeAllOperationResult& result) {
         }
         Logger::error(message);
     }
+}
+
+bool has_foreign_inventory_failure(
+        const UpgradeAllForeignInventoryPhaseResult& inventory) noexcept {
+    return inventory.status == UpgradeAllForeignInventoryPhaseStatus::Failed ||
+           inventory.failure.has_value() || inventory.diagnostic.has_value();
 }
 
 std::set<std::string> print_foreign_inventory_failure(
@@ -1710,35 +1896,31 @@ void print_details(
     print_aggregate_issues_and_diagnostics(result, inventory_diagnostics);
 }
 
-void print_aggregate_summary(const UpgradeAllOperationResult& result) {
-    std::cout << aggregate_status_label(result.status) << std::endl;
-    std::cout << aggregate_package_state_label(result.package_state_change())
-              << std::endl;
-    if(result.has_partial_completion()) {
-        std::cout << localization::translate_message("partial completion")
-                  << std::endl;
+void print_operation_result(const UpgradeAllOperationResult& result) {
+    // AUR child snapshotを最初に検証し、unknown enumやincoherent identityを
+    // 成功済みsummaryへ混ぜずfail-closedにする。
+    validate_aur_phase_presentation_boundary(result.aur);
+    std::optional<AurUpdateCliPresentation> aur_presentation;
+    if(result.aur.operation_result.has_value()) {
+        aur_presentation.emplace(format_aur_update_cli_presentation(
+                result.aur.operation_result->reduced_operation_result));
     }
-    if(result.has_not_attempted_phase()) {
-        std::cout << localization::translate_message(
-                             "some phases were not attempted")
-                  << std::endl;
-    }
-    if(result.has_cleanup_failure()) {
-        std::cout << localization::translate_message("cleanup failure occurred")
-                  << std::endl;
-    }
-    if(result.has_duplicate_exclusions()) {
-        // TRANSLATORS: The placeholder is the literal service name "AUR".
-        std::cout << localization::format_translated_message(
-                             "duplicate {} targets excluded", AUR_SERVICE)
-                  << std::endl;
-    }
-    if(result.has_external_satisfaction()) {
-        // TRANSLATORS: The placeholder is the literal service name "AUR".
-        std::cout << localization::format_translated_message(
-                             "{} build units externally satisfied", AUR_SERVICE)
-                  << std::endl;
-    }
+    const AurUpdateCliPresentation* presentation =
+            aur_presentation.has_value() ? &*aur_presentation : nullptr;
+
+    const OperationStateProjection operation_state =
+            project_upgrade_all_operation_state(result);
+    const PresentationProjection runtime_presentation =
+            project_upgrade_all_presentation_with_operation_state(
+                    result, operation_state);
+
+    // POLICY(#350): successful operation state and package-state observation
+    // remain orthogonal. Normal items are aggregated before attention detail.
+    print_upgrade_all_summary(operation_state, runtime_presentation);
+    print_upgrade_all_attention(runtime_presentation);
+    print_duplicate_exclusions(result);
+    print_external_satisfaction(result);
+    print_details(result, presentation);
 
     if((result.status == UpgradeAllOperationStatus::Completed ||
         result.status == UpgradeAllOperationStatus::NoUpdates) &&
@@ -1749,27 +1931,6 @@ void print_aggregate_summary(const UpgradeAllOperationResult& result) {
                 "The {} result contains failure details despite a successful aggregate status.",
                 COMMAND_NAME));
     }
-}
-
-void print_operation_result(const UpgradeAllOperationResult& result) {
-    // AUR child snapshotを最初に検証し、unknown enumやincoherent identityを
-    // 成功済みsummaryへ混ぜずfail-closedにする。
-    std::optional<AurUpdateCliPresentation> aur_presentation;
-    if(result.aur.operation_result.has_value()) {
-        aur_presentation.emplace(format_aur_update_cli_presentation(
-                result.aur.operation_result->reduced_operation_result));
-    }
-    const AurUpdateCliPresentation* presentation =
-            aur_presentation.has_value() ? &*aur_presentation : nullptr;
-
-    // POLICY(#281): phase/target order is part of the public CLI contract.
-    print_system_phase(result.system_source);
-    print_registered_sources(result.system_source);
-    print_aur_phase(result, presentation);
-    print_duplicate_exclusions(result);
-    print_external_satisfaction(result);
-    print_details(result, presentation);
-    print_aggregate_summary(result);
 }
 
 bool is_supported_upgrade_all_global_option(const std::string& option) {
@@ -1810,6 +1971,12 @@ std::vector<std::string> validate_upgrade_all_invocation(
     }
 
     std::vector<std::string> errors;
+    const CliInvocationValidation operand_validation =
+            validate_cli_invocation_contract(parsed);
+    if(!operand_validation.is_valid()) {
+        errors.push_back(cli_invocation_issue_message(
+                operand_validation.diagnostic->reason));
+    }
     for(const ParsedCliToken& token : parsed.tokens) {
         switch(token.role) {
         case CliTokenRole::Operation:
@@ -1826,18 +1993,11 @@ std::vector<std::string> validate_upgrade_all_invocation(
             }
             break;
         case CliTokenRole::Target:
-            errors.push_back(localization::format_translated_message(
-                    // TRANSLATORS: The first placeholder is the literal
-                    // command name "upgrade-all"; the second is an operand.
-                    "{} does not accept target operands: {}", COMMAND_NAME,
-                    token.value));
+            // Operand cardinality belongs to the shared structured CLI
+            // authority above. Keep this pass operation-option-only.
             break;
         case CliTokenRole::OpaqueOperand:
-            errors.push_back(localization::format_translated_message(
-                    // TRANSLATORS: The first placeholder is the literal
-                    // command name "upgrade-all"; the second is an operand.
-                    "{} does not accept opaque operands: {}", COMMAND_NAME,
-                    token.value));
+            // `--`-separated operands are targets in the same authority.
             break;
         case CliTokenRole::PacmanOption:
         case CliTokenRole::PacmanOptionValue:

@@ -33,7 +33,6 @@ namespace {
 
 // NO_TRANSLATE: These are protocol endpoint identities, not user-facing prose.
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
-const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packaging/packages/";
 
 SourceBuildEnvironment load_source_preference_environment(
         const std::string& package_name) {
@@ -50,38 +49,19 @@ SourceBuildEnvironment load_source_preference_environment(
             });
 }
 
-bool has_distinct_package_base(const AurPackageInfo& info) {
-    return info.PackageBase != info.Name;
-}
-
-std::string canonical_source_key(
-        SourceBuildSourceKind source_kind,
-        const std::string& package_base) {
-    switch(source_kind) {
-        case SourceBuildSourceKind::Repository:
-            // NO_TRANSLATE: Stable internal source identity key.
-            return "repository:" + package_base;
-        case SourceBuildSourceKind::Aur:
-            // NO_TRANSLATE: Stable internal source identity key.
-            return "aur:" + package_base;
-    }
-    throw std::logic_error(localization::translate_message(
-            "Unknown source-build source kind."));
-}
-
 void require_supported_registered_source_install_target(
         const ResolvedSourceBuildIdentity& source) {
     // POLICY(#98,#268): registered source upgradeのlegacy singular lifecycleは
     // requested split childを個別選択できないため安全側で停止する。
-    if(source.source_kind == SourceBuildSourceKind::Aur &&
-       source.has_distinct_package_base) {
+    if(source.source_kind() == SourceBuildSourceKind::Aur &&
+       source.has_distinct_package_base()) {
         // TRANSLATORS: The placeholders are the AUR identity, a requested package name, the PackageBase field identity, and its value.
         throw std::runtime_error(localization::format_translated_message(
                 "Registered source upgrade does not support split {} preference {} from {} {}; this route requires a singular package identity.",
                 "AUR",
-                source.requested_name,
+                source.requested_name(),
                 "PackageBase",
-                source.package_base));
+                source.package_base()));
     }
 }
 
@@ -91,12 +71,12 @@ void add_selected_repository_provider(
 
 DesiredInstallReason resolve_source_target_reason(
         const ResolvedSourceBuildIdentity& source,
-        bool use_package_base_lifecycle,
+        ArtifactLifecycleIntent lifecycle_intent,
         const ProviderSelectionCallback& select_provider,
         std::vector<ProvidedDependency>& selected_repository_providers,
         std::optional<std::vector<std::string>>&
                 configured_repository_order) {
-    if(source.source_kind != SourceBuildSourceKind::Aur) {
+    if(source.source_kind() != SourceBuildSourceKind::Aur) {
         return DesiredInstallReason::Explicit;
     }
 
@@ -104,13 +84,13 @@ DesiredInstallReason resolve_source_target_reason(
     // route固有のexecutable guardへ進む。registered source upgradeのlegacy
     // singular ownerだけはsplit selection guardを維持する。
     BuildPlan plan = resolve_build_plan(
-            source.requested_name, select_provider);
+            source.requested_name(), select_provider);
     configured_repository_order = plan.configured_repository_order;
-    if(use_package_base_lifecycle) {
-        require_executable_build_plan(source.requested_name, plan);
+    if(lifecycle_intent == ArtifactLifecycleIntent::PackageBaseSet) {
+        require_executable_build_plan(source.requested_name(), plan);
     } else {
         require_supported_registered_source_install_target(source);
-        require_executable_install_plan(source.requested_name, plan);
+        require_executable_install_plan(source.requested_name(), plan);
     }
     for(const BuildPlanProvidedDependency& dependency : plan.provided) {
         if(dependency.resolution !=
@@ -119,7 +99,7 @@ DesiredInstallReason resolve_source_target_reason(
         }
         if(std::holds_alternative<AurProviderOrigin>(
                    dependency.provider.origin) &&
-           !use_package_base_lifecycle) {
+           lifecycle_intent != ArtifactLifecycleIntent::PackageBaseSet) {
             throw std::runtime_error(
                     localization::format_translated_message(
                             "Registered source upgrade cannot enforce a selected {} dependency provider.",
@@ -138,12 +118,12 @@ DesiredInstallReason resolve_source_target_reason(
         // TRANSLATORS: The placeholders are the literal BuildPlan identity and a requested package name.
         throw std::logic_error(localization::format_translated_message(
                 "{} required artifact target projection failed for {}.",
-                "BuildPlan", source.requested_name));
+                "BuildPlan", source.requested_name()));
     }
     for(const auto& unit : projection.success()->build_units) {
-        if(unit.package_base != source.package_base) continue;
+        if(unit.package_base != source.package_base()) continue;
         for(const auto& target : unit.required_targets) {
-            if(target.package_name == source.requested_name) {
+            if(target.package_name == source.requested_name()) {
                 return target.desired_reason;
             }
         }
@@ -151,7 +131,7 @@ DesiredInstallReason resolve_source_target_reason(
     // TRANSLATORS: The placeholders are the literal BuildPlan identity and a requested package name.
     throw std::logic_error(localization::format_translated_message(
             "{} required artifact target projection omitted {}.",
-            "BuildPlan", source.requested_name));
+            "BuildPlan", source.requested_name()));
 }
 
 std::string join_required_package_names(
@@ -236,7 +216,10 @@ ProductionSourceBuildWorkItem make_aur_source_build_work_item(
     work_item.request.custom_environment = std::move(environment);
     work_item.request.needed = needed;
     work_item.required_targets = unit.required_targets;
-    work_item.is_build_plan_entry = true;
+    work_item.required_target_provenance =
+            RequiredTargetProvenance::AurBuildPlanProjection;
+    work_item.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::PackageBaseSet;
     work_item.configured_repository_order =
             plan.configured_repository_order;
     attach_selected_repository_providers(work_item, plan);
@@ -351,25 +334,35 @@ ProductionSourceBuildWorkItem make_direct_source_build_work_item(
         SourceEnvironmentEmptyValuePolicy empty_value_policy,
         bool only_if_updated,
         bool needed,
-        bool use_package_base_lifecycle,
+        ArtifactLifecycleIntent lifecycle_intent,
         const ProviderSelectionCallback& select_provider) {
     ProductionSourceBuildWorkItem work_item;
-    work_item.request.package_name = source.requested_name;
-    work_item.request.checkout_name = source.package_base;
-    work_item.request.git_url = source.git_url;
+    work_item.request.package_name = source.requested_name();
+    work_item.request.checkout_name = source.package_base();
+    work_item.request.git_url = source.git_url();
     work_item.request.custom_environment = std::move(environment);
     work_item.request.empty_value_policy = empty_value_policy;
     work_item.request.only_if_updated = only_if_updated;
     work_item.request.needed = needed;
     DesiredInstallReason reason = resolve_source_target_reason(
-            source, use_package_base_lifecycle, select_provider,
+            source, lifecycle_intent, select_provider,
             work_item.selected_repository_providers,
             work_item.configured_repository_order);
     work_item.required_targets.push_back(RequiredPackageArtifactTarget{
-            source.package_base, source.requested_name, reason});
-    work_item.is_build_plan_entry = use_package_base_lifecycle;
+            source.package_base(), source.requested_name(), reason});
+    work_item.required_target_provenance =
+            source.source_kind() == SourceBuildSourceKind::Repository
+            ? RequiredTargetProvenance::RepositoryExactPackageProjection
+            : RequiredTargetProvenance::AurBuildPlanProjection;
+    work_item.artifact_lifecycle_intent = lifecycle_intent;
+    if(const auto* repository = source.repository_identity();
+       repository != nullptr) {
+        work_item.repository_identity = *repository;
+        work_item.configured_repository_order =
+                repository->exact_package().configured_repository_order;
+    }
     work_item.uses_system_update_baseline =
-            source.source_kind == SourceBuildSourceKind::Repository;
+            source.source_kind() == SourceBuildSourceKind::Repository;
     require_static_production_source_build_work_item(work_item);
     return work_item;
 }
@@ -411,7 +404,7 @@ void present_package_base_result(
                         "PackageBase"));
     }
 
-    // TRANSLATORS: The placeholders are the PackageBase field identity and an AUR PackageBase name.
+    // TRANSLATORS: The placeholders are the PackageBase field identity and a PackageBase name.
     Logger::info(localization::format_translated_message(
             "{} result: {}", "PackageBase", result.package_base()));
     for(std::size_t index = 0;
@@ -678,22 +671,61 @@ const ValidatedCacheRoot& require_prepared_cache_root(
     return work_item.cache_root.value();
 }
 
+void require_registered_repository_package_base_work_item(
+        const ProductionSourceBuildWorkItem& work_item,
+        const AppConfig& config) {
+    require_static_production_source_build_work_item(work_item);
+    if(work_item.required_target_provenance !=
+               RequiredTargetProvenance::RepositoryExactPackageProjection ||
+       work_item.artifact_lifecycle_intent !=
+               ArtifactLifecycleIntent::PackageBaseSet ||
+       !work_item.repository_identity.has_value()) {
+        throw std::logic_error(
+                "Registered repository prepared source-build requires exact repository PackageBase-set provenance.");
+    }
+    if(work_item.request.only_if_updated) {
+        throw std::logic_error(
+                "Registered repository PackageBase-set work item must keep only-if-updated out of the lower request.");
+    }
+    if(work_item.request.needed) {
+        throw std::logic_error(
+                "Registered repository PackageBase-set work item does not support needed execution.");
+    }
+    if(work_item.required_targets.size() != 1 ||
+       work_item.required_targets.front().desired_reason !=
+               DesiredInstallReason::Explicit) {
+        throw std::logic_error(
+                "Registered repository PackageBase-set work item requires exactly one explicit requested child.");
+    }
+    require_supported_separated_install_options(config.rm_deps);
+    require_unclaimed_artifact_pkgdest(work_item.request.custom_environment);
+}
+
 } // namespace
 
 ResolvedSourceBuildIdentity resolve_source_build_identity(
         const std::string& package_name) {
     require_valid_package_name(package_name);
 
-    if(is_repo_package(package_name)) {
-        const SourceBuildSourceKind source_kind =
-                SourceBuildSourceKind::Repository;
-        return ResolvedSourceBuildIdentity{
+    StrictRepositoryPackageQueryResult repository_result =
+            query_repository_package_strict(package_name);
+    if(const auto* present =
+               std::get_if<RepositoryPackagePresent>(&repository_result);
+       present != nullptr) {
+        if(present->package_name != package_name) {
+            throw std::runtime_error(localization::format_translated_message(
+                    "Repository exact package identity does not match the requested package {}.",
+                    package_name));
+        }
+        return make_repository_source_build_identity(*present);
+    }
+    if(const auto* failure =
+               std::get_if<RepositoryMetadataFailure>(&repository_result);
+       failure != nullptr) {
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to inspect repository metadata for {}: {}",
                 package_name,
-                package_name,
-                canonical_source_key(source_kind, package_name),
-                ARCH_GIT_BASE + package_name + ".git",
-                source_kind,
-                false};
+                failure->diagnostic));
     }
 
     std::optional<AurPackageInfo> info;
@@ -725,32 +757,22 @@ ResolvedSourceBuildIdentity resolve_source_build_identity(
     }
     require_valid_package_name(info->PackageBase);
 
-    const SourceBuildSourceKind source_kind = SourceBuildSourceKind::Aur;
     return ResolvedSourceBuildIdentity{
-            package_name,
-            info->PackageBase,
-            canonical_source_key(source_kind, info->PackageBase),
-            AUR_BASE_URL + info->PackageBase + ".git",
-            source_kind,
-            has_distinct_package_base(info.value())};
+            ResolvedAurSourceBuildIdentity{
+                    package_name,
+                    info->PackageBase}};
 }
 
 ResolvedSourceBuildIdentity make_repository_source_build_identity(
         const RepositoryPackagePresent& package) {
     require_valid_package_name(package.package_name);
+    require_valid_package_name(package.package_base);
     if(package.repository_name.empty()) {
         throw std::invalid_argument(localization::translate_message(
                 "Repository source-build identity has no repository name."));
     }
-    const SourceBuildSourceKind source_kind =
-            SourceBuildSourceKind::Repository;
     return ResolvedSourceBuildIdentity{
-            package.package_name,
-            package.package_name,
-            canonical_source_key(source_kind, package.package_name),
-            ARCH_GIT_BASE + package.package_name + ".git",
-            source_kind,
-            false};
+            ResolvedRepositorySourceBuildIdentity{package}};
 }
 
 void build_source_target(
@@ -785,7 +807,7 @@ RemoteSourceBuildPreparation prepare_remote_source_build(
     std::optional<BuildPlan> aur_build_plan;
     ProviderSelectionCallback select_provider =
             provider_selection_callback(config);
-    if(source.source_kind == SourceBuildSourceKind::Aur) {
+    if(source.source_kind() == SourceBuildSourceKind::Aur) {
         BuildPlan plan = resolve_build_plan(package_name, select_provider);
         try {
             require_executable_build_plan(package_name, plan);
@@ -799,12 +821,12 @@ RemoteSourceBuildPreparation prepare_remote_source_build(
                 work_items.begin(), work_items.end(),
                 [&source](const ProductionSourceBuildWorkItem& candidate) {
                     return candidate.request.checkout_name ==
-                           source.package_base;
+                           source.package_base();
                 });
         if(root_work_item == work_items.end()) {
             throw std::logic_error(localization::format_translated_message(
                     "{} required artifact target projection omitted {}.",
-                    "BuildPlan", source.requested_name));
+                    "BuildPlan", source.requested_name()));
         }
         root_work_item->request.custom_environment = custom_environment;
         root_work_item->request.empty_value_policy =
@@ -814,7 +836,8 @@ RemoteSourceBuildPreparation prepare_remote_source_build(
         work_items.push_back(make_direct_source_build_work_item(
                 source, custom_environment,
                 SourceEnvironmentEmptyValuePolicy::Forward, false, false,
-                false, select_provider));
+                ArtifactLifecycleIntent::PackageBaseSet,
+                select_provider));
     }
     PreparedProductionSourceBuildInvocation invocation =
             prepare_production_source_build_invocation(
@@ -843,7 +866,24 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
     return make_direct_source_build_work_item(
             identity, std::move(environment),
             SourceEnvironmentEmptyValuePolicy::Omit, only_if_updated, needed,
-            false, select_provider);
+            ArtifactLifecycleIntent::SingularCompatibility,
+            select_provider);
+}
+
+ProductionSourceBuildWorkItem prepare_registered_source_build_work_item(
+        const ResolvedSourceBuildIdentity& identity,
+        SourceBuildEnvironment environment,
+        const ProviderSelectionCallback& select_provider) {
+    const bool is_repository =
+            identity.source_kind() == SourceBuildSourceKind::Repository;
+    return make_direct_source_build_work_item(
+            identity, std::move(environment),
+            SourceEnvironmentEmptyValuePolicy::Omit,
+            !is_repository,
+            false,
+            is_repository ? ArtifactLifecycleIntent::PackageBaseSet
+                          : ArtifactLifecycleIntent::SingularCompatibility,
+            select_provider);
 }
 
 std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
@@ -897,14 +937,12 @@ execute_prepared_package_base_source_build_work_item_typed(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
-    // set ownerはAUR BuildPlanから必要childを確定したwork itemに限定する。
+    // target provenanceではなく明示されたlifecycle intentだけでset ownerを選ぶ。
     require_static_production_source_build_work_item(work_item);
-    if(!work_item.is_build_plan_entry) {
-        // TRANSLATORS: The placeholders are the literal PackageBase, AUR, and BuildPlan identities.
+    if(work_item.artifact_lifecycle_intent !=
+       ArtifactLifecycleIntent::PackageBaseSet) {
         throw std::logic_error(
-                localization::format_translated_message(
-                        "{} set source-build execution requires an {} {} work item.",
-                        "PackageBase", "AUR", "BuildPlan"));
+                "PackageBase set source-build execution received a non-set lifecycle work item.");
     }
     if(work_item.request.only_if_updated) {
         throw std::logic_error(
@@ -913,18 +951,56 @@ execute_prepared_package_base_source_build_work_item_typed(
                         "PackageBase"));
     }
 
-    // TRANSLATORS: The placeholders are AUR and PackageBase identities and an AUR PackageBase name.
-    Logger::info(localization::format_translated_message(
-            "Building {} {}: {}", "AUR", "PackageBase",
-            work_item.request.checkout_name));
-    // TRANSLATORS: The placeholder is a comma-separated list of package names.
-    Logger::info(localization::format_translated_message(
-            "Target package(s): {}",
-            join_required_package_names(work_item.required_targets)));
+    if(work_item.required_target_provenance ==
+       RequiredTargetProvenance::AurBuildPlanProjection) {
+        // TRANSLATORS: The placeholders are AUR and PackageBase identities and an AUR PackageBase name.
+        Logger::info(localization::format_translated_message(
+                "Building {} {}: {}", "AUR", "PackageBase",
+                work_item.request.checkout_name));
+        // TRANSLATORS: The placeholder is a comma-separated list of package names.
+        Logger::info(localization::format_translated_message(
+                "Target package(s): {}",
+                join_required_package_names(work_item.required_targets)));
+    }
     return execute_source_build_package_base_typed(
             work_item.request, work_item.required_targets,
             require_prepared_cache_root(work_item),
             database_paths, config);
+}
+
+SourceBuildPreparationOutcome
+prepare_package_base_source_build_work_item_typed(
+        const ProductionSourceBuildWorkItem& work_item,
+        SourceBuildUpdatePolicy update_policy,
+        const AppConfig& config) {
+    require_registered_repository_package_base_work_item(work_item, config);
+    try {
+        return prepare_source_build_for_execution(
+                work_item.request, work_item.request.checkout_name,
+                update_policy, require_prepared_cache_root(work_item),
+                config);
+    } catch(const TrustedCacheError&) {
+        throw;
+    } catch(const std::exception& error) {
+        // registered CLIの既存prefix ownerへ原診断を返し、checkout failureを
+        // PackageBase lower phaseの文言へ置換しない。
+        throw std::runtime_error(error.what());
+    } catch(...) {
+        throw std::runtime_error(localization::translate_message(
+                "Source checkout or build preparation failed."));
+    }
+}
+
+RegisteredSourcePackageBaseExecutionResult
+execute_prepared_package_base_source_build_work_item_typed(
+        const ProductionSourceBuildWorkItem& work_item,
+        PreparedSourceBuildNeedsBuild prepared,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config) {
+    require_registered_repository_package_base_work_item(work_item, config);
+    return execute_prepared_source_build_package_base_typed(
+            work_item.request, work_item.required_targets,
+            std::move(prepared), database_paths, config);
 }
 
 SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
@@ -933,7 +1009,8 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
         const AppConfig& config) {
     const RequiredPackageArtifactTarget& target =
             require_singular_required_package_target(work_item);
-    if(work_item.is_build_plan_entry) {
+    if(work_item.required_target_provenance ==
+       RequiredTargetProvenance::AurBuildPlanProjection) {
         // TRANSLATORS: The placeholders are AUR and PackageBase identities and an AUR PackageBase name.
         Logger::info(localization::format_translated_message(
                 "Building {} {}: {}", "AUR", "PackageBase",
@@ -992,7 +1069,8 @@ void execute_prepared_source_build_invocation(
                                 "Failed to install selected repository providers.")));
     }
     for(const auto& work_item : invocation.work_items) {
-        if(work_item.is_build_plan_entry) {
+        if(work_item.artifact_lifecycle_intent ==
+           ArtifactLifecycleIntent::PackageBaseSet) {
             try {
                 PackageBaseSourceBuildExecutionResult result =
                         execute_prepared_package_base_source_build_work_item_typed(

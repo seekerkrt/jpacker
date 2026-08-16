@@ -136,6 +136,12 @@ struct RegisteredSourcePreferenceSnapshot {
     std::optional<std::string> resolved_package_base;
     std::vector<std::string> preference_load_warnings;
     std::optional<SourceBuildSourceKind> source_kind = std::nullopt;
+    std::optional<ResolvedRepositorySourceBuildIdentity>
+            repository_identity = std::nullopt;
+    std::optional<RequiredTargetProvenance> required_target_provenance =
+            std::nullopt;
+    std::optional<ArtifactLifecycleIntent> artifact_lifecycle_intent =
+            std::nullopt;
 };
 
 struct SystemSourceUpgradePreparedSnapshot {
@@ -191,14 +197,27 @@ public:
     [[nodiscard]] const std::string& checkout_package_base() const noexcept {
         return checkout_package_base_.get();
     }
-    [[nodiscard]] bool is_build_plan_entry() const noexcept {
-        return is_build_plan_entry_;
+    [[nodiscard]] RequiredTargetProvenance required_target_provenance()
+            const noexcept {
+        return required_target_provenance_;
+    }
+    [[nodiscard]] ArtifactLifecycleIntent artifact_lifecycle_intent()
+            const noexcept {
+        return artifact_lifecycle_intent_;
+    }
+    [[nodiscard]] const std::optional<
+            ResolvedRepositorySourceBuildIdentity>&
+    repository_identity() const noexcept {
+        return repository_identity_.get();
     }
     [[nodiscard]] bool uses_system_update_baseline() const noexcept {
         return uses_system_update_baseline_;
     }
     [[nodiscard]] bool needed() const noexcept {
         return needed_;
+    }
+    [[nodiscard]] bool only_if_updated() const noexcept {
+        return only_if_updated_;
     }
     [[nodiscard]] const std::optional<std::vector<std::string>>&
     configured_repository_order() const noexcept {
@@ -217,10 +236,15 @@ private:
           required_targets_(work_item.required_targets),
           requested_package_name_(work_item.request.package_name),
           checkout_package_base_(work_item.request.checkout_name),
-          is_build_plan_entry_(work_item.is_build_plan_entry),
+          required_target_provenance_(
+                  work_item.required_target_provenance),
+          artifact_lifecycle_intent_(
+                  work_item.artifact_lifecycle_intent),
+          repository_identity_(work_item.repository_identity),
           uses_system_update_baseline_(
                   work_item.uses_system_update_baseline),
           needed_(work_item.request.needed),
+          only_if_updated_(work_item.request.only_if_updated),
           configured_repository_order_(
                   work_item.configured_repository_order),
           selected_repository_providers_(
@@ -232,9 +256,16 @@ private:
             required_targets_;
     std::reference_wrapper<const std::string> requested_package_name_;
     std::reference_wrapper<const std::string> checkout_package_base_;
-    bool is_build_plan_entry_ = false;
+    RequiredTargetProvenance required_target_provenance_ =
+            RequiredTargetProvenance::Unspecified;
+    ArtifactLifecycleIntent artifact_lifecycle_intent_ =
+            ArtifactLifecycleIntent::Unspecified;
+    std::reference_wrapper<const std::optional<
+            ResolvedRepositorySourceBuildIdentity>>
+            repository_identity_;
     bool uses_system_update_baseline_ = false;
     bool needed_ = false;
+    bool only_if_updated_ = false;
     std::reference_wrapper<
             const std::optional<std::vector<std::string>>>
             configured_repository_order_;
@@ -342,6 +373,65 @@ struct SystemUpgradePhaseResult {
     std::optional<std::string> diagnostic;
 };
 
+enum class RegisteredSourceBuildFailureCategory {
+    Build,
+    ArtifactValidation,
+    ArtifactIdentity,
+    Other,
+};
+
+struct RegisteredSourceBuildFailureSnapshot {
+    RegisteredSourceBuildFailureCategory category =
+            RegisteredSourceBuildFailureCategory::Other;
+    std::string diagnostic;
+};
+
+struct RegisteredSourcePackageTransactionFailureSnapshot {
+    PackageBaseArtifactInstallTransactionFailureKind category =
+            PackageBaseArtifactInstallTransactionFailureKind::UnknownException;
+    std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts;
+    std::optional<int> exit_code;
+    std::string diagnostic;
+};
+
+enum class RegisteredSourceExecutionCorrelationFailureReason {
+    PackageBaseMismatch,
+    MissingSelectedChild,
+    ExtraSelectedChild,
+    SelectedArtifactIdentityMismatch,
+    EmptySelectedArtifactVersion,
+    DesiredInstallReasonMismatch,
+    UnexpectedSkippedAsNeeded,
+    UnknownChildOutcome,
+    InvalidUnselectedArtifactIdentity,
+    SelectedAndUnselectedIdentityOverlap,
+    DuplicateUnselectedArtifactIdentity,
+};
+
+struct RegisteredSourceExecutionCorrelationFailure {
+    RegisteredSourceExecutionCorrelationFailureReason reason =
+            RegisteredSourceExecutionCorrelationFailureReason::
+                    PackageBaseMismatch;
+    std::optional<std::size_t> required_child_index;
+    std::optional<std::string> package_name;
+    std::string diagnostic;
+};
+
+struct RegisteredSourcePackageBaseExecutionSnapshot {
+    std::string package_base;
+    PackageBaseSourceBuildSelectedResult selected_child;
+    std::vector<ArtifactPackageIdentity> unselected_artifacts;
+};
+
+using RegisteredSourceUpgradeFailureDetail = std::variant<
+        std::monostate,
+        PackageBaseArtifactIdentitySelectionFailure,
+        MixedPackageBaseInstallReasonUnsupported,
+        PackageMetadataFailure,
+        RegisteredSourceBuildFailureSnapshot,
+        RegisteredSourcePackageTransactionFailureSnapshot,
+        RegisteredSourceExecutionCorrelationFailure>;
+
 struct RegisteredSourceUpgradeResult {
     std::size_t original_preference_index = 0;
     std::string preference_package_name;
@@ -354,6 +444,26 @@ struct RegisteredSourceUpgradeResult {
     PackageStateChange package_state_change = PackageStateChange::NoChange;
     std::optional<std::string> diagnostic;
     std::optional<std::string> cleanup_diagnostic;
+    std::optional<RegisteredSourcePackageBaseExecutionSnapshot>
+            package_base_execution;
+    // correlation failure時もsafe attempt evidenceを別slotで保持する。
+    std::optional<RegisteredSourcePackageTransactionFailureSnapshot>
+            package_transaction_failure;
+    RegisteredSourceUpgradeFailureDetail failure_detail = std::monostate{};
+
+    RegisteredSourceUpgradeResult() = default;
+
+    // Slice 4以前のcoarse result構築は維持し、typed detailだけをdefaultで足す。
+    RegisteredSourceUpgradeResult(
+            std::size_t original_index,
+            std::string package_name,
+            std::optional<std::string> source_identity_key,
+            std::optional<std::string> package_base,
+            RegisteredSourceUpgradeStatus source_status,
+            RegisteredSourceUpgradeFailureKind source_failure_kind,
+            PackageStateChange state_change,
+            std::optional<std::string> source_diagnostic,
+            std::optional<std::string> source_cleanup_diagnostic);
 };
 
 struct SystemSourceUpgradeResult {

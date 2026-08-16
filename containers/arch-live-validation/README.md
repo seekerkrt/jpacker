@@ -15,6 +15,22 @@ Slice 2のprovider-selection lane、Slice 3のreal AUR install laneを収める�
 - live case については暗黙のフォールバックを許容せず、外部レビューを要求する。
 - live lane は `make test` / `release-check` を再帰的に起動しない。
 
+## Fixture authority boundary
+
+network非依存のdeterministic fixtureは`tests/fixtures/`に置き、live provider / AUR /
+local payloadはこのdirectoryの明示的live targetだけが消費する。`make test`はlive stateを
+取得せず、`test-fixture-authority`でtracked PKGBUILDとindependentなexpected `.SRCINFO`、
+small scenario contract、transport固有payload authorityの内部整合だけを検証する。
+
+local scenarioで共有するpackage / PackageBase、version、architecture、dependency constraint、
+reviewed provider、install reasonは`fixtures/local-package/contract.env`をauthorityとする。
+PKGBUILD、`expected.srcinfo`、`payload-authority.tsv`はshell contractへ統合せず、それぞれ
+Arch build input、tracked projection、archive payloadという固有contractを維持する。
+AUR scenarioのidentity、dependency、pin、source、artifact architectureは`aur-cases.tsv`、
+payload path/type/mode/static hashは`fixtures/aur/payload-authority.tsv`がauthorityで、
+Dockerfile、runner、root gatewayは共通loaderを通してcase値を読む。expected projectionや
+payload expectedをMoguet本体のparser / formatter / resolverから生成しない。
+
 ## Slice 2: live provider selection
 
 `make test-container-live-provider`は、`archlinux:latest`をpullして独立imageを
@@ -32,10 +48,11 @@ byte-safeに記録し、固定statusで停止する。元のreal pacmanはvalida
 実行不能なroot-only pathへ隔離されるため、rust / rustupのreal install、`pacman -U`、
 remove、upgrade、複数target、unqualified targetは実行されない。
 
-各caseはtracked fixtureをfresh user-owned directoryへcopyし、そのcopyだけで
-unprivileged `makepkg --printsrcinfo`を実行する。tracked fixtureへ`.SRCINFO`を追加せず、
-before / after checksum、package database manifest、sentinel log、source / artifact
-workspace不在を照合する。Moguetとmakepkgはいずれもvalidation userで動作する。
+各caseはtracked PKGBUILDだけをfresh user-owned directoryへcopyし、そのcopyで
+unprivileged `makepkg --printsrcinfo`を実行してtracked `expected.srcinfo`とexact比較する。
+case sourceへcontractやexpected dataを混ぜず、generated `.SRCINFO`もtracked fixtureへ
+追加しない。before / after checksum、package database manifest、sentinel log、source /
+artifact workspace不在を照合する。Moguetとmakepkgはいずれもvalidation userで動作する。
 
 runtime networkは有効だが、host worktreeや`.git`、credentials、Docker socket、XDG
 state、pacman DB/config/cacheをmountしない。containerは`--rm`で破棄する。Dockerの
@@ -98,7 +115,7 @@ payloadのREADMEをexactに展開する。host pacman configは参照・共有�
 
 `make test-container-live-local`はprovider / AUR laneと別のstandalone imageをbuildし、
 tracked local fixtureはvalidation-user buildより前にroot-owned read-only authorityへ固定し、
-runtimeではそのauthorityだけをfresh user-owned directoryへcopyしてproduction
+runtimeではPKGBUILDだけをfresh user-owned directoryへcopyしてproduction
 `moguet --noedit build --local <directory>`で検証する。fixtureのmissing
 `.SRCINFO`はexplicit evaluation gateを通り、real Arch repository metadataから選択した
 `extra/rust` providerをdependencyとしてinstallした後、invocation-owned source snapshot、
@@ -106,7 +123,8 @@ unprivileged `makepkg` build、artifact identity validation、root gateway経由
 `pacman -U`によるexplicit installまでを通す。authorityとcase-local copyのmanifest、owner、
 modeをbuild前に照合し、case-local root、root-owned fixture authority、host worktreeを変更しない。
 root artifact transactionはroot-owned staging copy、four-way SHA-256照合、
-exact `.PKGINFO`、payload path、marker contentの検証を終えてからだけ許可する。
+contract由来の`.PKGINFO` identity、tracked payload path/mode/static marker hashの検証を
+終えてからだけ許可する。
 
 install reasonはlive package databaseで検証する。local root
 `moguet-live-fixture 1.0.0-1`はExplicit、選択した`rust`と同時に導入されるprovider

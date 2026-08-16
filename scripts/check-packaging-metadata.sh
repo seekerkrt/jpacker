@@ -3,6 +3,12 @@
 set -eu
 
 repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
+current_package_fixture=$repo_root/tests/fixtures/current-package
+current_package_contract=$current_package_fixture/contract.env
+runtime_dependency_authority=$current_package_fixture/runtime-dependencies.txt
+build_dependency_authority=$current_package_fixture/build-dependencies.txt
+install_payload_authority=$current_package_fixture/install-payload.txt
 tmp_dir=$(mktemp -d)
 srcinfo_file=$tmp_dir/.SRCINFO
 stage_root=$tmp_dir/stage
@@ -18,6 +24,24 @@ fail() {
     printf 'packaging-metadata-check: %s\n' "$*" >&2
     exit 1
 }
+
+for authority_file in \
+    "$current_package_contract" \
+    "$runtime_dependency_authority" \
+    "$build_dependency_authority" \
+    "$install_payload_authority"
+do
+    [ -f "$authority_file" ] && [ ! -L "$authority_file" ] &&
+        [ -s "$authority_file" ] ||
+        fail "current package authority must be a non-empty regular non-symlink: $authority_file"
+done
+# shellcheck source=../tests/fixtures/current-package/contract.env
+. "$current_package_contract"
+
+[ -f "$repo_root/VERSION" ] && [ ! -L "$repo_root/VERSION" ] ||
+    fail 'VERSION must be a regular non-symlink'
+current_version=$(tr -d '[:space:]' < "$repo_root/VERSION")
+[ -n "$current_version" ] || fail 'VERSION is empty'
 
 srcinfo_values() {
     key=$1
@@ -42,7 +66,15 @@ assert_no_values() {
 assert_value_set() {
     key=$1
     expected=$2
-    actual=$(srcinfo_values "$key" | LC_ALL=C sort)
+    values_raw=$tmp_dir/srcinfo-$key.raw
+    values_sorted=$tmp_dir/srcinfo-$key.sorted
+    if validation_capture_sorted_output "$values_raw" "$values_sorted" \
+        srcinfo_values "$key"; then
+        actual=$(cat "$values_sorted")
+    else
+        producer_status=$?
+        fail "$key producer or normalization failed with status $producer_status; raw=$values_raw"
+    fi
     [ "$actual" = "$expected" ] || {
         printf 'packaging-metadata-check: %s mismatch\nexpected:\n%s\nactual:\n%s\n' \
             "$key" "$expected" "$actual" >&2
@@ -55,27 +87,30 @@ assert_value_set() {
     makepkg --printsrcinfo
 ) > "$srcinfo_file"
 
-assert_single_value pkgbase moguet
-assert_single_value pkgname moguet
-assert_single_value pkgver 2.2.0
-assert_single_value pkgrel 1
-assert_single_value arch x86_64
-assert_single_value license GPL-3.0-or-later
+assert_single_value pkgbase "$PACKAGE_BASE"
+assert_single_value pkgname "$PACKAGE_NAME"
+assert_single_value pkgver "$current_version"
+assert_single_value pkgrel "$PACKAGE_RELEASE"
+assert_single_value arch "$PACKAGE_ARCHITECTURE"
+assert_single_value license "$PACKAGE_LICENSE"
 assert_single_value source \
-    'moguet-src::git+https://github.com/seekerkrt/moguet.git#tag=v2.2.0'
+    "$PACKAGE_SOURCE_NAME::git+$PROJECT_REPOSITORY_URL.git#tag=v$current_version"
 assert_single_value sha256sums SKIP
 
-expected_depends='curl
-git
-libalpm.so
-libarchive
-nano
-pacman
-sudo'
+if expected_depends=$(cat "$runtime_dependency_authority"); then
+    :
+else
+    producer_status=$?
+    fail "runtime dependency authority read failed with status $producer_status"
+fi
 assert_value_set depends "$expected_depends"
 
-expected_makedepends='nlohmann-json
-tomlplusplus'
+if expected_makedepends=$(cat "$build_dependency_authority"); then
+    :
+else
+    producer_status=$?
+    fail "build dependency authority read failed with status $producer_status"
+fi
 assert_value_set makedepends "$expected_makedepends"
 
 # No system or user configuration belongs to the package. The disjoint v1/v2
@@ -86,12 +121,22 @@ assert_no_values replaces
 assert_no_values provides
 assert_no_values optdepends
 
-for build_only_dependency in nlohmann-json tomlplusplus
-do
-    if srcinfo_values depends | grep -Fx -- "$build_only_dependency" >/dev/null; then
-        fail "$build_only_dependency must not be a runtime dependency."
+while IFS= read -r build_only_dependency; do
+    [ -n "$build_only_dependency" ] || continue
+    depends_values=$tmp_dir/srcinfo-depends.values
+    validation_capture_output "$depends_values" srcinfo_values depends ||
+        fail "depends producer failed with status $?"
+    if grep -Fx -- "$build_only_dependency" "$depends_values" >/dev/null; then
+        dependency_status=0
+    else
+        dependency_status=$?
     fi
-done
+    case $dependency_status in
+        0) fail "$build_only_dependency must not be a runtime dependency." ;;
+        1) ;;
+        *) fail "depends inspection failed with status $dependency_status" ;;
+    esac
+done <"$build_dependency_authority"
 
 for forbidden_tomlplusplus_flag in \
     -ltomlplusplus \
@@ -106,7 +151,7 @@ done
 # Evaluate the actual package() function against the current source tree. A
 # clean archive build uses an isolated local-tag fixture in the package
 # transition test because the public v2.0.0 tag belongs to the later cutover.
-ln -s "$repo_root" "$package_work/moguet-src"
+ln -s "$repo_root" "$package_work/$PACKAGE_SOURCE_NAME"
 ln -s "$repo_root/VERSION" "$package_work/VERSION"
 bash -c '
     set -eu
@@ -119,27 +164,31 @@ bash -c '
     package
 ' bash "$package_work" "$stage_root" "$repo_root/PKGBUILD" >/dev/null
 
-expected_payload='/usr/bin/moguet
-/usr/share/bash-completion/completions/moguet
-/usr/share/doc/moguet/README.ja.md
-/usr/share/doc/moguet/README.md
-/usr/share/doc/moguet/THIRD_PARTY_NOTICES.md
-/usr/share/doc/moguet/docs/LICENSING.md
-/usr/share/doc/moguet/docs/migration/v1-to-v2.ja.md
-/usr/share/doc/moguet/docs/migration/v1-to-v2.md
-/usr/share/fish/vendor_completions.d/moguet.fish
-/usr/share/licenses/moguet/LICENSE
-/usr/share/licenses/moguet/bjoern-hoehrmann-utf8-MIT.txt
-/usr/share/licenses/moguet/curl.txt
-/usr/share/licenses/moguet/jpacker-MIT-legacy.txt
-/usr/share/licenses/moguet/nlohmann-json-MIT.txt
-/usr/share/licenses/moguet/tomlplusplus-MIT.txt
-/usr/share/locale/ja/LC_MESSAGES/moguet.mo
-/usr/share/man/ja/man1/moguet.1
-/usr/share/man/man1/moguet.1
-/usr/share/zsh/site-functions/_moguet'
-actual_payload=$(find "$stage_root" -type f -print |
-    sed "s|^$stage_root||" | LC_ALL=C sort)
+if expected_payload=$(cat "$install_payload_authority"); then
+    :
+else
+    producer_status=$?
+    fail "install payload authority read failed with status $producer_status"
+fi
+payload_paths_raw=$tmp_dir/payload-paths.raw
+payload_paths_stripped=$tmp_dir/payload-paths.stripped
+payload_paths_sorted=$tmp_dir/payload-paths.sorted
+validation_capture_output "$payload_paths_raw" \
+    find "$stage_root" -type f -print ||
+    fail "payload path producer failed with status $?; raw=$payload_paths_raw"
+if sed "s|^$stage_root||" "$payload_paths_raw" \
+    >"$payload_paths_stripped"; then
+    :
+else
+    producer_status=$?
+    fail "payload path normalization failed with status $producer_status"
+fi
+if LC_ALL=C sort "$payload_paths_stripped" >"$payload_paths_sorted"; then
+    actual_payload=$(cat "$payload_paths_sorted")
+else
+    producer_status=$?
+    fail "payload path sorting failed with status $producer_status"
+fi
 [ "$actual_payload" = "$expected_payload" ] || {
     printf 'packaging-metadata-check: archive payload mismatch:\n%s\n' \
         "$actual_payload" >&2
@@ -155,14 +204,34 @@ actual_payload=$(find "$stage_root" -type f -print |
 
 command -v readelf >/dev/null 2>&1 ||
     fail "readelf is required for runtime dependency verification."
-needed=$(LC_ALL=C readelf -d "$stage_root/usr/bin/moguet" |
-    sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p')
-printf '%s\n' "$needed" | grep -Eq '^libcurl\.so(\.|$)' ||
-    fail "moguet ELF is missing the direct libcurl runtime dependency."
-printf '%s\n' "$needed" | grep -Eq '^libalpm\.so(\.|$)' ||
-    fail "moguet ELF is missing the direct libalpm runtime dependency."
-if printf '%s\n' "$needed" | grep -Eq '^libintl\.so(\.|$)'; then
+readelf_raw=$tmp_dir/readelf.dynamic.raw
+needed_file=$tmp_dir/readelf.needed
+if validation_capture_output "$readelf_raw" \
+    env LC_ALL=C readelf -d "$stage_root/usr/bin/$COMMAND_NAME"; then
+    :
+else
+    producer_status=$?
+    fail "readelf producer failed with status $producer_status; raw=$readelf_raw"
+fi
+if sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p' \
+    "$readelf_raw" >"$needed_file"; then
+    :
+else
+    producer_status=$?
+    fail "readelf dependency normalization failed with status $producer_status"
+fi
+grep -Eq '^libcurl\.so(\.|$)' "$needed_file" ||
+    fail "$COMMAND_NAME ELF is missing the direct libcurl runtime dependency."
+grep -Eq '^libalpm\.so(\.|$)' "$needed_file" ||
+    fail "$COMMAND_NAME ELF is missing the direct libalpm runtime dependency."
+if grep -Eq '^libintl\.so(\.|$)' "$needed_file"; then
     fail "gettext unexpectedly became a linked runtime dependency."
+else
+    grep_status=$?
+    case $grep_status in
+        1) ;;
+        *) fail "readelf dependency absence check failed with status $grep_status" ;;
+    esac
 fi
 
 printf 'packaging-metadata-check: all checks passed\n'

@@ -38,9 +38,11 @@ struct RepositoryPackagePresent {
     std::string repository_name;
     std::size_t configured_order = 0;
     std::string package_name;
+    std::string package_base;
     std::optional<ObservedVersion> package_version = std::nullopt;
     std::optional<std::vector<std::string>> configured_repository_order =
             std::nullopt;
+    std::vector<RepositoryProviderCapability> provides = {};
 
     bool operator==(const RepositoryPackagePresent&) const = default;
 };
@@ -62,6 +64,7 @@ struct RepositoryProviderQuerySnapshot {
     std::vector<RepositoryMetadataFailure> source_failures;
     std::optional<std::vector<std::string>> configured_repository_order =
             std::nullopt;
+    std::vector<RepositoryExactPackage> observed_packages = {};
 
     [[nodiscard]] bool is_complete() const noexcept {
         return source_failures.empty();

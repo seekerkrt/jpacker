@@ -180,6 +180,155 @@ const PlannedPackageTarget& require_package_target(
     return *found;
 }
 
+const PlannedPackageRelationObservation& require_relation_observation(
+        const BuildPlan& plan, std::string_view package_name) {
+    const PlannedPackageRelationObservation* found = nullptr;
+    for(const auto& observation : plan.planned_relation_observations) {
+        if(observation.package.package_name != package_name) continue;
+        if(found != nullptr) {
+            throw std::runtime_error(
+                    "Duplicate planned relation observation: " +
+                    std::string(package_name));
+        }
+        found = &observation;
+    }
+    if(found == nullptr) {
+        throw std::runtime_error(
+                "Missing planned relation observation: " +
+                std::string(package_name));
+    }
+    return *found;
+}
+
+PackageRelationAssessment relation_assessment_fixture(
+        PackageRelationAssessmentKind expected_kind,
+        std::vector<PackageRelationRootAttribution> roots = {{0, "root"}}) {
+    const PackageRelationKind relation_kind =
+            expected_kind ==
+                            PackageRelationAssessmentKind::PotentialReplacement
+            ? PackageRelationKind::Replacement
+            : PackageRelationKind::Conflict;
+    const DeclaredPackageRelationParseResult parsed =
+            parse_declared_package_relation(
+                    "relation-child", "relation-base", relation_kind,
+                    "relation-target");
+    expect(parsed.relation() != nullptr, "Relation fixture did not parse");
+    const PackageRelationAurSourceIdentity declaring_source{
+            "relation-child", "relation-base"};
+    PackageRelationObservedPackage declaring_package{
+            "relation-child",
+            "relation-base",
+            ObservedVersion::available(
+                    ObservedVersionSource::AurExactPackage, "1"),
+            {},
+            declaring_source,
+            PackageRelationObservationRole::PlannedTarget,
+            std::move(roots)};
+
+    const PackageRelationInstalledDatabaseIdentity installed_source{
+            "/", "/var/lib/pacman"};
+    PackageRelationMatchingEvidence active_evidence{
+            PackageRelationObservationCompleteness::Complete,
+            {PackageRelationSourceIdentity{installed_source}},
+            {PackageRelationSourceIdentityCoverage{
+                    PackageRelationSourceIdentity{installed_source},
+                    true,
+                    true}},
+            {},
+            {}};
+    std::optional<PackageRelationMatchEvidence> matched_evidence;
+    std::optional<PackageRelationObservationFailure> observation_failure;
+    if(expected_kind == PackageRelationAssessmentKind::
+                                ConfirmedInstalledConflict ||
+       expected_kind ==
+               PackageRelationAssessmentKind::PotentialReplacement) {
+        matched_evidence = PackageRelationMatchEvidence{
+                PackageRelationObservedPackage{
+                        "relation-target",
+                        std::nullopt,
+                        ObservedVersion::available(
+                                ObservedVersionSource::InstalledExactPackage,
+                                "1"),
+                        {},
+                        installed_source,
+                        PackageRelationObservationRole::Installed,
+                        {}},
+                PackageRelationIdentityMatchKind::ExactPackage,
+                PackageRelationVersionMatchKind::Unconstrained,
+                {},
+                std::nullopt};
+    } else if(expected_kind == PackageRelationAssessmentKind::
+                                       ConfirmedPlannedTargetConflict) {
+        matched_evidence = PackageRelationMatchEvidence{
+                PackageRelationObservedPackage{
+                        "relation-target",
+                        "relation-target-base",
+                        ObservedVersion::available(
+                                ObservedVersionSource::AurExactPackage, "1"),
+                        {},
+                        PackageRelationAurSourceIdentity{
+                                "relation-target", "relation-target-base"},
+                        PackageRelationObservationRole::PlannedTarget,
+                        {{0, "root"}}},
+                PackageRelationIdentityMatchKind::ExactPackage,
+                PackageRelationVersionMatchKind::Unconstrained,
+                {},
+                std::nullopt};
+    } else if(expected_kind == PackageRelationAssessmentKind::Unknown) {
+        active_evidence.observation_completeness =
+                PackageRelationObservationCompleteness::Unavailable;
+        active_evidence.source_identity_coverage.front()
+                .exact_package_identity = false;
+        active_evidence.source_identity_coverage.front()
+                .provided_component_identity = false;
+        observation_failure = PackageRelationObservationFailure{
+                PackageRelationObservationFailureKind::SourceUnavailable,
+                PackageRelationObservationRole::Installed,
+                PackageRelationSourceIdentity{installed_source},
+                std::nullopt,
+                "installed inventory unavailable"};
+    } else if(expected_kind == PackageRelationAssessmentKind::Invalid) {
+        active_evidence.observation_completeness =
+                PackageRelationObservationCompleteness::Invalid;
+        active_evidence.source_identity_coverage.front()
+                .exact_package_identity = false;
+        active_evidence.source_identity_coverage.front()
+                .provided_component_identity = false;
+        observation_failure = PackageRelationObservationFailure{
+                PackageRelationObservationFailureKind::MalformedMetadata,
+                PackageRelationObservationRole::Installed,
+                PackageRelationSourceIdentity{installed_source},
+                std::nullopt,
+                "installed inventory malformed"};
+    } else if(expected_kind ==
+              PackageRelationAssessmentKind::DeclaredRelation) {
+        active_evidence = PackageRelationMatchingEvidence{
+                PackageRelationObservationCompleteness::Unavailable,
+                {},
+                {},
+                {},
+                {}};
+    }
+
+    if(matched_evidence.has_value()) {
+        active_evidence.package_evidence.push_back(*matched_evidence);
+    }
+    if(observation_failure.has_value()) {
+        active_evidence.observation_failures.push_back(*observation_failure);
+    }
+
+    // Model tests consume a completed assessment. Matching/classification is
+    // owned and tested by package_relation_assessment_test.cpp.
+    return PackageRelationAssessment{
+            *parsed.relation(),
+            expected_kind,
+            std::move(declaring_package),
+            std::move(active_evidence),
+            std::nullopt,
+            std::move(matched_evidence),
+            std::move(observation_failure)};
+}
+
 std::size_t package_target_count(
         const BuildPlan& plan, std::string_view package_name) {
     return static_cast<std::size_t>(std::count_if(
@@ -420,6 +569,9 @@ void expect_equivalent_plans(const BuildPlan& lhs, const BuildPlan& rhs) {
             lhs.incomplete_provider_candidate_sets ==
                     rhs.incomplete_provider_candidate_sets,
             "BuildPlan::incomplete_provider_candidate_sets differs");
+    expect(
+            lhs.relation_assessments == rhs.relation_assessments,
+            "BuildPlan::relation_assessments differs");
 
     expect(
             lhs.split_package_targets.size() == rhs.split_package_targets.size(),
@@ -465,6 +617,11 @@ void expect_equivalent_plans(const BuildPlan& lhs, const BuildPlan& rhs) {
         }
     }
 
+    expect(
+            lhs.cancelled_provider_dependencies ==
+                    rhs.cancelled_provider_dependencies,
+            "BuildPlan::cancelled_provider_dependencies differs");
+
     expect(lhs.unresolved == rhs.unresolved, "BuildPlan::unresolved differs");
     expect(lhs.cycles == rhs.cycles, "BuildPlan::cycles differs");
 }
@@ -508,6 +665,7 @@ BuildPlan typed_constraint_plan(
                     DependencyVersionRelation::GreaterThanOrEqual, "2"));
     RepositoryExactPackage candidate{
             ConfiguredRepositoryIdentity{"core", 0},
+            resolved_name,
             resolved_name,
             ObservedVersion::available(
                     ObservedVersionSource::RepositoryExactPackage, "1"),
@@ -629,9 +787,8 @@ void test_execution_guard_category_order() {
             {case8_repository_provider_a(),
              case8_repository_provider_b()}});
     plan.cycles.push_back("cycle-base");
-    plan.metadata_risks.push_back(BuildPlanMetadataRisk{
-            "risk-child", "risk-base",
-            {"conflict-target"}, {"replacement-target"}});
+    plan.relation_assessments.push_back(relation_assessment_fixture(
+            PackageRelationAssessmentKind::ConfirmedInstalledConflict));
     plan.split_package_targets.push_back(
             BuildPlanSplitPackageTarget{"split-base", "split-child"});
 
@@ -659,16 +816,352 @@ void test_execution_guard_category_order() {
     plan.cycles.clear();
     expect_exception(
             require_install_plan,
-            "Cannot execute build plan for guard-root; conflicts/replaces "
-            "metadata requires manual review: risk-child (base: risk-base) "
-            "[conflicts: conflict-target; replaces: replacement-target]");
+            "Cannot execute build plan for guard-root; Installed conflict "
+            "confirmed: declaring package relation-child (PackageBase: "
+            "relation-base) [source: AUR source relation-child (PackageBase: "
+            "relation-base); roots: input #1 requested root] declares conflict "
+            "relation-target for target component relation-target; matched "
+            "installed package relation-target [source: installed package "
+            "database] through exact "
+            "package component relation-target (version 1); build/install is "
+            "blocked before mutation.");
 
-    plan.metadata_risks.clear();
+    plan.relation_assessments.clear();
     expect_exception(
             require_install_plan,
             "Cannot execute singular install plan for guard-root; split "
             "package targets require the PackageBase set lifecycle: "
             "split-child (base: split-base)");
+}
+
+void test_plan_state_projection_keeps_capability_axes() {
+    const ExecutionReadiness not_assessed;
+    expect(
+            not_assessed.state == ExecutionReadinessState::NotAssessed,
+            "Default readiness did not preserve NotAssessed");
+
+    BuildPlan relation_plan;
+    relation_plan.relation_assessments.push_back(
+            relation_assessment_fixture(
+                    PackageRelationAssessmentKind::
+                            ConfirmedInstalledConflict));
+    relation_plan.split_package_targets.push_back(
+            BuildPlanSplitPackageTarget{"split-base", "split-child"});
+
+    const PlanStateProjection relation_projection =
+            project_build_plan_state(relation_plan);
+    const ExecutionReadiness& fetch = execution_readiness(
+            relation_projection, ExecutionCapability::Fetch);
+    const ExecutionReadiness& build = execution_readiness(
+            relation_projection, ExecutionCapability::Build);
+    const ExecutionReadiness& install = execution_readiness(
+            relation_projection, ExecutionCapability::Install);
+    expect(
+            fetch.state == ExecutionReadinessState::Ready &&
+                    !fetch.is_blocked_by_production_guard,
+            "Fetch readiness imported build-only metadata policy");
+    expect(
+            build.state == ExecutionReadinessState::RequiresCheck &&
+                    build.is_blocked_by_production_guard &&
+                    std::find(
+                            build.required_actions.begin(),
+                            build.required_actions.end(),
+                            PlanRequiredAction::ReviewDeclaredRelations) !=
+                            build.required_actions.end(),
+            "Build readiness lost declared metadata review");
+    expect(
+            install.state == ExecutionReadinessState::Blocked &&
+                    install.is_blocked_by_production_guard &&
+                    std::find(
+                            install.required_actions.begin(),
+                            install.required_actions.end(),
+                            PlanRequiredAction::UsePackageBaseSetLifecycle) !=
+                            install.required_actions.end(),
+            "Install readiness lost the singular split-package gate");
+
+    const auto relation_reason = std::find_if(
+            build.reasons.begin(), build.reasons.end(),
+            [](const ExecutionReadinessReason& reason) {
+                return std::holds_alternative<PlanDeclaredRelationReason>(
+                        reason.reason);
+            });
+    expect(relation_reason != build.reasons.end(),
+           "Build readiness lost declared relation metadata");
+    const PlanDeclaredRelationReason& declared =
+            std::get<PlanDeclaredRelationReason>(relation_reason->reason);
+    expect(
+            declared.assessment.kind ==
+                            PackageRelationAssessmentKind::
+                                    ConfirmedInstalledConflict &&
+                    declared.assessment.declaring_package.package_name ==
+                            "relation-child" &&
+                    declared.assessment.declaring_package.package_base ==
+                            std::optional<std::string>{"relation-base"} &&
+                    declared.assessment.declaration.target_component() ==
+                            "relation-target",
+            "#353 relation assessment attribution was flattened");
+
+    BuildPlan ambiguous_plan;
+    ambiguous_plan.ambiguous_providers.push_back(
+            AmbiguousProvidedDependency{
+                    "virtual-api",
+                    {case8_repository_provider_a(),
+                     case8_repository_provider_b()}});
+    const PlanStateProjection ambiguous_projection =
+            project_build_plan_state(ambiguous_plan);
+    const ExecutionReadiness& ambiguous_fetch = execution_readiness(
+            ambiguous_projection, ExecutionCapability::Fetch);
+    expect(
+            ambiguous_projection.provider_decision ==
+                            ProviderDecision::Ambiguous &&
+                    ambiguous_fetch.state ==
+                            ExecutionReadinessState::Blocked &&
+                    std::find(
+                            ambiguous_fetch.required_actions.begin(),
+                            ambiguous_fetch.required_actions.end(),
+                            PlanRequiredAction::SelectProvider) !=
+                            ambiguous_fetch.required_actions.end(),
+            "Ambiguous provider decision was flattened");
+
+    ambiguous_plan.cancelled_provider_dependencies.push_back(
+            "virtual-api");
+    const PlanStateProjection cancelled_projection =
+            project_build_plan_state(ambiguous_plan);
+    expect(
+            cancelled_projection.provider_decision ==
+                            ProviderDecision::Cancelled &&
+                    execution_readiness(
+                            cancelled_projection,
+                            ExecutionCapability::Fetch)
+                                    .state ==
+                            ExecutionReadinessState::Blocked,
+            "Cancelled provider decision was flattened into ambiguity");
+
+    BuildPlan unknown_plan = typed_constraint_plan(
+            ConstraintEvaluation::unknown(
+                    ObservedVersionUnknownReason::
+                            CandidateVersionUnavailable));
+    const PlanStateProjection unknown_projection =
+            project_build_plan_state(unknown_plan);
+    const ExecutionReadiness& unknown_fetch = execution_readiness(
+            unknown_projection, ExecutionCapability::Fetch);
+    expect(
+            unknown_projection.construction ==
+                            PlanConstruction::Constructed &&
+                    unknown_projection.completeness ==
+                            PlanCompleteness::Unknown &&
+                    unknown_fetch.state ==
+                            ExecutionReadinessState::Unknown &&
+                    unknown_fetch.is_blocked_by_production_guard &&
+                    std::find(
+                            unknown_fetch.required_actions.begin(),
+                            unknown_fetch.required_actions.end(),
+                            PlanRequiredAction::ObtainMetadata) !=
+                            unknown_fetch.required_actions.end(),
+            "Unknown constraint was reduced to a readiness bool");
+
+    BuildPlan invalid_plan = typed_constraint_plan(
+            ConstraintEvaluation::invalid(
+                    ConstraintInvalidReason::MalformedRequirement));
+    const PlanStateProjection invalid_projection =
+            project_build_plan_state(invalid_plan);
+    expect(
+            invalid_projection.construction == PlanConstruction::Failed &&
+                    invalid_projection.completeness ==
+                            PlanCompleteness::Incomplete &&
+                    execution_readiness(
+                            invalid_projection,
+                            ExecutionCapability::Build)
+                                    .state ==
+                            ExecutionReadinessState::Blocked,
+            "Invalid plan construction was flattened into completeness");
+}
+
+void test_relation_assessment_readiness_and_completeness_mapping() {
+    for(const PackageRelationAssessmentKind kind : {
+                PackageRelationAssessmentKind::
+                        ConfirmedInstalledConflict,
+                PackageRelationAssessmentKind::
+                        ConfirmedPlannedTargetConflict,
+                PackageRelationAssessmentKind::PotentialReplacement}) {
+        BuildPlan plan;
+        plan.relation_assessments.push_back(
+                relation_assessment_fixture(kind));
+        const PlanStateProjection projection =
+                project_build_plan_state(plan);
+        expect(
+                projection.construction == PlanConstruction::Constructed &&
+                        projection.completeness ==
+                                PlanCompleteness::Complete &&
+                        execution_readiness(
+                                projection, ExecutionCapability::Fetch)
+                                        .state ==
+                                ExecutionReadinessState::Ready &&
+                        !execution_readiness(
+                                 projection, ExecutionCapability::Fetch)
+                                 .is_blocked_by_production_guard &&
+                        execution_readiness(
+                                projection, ExecutionCapability::Build)
+                                        .state ==
+                                ExecutionReadinessState::RequiresCheck &&
+                        execution_readiness(
+                                projection, ExecutionCapability::Install)
+                                .is_blocked_by_production_guard,
+                "Classified relation changed Fetch or completeness semantics");
+    }
+
+    for(const PackageRelationAssessmentKind kind : {
+                PackageRelationAssessmentKind::DeclaredRelation,
+                PackageRelationAssessmentKind::Unknown}) {
+        BuildPlan plan;
+        plan.relation_assessments.push_back(
+                relation_assessment_fixture(kind));
+        const PlanStateProjection projection =
+                project_build_plan_state(plan);
+        expect(
+                projection.construction == PlanConstruction::Constructed &&
+                        projection.completeness ==
+                                PlanCompleteness::Unknown &&
+                        execution_readiness(
+                                projection, ExecutionCapability::Fetch)
+                                        .state ==
+                                ExecutionReadinessState::Ready &&
+                        execution_readiness(
+                                projection, ExecutionCapability::Build)
+                                        .state ==
+                                ExecutionReadinessState::RequiresCheck &&
+                        execution_readiness(
+                                projection, ExecutionCapability::Install)
+                                .is_blocked_by_production_guard,
+                "Unknown/fallback relation did not fail closed for Build/Install");
+    }
+
+    BuildPlan invalid;
+    invalid.relation_assessments.push_back(relation_assessment_fixture(
+            PackageRelationAssessmentKind::Invalid));
+    const PlanStateProjection invalid_projection =
+            project_build_plan_state(invalid);
+    expect(
+            invalid_projection.construction == PlanConstruction::Failed &&
+                    invalid_projection.completeness ==
+                            PlanCompleteness::Incomplete &&
+                    execution_readiness(
+                            invalid_projection, ExecutionCapability::Fetch)
+                                    .state ==
+                            ExecutionReadinessState::Ready &&
+                    execution_readiness(
+                            invalid_projection, ExecutionCapability::Build)
+                                    .state ==
+                            ExecutionReadinessState::Blocked,
+            "Invalid relation did not use fail-closed construction policy");
+
+    BuildPlan no_match;
+    no_match.relation_assessments.push_back(relation_assessment_fixture(
+            PackageRelationAssessmentKind::
+                    ConfirmedNoMatchingCurrentOrPlannedTarget));
+    const PlanStateProjection no_match_projection =
+            project_build_plan_state(no_match);
+    expect(
+            no_match_projection.completeness == PlanCompleteness::Complete &&
+                    execution_readiness(
+                            no_match_projection, ExecutionCapability::Build)
+                                    .state ==
+                            ExecutionReadinessState::Ready &&
+                    execution_readiness(
+                            no_match_projection, ExecutionCapability::Install)
+                                    .state ==
+                            ExecutionReadinessState::Ready,
+            "Confirmed NoMatch retained a relation guard");
+    require_executable_build_plan("no-match", no_match);
+    require_executable_install_plan("no-match", no_match);
+
+    BuildPlan legacy_raw_only;
+    legacy_raw_only.metadata_risks.push_back(BuildPlanMetadataRisk{
+            "legacy-child", "legacy-base", {"old"}, {"replacement"}});
+    const PlanStateProjection legacy_projection =
+            project_build_plan_state(legacy_raw_only);
+    expect(
+            execution_readiness(
+                    legacy_projection, ExecutionCapability::Build)
+                            .state == ExecutionReadinessState::Ready &&
+                    !execution_readiness(
+                             legacy_projection, ExecutionCapability::Install)
+                             .is_blocked_by_production_guard,
+            "Raw compatibility metadata remained a second safety authority");
+
+    BuildPlan composed;
+    composed.unresolved.push_back("missing-dependency");
+    composed.relation_assessments.push_back(relation_assessment_fixture(
+            PackageRelationAssessmentKind::Unknown,
+            {{0, "root-a"}, {1, "root-b"}}));
+    const PlanStateProjection composed_projection =
+            project_build_plan_state(composed);
+    expect(
+            composed_projection.completeness == PlanCompleteness::Incomplete &&
+                    execution_readiness(
+                            composed_projection, ExecutionCapability::Fetch)
+                                    .state ==
+                            ExecutionReadinessState::Blocked &&
+                    composed.relation_assessments.front()
+                                    .declaring_package.roots ==
+                            std::vector<PackageRelationRootAttribution>{
+                                    {0, "root-a"}, {1, "root-b"}},
+            "Existing blocker composition or shared roots were lost");
+    expect_exception(
+            [&composed]() {
+                require_executable_build_plan("composed", composed);
+            },
+            "Cannot execute build plan for composed; unresolved dependencies: missing-dependency");
+}
+
+void test_split_package_install_readiness_is_orthogonal_to_completeness() {
+    BuildPlan split_plan;
+    split_plan.split_package_targets.push_back(
+            BuildPlanSplitPackageTarget{"split-base", "split-child"});
+
+    const PlanStateProjection projection =
+            project_build_plan_state(split_plan);
+    const ExecutionReadiness& fetch = execution_readiness(
+            projection, ExecutionCapability::Fetch);
+    const ExecutionReadiness& build = execution_readiness(
+            projection, ExecutionCapability::Build);
+    const ExecutionReadiness& install = execution_readiness(
+            projection, ExecutionCapability::Install);
+
+    expect(
+            projection.construction == PlanConstruction::Constructed &&
+                    projection.completeness == PlanCompleteness::Complete,
+            "Split-only install policy changed plan completeness");
+    expect(
+            fetch.state == ExecutionReadinessState::Ready &&
+                    build.state == ExecutionReadinessState::Ready,
+            "Split-only install policy leaked into fetch/build readiness");
+    expect(
+            install.state == ExecutionReadinessState::Blocked &&
+                    install.is_blocked_by_production_guard,
+            "Split-only singular install gate was not preserved");
+    expect(
+            std::none_of(
+                    projection.completeness_reasons.begin(),
+                    projection.completeness_reasons.end(),
+                    [](const PlanReason& reason) {
+                        return std::holds_alternative<PlanSplitPackageReason>(
+                                reason);
+                    }),
+            "Split-package install reason became completeness authority");
+    const auto split_reason = std::find_if(
+            install.reasons.begin(), install.reasons.end(),
+            [](const ExecutionReadinessReason& reason) {
+                return std::holds_alternative<PlanSplitPackageReason>(
+                        reason.reason);
+            });
+    expect(
+            split_reason != install.reasons.end() &&
+                    split_reason->state == ExecutionReadinessState::Blocked &&
+                    split_reason->blocks_production_guard &&
+                    split_reason->required_action ==
+                            PlanRequiredAction::UsePackageBaseSetLifecycle,
+            "Split-package install reason lost its independent readiness axes");
 }
 
 void test_case_1_root_only() {
@@ -1730,6 +2223,9 @@ void test_case_11_single_overload_compatibility() {
     expect(!single.split_package_targets.empty(), "Case 11 split fixture is empty");
     expect(!single.provided.empty(), "Case 11 provider fixture is empty");
     expect(!single.metadata_risks.empty(), "Case 11 risk fixture is empty");
+    expect(
+            !single.relation_assessments.empty(),
+            "Case 11 relation assessment fixture is empty");
     expect(!single.ambiguous_providers.empty(), "Case 11 ambiguous fixture is empty");
     expect(!single.unresolved.empty(), "Case 11 unresolved fixture is empty");
     expect(!single.cycles.empty(), "Case 11 cycle fixture is empty");
@@ -2465,6 +2961,148 @@ void test_legacy_resolution_failure_boundary() {
             "AUR package not found: preflight-root-not-found");
 }
 
+void test_planned_relation_observation_authorities() {
+    const BuildPlan root_plan = resolve_build_plan("case11-root");
+    const PlannedPackageRelationObservation& root_observation =
+            require_relation_observation(root_plan, "case11-root");
+    expect(
+            root_observation.package.package_base ==
+                            std::optional<std::string>("case11-root") &&
+                    root_observation.package.package_version.version() !=
+                            nullptr &&
+                    *root_observation.package.package_version.version() ==
+                            "1.0-1" &&
+                    std::get<PackageRelationAurSourceIdentity>(
+                            root_observation.package.source) ==
+                            PackageRelationAurSourceIdentity{
+                                    "case11-root", "case11-root"} &&
+                    root_observation.package.roots ==
+                            std::vector<PackageRelationRootAttribution>{
+                                    {0, "case11-root"}} &&
+                    root_observation.declarations.size() == 1 &&
+                    root_observation.declarations.front().kind() ==
+                            PackageRelationKind::Conflict &&
+                    root_observation.declarations.front()
+                                    .target_component() == "case11-old",
+            "AUR root observation did not retain direct metadata authority");
+
+    const PlannedPackageRelationObservation& dependency_observation =
+            require_relation_observation(root_plan, "case11-direct");
+    expect(
+            dependency_observation.package.package_base ==
+                            std::optional<std::string>(
+                                    "case11-direct-base") &&
+                    dependency_observation.package.package_version.version() !=
+                            nullptr &&
+                    *dependency_observation.package.package_version.version() ==
+                            "1.0-1" &&
+                    dependency_observation.package.roots ==
+                            std::vector<PackageRelationRootAttribution>{
+                                    {0, "case11-root"}} &&
+                    dependency_observation.declarations.size() == 1 &&
+                    dependency_observation.declarations.front().kind() ==
+                            PackageRelationKind::Replacement &&
+                    dependency_observation.declarations.front()
+                                    .target_component() ==
+                            "case11-replaced",
+            "AUR dependency observation lost PackageBase/version/root/relation");
+
+    const BuildPlan split_plan = resolve_build_plan(
+            std::vector<std::string>{
+                    "case16-child-a", "case16-child-b"});
+    const auto& split_a =
+            require_relation_observation(split_plan, "case16-child-a");
+    const auto& split_b =
+            require_relation_observation(split_plan, "case16-child-b");
+    const auto& split_shared =
+            require_relation_observation(split_plan, "case16-shared");
+    expect(
+            split_a.package.package_base ==
+                            std::optional<std::string>("case16-suite") &&
+                    split_b.package.package_base ==
+                            std::optional<std::string>("case16-suite") &&
+                    split_a.package.package_name !=
+                            split_b.package.package_name &&
+                    std::get<PackageRelationAurSourceIdentity>(
+                            split_a.package.source)
+                                    .package_name == "case16-child-a" &&
+                    std::get<PackageRelationAurSourceIdentity>(
+                            split_b.package.source)
+                                    .package_name == "case16-child-b",
+            "Split PackageBase siblings were flattened");
+    expect(
+            split_shared.package.roots ==
+                    std::vector<PackageRelationRootAttribution>{
+                            {0, "case16-child-a"},
+                            {1, "case16-child-b"}},
+            "Repeated planned observation lost root attribution");
+
+    const BuildPlan aur_provider_plan = resolve_build_plan("case7-app");
+    const auto& aur_provider = require_relation_observation(
+            aur_provider_plan, "case7-provider-pkg");
+    expect(
+            aur_provider.package.package_version.version() != nullptr &&
+                    *aur_provider.package.package_version.version() ==
+                            "1.0-1" &&
+                    aur_provider.package.provides.size() == 1 &&
+                    aur_provider.package.provides.front()
+                                    .capability.package_name() ==
+                            "case7-virtual-api" &&
+                    aur_provider.package.provides.front()
+                                    .observed_version.unknown_reason() !=
+                            nullptr &&
+                    *aur_provider.package.provides.front()
+                             .observed_version.unknown_reason() ==
+                            ObservedVersionUnknownReason::
+                                    UnversionedProviderCapability,
+            "AUR provider observation lost package/provided versions");
+
+    const BuildPlan repository_plan = resolve_build_plan("case6-app");
+    const auto& repository = require_relation_observation(
+            repository_plan, "case6-repo-lib");
+    expect(
+            repository.package.package_base ==
+                            std::optional<std::string>("case6-repo-lib") &&
+                    repository.package.package_version.version() != nullptr &&
+                    *repository.package.package_version.version() ==
+                            "1.0-1" &&
+                    std::get<ConfiguredRepositoryIdentity>(
+                            repository.package.source) ==
+                            ConfiguredRepositoryIdentity{"core", 0} &&
+                    repository.package.roots ==
+                            std::vector<PackageRelationRootAttribution>{
+                                    {0, "case6-app"}},
+            "Repository package observation lost source/version/root");
+
+    const BuildPlan repository_provider_plan =
+            resolve_build_plan("case23-app");
+    const auto& repository_provider = require_relation_observation(
+            repository_provider_plan, "case23-provider");
+    expect(
+            repository_provider.package.package_base ==
+                            std::optional<std::string>(
+                                    "case23-provider-base") &&
+                    repository_provider.package.package_version.version() !=
+                            nullptr &&
+                    *repository_provider.package.package_version.version() ==
+                            "5.0-1" &&
+                    repository_provider.package.provides.size() == 1 &&
+                    repository_provider.package.provides.front()
+                                    .capability.raw_specification() ==
+                            "case23-virtual=6" &&
+                    repository_provider.package.provides.front()
+                                    .observed_version.version() != nullptr &&
+                    *repository_provider.package.provides.front()
+                             .observed_version.version() == "6" &&
+                    std::get<ConfiguredRepositoryIdentity>(
+                            repository_provider.package.source) ==
+                            ConfiguredRepositoryIdentity{"extra", 1} &&
+                    repository_provider.package.roots ==
+                            std::vector<PackageRelationRootAttribution>{
+                                    {0, "case23-app"}},
+            "Repository provider observation lost source/provides/root");
+}
+
 template <typename Callable>
 void run_case(const std::string& name, Callable callable) {
     callable();
@@ -2487,6 +3125,15 @@ int main() {
         run_case(
                 "execution guard category order",
                 test_execution_guard_category_order);
+        run_case(
+                "plan construction/completeness/readiness axes",
+                test_plan_state_projection_keeps_capability_axes);
+        run_case(
+                "relation assessment readiness and completeness mapping",
+                test_relation_assessment_readiness_and_completeness_mapping);
+        run_case(
+                "split package install readiness is orthogonal to completeness",
+                test_split_package_install_readiness_is_orthogonal_to_completeness);
         run_case("Case 1 root only", test_case_1_root_only);
         run_case("Case 2 dependency roles", test_case_2_dependency_roles);
         run_case("Case 3 multiple roles", test_case_3_multiple_roles);
@@ -2572,6 +3219,9 @@ int main() {
         run_case(
                 "legacy resolution failure boundary",
                 test_legacy_resolution_failure_boundary);
+        run_case(
+                "planned relation observation authorities",
+                test_planned_relation_observation_authorities);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

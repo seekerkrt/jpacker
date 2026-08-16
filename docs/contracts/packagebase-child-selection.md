@@ -2,22 +2,24 @@
 
 ## 文書の位置づけ
 
-この文書は、AUR source buildにおけるPackageBase build unitと、BuildPlanが要求するpackage childのinstall-selection unitを分離するnormative production contractである。文書の規範上の正本は日本語本文であり、Issue本文や英語要約は来歴・説明として扱う。
+この文書は、source-build upper projectionがauthoritativeに確定したPackageBase build unitとrequired package childのinstall-selection unitを分離するsource-neutralなnormative production contractである。文書の規範上の正本は日本語本文であり、Issue本文や英語要約は来歴・説明として扱う。
 
 - Origin Issue: [#268](https://github.com/seekerkrt/moguet/issues/268)
-- Related Issues: [#98](https://github.com/seekerkrt/moguet/issues/98)、[#218](https://github.com/seekerkrt/moguet/issues/218)、[#242](https://github.com/seekerkrt/moguet/issues/242)、[#266](https://github.com/seekerkrt/moguet/issues/266)、[#267](https://github.com/seekerkrt/moguet/issues/267)
-- Related PRs: #291〜#296（#268 production slice）、#241、#257〜#261（#242 artifact lifecycle）
-- Update history: Issue #373で旧decision 9の本文から安定contractへ分離。
+- Related Issues: [#98](https://github.com/seekerkrt/moguet/issues/98)、[#218](https://github.com/seekerkrt/moguet/issues/218)、[#242](https://github.com/seekerkrt/moguet/issues/242)、[#266](https://github.com/seekerkrt/moguet/issues/266)、[#267](https://github.com/seekerkrt/moguet/issues/267)、[#406](https://github.com/seekerkrt/moguet/issues/406)
+- Related PRs: #291〜#296（#268 production slice）、#241、#257〜#261（#242 artifact lifecycle）、#412〜#414（#406 repository projection / integration）
+- Update history: Issue #373で旧decision 9の本文から安定contractへ分離。Issue #406でofficial repositoryのstandalone / registered upper projectionへ適用範囲を拡張。
 - Related upper decisions: [decision 1](../DECISIONS.md#decision-1)、[decision 2](../DECISIONS.md#decision-2)、[decision 4](../DECISIONS.md#decision-4)、[decision 5](../DECISIONS.md#decision-5)、[decision 6](../DECISIONS.md#decision-6)、[decision 7](../DECISIONS.md#decision-7)
 
 ## Contract本文（日本語normative source of truth）
 
 ### Identityとbuild unit
 
-AUR source buildでは、PackageBaseをrepository、build、workspace、package transactionの単位とし、BuildPlanが必要とするpackage childをinstall-selectionの単位とする。PackageBase identityとchild identityを単一のpackage nameへflattenしてはならない。
+source buildでは、PackageBaseをrepository、build、workspace、package transactionの単位とし、source-build upper projectionが必要とするpackage childをinstall-selectionの単位とする。upper projectionはroute固有のauthorityを使う。AURはBuildPlan、official repositoryはconfigured repository順のstrict libalpm exact snapshotからrequired targetを確定し、PackageBase identityとchild identityを単一のpackage nameへflattenしてはならない。official repositoryのconfirmed `NotFound`だけをAUR fallbackとして扱い、query / config / metadata failureからabsenceやPackageBaseを推測しない。
+
+official repositoryのstandalone / registered upper projectionは、single / multiple outputに関係なく`{authoritative PackageBase, requested repository child, Explicit}`をrequired targetとする`PackageBaseSet`を使う。registered routeは`OnlyIfUpdated` preparationを先に閉じる。sync repositoryの`SingularCompatibility` + existing `--needed`、registered AURの`SingularCompatibility` + existing provider / split guardはこのcontract適用で拡張しない。
 
 1. 1つのPackageBaseは、1つのinvocation-owned fresh artifact workspaceで1回だけbuildする。expected outputは`makepkg --packagelist`からordered aggregateとして取得する。
-2. BuildPlanが要求するchildはrequired-target orderで保持する。childのartifactはfilenameの推測やPackageBase名ではなく、build後のpackage metadata identityでexactly one選択する。
+2. upper projectionが要求するchildはrequired-target orderで保持する。childのartifactはfilenameの推測やPackageBase名ではなく、build後のpackage metadata identityでexactly one選択する。
 3. expectedだがrequiredでないsibling、debug、その他のartifactはunselected result dataとして保持する。これらへinstall input、update target attribution、install outcome、install reasonを付与しない。
 4. selected childrenはPackageBaseごとに1回のpacman transactionへ渡す。childごとのdesired install reasonをそのtransactionで表現できない場合は、部分的にinstallせずmutation前にfail closedとする。
 

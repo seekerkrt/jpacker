@@ -49,11 +49,13 @@ a new storage direction: source-build preferences now use only the executing
 user's XDG config context, while the published v2.0.0 tag, Release, and release
 notes remain historical records.
 
-Moguet v2.2.0 is the latest release. It makes installed-state visibility for
-ambiguous providers explicit, validates version constraints across repository,
-AUR, provider, and local observations, and adds a unified human-readable plan
-with global `--dry-run` coverage for supported workflows. See the
-[v2.2.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.2.0) for
+Moguet v2.3.0 is the latest release. It strengthens validation and release
+reliability, aligns the public CLI and diagnostics, and adds typed
+pre-transaction assessment for `Conflicts` and `Replaces`. Official-repository
+source builds now safely select the requested package from multiple-artifact
+PackageBases, while per-package build assignments remain effective after
+makepkg loads its configuration. See the
+[v2.3.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.3.0) for
 the complete user-visible changes.
 
 The canonical repository identity is Moguet on GitHub, with a GitLab mirror.
@@ -64,12 +66,13 @@ endpoint exists.
 Moguet v2.x is published and usable, but it remains a development-phase
 product rather than a finished, general-purpose AUR helper. Basic pacman
 wrapping, AUR source builds, updates, and per-package source-build
-preferences already work today, while the wider AUR-support surface — a full
-dependency solver, provider/conflict/replaces/version-constraint handling,
-and edge-case coverage — is still being implemented incrementally and its UX
-is still maturing. Moguet does not promise the same automatic-resolution
-completeness as established AUR helpers: unsupported or ambiguous cases stop
-fail-closed instead of guessing. v2.x is the public development period that
+preferences already work today, while the wider AUR-support surface and
+edge-case coverage are still being implemented incrementally and the UX is
+still maturing. Moguet remains pacman-first rather than reimplementing a full
+dependency solver or automatic provider/conflict resolution, and does not
+promise the same automatic-resolution completeness as established AUR
+helpers: unsupported or ambiguous cases stop fail-closed instead of guessing.
+v2.x is the public development period that
 builds Moguet's source-aware entry points, safety boundaries, and validation
 infrastructure; v3.0.0 is the point where Moguet-specific build-profile and
 PKGBUILD-diff workflows come together, which the project treats internally
@@ -96,6 +99,18 @@ detailed plan.
   fail closed. `fetch`, build, install, upgrade, and local build stop before
   clone, fetch, source mutation, build, sudo, pacman, or transaction work when
   the result is `Unsatisfied` or `Unknown`.
+- AUR `Conflicts` and `Replaces` declarations are assessed before build and
+  install against installed and planned packages, including provided
+  components and versioned relations. Diagnostics distinguish an installed
+  conflict from a planned-target conflict and present a matching replacement
+  only as a potential impact that requires review. Moguet does not remove a
+  package, select a replacement target, or resolve a conflict automatically.
+- An unavailable (`Unknown`) or invalid relation assessment fails closed; it
+  is never presented as an absence. Only a complete observation that confirms
+  no matching current or planned package or provided component releases that
+  relation guard. The declaration still exists, and pacman/libalpm remains the
+  transaction authority. `-Si` shows the source metadata and explicitly
+  defers this stateful assessment to planning and build preflight.
 - When multiple provider candidates remain, an interactive TTY lists
   source-aware candidates by number and requires exactly one explicit choice;
   there is no default. Empty input, `q`, `quit`, `cancel`, or EOF cancels the
@@ -108,7 +123,7 @@ detailed plan.
   order, numbering, or the required explicit choice.
 - Non-TTY use and `--noconfirm` do not read provider input from stdin or
   auto-select a candidate. Unselected ambiguity fails closed.
-- `moguet -S --select <query>` discovers source-aware root package candidates
+- `moguet -S --select [--needed] <query>` discovers source-aware root package candidates
   from official repositories and AUR. An interactive TTY accepts package
   numbers, multiple numbers, inclusive ranges, and an `@group` selector for a
   displayed official group; there is no default, even for one candidate.
@@ -131,17 +146,28 @@ detailed plan.
   auto-select provider candidates, and do not authorize source fallback.
   When selected AUR provider metadata is refreshed, the current matching
   capability is evaluated again and the stale result is discarded.
-- The registered-source phase keeps its singular source lifecycle. It offers
-  provider selection only when every candidate is from an official repository;
-  a candidate set containing an AUR provider remains ambiguous and stops before
-  system or source execution because that phase cannot schedule the provider's
-  PackageBase.
+- Source-build routes keep their route-specific lifecycle. A standalone
+  official-repository build uses `PackageBaseSet`; a registered official
+  source uses `PackageBaseSet` after `OnlyIfUpdated` preparation. The sync
+  repository route remains `SingularCompatibility` with its existing
+  `--needed` behavior, while a registered AUR source remains
+  `SingularCompatibility` with its existing provider and split-package guards.
+- Official-repository source identity comes from the exact configured libalpm
+  snapshot. Only a confirmed `NotFound` may fall back to AUR; query,
+  configuration, or metadata failure stops. Standalone and registered builds
+  build the authoritative PackageBase once, install only the requested
+  `Explicit` child, and retain sibling and debug outputs as unselected and not
+  installed.
+- The registered AUR route offers provider selection only when every candidate
+  is from an official repository. A candidate set containing an AUR provider
+  remains ambiguous and stops before system or source execution because this
+  singular compatibility route cannot schedule that provider's PackageBase.
 - Moguet rejects unresolved dependencies, unselected ambiguous providers,
-  cycles, conflicts/replacements that it cannot safely resolve, and
-  unprovable artifact identities before the corresponding mutation.
+  cycles, blocking conflict/replacement assessments, and unprovable artifact
+  identities before the corresponding mutation.
 - `--noconfirm` avoids interactive blocking. It is not “yes to everything” and
   does not bypass source selection, planning, identity, conflict, or ownership
-  guards.
+  guards, and it never authorizes automatic removal or replacement.
 - Multi-phase upgrades are not one atomic transaction. A failure stops later
   work but does not roll back an already completed package transaction. If
   cleanup fails after installation succeeds, inspect the result before
@@ -235,10 +261,40 @@ page.
 `moguet --help` is the runtime authority for the current command and option
 surface. Command and option tokens never change with the selected locale.
 
+The closed Moguet-owned and intercepted grammar is:
+
+<!-- CLI CANONICAL GRAMMAR BEGIN -->
+```text
+build <pkg> [V=K...]
+build --local <directory> [V=K...]
+upgrade
+upgrade-aur
+upgrade-all
+clean
+deps [--recursive] <pkg>...
+plan <pkg>...
+fetch <pkg>...
+add-src <item>...
+edit-src <pkg>...
+list-src
+del-src <pkg>...
+revert <pkg>...
+-G <pkg>
+-Gp <pkg>
+-S --select [--needed] <query>
+```
+<!-- CLI CANONICAL GRAMMAR END -->
+
+Other pacman operation forms remain delegated open grammar, not a Moguet
+allowlist. The closed grammar rejects a second bare operand for remote or local
+`build`, and rejects target operands for `upgrade`, `upgrade-aur`,
+`upgrade-all`, `clean`, and `list-src`. Inspection and source-maintenance forms
+shown with `...` keep their multi-target behavior.
+
 ```bash
 # Install, search, or inspect packages
 moguet -S <pkg>
-moguet -S --select <query>
+moguet -S --select [--needed] <query>
 moguet -Ss <query>
 moguet -Si <pkg>
 
@@ -255,11 +311,18 @@ moguet build <pkg> [V=K...]
 moguet build --local <directory> [V=K...]
 
 # Inspect AUR dependencies and build order without building
-moguet deps --recursive <pkg>
-moguet plan <pkg>
+moguet deps --recursive <pkg>...
+moguet plan <pkg>...
 
 # Retrieve build repositories without building or installing
-moguet fetch <pkg>
+moguet fetch <pkg>...
+
+# Maintain one or more source-build preferences
+moguet add-src <item>...
+moguet edit-src <pkg>...
+moguet list-src
+moguet del-src <pkg>...
+moguet revert <pkg>...
 
 # Export one PackageBase checkout or print only its PKGBUILD
 moguet -G <pkg>
@@ -268,7 +331,7 @@ moguet -Gp <pkg>
 # Observe every supported mutating route without changing persistent state
 moguet --dry-run -S <pkg>
 moguet --dry-run -Syu
-moguet --dry-run fetch <pkg>
+moguet --dry-run fetch <pkg>...
 moguet --dry-run build <pkg>
 moguet --dry-run build --local <directory>
 moguet --dry-run upgrade
@@ -295,6 +358,15 @@ is not reused as an approval token, execution capability, or cached provider
 choice: a later actual invocation revalidates current state. The v2.2.0 surface
 is human-readable only and adds no JSON or other machine-readable plan schema.
 
+Human-readable diagnostics are projections of typed state, never the authority
+used to classify it. English and Japanese keep the same hierarchy: a normal
+summary first, attention-required details next, and route-owned necessary
+detail last. Operation outcome and package-state observation remain distinct;
+plan construction, completeness, and execution readiness are reported
+independently. A successful but unverified observation remains successful with
+the required check, `Unknown` is not rewritten as `NoOp`, and severity,
+blocking, and exit-status effect remain separate dimensions.
+
 **Choosing an upgrade command:** For ordinary package installation, search,
 and system upgrades, use pacman-compatible operations such as `-S`, `-Ss`,
 and `-Syu`, as with pacman and other AUR helpers. Use the corresponding
@@ -309,15 +381,79 @@ error before an external command or AUR query. Pacman-only routes preserve
 compatible pacman options; a source-build route rejects options whose meaning
 cannot be preserved instead of silently ignoring them.
 
-`-S --select <query>` is the interactive source-aware discovery form. Without
+`-S --select [--needed] <query>` is the interactive source-aware discovery form. Without
 a source selector it searches both official repositories and AUR; `--aur` or
 `--repo` limits the candidate source. Only `--needed` has a shared meaning on
 both selected routes. Non-TTY use and `--noconfirm` fail without querying or
 choosing a package.
 
-Source-build preferences are managed with `add-src`, `edit-src`, `list-src`,
-`del-src`, and `revert`. A one-off `build <pkg> [V=K...]` resolves a remote
-package and does not save a preference. `build --local <directory> [V=K...]`
+Source-build preferences are managed with multi-target `add-src`, `edit-src`,
+`del-src`, and `revert`, plus target-less `list-src`. A one-off
+`build <pkg> [V=K...]` resolves a remote package and does not save a preference.
+
+### Per-package build customization
+
+The existing v2.x `[V=K...]` and source-build preference forms let you adjust
+one package's build environment without editing the system-wide
+`/etc/makepkg.conf`. Complete replacement and inheriting the system values
+before a local modification are separate patterns; choose between them for the
+specific task rather than treating either one as a universal default.
+
+For a one-off complete override:
+
+```bash
+moguet build example-package \
+  CFLAGS="-O3 -pipe" \
+  CXXFLAGS="-O3 -pipe"
+```
+
+Each named variable is set to an explicit value for this package build; it is
+not merged with the corresponding system-wide value. This can be useful when
+deliberately simplifying flags for troubleshooting or trying a package-specific
+setting. `-O3` is illustrative here, not a performance recommendation.
+
+To inherit the current system settings and modify only one part:
+
+```bash
+source /etc/makepkg.conf
+
+moguet build obs-studio \
+  CFLAGS="${CFLAGS/-O2/-O3}" \
+  CXXFLAGS="${CXXFLAGS/-O2/-O3}"
+```
+
+Here, `source` loads `/etc/makepkg.conf` into the current shell as a baseline;
+it does not modify the file. Each substitution preserves the other existing
+flags and changes a matching `-O2`; if that text is absent, the value remains
+unchanged. This is not a universal optimization recipe, and `-O3` remains an
+illustrative value.
+
+A mixed C/C++ package may need both `CFLAGS` and `CXXFLAGS`, while a C-only or
+C++-only package may need different variables. The package's `PKGBUILD` and
+upstream build system determine which environment flags they consume; Moguet
+does not guarantee that these variables affect the compiler invocation.
+
+`build` remains a one-off operation and does not save these assignments. After
+verifying a setting, use `add-src` to save it as that package's source-build
+preference. Save a complete override with:
+
+```bash
+moguet add-src example-package \
+  CFLAGS="-O3 -pipe" \
+  CXXFLAGS="-O3 -pipe"
+```
+
+Or save the result of inheriting and locally modifying the system values:
+
+```bash
+source /etc/makepkg.conf
+
+moguet add-src obs-studio \
+  CFLAGS="${CFLAGS/-O2/-O3}" \
+  CXXFLAGS="${CXXFLAGS/-O2/-O3}"
+```
+
+`build --local <directory> [V=K...]`
 instead treats exactly one user-owned directory as a local PackageBase source;
 it does not infer a local root from a path-like package operand or query AUR for
 that root.

@@ -1483,12 +1483,19 @@ std::string ArtifactMakepkgContext::command_environment_prefix() const {
 
 std::string ArtifactMakepkgContext::makepkg_command(
         const std::vector<std::string>& makepkg_arguments) const {
+    const std::vector<std::string> assignment_words =
+            materialize_source_build_environment_assignment_words(
+                    command_environment_, empty_value_policy_);
     std::vector<std::string> arguments;
-    arguments.reserve(makepkg_arguments.size() + 1);
+    arguments.reserve(
+            makepkg_arguments.size() + assignment_words.size() + 1);
     arguments.push_back("makepkg");
     arguments.insert(
             arguments.end(), makepkg_arguments.begin(),
             makepkg_arguments.end());
+    arguments.insert(
+            arguments.end(), assignment_words.begin(),
+            assignment_words.end());
     return command_environment_prefix() + shell_words::join(arguments);
 }
 

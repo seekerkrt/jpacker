@@ -44,11 +44,12 @@ Moguet v2.0.1は、採用済みXDG storage契約のうちsource-preference部分
 preferenceは実行user自身のXDG config contextだけを使い、公開済みv2.0.0のtag、Release、
 release noteは歴史的記録のまま変更しません。
 
-Moguet v2.2.0は最新releaseです。ambiguous providerのinstalled state表示を明示化し、
-repository、AUR、provider、localのobservationをまたぐversion constraintを検証し、
-supported workflow向けの統一human-readable planとglobal `--dry-run`を追加しました。
-利用者から見える変更の全体は
-[v2.2.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.2.0)を参照してください。
+Moguet v2.3.0は最新releaseです。validationとrelease reliabilityを強化し、public CLIと
+diagnosticを整合させ、`Conflicts` / `Replaces`をtransaction前にtyped評価します。
+official repository source-buildではmultiple-artifact PackageBaseからrequested packageを
+安全に選択でき、package単位のbuild assignmentはmakepkgがconfigを読み込んだ後も
+effectiveになります。利用者から見える変更の全体は
+[v2.3.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.3.0)を参照してください。
 
 canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ちます。Moguet
 packageは`jpacker` command aliasを提供しません。AUR publicationは将来の別判断であり、
@@ -56,11 +57,11 @@ packageは`jpacker` command aliasを提供しません。AUR publicationは将�
 
 Moguet v2.xは公開済みで利用できますが、完成済みの一般向けAUR helperではなく、
 development-phaseのproductのままです。basicなpacman wrapper、AUR source build、
-update、package別のsource-build preferenceは現在すでに動作しますが、AUR support全体を
-構成するdependency solver、provider / conflict / replaces / version constraint対応、
-edge case対応といったより広い範囲は段階的に実装中で、UXも成熟途上です。Moguetは既存AUR
-helperと同等の自動解決能力・完成度を約束しません。unsupportedまたはambiguousなcaseは、
-推測せずfail-closedで停止します。v2.xは、Moguetのsource-aware入口、安全境界、検証基盤を
+update、package別のsource-build preferenceは現在すでに動作しますが、AUR support全体と
+edge case対応は段階的に実装中で、UXも成熟途上です。Moguetはfull dependency solverや
+provider / conflictの自動解決を再実装せずpacman-firstを維持し、既存AUR helperと同等の
+自動解決能力・完成度を約束しません。unsupportedまたはambiguousなcaseは、推測せず
+fail-closedで停止します。v2.xは、Moguetのsource-aware入口、安全境界、検証基盤を
 築く公開開発期です。v3.0.0は、Moguet固有のbuild-profileとPKGBUILD差分workflowが揃う
 地点であり、projectは内部的にこれをMoguetの本格的な正式就役と位置付けています。詳細な
 計画はrelease roadmap（[issue #344](https://github.com/seekerkrt/moguet/issues/344)）
@@ -82,6 +83,16 @@ helperと同等の自動解決能力・完成度を約束しません。unsuppor
   `Invalid` / `Conflicting`はfail-closedです。`fetch`、build、install、upgrade、local buildは
   `Unsatisfied` / `Unknown`の場合、clone、fetch、source mutation、build、sudo、pacman、transaction
   より前に停止します。
+- AURの`Conflicts` / `Replaces`宣言は、provided componentとversion付きrelationを含め、
+  build / install前にinstalled packageとplanned packageへ照合します。diagnosticはinstalled
+  packageとのconflictとplanned targetとのconflictを分け、matching replacementはreviewが
+  必要なpotential impactとしてだけ表示します。Moguetはpackageの削除、replacement targetの
+  選択、conflict解決を自動実行しません。
+- relation assessmentが利用不能（`Unknown`）またはinvalidならfail-closedとし、absenceとして
+  表示しません。completeな観測でcurrent / planned packageまたはprovided componentに一致が
+  ないと確認できた場合だけ、そのrelation guardを解除します。宣言自体は残り、transaction
+  authorityはpacman / libalpmです。`-Si`はsource metadataを表示し、このstatefulな判定を
+  plan / build preflightへ明示的に延期します。
 - 複数provider candidateが残る場合、interactive TTYではsource-aware candidateを番号付きで
   表示し、exactly oneの明示選択を要求します。defaultはありません。empty input、`q`、
   `quit`、`cancel`、EOFは選択を取り消し、invalid / out-of-range inputは再入力します。
@@ -92,7 +103,7 @@ helperと同等の自動解決能力・完成度を約束しません。unsuppor
   明示選択の必要性を変更しません。
 - non-TTYと`--noconfirm`ではprovider inputをstdinから読まず、candidateを自動選択しません。
   未選択のambiguous providerはfail-closedで停止します。
-- `moguet -S --select <query>`はofficial repositoryとAURからsource-awareなroot
+- `moguet -S --select [--needed] <query>`はofficial repositoryとAURからsource-awareなroot
   package candidateを検索します。interactive TTYではpackage番号、複数番号、inclusive range、
   表示済みofficial groupの`@group` selectorを受理します。candidateが1件でもdefaultは
   ありません。empty input、`q`、`quit`、`cancel`、EOFは取消とし、invalid inputは同じ
@@ -111,14 +122,25 @@ helperと同等の自動解決能力・完成度を約束しません。unsuppor
 - constraint resultはprovider candidateのfilter、sort、番号変更、recommend、default、
   auto-selectを行わず、source fallbackの根拠にもなりません。selected AUR provider metadataを
   refreshした場合はcurrent matching capabilityを再評価し、古いresultを再利用しません。
-- registered source phaseはsingular source lifecycleを維持します。candidateがすべて
-  official repository由来の場合だけprovider selectionを行い、AUR providerを含む
-  candidate setは、そのPackageBaseをこのphaseでscheduleできないためambiguousのまま
-  system / source execution前に停止します。
-- 未解決dependency、未選択のambiguous provider、cycle、安全に解決できないconflicts /
-  replaces、証明できないartifact identityは、対応するmutation前に拒否します。
+- source-build routeはroute固有のlifecycleを維持します。standalone official
+  repository buildは`PackageBaseSet`、registered official sourceは
+  `OnlyIfUpdated` preparation後の`PackageBaseSet`を使います。sync repository
+  routeは既存`--needed`付きの`SingularCompatibility`、registered AUR sourceは
+  既存provider / split-package guard付きの`SingularCompatibility`のままです。
+- official repository source identityはconfigured libalpmのexact snapshotを
+  authorityとします。confirmed `NotFound`だけがAUR fallbackを許し、query、config、
+  metadata failureでは停止します。standalone / registered buildはauthoritativeな
+  PackageBaseを1回buildし、requested `Explicit` childだけをinstallします。sibling / debug
+  outputはunselectedかつnot installedとして保持します。
+- registered AUR routeは、candidateがすべてofficial repository由来の場合だけprovider
+  selectionを行います。AUR providerを含むcandidate setは、このsingular compatibility
+  routeでそのproviderのPackageBaseをscheduleできないためambiguousのままsystem / source
+  execution前に停止します。
+- 未解決dependency、未選択のambiguous provider、cycle、blockingなconflict / replacement
+  assessment、証明できないartifact identityは、対応するmutation前に拒否します。
 - `--noconfirm`は対話停止を避ける指定であり、「すべてyes」ではありません。source
-  selection、plan、identity、conflict、ownershipのguardを突破しません。
+  selection、plan、identity、conflict、ownershipのguardを突破せず、自動削除や自動置換を
+  許可しません。
 - 複数phaseのupgradeは単一atomic transactionではありません。failure時は後続処理を
   止めますが、完了済みpackage transactionをrollbackしません。install成功後にcleanup
   だけ失敗した場合、packageはinstall済みの可能性があるため、結果を確認せず再試行
@@ -206,10 +228,39 @@ AUR pageを公開していません。
 現在のcommand / option surfaceは`moguet --help`をruntime authorityとします。command
 tokenとoption tokenはlocaleによって変わりません。
 
+Moguet-owned / interceptedのclosed grammarは次のとおりです。
+
+<!-- CLI CANONICAL GRAMMAR BEGIN -->
+```text
+build <pkg> [V=K...]
+build --local <directory> [V=K...]
+upgrade
+upgrade-aur
+upgrade-all
+clean
+deps [--recursive] <pkg>...
+plan <pkg>...
+fetch <pkg>...
+add-src <item>...
+edit-src <pkg>...
+list-src
+del-src <pkg>...
+revert <pkg>...
+-G <pkg>
+-Gp <pkg>
+-S --select [--needed] <query>
+```
+<!-- CLI CANONICAL GRAMMAR END -->
+
+その他のpacman operation formは、Moguetのallowlistではなくdelegated open grammarのまま
+です。closed grammarはremote / local `build`の2つ目のbare operandを拒否し、`upgrade`、
+`upgrade-aur`、`upgrade-all`、`clean`、`list-src`のtarget operandを拒否します。`...`を
+示したinspection / source-maintenance formはmulti-target behaviorを維持します。
+
 ```bash
 # packageのinstall、search、info表示
 moguet -S <pkg>
-moguet -S --select <query>
+moguet -S --select [--needed] <query>
 moguet -Ss <query>
 moguet -Si <pkg>
 
@@ -226,11 +277,18 @@ moguet build <pkg> [V=K...]
 moguet build --local <directory> [V=K...]
 
 # buildせずAUR dependencyとbuild orderを調査
-moguet deps --recursive <pkg>
-moguet plan <pkg>
+moguet deps --recursive <pkg>...
+moguet plan <pkg>...
 
 # build / installせずbuild repositoryを取得
-moguet fetch <pkg>
+moguet fetch <pkg>...
+
+# source-build preferenceを1件以上maintenance
+moguet add-src <item>...
+moguet edit-src <pkg>...
+moguet list-src
+moguet del-src <pkg>...
+moguet revert <pkg>...
 
 # PackageBase checkoutをexport、またはPKGBUILDだけを表示
 moguet -G <pkg>
@@ -239,7 +297,7 @@ moguet -Gp <pkg>
 # persistent stateを変更せず、対応する全mutating routeを観測
 moguet --dry-run -S <pkg>
 moguet --dry-run -Syu
-moguet --dry-run fetch <pkg>
+moguet --dry-run fetch <pkg>...
 moguet --dry-run build <pkg>
 moguet --dry-run build --local <directory>
 moguet --dry-run upgrade
@@ -263,6 +321,13 @@ token、execution capability、cached provider choiceとして再利用せず、
 current stateを再validationします。v2.2.0のsurfaceはhuman-readableだけで、JSONその他の
 machine-readable plan schemaは追加しません。
 
+human-readable diagnosticはtyped stateのprojectionであり、classificationを決める
+authorityではありません。英日ともnormal summary、attention-required detail、route-owned
+necessary detailの順を保ちます。operation outcomeとpackage state observationを分け、plan
+construction、completeness、execution readinessを独立して表示します。successfulだが
+unverifiedな観測はrequired check付きのsuccessとして維持し、`Unknown`を`NoOp`へ書き換えず、
+severity、blocking、exit-status effectも別dimensionとして扱います。
+
 **upgrade commandの選択:** 通常のpackage install、search、system upgradeでは、
 pacmanや他のAUR helperと同様に`-S`、`-Ss`、`-Syu`等のpacman-compatible
 operationを使用してください。保存済みsource-build preferenceの適用、installed AUR
@@ -275,14 +340,76 @@ repositoryへ限定します。両selectorの併用はexternal commandやAUR que
 失敗します。pacman-only routeではcompatibleなpacman optionを保持し、source-build
 routeで意味を維持できないoptionは黙って無視せず拒否します。
 
-`-S --select <query>`はinteractiveなsource-aware discovery形式です。source selectorを
+`-S --select [--needed] <query>`はinteractiveなsource-aware discovery形式です。source selectorを
 指定しなければofficial repositoryとAURの両方を検索し、`--aur`または`--repo`でcandidate
 sourceを限定します。両selected routeで同じ意味を持つoptionは`--needed`だけです。
 non-TTYと`--noconfirm`ではqueryやpackage選択を行わず失敗します。
 
-source-build preferenceは`add-src`、`edit-src`、`list-src`、`del-src`、`revert`で
-管理します。一時的な`build <pkg> [V=K...]`はremote packageを解決し、preferenceを
-保存しません。`build --local <directory> [V=K...]`は、代わりにuser所有directoryを
+source-build preferenceはmulti-targetの`add-src`、`edit-src`、`del-src`、`revert`と、
+target-lessの`list-src`で管理します。一時的な`build <pkg> [V=K...]`はremote packageを
+解決し、preferenceを保存しません。
+
+### Package単位のbuild customization
+
+既存v2.xの`[V=K...]`とsource-build preferenceを使うと、system-wideな
+`/etc/makepkg.conf`を編集せず、1つのpackageだけbuild environmentを調整できます。
+complete replacementと、system-wide valueを引き継いでから局所変更する方法は別の
+patternです。どちらかを常にdefaultとせず、目的に応じて選びます。
+
+one-offでcomplete overrideする例:
+
+```bash
+moguet build example-package \
+  CFLAGS="-O3 -pipe" \
+  CXXFLAGS="-O3 -pipe"
+```
+
+指定した各variableは、このpackage build向けの明示値へ置き換わり、対応する
+system-wide valueとはmergeされません。問題の切り分けのためにflagsを意図的に
+単純化する場合や、package固有の設定を試す場合に使えます。ここでの`-O3`は説明用で、
+performance recommendationではありません。
+
+現在のsystem settingを引き継ぎ、一部分だけ変更する例:
+
+```bash
+source /etc/makepkg.conf
+
+moguet build obs-studio \
+  CFLAGS="${CFLAGS/-O2/-O3}" \
+  CXXFLAGS="${CXXFLAGS/-O2/-O3}"
+```
+
+ここで`source`は`/etc/makepkg.conf`をbaselineとしてcurrent shellへ読み込むだけで、
+file自体を変更しません。各substitutionはその他の既存flagsを維持し、現在の値に
+`-O2`が含まれる場合だけその部分を変更します。含まれなければ値は変わりません。
+これは万能なoptimization recipeではなく、`-O3`も説明用の値です。
+
+C / C++ mixed packageでは`CFLAGS`と`CXXFLAGS`の両方が必要になり得ますが、
+C-only / C++-only packageでは必要なvariableが異なり得ます。実際にどのenvironment flagsを
+利用するかはpackageの`PKGBUILD`とupstream build systemが決めるため、Moguetはこれらの
+variableがcompiler invocationへ作用することを保証しません。
+
+`build`はone-off operationのままで、これらのassignmentを保存しません。設定を確認後、
+`add-src`を使うと、そのpackageのsource-build preferenceとして保存できます。
+complete overrideを保存する例:
+
+```bash
+moguet add-src example-package \
+  CFLAGS="-O3 -pipe" \
+  CXXFLAGS="-O3 -pipe"
+```
+
+system-wide valueを引き継いで局所変更した結果を保存する例:
+
+```bash
+source /etc/makepkg.conf
+
+moguet add-src obs-studio \
+  CFLAGS="${CFLAGS/-O2/-O3}" \
+  CXXFLAGS="${CXXFLAGS/-O2/-O3}"
+```
+
+`build --local <directory> [V=K...]`は、代わりにuser所有directoryを
 exactly oneのlocal PackageBase sourceとして扱います。pathらしいpackage operandからlocal
 rootを推測せず、そのrootをAURへqueryしません。
 

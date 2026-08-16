@@ -15,12 +15,17 @@ namespace {
 using local_dependency_plan_query_stub::RepositoryQuery;
 using local_dependency_plan_query_stub::RepositoryQueryKind;
 
-std::map<std::string, std::optional<std::string>> g_package_responses;
+struct RepositoryPackageResponse {
+    std::optional<std::string> repository_name;
+    std::string                package_base;
+};
+
+std::map<std::string, RepositoryPackageResponse> g_package_responses;
 std::map<std::string, std::string> g_package_failures;
 std::map<std::string, std::vector<ProvidedDependency>> g_provider_responses;
 std::vector<RepositoryQuery> g_query_history;
 
-const std::optional<std::string>& require_package_response(
+const RepositoryPackageResponse& require_package_response(
         const std::string& package_name) {
     const auto response = g_package_responses.find(package_name);
     if(response == g_package_responses.end()) {
@@ -56,9 +61,22 @@ void reset_repository_stub() {
 void set_repository_package_response(
         std::string package_name,
         std::optional<std::string> repository_name) {
+    const std::string package_base = package_name;
+    set_repository_package_response(
+            std::move(package_name), std::move(repository_name),
+            package_base);
+}
+
+void set_repository_package_response(
+        std::string package_name,
+        std::optional<std::string> repository_name,
+        std::string package_base) {
     g_package_failures.erase(package_name);
     g_package_responses.insert_or_assign(
-            std::move(package_name), std::move(repository_name));
+            std::move(package_name),
+            RepositoryPackageResponse{
+                    std::move(repository_name),
+                    std::move(package_base)});
 }
 
 void set_repository_package_failure(
@@ -95,7 +113,7 @@ bool is_repo_package(const std::string& package_name) {
     if(failure != g_package_failures.end()) {
         throw std::runtime_error(failure->second);
     }
-    return require_package_response(package_name).has_value();
+    return require_package_response(package_name).repository_name.has_value();
 }
 
 StrictRepositoryPackageQueryResult query_repository_package_strict(
@@ -108,11 +126,12 @@ StrictRepositoryPackageQueryResult query_repository_package_strict(
                 RepositoryMetadataFailureKind::SyncDatabaseUnavailable,
                 std::nullopt, failure->second};
     }
-    const std::optional<std::string>& repository =
+    const RepositoryPackageResponse& response =
             require_package_response(package_name);
-    if(repository.has_value()) {
+    if(response.repository_name.has_value()) {
         return RepositoryPackagePresent{
-                repository.value(), 0, package_name,
+                response.repository_name.value(), 0, package_name,
+                response.package_base,
                 ObservedVersion::available(
                         ObservedVersionSource::RepositoryExactPackage,
                         "1.0-1")};

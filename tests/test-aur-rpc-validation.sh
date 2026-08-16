@@ -14,6 +14,7 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -103,8 +104,8 @@ run_ok() {
 
 run_fail() {
     : > "$command_log"
-    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected command to fail: $*" >&2
+    if ! validation_expect_status aur-rpc-business-failure 1 \
+        "$output_file" "$output_file" "$test_binary" "$@" </dev/null; then
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -123,8 +124,9 @@ run_envelope_ok() {
 
 run_envelope_fail() {
     : > "$command_log"
-    if "$envelope_test_binary" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected strict envelope command to fail: $*" >&2
+    if ! validation_expect_status aur-envelope-business-failure 1 \
+        "$output_file" "$output_file" \
+        "$envelope_test_binary" "$@" </dev/null; then
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -204,9 +206,8 @@ assert_moguet_user_agents() {
         echo "AUR fixture did not observe a User-Agent header" >&2
         exit 1
     fi
-    unexpected_user_agent_count=$(
-        grep -Fvxc -- "$expected_user_agent" "$user_agent_log" || true
-    )
+    unexpected_user_agent_count=$(validation_grep_count \
+        -Fvxc -- "$expected_user_agent" "$user_agent_log")
     if [ "$unexpected_user_agent_count" -ne 0 ]; then
         echo "unexpected AUR RPC User-Agent; expected $expected_user_agent" >&2
         cat "$user_agent_log" >&2
@@ -375,11 +376,15 @@ semantic-provides-control|field Provides[0] contains a control character
 semantic-provides-malformed|field Provides[0] contains an invalid version constraint
 semantic-provides-non-equality|field Provides[0] contains an invalid version constraint
 semantic-provides-empty-version|field Provides[0] contains an invalid version constraint
+semantic-conflicts-malformed|field Conflicts[0] contains an invalid version constraint
+semantic-conflicts-empty-version|field Conflicts[0] contains an invalid version constraint
+semantic-replaces-malformed|field Replaces[0] contains an invalid version constraint
+semantic-replaces-invalid-version|field Replaces[0] contains an invalid version constraint
 CASES
 
 setup_case strict-constraint-metadata-projection
 run_envelope_ok constraint-metadata-strict arrays-valid
-assert_contains "arrays-valid|arrays-valid|1|1|1|1" "$output_file"
+assert_contains "arrays-valid|arrays-valid|1|1|1|1|2" "$output_file"
 assert_command_log_empty
 
 setup_case strict-envelope-search-type
@@ -498,19 +503,19 @@ assert_validation_error "info[package=\"recursive-malformed\"]"
 setup_case direct-plan
 run_fail plan direct-root
 assert_validation_error "info[package=\"malformed-direct\"]"
-assert_not_contains "unresolved dependencies remain" "$output_file"
+assert_not_contains "Unresolved dependencies:" "$output_file"
 
 setup_case recursive-plan
 run_fail plan recursive-root
 assert_validation_error "info[package=\"recursive-malformed\"]"
-assert_not_contains "unresolved dependencies remain" "$output_file"
+assert_not_contains "Unresolved dependencies:" "$output_file"
 
 while IFS='|' read -r root context detail; do
     setup_case "provider-$root"
     run_fail plan "$root"
     assert_validation_error "$context"
     assert_contains "$detail" "$output_file"
-    assert_not_contains "unresolved dependencies remain" "$output_file"
+    assert_not_contains "Unresolved dependencies:" "$output_file"
 done <<'CASES'
 provider-name-root|search[provides="virtual-provider-name"]|invalid Name "../provider"
 provider-base-root|search[provides="virtual-provider-base"]|invalid PackageBase "../provider-base"
@@ -629,21 +634,37 @@ assert_contains "provider-one" "$output_file"
 
 setup_case ambiguous-provider
 run_ok plan ambiguous-provider-root
-assert_contains "ambiguous providers are not selected" "$output_file"
+assert_contains "construction: Constructed" "$output_file"
+assert_contains "completeness: Incomplete" "$output_file"
+assert_contains "provider decision: Ambiguous" "$output_file"
+assert_contains "Fetch readiness: Blocked" "$output_file"
+assert_contains "Build readiness: Blocked" "$output_file"
+assert_contains "Install readiness: Blocked" "$output_file"
+assert_contains "Ambiguous provided dependencies:" "$output_file"
 
 setup_case cycle
 run_ok plan cycle-root-174
-assert_contains "cyclic dependencies detected" "$output_file"
+assert_contains "construction: Constructed" "$output_file"
+assert_contains "completeness: Incomplete" "$output_file"
+assert_contains "Fetch readiness: Blocked" "$output_file"
+assert_contains "Cyclic dependencies:" "$output_file"
 
 setup_case unresolved
 run_ok plan unresolved-root-174
-assert_contains "unresolved dependencies remain" "$output_file"
+assert_contains "construction: Constructed" "$output_file"
+assert_contains "completeness: Incomplete" "$output_file"
+assert_contains "Fetch readiness: Blocked" "$output_file"
+assert_contains "Unresolved dependencies:" "$output_file"
 
 setup_case split
 run_ok plan valid-split
 assert_contains "Split package install targets:" "$output_file"
 assert_contains "valid-split (base: valid-split-base)" "$output_file"
-assert_not_contains "Plan status: incomplete" "$output_file"
+assert_contains "construction: Constructed" "$output_file"
+assert_contains "completeness: Complete" "$output_file"
+assert_contains "Fetch readiness: Ready" "$output_file"
+assert_contains "Build readiness: Ready" "$output_file"
+assert_contains "Install readiness: Blocked" "$output_file"
 
 setup_case normal-fetch
 run_ok fetch valid-root

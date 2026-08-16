@@ -41,13 +41,9 @@ run_validation_step() {
 }
 
 cd "$repo_root"
-run_validation_step clean \
-    env -u MAKEFLAGS -u MFLAGS make clean
-run_validation_step parallel-build \
-    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target
-run_validation_step parallel-test \
-    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target test
-run_validation_step parallel-release-check \
-    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target release-check
+[ -x "$repo_root/moguet" ] ||
+    fail "image clean production build artifact is missing or not executable"
+run_validation_step parallel-host-release \
+    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target test-host-release
 
 printf 'arch-validation: all validation steps passed\n'

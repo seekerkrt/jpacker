@@ -15,6 +15,7 @@ src/build_plan_artifact_target_projection.cpp
 src/checkout_fetch.cpp
 src/cli_parser.cpp
 src/cli_routing.cpp
+src/cli_runtime_contract.cpp
 src/commands_aur_update.cpp
 src/commands_inspect.cpp
 src/commands_source_maintenance.cpp
@@ -34,11 +35,13 @@ src/moguet.cpp
 src/package_base_artifact_install_executor.cpp
 src/package_identifier.cpp
 src/package_metadata.cpp
+src/package_relation_presentation.cpp
 src/pkgbuild_export.cpp
 src/process.cpp
 src/provider_selection.cpp
 src/provider_installed_state_presentation.cpp
 src/repository_query.cpp
+src/runtime_diagnostic.cpp
 src/separated_package_base_source_build.cpp
 src/separated_source_build.cpp
 src/source_build.cpp

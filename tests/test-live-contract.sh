@@ -2,12 +2,24 @@
 set -eu
 
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
+tmp_dir=$(mktemp -d)
+
+cleanup() {
+    rm -rf "$tmp_dir" >/dev/null 2>&1 || :
+}
+trap cleanup EXIT
+
 live_root=$repo_root/containers/arch-live-validation
 readme_file=$live_root/README.md
 local_package_file=$live_root/fixtures/local-package/PKGBUILD
 local_contract_file=$live_root/fixtures/local-package/contract.env
+local_expected_srcinfo_file=$live_root/fixtures/local-package/expected.srcinfo
+local_payload_file=$live_root/fixtures/local-package/payload-authority.tsv
 aur_case_file=$live_root/aur-cases.tsv
-aur_payload_file=$live_root/fixtures/aur/fetchfetch-payload-authority.tsv
+aur_payload_file=$live_root/fixtures/aur/payload-authority.tsv
+aur_case_loader=$live_root/fixtures/aur/load-case.sh
+aur_conflict_mutator=$live_root/aur-mutate-pkginfo-conflict.py
 live_dockerfile=$live_root/Dockerfile
 provider_runner=$live_root/run-provider-selection.sh
 pacman_sentinel=$live_root/pacman-sentinel.sh
@@ -20,8 +32,12 @@ local_dockerfile=$live_root/Dockerfile.local
 local_runner=$live_root/run-local-install.sh
 local_gateway=$live_root/local-pacman-gateway.sh
 local_stage_helper=$live_root/local-stage-artifact.py
+local_archive_validator=$live_root/local-archive-validator.sh
+validation_status_library=$repo_root/scripts/validation-status.sh
 dockerignore_file=$repo_root/.dockerignore
 makefile=$repo_root/Makefile
+development_policy=$repo_root/docs/DEVELOPMENT.md
+validation_policy=$repo_root/docs/VALIDATION.md
 offline_dockerfile=$repo_root/containers/arch-validation/Dockerfile
 offline_runner=$repo_root/containers/arch-validation/run-tests.sh
 
@@ -73,8 +89,12 @@ make_target_body() {
 assert_regular_file "$readme_file" 'live validation contract'
 assert_regular_file "$local_package_file" 'local package PKGBUILD'
 assert_regular_file "$local_contract_file" 'local package contract env'
+assert_regular_file "$local_expected_srcinfo_file" 'local expected .SRCINFO projection'
+assert_regular_file "$local_payload_file" 'local payload authority'
 assert_regular_file "$aur_case_file" 'AUR case authority table'
 assert_regular_file "$aur_payload_file" 'AUR expected payload authority'
+assert_regular_file "$aur_case_loader" 'AUR case authority loader'
+assert_regular_file "$aur_conflict_mutator" 'AUR conflict mutation helper'
 assert_regular_file "$live_dockerfile" 'live provider Dockerfile'
 assert_regular_file "$provider_runner" 'live provider runner'
 assert_regular_file "$pacman_sentinel" 'live pacman sentinel source'
@@ -87,7 +107,11 @@ assert_regular_file "$local_dockerfile" 'live local PKGBUILD Dockerfile'
 assert_regular_file "$local_runner" 'live local PKGBUILD runner'
 assert_regular_file "$local_gateway" 'live local PKGBUILD gateway'
 assert_regular_file "$local_stage_helper" 'live local artifact staging helper'
+assert_regular_file "$local_archive_validator" 'live local archive validator'
+assert_regular_file "$validation_status_library" 'validation status library'
 assert_regular_file "$dockerignore_file" 'Docker context exclusion contract'
+assert_regular_file "$development_policy" 'development workflow authority'
+assert_regular_file "$validation_policy" 'validation policy authority'
 assert_regular_file "$offline_dockerfile" 'offline validation Dockerfile'
 assert_regular_file "$offline_runner" 'offline validation runner'
 
@@ -97,17 +121,17 @@ assert_contains "$readme_file" "実行時ネットワークは**有効**"
 assert_contains "$readme_file" "--privileged"
 assert_contains "$readme_file" "暗黙のフォールバックを許容せず"
 assert_contains "$readme_file" "make test\` / \`release-check\` を再帰的に起動しない"
-assert_contains "$local_package_file" "pkgname='moguet-live-fixture'"
-
-if ! grep -E '^pkgver=1\.0\.0$' "$local_package_file" >/dev/null; then
-    fail 'local PKGBUILD must keep pkgver 1.0.0'
-fi
-if ! grep -E '^pkgrel=1$' "$local_package_file" >/dev/null; then
-    fail 'local PKGBUILD must keep pkgrel 1'
-fi
-if ! grep -F "makedepends=('cargo')" "$local_package_file" >/dev/null; then
-    fail 'local PKGBUILD must keep makedepends=(\"cargo\")'
-fi
+# Values shared by the local scenario are read from its small identity contract.
+# Their independent PKGBUILD/.SRCINFO/payload parity is checked by
+# test-fixture-authority, rather than copied here as another expected-data set.
+# shellcheck source=../containers/arch-live-validation/fixtures/local-package/contract.env
+. "$local_contract_file"
+local_pkgver=${PACKAGE_VERSION%-*}
+local_pkgrel=${PACKAGE_VERSION##*-}
+assert_contains "$local_package_file" "pkgname='$PACKAGE_NAME'"
+assert_contains "$local_package_file" "pkgver=$local_pkgver"
+assert_contains "$local_package_file" "pkgrel=$local_pkgrel"
+assert_contains "$local_package_file" "makedepends=('$REQUIRED_MAKE_DEPENDENCY')"
 if grep -E '^source=\(.+\)$' "$local_package_file" >/dev/null; then
     fail 'local fixture source list must be empty for no source download'
 fi
@@ -120,144 +144,338 @@ fi
 if ! grep -F '"${CC:-cc}" -g -O0' "$local_package_file" >/dev/null; then
     fail 'local fixture must generate debug symbols for the live debug artifact'
 fi
-if ! grep -F 'usr/bin/moguet-live-fixture' "$local_package_file" >/dev/null; then
+if ! grep -F "usr/bin/$PACKAGE_NAME" "$local_package_file" >/dev/null; then
     fail 'local fixture package() must install its debug-symbol source binary'
 fi
 if [ -e "$live_root/fixtures/local-package/.SRCINFO" ]; then
     fail 'local fixture must not track .SRCINFO for live contract'
 fi
 
-assert_contract_assignment() {
-    expected=$1
-    if ! grep -Fx -- "$expected" "$local_contract_file" >/dev/null; then
-        fail "missing local fixture contract assignment: $expected"
-    fi
-}
-
-assert_contract_assignment 'REQUIRED_MAKE_DEPENDENCY=cargo'
-assert_contract_assignment 'EXPECTED_PROVIDER_PACKAGES=rust,rustup'
-assert_contract_assignment 'PROVIDER_INSTALL_REASON=Dependency'
-assert_contract_assignment 'ROOT_ARTIFACT_INSTALL_REASON=Explicit'
-
 if grep -F 'SELECTED_MAKE_PROVIDER_EXPECTED=' "$local_contract_file" >/dev/null; then
-    fail 'local fixture must not treat cargo as a selected provider package'
+    fail 'local fixture must not duplicate selected provider identity'
 fi
 
-tab=$(printf '\tX')
-tab=${tab%X}
-expected_case_header=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
-    '# package' package_base expected_version runtime_dependencies \
-    make_dependencies source_kind install_reason fallback_policy \
-    review_required expected_aur_git_head expected_pkgbuild_sha256 \
-    expected_srcinfo_sha256 expected_source_filename expected_source_url \
-    expected_source_sha256 expected_rpc_url_path \
-    expected_artifact_architecture)
-case_header=
-package_name=
-package_base=
-expected_version=
-runtime_deps=
-make_deps=
-source_kind=
-install_reason=
-fallback_policy=
-review_required=
-expected_aur_git_head=
-expected_pkgbuild_sha256=
-expected_srcinfo_sha256=
-expected_source_filename=
-expected_source_url=
-expected_source_sha256=
-expected_rpc_url_path=
-expected_artifact_architecture=
-extra_field=
-{
-    IFS= read -r case_header || fail 'AUR case table has no header'
-    IFS=$tab read -r \
-        package_name package_base expected_version runtime_deps make_deps \
-        source_kind install_reason fallback_policy review_required \
-        expected_aur_git_head expected_pkgbuild_sha256 \
-        expected_srcinfo_sha256 expected_source_filename expected_source_url \
-        expected_source_sha256 expected_rpc_url_path \
-        expected_artifact_architecture extra_field ||
-        fail 'AUR case table has no case row'
-    if IFS= read -r _; then
-        fail 'AUR case table must contain exactly one case row'
-    fi
-} < "$aur_case_file"
+# AUR authority format and payload identity are checked independently by
+# test-fixture-authority.  This static gate loads that one scenario only to
+# prove every live transport consumes the tracked values instead of copies.
+# shellcheck source=../containers/arch-live-validation/fixtures/aur/load-case.sh
+. "$aur_case_loader"
+validation_load_aur_case "$aur_case_file" || fail 'AUR case authority did not load'
+for pinned_aur_value in \
+    "$AUR_CASE_EXPECTED_VERSION" \
+    "$AUR_CASE_EXPECTED_GIT_HEAD" \
+    "$AUR_CASE_EXPECTED_PKGBUILD_SHA256" \
+    "$AUR_CASE_EXPECTED_SRCINFO_SHA256" \
+    "$AUR_CASE_EXPECTED_SOURCE_FILENAME" \
+    "$AUR_CASE_EXPECTED_SOURCE_URL" \
+    "$AUR_CASE_EXPECTED_SOURCE_SHA256" \
+    "$AUR_CASE_EXPECTED_RPC_URL_PATH"
+do
+    for aur_consumer in \
+        "$aur_dockerfile" "$aur_gateway" "$aur_runner" "$aur_stage_helper"
+    do
+        if grep -F -- "$pinned_aur_value" "$aur_consumer" >/dev/null; then
+            fail "AUR consumer duplicates pinned scenario value: $aur_consumer"
+        else
+            authority_grep_status=$?
+        fi
+        case $authority_grep_status in
+            1) ;;
+            *) fail "AUR consumer scan failed with status $authority_grep_status: $aur_consumer" ;;
+        esac
+    done
+done
 
-[ "$case_header" = "$expected_case_header" ] || fail 'AUR case header drift'
-[ -z "$extra_field" ] || fail 'AUR case table has extra columns'
-[ "$package_name" = fetchfetch ] || fail 'AUR case package must be fetchfetch'
-[ "$package_base" = fetchfetch ] || fail 'AUR PackageBase must be fetchfetch'
-[ "$expected_version" = 2.0.0-1 ] || fail 'unexpected AUR case version'
-[ "$runtime_deps" = glibc ] || fail 'unexpected AUR runtime dependencies'
-[ "$make_deps" = gcc,make ] || fail 'unexpected AUR make dependencies'
-[ "$source_kind" = single-release-archive ] || fail 'unexpected source kind'
-[ "$install_reason" = Explicit ] || fail 'unexpected AUR install reason'
-[ "$fallback_policy" = reject ] || fail 'AUR fallback policy must reject'
-[ "$review_required" = required ] || fail 'AUR drift must require review'
-[ "$expected_aur_git_head" = \
-    353dc8ea947734b85175158cda87e5d084585c3f ] || fail 'pinned AUR HEAD drift'
-[ "$expected_pkgbuild_sha256" = \
-    6b9e09ae9c297c5be32b1bd6a038172ad1400cd0f4a5867fe2393b468d964232 ] ||
-    fail 'pinned PKGBUILD hash drift'
-[ "$expected_srcinfo_sha256" = \
-    d685ae938e6cfe1d2001dba3772539564b2cd8e7b2d488e7e78d92762f411df1 ] ||
-    fail 'pinned .SRCINFO hash drift'
-[ "$expected_source_filename" = fetchfetch-2.0.0.tar.gz ] ||
-    fail 'pinned source filename drift'
-[ "$expected_source_url" = \
-    https://github.com/spenserblack/fetchfetch/archive/v2.0.0.tar.gz ] ||
-    fail 'pinned source URL drift'
-[ "$expected_source_sha256" = \
-    e67be2f63497b6f75017873e06935218a407e46023fe10f422fb259e92a7d7ae ] ||
-    fail 'pinned source SHA-256 drift'
-[ "$expected_rpc_url_path" = \
-    /cgit/aur.git/snapshot/fetchfetch.tar.gz ] || fail 'AUR URLPath drift'
-[ "$expected_artifact_architecture" = x86_64 ] ||
-    fail 'pinned artifact architecture drift'
+# The conflict-policy negative artifact is scenario-derived, not an
+# independent dependency oracle.  Extract and execute the runner's actual
+# mutator argument construction so a temporary authority change crosses the
+# loader -> runner -> mutator boundary.
+validate_runner_conflict_mutation_contract() {
+    checked_runner=$1
+    extracted_function=$2
+    python3 - "$checked_runner" "$extracted_function" <<'PY'
+from pathlib import Path
+import re
+import sys
 
-python3 - "$aur_payload_file" <<'PY' || fail 'AUR payload authority format or identity drift'
+runner_path, extracted_path = map(Path, sys.argv[1:])
+runner = runner_path.read_text(encoding="utf-8")
+function_start = "mutate_conflict_policy_archive() {\n"
+if runner.count(function_start) != 1:
+    raise SystemExit("conflict mutation runner function is not unique")
+start_index = runner.index(function_start)
+end_index = runner.find("\n}\n", start_index)
+if end_index < 0:
+    raise SystemExit("conflict mutation runner function is not closed")
+function_text = runner[start_index:end_index + 3]
+expected_function = (
+    "mutate_conflict_policy_archive() {\n"
+    "    mutation_archive_path=$1\n"
+    '    python3 "$conflict_mutator" \\\n'
+    '        "$mutation_archive_path" "$AUR_CASE_MAKE_DEPENDENCIES"\n'
+    "}\n"
+)
+if function_text != expected_function:
+    raise SystemExit(
+        "conflict mutation runner does not pass loaded AUR make dependencies directly"
+    )
+if re.search(r"(?m)^[ \t]*make_dependencies=", runner):
+    raise SystemExit("runner reintroduces a make-dependency alias assignment")
+if '"$make_dependencies"' in runner:
+    raise SystemExit("runner consumes a make-dependency alias")
+if re.search(
+    r"(?<![A-Za-z0-9_])AUR_CASE_MAKE_DEPENDENCIES"
+    r"[ \t]*(?:\+?=|:=)",
+    runner,
+):
+    raise SystemExit("runner reassigns loaded AUR make-dependency authority")
+start_marker = "current_phase=conflict-policy-negative"
+end_marker = "/usr/bin/zstd --quiet --force -o \"$conflict_gateway_artifact\""
+if runner.count(start_marker) != 1 or runner.count(end_marker) != 1:
+    raise SystemExit("conflict mutation block markers are not unique")
+block = runner.split(start_marker, 1)[1].split(end_marker, 1)[0]
+expected_call = 'if mutate_conflict_policy_archive "$conflict_raw_tar"; then'
+if block.count(expected_call) != 1:
+    raise SystemExit("conflict mutation block does not invoke runner construction once")
+if re.search(r"makedepend\s*=", block):
+    raise SystemExit("conflict mutation block contains a consumer-side dependency record")
+extracted_path.write_text(function_text, encoding="utf-8")
+PY
+}
+
+runner_mutation_function=$tmp_dir/runner-conflict-mutation.sh
+if validate_runner_conflict_mutation_contract \
+    "$aur_runner" "$runner_mutation_function"; then
+    :
+else
+    runner_contract_status=$?
+    fail "AUR conflict mutation runner contract failed with status $runner_contract_status"
+fi
+
+# Focused regression for the previous counterexample: a consumer-side literal
+# assignment must be rejected even if the direct mutator call remains intact.
+literal_runner=$tmp_dir/run-aur-install-literal.sh
+python3 - "$aur_runner" "$literal_runner" <<'PY' || fail 'literal runner counterexample setup failed'
 from pathlib import Path
 import sys
 
-path = Path(sys.argv[1])
-rows = [line.split("\t") for line in path.read_text(encoding="utf-8").splitlines()]
-if not rows or rows[0] != ["# path", "type", "mode", "sha256"]:
-    raise SystemExit("authority header drift")
-if any(len(row) != 4 for row in rows) or any(not row[0] for row in rows[1:]):
-    raise SystemExit("authority is not exact-tab TSV")
-entries = {row[0]: tuple(row[1:]) for row in rows[1:]}
-if len(entries) != len(rows) - 1 or [row[0] for row in rows[1:]] != sorted(entries):
-    raise SystemExit("authority is not sorted and duplicate-free")
-expected = {
-    "usr/": ("directory", "0755", "-"),
-    "usr/bin/": ("directory", "0755", "-"),
-    "usr/bin/fetchfetch": ("regular", "0755", "-"),
-    "usr/share/": ("directory", "0755", "-"),
-    "usr/share/doc/": ("directory", "0755", "-"),
-    "usr/share/doc/fetchfetch/": ("directory", "0755", "-"),
-    "usr/share/doc/fetchfetch/README.md": (
-        "regular", "0644",
-        "26ac44a45dfae74d33d54e474bc14a2d677f0e720dade11882bd3bea3e5b0d9a",
+source, destination = map(Path, sys.argv[1:])
+runner = source.read_text(encoding="utf-8")
+anchor = "runtime_dependencies=$AUR_CASE_RUNTIME_DEPENDENCIES\n"
+if runner.count(anchor) != 1:
+    raise SystemExit("runner make-dependency authority anchor is not unique")
+destination.write_text(
+    runner.replace(anchor, anchor + "make_dependencies=fixture-build-literal\n", 1),
+    encoding="utf-8",
+)
+PY
+if validation_expect_status \
+    aur-runner-literal-counterexample 1 \
+    "$tmp_dir/aur-runner-literal.stdout" \
+    "$tmp_dir/aur-runner-literal.stderr" \
+    validate_runner_conflict_mutation_contract \
+    "$literal_runner" "$tmp_dir/literal-runner-function.sh"; then
+    :
+else
+    fail 'consumer-side make-dependency literal counterexample was not rejected'
+fi
+printf '%s\n' '  consumer-side make-dependency literal counterexample: rejected'
+
+# The scenario loader is the only setter for the uppercase authority field.
+# Reject a detached consumer alias that shadows the loaded value before the
+# otherwise-direct runner function reaches the mutator.
+shadow_runner=$tmp_dir/run-aur-install-uppercase-shadow.sh
+python3 - "$aur_runner" "$shadow_runner" <<'PY' || fail 'uppercase-shadow runner counterexample setup failed'
+from pathlib import Path
+import sys
+
+source, destination = map(Path, sys.argv[1:])
+runner = source.read_text(encoding="utf-8")
+anchor = "runtime_dependencies=$AUR_CASE_RUNTIME_DEPENDENCIES\n"
+if runner.count(anchor) != 1:
+    raise SystemExit("runner uppercase-shadow authority anchor is not unique")
+destination.write_text(
+    runner.replace(
+        anchor,
+        anchor
+        + "detached_make_dependencies=fixture-build-literal\n"
+        + "AUR_CASE_MAKE_DEPENDENCIES=$detached_make_dependencies\n",
+        1,
     ),
-    "usr/share/licenses/": ("directory", "0755", "-"),
-    "usr/share/licenses/fetchfetch/": ("directory", "0755", "-"),
-    "usr/share/licenses/fetchfetch/LICENSE": (
-        "regular", "0644",
-        "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
-    ),
-}
-if entries != expected:
-    raise SystemExit("authority entries drift")
-if any(item.startswith("/") or "/../" in item or item.startswith("../") for item in entries):
-    raise SystemExit("authority path traversal")
+    encoding="utf-8",
+)
+PY
+if validation_expect_status \
+    aur-runner-uppercase-shadow-counterexample 1 \
+    "$tmp_dir/aur-runner-uppercase-shadow.stdout" \
+    "$tmp_dir/aur-runner-uppercase-shadow.stderr" \
+    validate_runner_conflict_mutation_contract \
+    "$shadow_runner" "$tmp_dir/uppercase-shadow-runner-function.sh"; then
+    :
+else
+    fail 'uppercase-shadow make-dependency counterexample was not rejected'
+fi
+printf '%s\n' '  uppercase-shadow make-dependency counterexample: rejected'
+
+aur_mutation_case=$tmp_dir/aur-mutation-case.tsv
+expected_aur_mutation_make_dependencies='fixture-build-one>=1.0,fixture-build-two'
+python3 - \
+    "$aur_case_file" "$aur_mutation_case" \
+    "$expected_aur_mutation_make_dependencies" <<'PY' || fail 'temporary AUR dependency authority setup failed'
+import csv
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+expected_make_dependencies = sys.argv[3]
+with source.open(encoding="utf-8", newline="") as stream:
+    rows = list(csv.reader(stream, delimiter="\t"))
+if len(rows) != 2 or "make_dependencies" not in rows[0]:
+    raise SystemExit("tracked AUR scenario shape drift")
+make_dependencies_index = rows[0].index("make_dependencies")
+rows[1][make_dependencies_index] = expected_make_dependencies
+with destination.open("w", encoding="utf-8", newline="") as stream:
+    writer = csv.writer(stream, delimiter="\t", lineterminator="\n")
+    writer.writerows(rows)
+PY
+validation_load_aur_case "$aur_mutation_case" ||
+    fail 'temporary AUR dependency authority did not load'
+[ "$AUR_CASE_MAKE_DEPENDENCIES" = \
+    "$expected_aur_mutation_make_dependencies" ] ||
+    fail 'temporary AUR make-dependency authority did not load exactly'
+printf '  changed AUR authority exact value: %s\n' \
+    "$AUR_CASE_MAKE_DEPENDENCIES"
+
+aur_mutation_positive=$tmp_dir/aur-mutation-positive.tar
+aur_mutation_zero=$tmp_dir/aur-mutation-zero.tar
+aur_mutation_multiple=$tmp_dir/aur-mutation-multiple.tar
+python3 - \
+    "$aur_mutation_positive" "$aur_mutation_zero" "$aur_mutation_multiple" \
+    "$AUR_CASE_MAKE_DEPENDENCIES" <<'PY' || fail 'temporary AUR PKGINFO mutation archives could not be created'
+from io import BytesIO
+from pathlib import Path
+import sys
+import tarfile
+
+positive_path, zero_path, multiple_path = map(Path, sys.argv[1:4])
+dependencies = sys.argv[4].split(",")
+if len(dependencies) < 2 or any(not dependency for dependency in dependencies):
+    raise SystemExit("temporary make dependency authority is not a useful separator case")
+
+
+def write_archive(path: Path, records: list[str]) -> None:
+    contents = "pkgname = fixture\n" + "".join(
+        f"makedepend = {record}\n" for record in records
+    )
+    payload = contents.encode("ascii")
+    member = tarfile.TarInfo(".PKGINFO")
+    member.mode = 0o644
+    member.size = len(payload)
+    with tarfile.open(path, mode="w") as archive:
+        archive.addfile(member, BytesIO(payload))
+
+
+write_archive(positive_path, dependencies)
+write_archive(zero_path, dependencies[1:])
+write_archive(multiple_path, [dependencies[0], dependencies[0], *dependencies[1:]])
 PY
 
-if ! grep -R --line-number -- 'fetchfetch' "$live_root" >/dev/null; then
-    fail 'AUR case contract file must include fetchfetch entry'
+# shellcheck source=/dev/null
+. "$runner_mutation_function"
+conflict_mutator=$aur_conflict_mutator
+if mutate_conflict_policy_archive "$aur_mutation_positive"; then
+    :
+else
+    mutation_status=$?
+    fail "scenario-derived AUR conflict mutation failed with status $mutation_status"
 fi
+python3 - "$aur_mutation_positive" "$AUR_CASE_MAKE_DEPENDENCIES" <<'PY' || fail 'scenario-derived AUR conflict mutation result is invalid'
+from pathlib import Path
+import sys
+import tarfile
+
+archive_path = Path(sys.argv[1])
+dependencies = sys.argv[2].split(",")
+with tarfile.open(archive_path, mode="r:") as archive:
+    members = [member for member in archive.getmembers() if member.name == ".PKGINFO"]
+    if len(members) != 1:
+        raise SystemExit("mutated archive has no unique .PKGINFO")
+    extracted = archive.extractfile(members[0])
+    if extracted is None:
+        raise SystemExit("mutated .PKGINFO is not readable")
+    records = extracted.read().decode("ascii").splitlines()
+
+target_dependency = dependencies[0]
+if f"makedepend = {target_dependency}" in records:
+    raise SystemExit("scenario-selected make dependency was not mutated")
+replacement = f"conflict = {'x' * (len(target_dependency) + 2)}"
+if records.count(replacement) != 1:
+    raise SystemExit("derived conflict record is not exact and unique")
+for dependency in dependencies[1:]:
+    if records.count(f"makedepend = {dependency}") != 1:
+        raise SystemExit("non-target scenario make dependency changed")
+PY
+printf '%s\n' '  changed AUR authority reached the runner mutator argument'
+
+for mutation_case in zero multiple
+do
+    case $mutation_case in
+        zero) mutation_archive=$aur_mutation_zero ;;
+        multiple) mutation_archive=$aur_mutation_multiple ;;
+        *) fail "unknown AUR conflict mutation regression: $mutation_case" ;;
+    esac
+    if validation_expect_status \
+        "aur-conflict-mutation-$mutation_case" 1 \
+        "$tmp_dir/aur-conflict-mutation-$mutation_case.stdout" \
+        "$tmp_dir/aur-conflict-mutation-$mutation_case.stderr" \
+        python3 "$aur_conflict_mutator" \
+        "$mutation_archive" "$AUR_CASE_MAKE_DEPENDENCIES"; then
+        :
+    else
+        fail "AUR conflict mutation $mutation_case target did not fail closed"
+    fi
+done
+if validation_expect_status \
+    aur-conflict-mutation-empty-authority 1 \
+    "$tmp_dir/aur-conflict-mutation-empty.stdout" \
+    "$tmp_dir/aur-conflict-mutation-empty.stderr" \
+    python3 "$aur_conflict_mutator" "$aur_mutation_zero" ''; then
+    :
+else
+    fail 'AUR conflict mutation empty authority did not fail closed'
+fi
+
+# Restore the tracked case for the static checks below.
+validation_load_aur_case "$aur_case_file" ||
+    fail 'tracked AUR case authority did not reload after mutation regression'
+
+python3 - \
+    "$aur_payload_file" "$local_payload_file" \
+    "$aur_dockerfile" "$aur_gateway" "$aur_runner" "$aur_stage_helper" \
+    "$local_dockerfile" "$local_gateway" "$local_runner" \
+    "$local_archive_validator" <<'PY' || fail 'payload hash authority is duplicated by a consumer'
+from pathlib import Path
+import sys
+
+aur_payload, local_payload = map(Path, sys.argv[1:3])
+aur_consumers = [Path(value) for value in sys.argv[3:7]]
+local_consumers = [Path(value) for value in sys.argv[7:11]]
+
+def pinned_hashes(path):
+    rows = [line.split("\t") for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+    return {row[3] for row in rows if len(row) == 4 and row[3] != "-"}
+
+for authority, consumers in (
+    (aur_payload, aur_consumers),
+    (local_payload, local_consumers),
+):
+    for consumer in consumers:
+        text = consumer.read_text(encoding="utf-8")
+        for digest in pinned_hashes(authority):
+            if digest in text:
+                raise SystemExit(f"{consumer} duplicates payload digest {digest}")
+PY
 
 # Ensure offline validation lane is not forced as a live dependency by contract text.
 assert_contains "$readme_file" "offline validation lane"
@@ -271,16 +489,30 @@ assert_contains "$live_dockerfile" 'make -j8 --output-sync=target'
 assert_contains "$live_dockerfile" 'CMD ["containers/arch-live-validation/run-provider-selection.sh"]'
 assert_contains "$provider_runner" 'production_moguet=$repo_root/moguet'
 assert_contains "$provider_runner" 'makepkg --printsrcinfo > .SRCINFO'
+assert_contains "$provider_runner" 'cmp -s "$fixture_expected_srcinfo" "$case_source/.SRCINFO"'
 assert_contains "$provider_runner" 'python3 "$pty_runner" --timeout 90 --'
 assert_contains "$provider_runner" 'candidate_package'
-assert_contains "$provider_runner" 'rust_choice=$(awk'
-assert_contains "$provider_runner" 'rustup_choice=$(awk'
-assert_contains "$provider_runner" 'fail "provider drift: unexpected cargo provider'
+assert_contains "$provider_runner" 'first_provider_choice=$(awk'
+assert_contains "$provider_runner" 'second_provider_choice=$(awk'
+assert_contains "$provider_runner" 'case ",$EXPECTED_PROVIDER_PACKAGES," in'
 
-if grep -E '^[[:space:]]+(rust|rustup|cargo)([[:space:]\\]|$)' \
-    "$live_dockerfile" >/dev/null; then
-    fail 'live image must not preinstall rust, rustup, or cargo'
-fi
+old_ifs=$IFS
+IFS=,
+set -- $EXPECTED_PROVIDER_PACKAGES
+IFS=$old_ifs
+for forbidden_provider_package in "$@" "$REQUIRED_MAKE_DEPENDENCY"
+do
+    if grep -E "^[[:space:]]+$forbidden_provider_package([[:space:]\\\\]|$)" \
+        "$live_dockerfile" >/dev/null; then
+        fail "live image preinstalls fixture provider: $forbidden_provider_package"
+    else
+        provider_grep_status=$?
+    fi
+    case $provider_grep_status in
+        1) ;;
+        *) fail "live image provider scan failed with status $provider_grep_status" ;;
+    esac
+done
 if grep -E '(^|[[:space:]])(include|inherit|COPY)[[:space:]].*arch-validation' \
     "$live_dockerfile" >/dev/null; then
     fail 'live Dockerfile must not include, inherit, or copy the offline lane'
@@ -310,6 +542,7 @@ assert_contains "$live_dockerfile" 'install -o root -g root -m 0555'
 assert_contains "$live_dockerfile" 'pacman-sentinel.sh'
 assert_contains "$live_dockerfile" '/usr/bin/pacman'
 assert_contains "$live_dockerfile" '/usr/libexec/moguet-live-validation/pacman.real'
+assert_contains "$live_dockerfile" '/usr/libexec/moguet-live-validation/contract.env'
 assert_contains "$live_dockerfile" 'install -d -o root -g root -m 0711'
 assert_contains "$live_dockerfile" 'moguet-validation ALL=(root) NOPASSWD: /usr/bin/pacman *'
 assert_contains "$pacman_sentinel" 'readonly_sentinel_status=86'
@@ -320,23 +553,24 @@ assert_contains "$pacman_sentinel" "[ \"\$1\" = '-S' ]"
 assert_contains "$pacman_sentinel" "[ \"\$2\" = '--asdeps' ]"
 assert_contains "$pacman_sentinel" "[ \"\$3\" = '--needed' ]"
 assert_contains "$pacman_sentinel" "[ \"\$4\" = '--noconfirm' ]"
-assert_contains "$pacman_sentinel" 'extra/rust|extra/rustup'
+assert_contains "$pacman_sentinel" '. "$contract_file"'
+assert_contains "$pacman_sentinel" 'first_provider_target=$EXPECTED_PROVIDER_REPOSITORY/$first_provider'
+assert_contains "$pacman_sentinel" 'second_provider_target=$EXPECTED_PROVIDER_REPOSITORY/$second_provider'
 assert_contains "$pacman_sentinel" "reject 'target is not an allowed repo-qualified provider'"
 assert_contains "$provider_runner" "sentinel-reject-syu 'rejected argv'"
 assert_not_contains "$pacman_sentinel" 'pacman.real'
 assert_not_contains "$pacman_sentinel" 'exec '
 
 # Candidate numbers are derived from identity fields rather than fixed order.
-if grep -E 'rust(up)?_choice=[12]($|[^0-9])' "$provider_runner" >/dev/null; then
-    fail 'provider runner must not hard-code rust/rustup candidate numbers'
+if grep -E 'provider_choice=[12]($|[^0-9])' "$provider_runner" >/dev/null; then
+    fail 'provider runner must not hard-code reviewed candidate numbers'
 fi
 assert_contains "$provider_runner" "candidate_source\" != repository"
-assert_contains "$provider_runner" "candidate_repository\" != extra"
-assert_contains "$provider_runner" "candidate_dependency\" != cargo"
+assert_contains "$provider_runner" 'candidate_repository" != "$EXPECTED_PROVIDER_REPOSITORY"'
+assert_contains "$provider_runner" 'candidate_dependency" != "$REQUIRED_MAKE_DEPENDENCY"'
 assert_contains "$provider_runner" 'provider candidate set contains duplicate package identities'
 assert_contains "$provider_runner" 'provider presentation changed after discovery'
-assert_contains "$provider_runner" "candidate_package\" in"
-assert_contains "$provider_runner" 'rust|rustup)'
+assert_contains "$provider_runner" 'unexpected provider $candidate_package'
 assert_not_contains "$provider_runner" 'fallback_package='
 assert_not_contains "$provider_runner" 'fallback_dependency='
 
@@ -348,12 +582,13 @@ for required_aur_image_package in \
 do
     assert_contains "$aur_dockerfile" "$required_aur_image_package"
 done
-assert_contains "$aur_dockerfile" 'test "$(uname -m)" = x86_64'
-assert_contains "$aur_dockerfile" '! pacman -Qq fetchfetch'
+assert_contains "$aur_dockerfile" 'validation_load_aur_case'
+assert_contains "$aur_dockerfile" 'test "$(uname -m)" = "$AUR_CASE_EXPECTED_ARCHITECTURE"'
+assert_contains "$aur_dockerfile" 'pacman -Qq "$AUR_CASE_PACKAGE_NAME"'
 assert_contains "$aur_dockerfile" \
-    'NoExtract = !usr/share/doc/fetchfetch/README.md'
+    'NoExtract = !$AUR_CASE_README_PATH'
 assert_contains "$aur_dockerfile" \
-    "grep -Fx -- '!usr/share/doc/fetchfetch/README.md'"
+    'grep -Fx -- "!$AUR_CASE_README_PATH"'
 assert_contains "$aur_dockerfile" \
     'COPY --chown=moguet-validation:moguet-validation . .'
 assert_contains "$aur_dockerfile" 'USER moguet-validation:moguet-validation'
@@ -362,22 +597,22 @@ assert_contains "$aur_dockerfile" '/usr/libexec/moguet-live-aur/pacman.real'
 assert_contains "$aur_dockerfile" 'aur-pacman-gateway.sh'
 assert_contains "$aur_dockerfile" '/usr/bin/pacman'
 assert_contains "$aur_dockerfile" 'aur-cases.tsv'
-assert_contains "$aur_dockerfile" 'fetchfetch-payload-authority.tsv'
+assert_contains "$aur_dockerfile" 'fixtures/aur/payload-authority.tsv'
 assert_contains "$aur_dockerfile" 'aur-archive-metadata-check.c'
 assert_contains "$aur_dockerfile" '-std=c11 -Wall -Wextra -Wpedantic -Werror'
 assert_contains "$aur_dockerfile" '-larchive'
 assert_contains "$aur_dockerfile" '/usr/libexec/moguet-live-aur/aur-archive-metadata-check'
 assert_contains "$aur_dockerfile" 'chmod 0555'
 assert_contains "$aur_dockerfile" 'install -o root -g root -m 0444'
-assert_contains "$aur_dockerfile" '/usr/libexec/moguet-live-aur/fixtures/fetchfetch-payload.tsv'
-assert_contains "$aur_dockerfile" '/usr/libexec/moguet-live-aur/fixtures/fetchfetch-pkginfo.tsv'
+assert_contains "$aur_dockerfile" '/usr/libexec/moguet-live-aur/fixtures/reference-payload.tsv'
+assert_contains "$aur_dockerfile" '/usr/libexec/moguet-live-aur/fixtures/reference-pkginfo.tsv'
 assert_contains "$aur_dockerfile" 'pkginfo-manifest'
 assert_contains "$aur_dockerfile" 'reference-build'
 assert_contains "$aur_dockerfile" 'git clone --no-checkout'
-assert_contains "$aur_dockerfile" '353dc8ea947734b85175158cda87e5d084585c3f'
-assert_contains "$aur_dockerfile" '6b9e09ae9c297c5be32b1bd6a038172ad1400cd0f4a5867fe2393b468d964232'
-assert_contains "$aur_dockerfile" 'd685ae938e6cfe1d2001dba3772539564b2cd8e7b2d488e7e78d92762f411df1'
-assert_contains "$aur_dockerfile" 'e67be2f63497b6f75017873e06935218a407e46023fe10f422fb259e92a7d7ae'
+assert_contains "$aur_dockerfile" '"$AUR_CASE_EXPECTED_GIT_HEAD"'
+assert_contains "$aur_dockerfile" '"$AUR_CASE_EXPECTED_PKGBUILD_SHA256"'
+assert_contains "$aur_dockerfile" '"$AUR_CASE_EXPECTED_SRCINFO_SHA256"'
+assert_contains "$aur_dockerfile" '"$AUR_CASE_EXPECTED_SOURCE_SHA256"'
 assert_contains "$aur_dockerfile" '/usr/bin/makepkg --config'
 assert_contains "$aur_dockerfile" '--nodeps --noconfirm'
 assert_contains "$aur_dockerfile" '/usr/bin/python3 -I /usr/libexec/moguet-live-aur/aur-stage-artifact.py'
@@ -412,11 +647,12 @@ assert_contains "$aur_gateway" 'export PATH'
 assert_contains "$aur_gateway" 'unset PYTHONPATH'
 assert_contains "$aur_gateway" 'unset PYTHONHOME'
 assert_contains "$aur_gateway" 'exec /usr/bin/env -i PATH=/usr/bin LC_ALL=C'
-assert_contains "$aur_gateway" 'fetchfetch-content-drift-test'
-assert_contains "$aur_gateway" 'fetchfetch-conflict-policy-test'
-assert_contains "$aur_gateway" 'fetchfetch-xattr-metadata-test'
-assert_contains "$aur_gateway" 'fetchfetch-acl-metadata-test'
-assert_contains "$aur_gateway" 'fetchfetch-pkgdesc-authority-test'
+assert_contains "$aur_gateway" 'validation_load_aur_case "$case_policy"'
+assert_contains "$aur_gateway" 'aur-content-drift-test'
+assert_contains "$aur_gateway" 'aur-conflict-policy-test'
+assert_contains "$aur_gateway" 'aur-xattr-metadata-test'
+assert_contains "$aur_gateway" 'aur-acl-metadata-test'
+assert_contains "$aur_gateway" 'aur-pkgdesc-authority-test'
 assert_contains "$aur_gateway" \
     'missing or unknown MOGUET_LIVE_AUR_CASE'
 assert_contains "$aur_gateway" '[ "$#" -ne 4 ]'
@@ -438,7 +674,7 @@ assert_contains "$aur_gateway" '/usr/bin/python3 -I "$stage_helper" stage'
 assert_contains "$aur_gateway" 'metadata_helper=/usr/libexec/moguet-live-aur/aur-archive-metadata-check'
 assert_contains "$aur_gateway" 'staged artifact direct metadata validation failed'
 assert_contains "$aur_gateway" '/usr/bin/python3 -I "$stage_helper" validate'
-assert_contains "$aur_gateway" 'fetchfetch-pkginfo.tsv'
+assert_contains "$aur_gateway" 'reference-pkginfo.tsv'
 assert_contains "$aur_gateway" 'staged artifact path, content, or PKGINFO validation failed'
 assert_contains "$aur_gateway" 'negative test case must never invoke real pacman'
 assert_contains "$aur_gateway" 'gateway_reject_status=97'
@@ -467,7 +703,8 @@ assert_contains "$aur_stage_helper" 'copied_hash'
 assert_contains "$aur_stage_helper" 'staged_hash'
 assert_contains "$aur_stage_helper" 'source_hash_after'
 assert_contains "$aur_stage_helper" 'len({source_hash_before, copied_hash, staged_hash, source_hash_after})'
-assert_contains "$aur_stage_helper" 'EXPECTED_STATIC_AUTHORITY'
+assert_contains "$aur_stage_helper" 'def parse_scenario('
+assert_contains "$aur_stage_helper" 'required_regular = {'
 assert_contains "$aur_stage_helper" 'PKGINFO_FORBIDDEN_TRANSACTION_FIELDS'
 assert_contains "$aur_stage_helper" 'PKGINFO_ALLOWED_KEYS'
 assert_contains "$aur_stage_helper" 'PKGINFO_STABLE_KEYS'
@@ -500,7 +737,10 @@ do
     assert_contains "$aur_runner" "$gateway_rejection_shape"
 done
 assert_contains "$aur_runner" '"$production_moguet" -Si --aur "$package_name"'
-assert_contains "$aur_runner" "printf 'n\\n' | env MOGUET_LIVE_AUR_CASE"
+assert_contains "$aur_runner" 'production_input=$case_root/production-install.input'
+assert_contains "$aur_runner" "printf 'n\\n' >\"\$production_input\""
+assert_contains "$aur_runner" '<"$production_input" >"$production_output"'
+assert_not_contains "$aur_runner" "printf 'n\\n' | env MOGUET_LIVE_AUR_CASE"
 assert_contains "$aur_runner" \
     '"$production_moguet" --nodiff --noconfirm -S --aur "$package_name"'
 if grep -E '"\$production_moguet".*--noedit' "$aur_runner" >/dev/null; then
@@ -508,16 +748,17 @@ if grep -E '"\$production_moguet".*--noedit' "$aur_runner" >/dev/null; then
 fi
 assert_contains "$aur_runner" 'Review target: PKGBUILD'
 assert_contains "$aur_runner" 'tests/run-with-pty.py'
+assert_contains "$aur_runner" 'validation_load_aur_case "$case_policy"'
 assert_contains "$aur_runner" 'git ls-remote "$aur_git_url" HEAD'
 assert_contains "$aur_runner" 'git clone --depth 1 --single-branch --no-checkout'
 assert_contains "$aur_runner" "'makepkg' '--packagelist'"
 assert_contains "$aur_runner" "'makepkg' '-sc' '--noconfirm'"
-assert_contains "$aur_runner" 'PackageBase result: fetchfetch'
+assert_contains "$aur_runner" 'PackageBase result: $package_base'
 assert_contains "$aur_runner" \
-    'fetchfetch-debug 2.0.0-1 (not selected; not installed)'
+    'produced artifact: $AUR_CASE_DEBUG_PACKAGE_NAME $expected_version (not selected; not installed)'
 assert_contains "$aur_runner" 'production did not clean the original artifact workspace'
 assert_contains "$aur_runner" 'root gateway binary-content fail-closed test'
-assert_contains "$aur_runner" 'usr/bin/fetchfetch'
+assert_contains "$aur_runner" 'binary_payload_path=usr/bin/$package_name'
 assert_contains "$aur_runner" 'content-drift gateway rejection changed package inventory'
 assert_contains "$aur_runner" 'content-drift rejection consumed valid one-shot evidence'
 assert_contains "$aur_runner" 'root gateway transaction-metadata fail-closed test'
@@ -526,10 +767,10 @@ assert_contains "$aur_runner" 'conflict-policy gateway rejection changed package
 assert_contains "$aur_runner" 'root gateway xattr metadata fail-closed test'
 assert_contains "$aur_runner" 'user.moguet-live-test'
 assert_contains "$aur_runner" '--xattrs --acls'
-assert_contains "$aur_runner" 'category=xattr entry=usr/bin/fetchfetch'
+assert_contains "$aur_runner" '"category=xattr entry=$binary_payload_path"'
 assert_contains "$aur_runner" 'root gateway ACL metadata fail-closed test'
 assert_contains "$aur_runner" 'setfacl -m u:65534:rx'
-assert_contains "$aur_runner" 'category=acl entry=usr/bin/fetchfetch'
+assert_contains "$aur_runner" '"category=acl entry=$binary_payload_path"'
 assert_contains "$aur_runner" 'root gateway PKGINFO authority fail-closed test'
 assert_contains "$aur_runner" '.PKGINFO pkgdesc authority mismatch'
 assert_contains "$aur_runner" 'assert_repacked_path_set'
@@ -580,7 +821,7 @@ do
     fi
 done
 
-live_target_reference_count=$(grep -F -c \
+live_target_reference_count=$(validation_grep_count -F -c \
     'test-container-live-provider' "$makefile")
 if [ "$live_target_reference_count" -ne 3 ]; then
     fail 'live provider target must appear only in .PHONY, its definition, and the aggregate gate'
@@ -611,7 +852,7 @@ do
         fail "live AUR Make target contains forbidden runtime option: $forbidden_runtime_option"
     fi
 done
-aur_live_target_reference_count=$(grep -F -c \
+aur_live_target_reference_count=$(validation_grep_count -F -c \
     'test-container-live-aur' "$makefile")
 if [ "$aur_live_target_reference_count" -ne 3 ]; then
     fail 'live AUR target must appear only in .PHONY, its definition, and the aggregate gate'
@@ -642,7 +883,7 @@ do
         fail "live local Make target contains forbidden runtime option: $forbidden_runtime_option"
     fi
 done
-local_live_target_reference_count=$(grep -F -c \
+local_live_target_reference_count=$(validation_grep_count -F -c \
     'test-container-live-local' "$makefile")
 if [ "$local_live_target_reference_count" -ne 3 ]; then
     fail 'live local target must appear only in .PHONY, its definition, and the aggregate gate'
@@ -737,9 +978,9 @@ fi
 # transaction shapes remain rejected, while AUR/provider/offline lanes do not
 # inherit this authority.
 assert_contains "$local_dockerfile" 'FROM archlinux:latest'
-assert_contains "$local_dockerfile" '! pacman -Qq rust'
-assert_contains "$local_dockerfile" '! pacman -Qq rustup'
-assert_contains "$local_dockerfile" '! pacman -Qq moguet-live-fixture'
+assert_contains "$local_dockerfile" '. /tmp/moguet-live-local-contract.env'
+assert_contains "$local_dockerfile" 'for provider_package in $EXPECTED_PROVIDER_PACKAGES'
+assert_contains "$local_dockerfile" 'pacman -Qq "$PACKAGE_NAME"'
 assert_contains "$local_dockerfile" 'COPY --chown=moguet-validation:moguet-validation . .'
 assert_contains "$local_dockerfile" '/usr/libexec/moguet-live-local/fixtures/local-package'
 assert_contains "$local_dockerfile" 'install -o root -g root -m 0444'
@@ -758,6 +999,8 @@ awk '
 assert_contains "$local_dockerfile" '/usr/libexec/moguet-live-local/pacman.real'
 assert_contains "$local_dockerfile" 'local-pacman-gateway.sh'
 assert_contains "$local_dockerfile" 'local-stage-artifact.py'
+assert_contains "$local_dockerfile" 'local-archive-validator.sh'
+assert_contains "$local_dockerfile" 'scripts/validation-status.sh'
 assert_contains "$local_dockerfile" 'moguet-validation ALL=(root) NOPASSWD: /usr/bin/pacman *'
 assert_contains "$local_dockerfile" 'CMD ["sh", "containers/arch-live-validation/run-local-install.sh"]'
 assert_not_contains "$local_dockerfile" 'aur-pacman-gateway.sh'
@@ -765,16 +1008,44 @@ assert_not_contains "$local_dockerfile" 'pacman-sentinel.sh'
 assert_contains "$local_gateway" '"/proc/$$/status"'
 assert_contains "$local_gateway" 'PATH=/usr/bin'
 assert_contains "$local_gateway" 'unset PYTHONPATH'
-assert_contains "$local_gateway" 'extra/rust|extra/rustup'
+assert_contains "$local_gateway" 'case ",$EXPECTED_PROVIDER_PACKAGES," in'
 assert_contains "$local_gateway" 'exec_real_pacman --noconfirm "$@"'
 assert_contains "$local_gateway" 'exec_real_pacman --noconfirm -U --asexplicit -- "$staged_artifact"'
 assert_contains "$local_gateway" 'root argv must be one selected provider transaction or local artifact install'
 assert_contains "$local_gateway" 'artifact path is outside the invocation-owned cache prefix'
 assert_contains "$local_gateway" 'live-local-case/actual/cache/moguet/.artifact-workspace~-*/*'
 assert_contains "$local_gateway" 'local-stage-artifact.py'
-assert_contains "$local_gateway" 'artifact payload path set drift'
+assert_contains "$local_gateway" 'local-archive-validator.sh'
+assert_contains "$local_gateway" 'validation-status.sh'
+assert_contains "$local_gateway" 'archive validator failed with infrastructure status'
 assert_not_contains "$local_gateway" 'pacman -Syu'
 assert_not_contains "$local_gateway" 'pacman -R '
+assert_contains "$local_archive_validator" 'validation_capture_sorted_output'
+assert_contains "$local_archive_validator" 'archive-members.raw'
+assert_contains "$local_archive_validator" 'expected-members.raw'
+assert_contains "$local_archive_validator" 'artifact member listing failed with status'
+assert_contains "$local_archive_validator" 'artifact payload path set drift'
+assert_contains "$local_archive_validator" 'moguet-live-local-gateway: rejected:'
+if grep -E 'bsdtar[^|]*\|[^|]*sort' \
+    "$local_gateway" "$local_archive_validator" >/dev/null; then
+    fail 'local archive inspection must not pipe bsdtar directly into sort'
+fi
+awk '
+    index($0, "\"$archive_validator\" \"$staged_artifact\"") {
+        validator_line = NR
+    }
+    index($0, "accepted.argv") {
+        accepted_line = NR
+    }
+    index($0, "exec_real_pacman --noconfirm -U --asexplicit") {
+        pacman_line = NR
+    }
+    END {
+        exit validator_line > 0 && accepted_line > validator_line &&
+            pacman_line > accepted_line ? 0 : 1
+    }
+' "$local_gateway" ||
+    fail 'archive validation must finish before accepted or real-pacman evidence'
 assert_contains "$local_stage_helper" 'os.O_NOFOLLOW'
 assert_contains "$local_stage_helper" 'os.O_EXCL'
 assert_contains "$local_stage_helper" 'live-local-case/actual/cache/moguet'
@@ -787,19 +1058,19 @@ assert_contains "$local_runner" 'fixture_root=/usr/libexec/moguet-live-local/fix
 assert_contains "$local_runner" 'fixture_before_copy=$(fixture_manifest)'
 assert_contains "$local_runner" 'fixture_after_copy=$(fixture_manifest)'
 assert_contains "$local_runner" 'case_copy_manifest=$(source_content_manifest "$prepared_root/source")'
-assert_contains "$local_runner" 'chmod u+w "$prepared_root/source"'
+assert_contains "$local_runner" 'chmod 0644 "$prepared_root/source/PKGBUILD"'
 assert_contains "$local_runner" 'case-local source copy differs from the root-owned fixture authority'
 assert_contains "$local_runner" 'validation user can modify the root-owned local fixture authority'
-assert_contains "$local_runner" 'ambiguous providers: cargo'
+assert_contains "$local_runner" 'ambiguous providers: $REQUIRED_MAKE_DEPENDENCY'
 assert_contains "$local_runner" 'reviewed provider choice'
 assert_contains "$local_runner" 'root did not install as the exact explicit fixture package'
-assert_contains "$local_runner" 'selected rust provider did not retain dependency install reason'
+assert_contains "$local_runner" 'selected provider did not retain dependency install reason'
 assert_contains "$local_runner" 'unselected local debug artifact was installed'
 assert_contains "$local_runner" 'baseline package version or reason changed'
 assert_contains "$local_runner" 'gateway rejection self-test changed package inventory'
 assert_contains "$local_runner" "Running: 'sudo' 'pacman' '-U' '--'"
 assert_contains "$local_runner" \
-    'required child: moguet-live-fixture 1.0.0-1 (explicit): installed'
+    'required child: $fixture_name $fixture_version (explicit): installed'
 
 for protected_lane_file in \
     "$live_dockerfile" "$provider_runner" "$pacman_sentinel" \
@@ -812,29 +1083,79 @@ done
 
 test_target=$(make_target_body test)
 release_target=$(make_target_body release-check)
+host_release_target=$(make_target_body test-host-release)
+release_exclusive_target=$(make_target_body release-check-exclusive)
 if printf '%s\n%s\n' "$test_target" "$release_target" |
     grep -E 'test-container-live-(provider|aur|local)' >/dev/null; then
     fail 'make test or release-check must not recursively start the live lane'
 fi
 printf '%s\n' "$release_target" | grep -F 'test-live-contract' >/dev/null ||
     fail 'release-check must run the static live-contract gate'
+printf '%s\n' "$release_target" | grep -F 'test-fixture-authority' >/dev/null ||
+    fail 'release-check must run the fixture-authority gate'
+printf '%s\n' "$host_release_target" | grep -F 'test-host-release: test' >/dev/null ||
+    fail 'host release composite must own the full host test prerequisite'
+printf '%s\n' "$host_release_target" |
+    grep -F 'release-check-exclusive' >/dev/null ||
+    fail 'host release composite must run the release-exclusive owner'
+printf '%s\n' "$release_target" | grep -F 'release-check-exclusive' >/dev/null ||
+    fail 'release-check must preserve G coverage through the exclusive owner'
+for release_checker in \
+    scripts/check-release-version.sh \
+    scripts/check-license-compliance.sh \
+    scripts/check-packaging-metadata.sh \
+    scripts/check-markdown-links.sh
+do
+    printf '%s\n' "$release_exclusive_target" |
+        grep -F "$release_checker" >/dev/null ||
+        fail "release-exclusive owner lost checker: $release_checker"
+done
+
+# The policy owner must remain discoverable from the development workflow and
+# preserve the same named boundaries enforced above. These assertions do not
+# duplicate the matrix; they prevent documentation from silently promoting a
+# focused or compatibility target to approval authority.
+assert_contains "$development_policy" '[VALIDATION.md](VALIDATION.md)'
+assert_contains "$validation_policy" 'PR / mergeのcanonical host gateは`test-host-release`である。'
+assert_contains "$validation_policy" '`release-check`はstandalone互換targetとして維持するが、full host A–Dのapproval evidenceではない。'
+assert_contains "$validation_policy" '`test-container`はhost A–D / Gを代替せず、`test-live-contract`はactual Fを代替しない。'
+assert_contains "$validation_policy" 'focused / affected resultだけはPR approval tokenにはならない。'
+assert_contains "$validation_policy" 'release candidateは新しいapproval evidence epochである。'
+assert_contains "$validation_policy" '## Evidence reuse / invalidation'
+assert_contains "$validation_policy" '## Review stop rule / closure rule'
 
 # Existing offline files and target remain isolated from the new live paths.
 assert_not_contains "$offline_dockerfile" 'arch-live-validation'
 assert_not_contains "$offline_runner" 'arch-live-validation'
+assert_contains "$offline_dockerfile" 'RUN env -u MAKEFLAGS -u MFLAGS make clean'
+assert_contains "$offline_dockerfile" \
+    'RUN env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target'
+assert_contains "$offline_runner" 'image clean production build artifact is missing'
+assert_contains "$offline_runner" 'test-host-release'
+assert_not_contains "$offline_runner" 'make clean'
+assert_not_contains "$offline_runner" 'parallel-build'
+assert_not_contains "$offline_runner" 'parallel-release-check'
 offline_target=$(make_target_body test-container)
-assert_not_contains_target=$(printf '%s\n' "$offline_target" |
-    grep -F 'arch-live-validation' || true)
-if [ -n "$assert_not_contains_target" ]; then
-    fail 'existing test-container recipe contains live-lane paths'
-fi
+case "$offline_target" in
+    *arch-live-validation*)
+        fail 'existing test-container recipe contains live-lane paths'
+        ;;
+esac
 printf '%s\n' "$offline_target" | grep -F -- '--network=none' >/dev/null ||
     fail 'existing offline target lost its offline runtime network boundary'
 
 # The tracked fixture remains the Docker build input. Runtime cases consume its
 # pre-build root-owned authority and keep generated metadata case-local.
-if find "$live_root/fixtures/local-package" -mindepth 1 -name .SRCINFO -print |
-    grep . >/dev/null; then
+tracked_srcinfo_raw=$tmp_dir/tracked-srcinfo.raw
+if validation_capture_output "$tracked_srcinfo_raw" \
+    find "$live_root/fixtures/local-package" \
+    -mindepth 1 -name .SRCINFO -print; then
+    :
+else
+    fixture_status=$?
+    fail "tracked fixture path producer failed with status $fixture_status; raw=$tracked_srcinfo_raw"
+fi
+if [ -s "$tracked_srcinfo_raw" ]; then
     fail 'tracked live fixture must not contain .SRCINFO'
 fi
 assert_contains "$provider_runner" "assert_sentinel_absent \"\$current_case\""
@@ -851,7 +1172,7 @@ assert_contains "$readme_file" 'review-required failure'
 assert_contains "$readme_file" '実package transactionは行わない'
 assert_contains "$readme_file" 'Slice 3: real AUR'
 assert_contains "$readme_file" 'real public AUR'
-assert_contains "$readme_file" 'AUR package **fetchfetchだけ**'
+assert_contains "$readme_file" "AUR package **$AUR_CASE_PACKAGE_NAMEだけ**"
 assert_contains "$readme_file" 'root-owned stagingへcopy'
 assert_contains "$readme_file" 'reason **Explicit**'
 assert_contains "$readme_file" 'version/reasonのbefore/afterが不変'
@@ -860,10 +1181,11 @@ assert_contains "$readme_file" 'permission listingを'
 assert_contains "$readme_file" 'ACL/xattr不在のauthorityには使わない'
 assert_contains "$readme_file" 'exact multiset照合'
 assert_contains "$readme_file" 'xattr、ACL、`pkgdesc` authority drift'
-assert_contains "$readme_file" '!usr/share/doc/fetchfetch/README.md'
+assert_contains "$readme_file" "!$AUR_CASE_README_PATH"
 assert_contains "$readme_file" 'Slice 4: real local PKGBUILD install and release gate'
 assert_contains "$readme_file" 'moguet --noedit build --local <directory>'
-assert_contains "$readme_file" 'moguet-live-fixture 1.0.0-1`はExplicit'
+assert_contains "$readme_file" \
+    "$PACKAGE_NAME $PACKAGE_VERSION\`は$ROOT_ARTIFACT_INSTALL_REASON"
 assert_contains "$readme_file" 'root-owned read-only authorityへ固定'
 assert_contains "$readme_file" 'make test-container-live`は単一のfail-fast recipe'
 assert_contains "$readme_file" 'release-check`は`test-live-contract`'

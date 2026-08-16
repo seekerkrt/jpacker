@@ -33,25 +33,46 @@ MoguetはArch Linux向けの **pacman-first wrapper** として扱う。日常�
 source routeのselection、preflight、partial completion、failureの詳細は各contractが正本である。routeの結果をpackage nameだけへflattenして別sourceを再推定しない。
 
 <a id="compat-moguet-operations"></a>
-## Moguet固有 operation
+## Closed CLI grammar
 
-次のoperationはMoguet固有であり、pacmanへそのまま委譲しない。
+Moguet-owned operationと、Moguetがinterceptするsource-aware `-S --select`のcanonical
+grammarは次のとおりである。
 
-- `build <pkg> [VAR=VALUE...]`
-- `build --local <directory> [VAR=VALUE...]`
-- `upgrade`
-- `upgrade-aur`
-- `upgrade-all`
-- `clean`
-- `deps [--recursive] <pkg>`
-- `plan <pkg>`
-- `fetch <pkg>`
-- `-G <pkg>` / `-Gp <pkg>`
-- `add-src <pkg> [VAR=VALUE...]`
-- `del-src <pkg>` / `edit-src <pkg>` / `list-src`
-- `revert <pkg>`
+<!-- CLI CANONICAL GRAMMAR BEGIN -->
+```text
+build <pkg> [V=K...]
+build --local <directory> [V=K...]
+upgrade
+upgrade-aur
+upgrade-all
+clean
+deps [--recursive] <pkg>...
+plan <pkg>...
+fetch <pkg>...
+add-src <item>...
+edit-src <pkg>...
+list-src
+del-src <pkg>...
+revert <pkg>...
+-G <pkg>
+-Gp <pkg>
+-S --select [--needed] <query>
+```
+<!-- CLI CANONICAL GRAMMAR END -->
 
-`deps`、`plan`、`fetch`、`-G`、`-Gp`は調査・表示・取得段階であり、build / installを混ぜない。`deps`の`--recursive`を除き、Moguet固有operationに未対応optionを指定した場合は停止する。
+remote / local `build`はprimary operandをexactly oneだけ取り、その後には`V=K`
+assignmentだけを許すため、extra bare operandを拒否する。`upgrade`、`upgrade-aur`、
+`upgrade-all`、`clean`、`list-src`はtarget-lessであり、target operandを拒否する。一方、
+`deps`、`plan`、`fetch`と`add-src`、`edit-src`、`del-src`、`revert`は表示どおり
+multi-targetを維持する。`add-src`ではpackage itemが後続assignmentのscopeを開始する。
+
+`--local`はlocal `build`、`--recursive`は`deps`、`--select`はplain `-S`だけが所有する。
+`-S --select`の`--needed`はroute-owned final installationだけへ作用する。Moguet固有routeに
+scope外optionを指定した場合は黙って無視せず停止する。上記以外のpacman operation formは
+delegated open grammarであり、この一覧をpacman parserのclosed allowlistとして扱わない。
+
+`deps`、`plan`、`fetch`、`-G`、`-Gp`は調査・表示・取得段階であり、build / installを
+混ぜない。
 
 <a id="compat-dry-run"></a>
 ## Unified dry-run compatibility
@@ -63,6 +84,13 @@ global `--dry-run`は、Moguet-owned supported `-S` install / system-update、`f
 absolute no-mutation boundaryとして、dry-runはstate log / persistent stateのwriteやdirectory作成、cache、workspace、worktree、Git clone / fetch / checkout mutation、`makepkg --printsrcinfo`その他のlocal metadata生成・評価、build output、sudo、pacman transactionの開始・mutation、pacman transaction lock、install、cleanup mutationへ到達しない。local routeは安全な既存descriptorだけを使い、metadata評価が必要ならreadyを推測せず`Blocked`とする。
 
 dry-run observationはapproval token、prepared execution capability、cached provider choiceではない。後続のactual invocationへ渡さず、actual routeはcurrent stateからproduction validationとprovider selectionを再実行する。v2.2.0ではhuman-readable outputだけを提供し、JSON / machine-readable schemaは追加しない。
+
+diagnostic presentationはtyped stateからlocalizeする一方向のprojectionであり、localized / raw
+stringからclassificationを逆算しない。English / Japaneseともnormal summary、
+attention-required detail、route-owned necessary detailの順を保つ。operation outcomeとpackage
+state observation、plan constructionとcompletenessとexecution readiness、severityとblockingと
+exit-status effectはそれぞれ独立したdimensionである。successful-unverifiedはrequired actionを
+伴うsuccessとして保持し、failureへ丸めない。`Unknown`も`NoOp`へ丸めない。
 
 <a id="compat-aur-update"></a>
 ## AUR update operation summary
@@ -83,12 +111,18 @@ dry-run observationはapproval token、prepared execution capability、cached pr
 <a id="compat-conflicts-replaces"></a>
 ## AUR conflicts / replaces summary
 
-AUR RPCの`Conflicts` / `Replaces`はdependency resolutionとは分離したmetadata riskとしてraw valueを保持する。`-Si`はmetadataとして表示し、`deps` / `plan`はdependency分類とは別のwarning / incomplete reasonとして表示する。`fetch`はunresolved dependency、未選択ambiguous provider、cycleがなければ取得を許可するが、build / install routeはriskをclone、fetch、makepkg、pacman transactionより前にblocking reasonとして扱う。Moguetはinstalled DBとmetadataを独自照合してconflictを解決せず、削除、置換、provider選択を自動実行しない。
+AUR RPC、`.SRCINFO`等から得た`Conflicts` / `Replaces`宣言は、dependency resolutionとは分離したtyped metadataとして保持する。Moguetはread-onlyなinstalled package databaseとplanned targetを観測し、package name、PackageBase、source / root attribution、version、provided componentを保ったままversion付きrelationをtransaction前に分類する。public diagnostic、build / install readiness、execution preflightはこのtyped assessmentを共通authorityとし、rendererやrouteごとにraw declarationを再parse・再判定しない。
+
+classificationは、installed packageとのconfirmed conflict、planned targetとのconfirmed conflict、reviewが必要なpotential replacement impact、judgment不能な`Unknown`、invalid metadata / observation、complete observationによるconfirmed no matching current / planned targetを区別する。replacement matchはautomatic replacementの予告や許可ではない。`Unknown`とinvalid result、およびdeclarationはあるがassessment未完了のfallbackはfail closedとし、「一致対象なし」へ丸めない。completeな観測がpackageとprovided componentのいずれにも一致しないと確認した場合だけrelation guardを解除する。この結果もdeclaration自体が存在しないという意味ではない。
+
+`-Si`はsource metadataとして`Conflicts` / `Replaces`を表示し、installed / planned stateを必要とする判定はplan / build preflightへ延期したことを明示する。`deps` / `plan`はtyped assessmentとreadinessをread-onlyに表示し、既存inspection commandのstatus contractへ新しいexit codeを追加しない。standalone `fetch`はfetch readinessが満たされる限りsource取得だけを行えるが、relation assessmentはBuild / Install readinessを許可しない。blocking conflict、potential replacement、`Unknown`、invalid、assessment未完了の各resultは、source install、local source route、AUR updateを含むexecutionをmakepkg、sudo、pacman install transactionより前に停止する。dry-run / unified planは同じblocking truthを`Blocked`とnon-zero statusへ投影する。complete no-matchだけならrelationを理由にblockせず、他のguardがなければ`Ready` / successを維持する。
+
+Moguetが所有するのはmetadata observation、typed classification、pre-transaction diagnostic、safety stopまでである。automatic package removal、automatic replacement、automatic conflict resolution、replacement targetやproviderのimplicit selection、full dependency / conflict solverの置換、libalpm transaction prepare / commitは行わない。`pacman` / libalpmが最終transaction authorityであり、Moguetのpreflight successはtransaction successを意味しない。`--noconfirm`もrelation guardをbypassせず、自動削除・自動置換を許可しない。
 
 <a id="compat-plan-size"></a>
 ## Planのofficial package size summary
 
-`plan <pkg>`で表示するofficial repository dependencyのpackage sizeはpresentation metadataであり、BuildPlanのgraph safety、AUR build unitのsize、dependency resolution、provider selection、transactionを変更しない。configured repository orderとread-only sync metadataをauthorityとし、package absence、query failure、malformed metadata、configuration failure、0 bytesを区別する。size metadataが取得できなくても、既存のplan本文を表示できる場合はgraph statusやexit codeを不必要に変えない。
+`plan <pkg>...`で表示するofficial repository dependencyのpackage sizeはpresentation metadataであり、BuildPlanのgraph safety、AUR build unitのsize、dependency resolution、provider selection、transactionを変更しない。configured repository orderとread-only sync metadataをauthorityとし、package absence、query failure、malformed metadata、configuration failure、0 bytesを区別する。size metadataが取得できなくても、既存のplan本文を表示できる場合はgraph statusやexit codeを不必要に変えない。
 
 dependency edgeはmetadata trust boundaryで構成したtyped requirement、installed / configured repository / AUR / local / providerのsource-aware candidate、`ConstraintEvaluation`を保持し、production downstreamでraw constraintを再parseしない。`deps`は`Satisfied` / `Unconstrained`を通常表示し、`Unsatisfied` / `Unknown`をresult / reason付きwarningとして継続する。`plan`は同じ2状態をincompleteとする。`Invalid` / `Conflicting`はread-only plan constructionでもfail-closedとする。`fetch`、build、install、upgrade、local buildは`Unsatisfied` / `Unknown`を含め、成功を証明できないconstraint resultをclone、fetch、source mutation、build、sudo、pacman、transaction開始前に拒否する。preflight successはtransaction successを意味しない。
 
@@ -98,9 +132,11 @@ dependency edgeはmetadata trust boundaryで構成したtyped requirement、inst
 `-Ss`は軽いsearch / discovery表示として、AUR resultの状態tagを`[installed]`、`[out-of-date]`、`[orphaned]`の順に表示する。`-Si`はAUR metadataの`Maintainer`、`Installed`、`Orphaned`、`Out of Date`を表示する。repository packageの`-Si`はpacmanへ委譲し、AUR metadata表示と混ぜない。status表示はselectionやbuild executionを開始しない。
 
 <a id="compat-split-package"></a>
-## AUR split package summary
+## Remote source-build PackageBase summary
 
-PackageBaseはclone / fetch / build repositoryの単位であり、package nameはinstall targetである。`deps` / `plan` / `fetch` / `-G` / `-Gp`はPackageBaseとrequested packageの違いを表示・取得のidentityとして保持するだけで、splitであることだけを理由にincomplete扱いしたり全artifactをinstallしたりしない。build / install routeはBuildPlanのrequired childとartifact metadata identityがexactly one一致する場合だけselected childを渡し、sibling / debug outputを暗黙にinstallしない。詳細なselection、transaction、partial completionは[PackageBase contract](contracts/packagebase-child-selection.md)を参照する。
+PackageBaseはclone / fetch / build repositoryの単位であり、package nameはinstall targetである。official repositoryでは、requested childとPackageBaseの対応をconfigured repository順のstrict libalpm exact snapshotから取得する。`Present`だけをrepository sourceとして採用し、confirmed `NotFound`だけをAUR fallbackへ渡す。query / config / metadata failureをabsenceへflattenせず停止し、requested name、filename、URL、artifact pathからPackageBaseを推測しない。
+
+`deps` / `plan` / `fetch` / `-G` / `-Gp`はPackageBaseとrequested packageの違いを表示・取得のidentityとして保持するだけで、splitであることだけを理由にincomplete扱いしたり全artifactをinstallしたりしない。build / install routeはsource-build upper projectionが確定したrequired childとartifact metadata identityがexactly one一致する場合だけselected childを渡し、sibling / debug outputを暗黙にinstallしない。official repositoryのstandalone / registered routeではrequested `Explicit` childだけをinstallし、全unselected sibling / debugをresultへ保持する。詳細なselection、transaction、partial completionは[PackageBase contract](contracts/packagebase-child-selection.md)を参照する。
 
 <a id="compat-contract-summary"></a>
 ## Production contract summary
@@ -109,7 +145,7 @@ PackageBaseはclone / fetch / build repositoryの単位であり、package name�
 
 | Behavior / safety contract | User-visible compatibility summary | Normative contract |
 | --- | --- | --- |
-| PackageBase / child selection | PackageBase単位でbuildするが、installするのはBuildPlanが要求しmetadata identityで選択したchildだけ。sibling / debugは暗黙installしない | [PackageBase / required-child selection](contracts/packagebase-child-selection.md) |
+| PackageBase / child selection | PackageBase単位でbuildするが、installするのはsource-build upper projectionが要求しmetadata identityで選択したchildだけ。sibling / debugは暗黙installしない | [PackageBase / required-child selection](contracts/packagebase-child-selection.md) |
 | separated source-build `--rmdeps` | source-buildではownershipを証明できないためmutation前に拒否。pacman-onlyではMoguetが消費するが作用させず、pacmanへ転送しない | [source-build `--rmdeps`](contracts/source-build-rmdeps.md) |
 | XDG cache cutover | trusted root、filesystem identity、symlink、root escape、legacy cache非変更を守る。implementation moduleは固定しない | [XDG cache safety](contracts/xdg-cache-safety.md) |
 | source-build preference | `${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/`をreader / writer共通のauthorityとする。legacy storeへfallbackしない | [source-build preference XDG authority](contracts/source-build-preference-xdg.md) |
@@ -121,6 +157,17 @@ PackageBaseはclone / fetch / build repositoryの単位であり、package name�
 ## PackageBase / required-child compatibility
 
 PackageBaseはrepository / build / workspace / package transactionの単位、required childはinstall-selectionの単位である。1 PackageBaseを1 fresh workspaceで1回buildし、`makepkg --packagelist`のexpected aggregateとbuild後package metadata identityを照合する。required childがexactly one選択できない場合、filename、先頭artifact、PackageBase名、`--noconfirm`で補わずfail closedする。
+
+remote source-buildのcurrent route matrixは次である。
+
+| Route | PackageBase lifecycle / preparation |
+| --- | --- |
+| standalone repository | `PackageBaseSet` |
+| registered repository | `OnlyIfUpdated` preparation後の`PackageBaseSet` |
+| sync repository | `SingularCompatibility` + existing `--needed` |
+| registered AUR | `SingularCompatibility` + existing provider / split guard |
+
+official repositoryのrequested child / PackageBase authorityはstrict libalpm exact snapshotである。confirmed `NotFound`だけがAUR fallbackを許し、metadata query / config / malformed identityは停止する。standalone / registered repository routeはsingle / multiple outputに関係なくrequested `Explicit` childだけをinstallし、sibling / debug artifactはunselectedかつnot installedとして保持する。sync / registered AUR routeの既存capabilityを、このSet対応から推測して拡張しない。
 
 selected childだけがinstall input、install reason、installed / skipped-as-needed outcome、target attributionを持つ。unselected sibling / debug artifactはresult dataとして保持する。transaction failureでchild successを推測せず、cleanup failureはcompleted childを保持するpartial successとして扱う。詳細は[contract](contracts/packagebase-child-selection.md)を参照する。
 
@@ -179,7 +226,7 @@ interactive candidate listには、read-only local package databaseにcandidate�
 <a id="compat-root-package-selection"></a>
 ## Root package selection compatibility
 
-正式入口は`moguet -S --select <query>`であり、`-Ss`は非対話search / presentationのままである。repository / AUR candidateはsource identityを保持し、同名packageでもsourceが違えば別候補とする。official searchはread-only libalpm metadata、AUR searchはtyped AUR responseをauthorityとし、pacmanのhuman-readable search outputをparseしない。
+正式入口は`moguet -S --select [--needed] <query>`であり、`-Ss`は非対話search / presentationのままである。repository / AUR candidateはsource identityを保持し、同名packageでもsourceが違えば別候補とする。official searchはread-only libalpm metadata、AUR searchはtyped AUR responseをauthorityとし、pacmanのhuman-readable search outputをparseしない。
 
 interactive stdinで番号、複数番号、inclusive range、表示済みofficial groupの`@group` selectorを扱う。empty、cancel、EOF、non-TTY、`--noconfirm`はnon-zeroで停止し、invalid lineはatomically retryする。selection、identity validation、全static preflightが終わるまでpacman、sudo、clone、build、install、cache / workspace mutationを開始しない。selected repository rootとAUR rootは明示routeへprojectし、package nameからsourceを再推定しない。詳細は[root package selection contract](contracts/root-package-selection.md)を参照する。
 

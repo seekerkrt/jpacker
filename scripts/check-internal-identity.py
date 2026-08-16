@@ -227,14 +227,9 @@ FINAL_REPOSITORY_TOKENS: dict[str, tuple[str, ...]] = {
         "https://github.com/seekerkrt/moguet",
         "https://gitlab.com/seekerkrt/moguet",
     ),
-    "scripts/check-packaging-metadata.sh": (
-        "https://github.com/seekerkrt/moguet.git",
-    ),
-    "scripts/check-license-compliance.sh": (
+    "tests/fixtures/current-package/contract.env": (
+        "COMMAND_NAME=moguet",
         "https://github.com/seekerkrt/moguet",
-    ),
-    "tests/test-package-transition.sh": (
-        "https://github.com/seekerkrt/moguet.git",
     ),
     ".github/workflows/mirror-gitlab.yml": (
         "git@gitlab.com:seekerkrt/moguet.git",
@@ -506,6 +501,10 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
         legacy_etc_path,
         rf"etc/{legacy}/{legacy}\.conf{identity_end}",
         rf"{identity_start}{legacy}\.conf(?:\.pacsave)?{identity_end}",
+    ),
+    "tests/fixtures/current-package/install-payload.txt": allowances(
+        "historical-license-file",
+        historical_license_filename,
     ),
     "tests/trusted_cache_test.cpp": (
         allowances(

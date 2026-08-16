@@ -46,12 +46,12 @@ std::string provider_capability_specification(
     return package_name + ">" + version;
 }
 
-using RepositoryProviderCapabilityProjectionResult = std::variant<
-        std::vector<RepositoryProviderCapability>,
-        DependencyConstraintParseFailure>;
+} // namespace
 
-RepositoryProviderCapabilityProjectionResult project_repository_provides(
-        const std::vector<RepositoryProvidedPackageMetadata>& metadata) {
+ProviderCapabilityMetadataProjectionResult
+project_package_metadata_provides(
+        const std::vector<RepositoryProvidedPackageMetadata>& metadata,
+        ObservedVersionSource version_source) {
     std::vector<RepositoryProviderCapability> capabilities;
     capabilities.reserve(metadata.size());
     for(const auto& provided : metadata) {
@@ -70,10 +70,10 @@ RepositoryProviderCapabilityProjectionResult project_repository_provides(
 
         ObservedVersion provided_version = capability->version().has_value()
                 ? ObservedVersion::available(
-                          ObservedVersionSource::RepositoryProviderCapability,
+                          version_source,
                           capability->version().value())
                 : ObservedVersion::unknown(
-                          ObservedVersionSource::RepositoryProviderCapability,
+                          version_source,
                           ObservedVersionUnknownReason::
                                   UnversionedProviderCapability);
         capabilities.push_back(RepositoryProviderCapability{
@@ -82,6 +82,8 @@ RepositoryProviderCapabilityProjectionResult project_repository_provides(
     }
     return capabilities;
 }
+
+namespace {
 
 ConfiguredRepositoryIdentity repository_identity(
         std::size_t configured_order,
@@ -140,8 +142,11 @@ RepositoryExactPackageObservationResult observe_repository_exact_package(
         if(auto* metadata =
                    std::get_if<RepositoryExactPackageMetadata>(&source_result);
            metadata != nullptr) {
-            RepositoryProviderCapabilityProjectionResult provides_result =
-                    project_repository_provides(metadata->provides);
+            ProviderCapabilityMetadataProjectionResult provides_result =
+                    project_package_metadata_provides(
+                            metadata->provides,
+                            ObservedVersionSource::
+                                    RepositoryProviderCapability);
             if(const auto* failure =
                        std::get_if<DependencyConstraintParseFailure>(
                                &provides_result);
@@ -161,6 +166,7 @@ RepositoryExactPackageObservationResult observe_repository_exact_package(
                             metadata->configured_repository_order,
                             metadata->repository_name),
                     std::move(metadata->package_name),
+                    std::move(metadata->package_base),
                     exact_package_version(
                             ObservedVersionSource::RepositoryExactPackage,
                             metadata->version),
@@ -231,8 +237,11 @@ RepositoryProviderObservationResult observe_repository_providers(
             projected.packages.reserve(source->packages.size());
             std::optional<DependencyConstraintParseFailure> parse_failure;
             for(auto& metadata : source->packages) {
-                RepositoryProviderCapabilityProjectionResult provides_result =
-                        project_repository_provides(metadata.provides);
+                ProviderCapabilityMetadataProjectionResult provides_result =
+                        project_package_metadata_provides(
+                                metadata.provides,
+                                ObservedVersionSource::
+                                        RepositoryProviderCapability);
                 if(const auto* failure =
                            std::get_if<DependencyConstraintParseFailure>(
                                    &provides_result);
@@ -245,6 +254,7 @@ RepositoryProviderObservationResult observe_repository_providers(
                                 metadata.configured_repository_order,
                                 metadata.repository_name),
                         std::move(metadata.package_name),
+                        std::move(metadata.package_base),
                         exact_package_version(
                                 ObservedVersionSource::RepositoryExactPackage,
                                 metadata.version),

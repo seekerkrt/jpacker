@@ -4,11 +4,14 @@
 #include "app_config.hpp"
 #include "cache_authority.hpp"
 #include "cli_authority.hpp"
+#include "cli_runtime_contract.hpp"
+#include "diagnostic_projection.hpp"
 #include "local_source_build.hpp"
 #include "local_source_install.hpp"
 #include "local_source_metadata_evaluation.hpp"
 #include "localization.hpp"
 #include "logging.hpp"
+#include "runtime_diagnostic.hpp"
 #include "package_metadata.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
@@ -276,6 +279,47 @@ void present_system_source_upgrade_event(
     }
     throw std::logic_error(localization::translate_message(
             "Unknown system/source upgrade event kind."));
+}
+
+bool should_present_registered_package_base_result(
+        const RegisteredSourceUpgradeResult& source) noexcept {
+    if(!source.package_base_execution.has_value()) return false;
+    const RegisteredSourcePackageBaseExecutionSnapshot& execution =
+            *source.package_base_execution;
+    return execution.package_base != source.preference_package_name ||
+           !execution.unselected_artifacts.empty();
+}
+
+void present_registered_package_base_result(
+        const RegisteredSourceUpgradeResult& source) {
+    if(!should_present_registered_package_base_result(source)) return;
+    const RegisteredSourcePackageBaseExecutionSnapshot& execution =
+            *source.package_base_execution;
+
+    // TRANSLATORS: The placeholders are the PackageBase field identity and a PackageBase name.
+    Logger::info(localization::format_translated_message(
+            "{} result: {}", "PackageBase", execution.package_base));
+    // TRANSLATORS: The placeholders are the requested package, produced package, and full version.
+    Logger::info(localization::format_translated_message(
+            "  required child: {} -> {} {} (explicit): installed",
+            source.preference_package_name,
+            execution.selected_child.identity.package_name,
+            execution.selected_child.identity.full_version));
+    for(const ArtifactPackageIdentity& artifact :
+        execution.unselected_artifacts) {
+        // TRANSLATORS: The placeholders are a produced package name and full version.
+        Logger::info(localization::format_translated_message(
+                "  produced artifact: {} {} (not selected; not installed)",
+                artifact.package_name, artifact.full_version));
+    }
+}
+
+void present_registered_package_base_results(
+        const SystemSourceUpgradeResult& result) {
+    for(const RegisteredSourceUpgradeResult& source :
+        result.registered_source_results) {
+        present_registered_package_base_result(source);
+    }
 }
 
 [[noreturn]] void throw_system_source_upgrade_failure(
@@ -746,9 +790,7 @@ RemoteSourceBuildInvocation require_remote_source_build_invocation(
         throw std::invalid_argument(localization::format_translated_message(
                 "Usage: {} {}",
                 application_identity::COMMAND_NAME,
-                cli_authority::operation_spec(
-                        cli_authority::OperationId::Build)
-                        .help_syntax));
+                cli_operation_syntax(cli_authority::OperationId::Build)));
     }
 
     RemoteSourceBuildInvocation invocation;
@@ -766,9 +808,12 @@ RemoteSourceBuildInvocation require_remote_source_build_invocation(
         } else if(invocation.package_name.empty()) {
             invocation.package_name = arg;
         } else {
-            // TRANSLATORS: The placeholder is a literal CLI argument.
-            Logger::warn(localization::format_translated_message(
-                    "Ignoring extra arg '{}'", arg));
+            // Shared runtime validation rejects this before dispatch. Keep the
+            // direct helper fail-closed for test/support callers as well.
+            throw std::invalid_argument(
+                    localization::format_translated_message(
+                            "Operation {} requires exactly one {} operand.",
+                            "build", "<pkg>"));
         }
     }
     if(invocation.package_name.empty()) {
@@ -800,6 +845,10 @@ int cmd_build_local(
                         config);
         LocalBuildPlan plan = resolve_local_build_plan(
                 accepted_metadata.metadata(), effective_architecture,
+                PackageRelationLocalSourceIdentity{
+                        reviewed.source_root.canonical_path(),
+                        reviewed.source_root.directory_identity().device,
+                        reviewed.source_root.directory_identity().inode},
                 provider_selection_callback(config));
         require_complete_local_build_plan(plan);
 
@@ -865,7 +914,9 @@ int cmd_build_local(
                 local_source_build_failure_diagnostic(error)));
         return 1;
     } catch(const LocalSourceRootError& error) {
-        Logger::error(local_source_root_failure_diagnostic(error.failure()));
+        report_runtime_diagnostic(
+                project_local_source_root_diagnostic(error.failure()),
+                local_source_root_failure_diagnostic(error.failure()));
         return 1;
     } catch(const LocalSourceWorkspaceError& error) {
         Logger::error(
@@ -1377,6 +1428,7 @@ int cmd_upgrade(const AppConfig& config) {
                                     preparation)),
                     config,
                     present_system_source_upgrade_event);
+    present_registered_package_base_results(result);
     if(result.status != SystemSourceUpgradeStatus::Completed) {
         throw_system_source_upgrade_failure(result);
     }

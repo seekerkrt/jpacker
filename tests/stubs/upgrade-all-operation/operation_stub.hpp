@@ -34,6 +34,8 @@ enum class EventKind {
     LocalPackageSnapshot,
     Progress,
     SystemCommand,
+    SourcePreparation,
+    PackageBaseSourceExecution,
     SourceExecution,
     RepositoryConfigurationResolution,
     ForeignInventoryQuery,
@@ -76,6 +78,24 @@ struct MetadataSessionScript {
 };
 
 struct SourceExecutionCall {
+    std::string          package_name;
+    std::string          package_base;
+    SourceBuildRequest   request;
+    PacmanDatabasePaths database_paths;
+    ConfigSnapshot      config;
+};
+
+struct SourcePreparationCall {
+    std::string          package_name;
+    std::string          package_base;
+    SourceBuildRequest   request;
+    SourceBuildUpdatePolicy update_policy =
+            SourceBuildUpdatePolicy::AlwaysBuild;
+    PacmanDatabasePaths database_paths;
+    ConfigSnapshot      config;
+};
+
+struct PackageBaseSourceExecutionCall {
     std::string          package_name;
     std::string          package_base;
     SourceBuildRequest   request;
@@ -135,6 +155,10 @@ void fail_cache_seed();
 void set_after_next_cache_seed_hook(std::function<void()> hook);
 void fail_cache_activation();
 void enqueue_source_success(SourceBuildExecutionResult result);
+void enqueue_package_base_source_success(
+        std::string package_base,
+        ArtifactPackageIdentity selected_child,
+        std::vector<ArtifactPackageIdentity> unselected_artifacts);
 void enqueue_source_failure(std::string diagnostic);
 void enqueue_source_cache_failure();
 void enqueue_source_cleanup_failure(
@@ -198,6 +222,9 @@ void record_progress(const std::string& subject);
 const std::vector<Event>& event_history();
 const std::vector<Event>& events();
 const std::vector<SourceExecutionCall>& source_execution_calls();
+const std::vector<SourcePreparationCall>& source_preparation_calls();
+const std::vector<PackageBaseSourceExecutionCall>&
+package_base_source_execution_calls();
 const std::vector<AurExecutionCall>& aur_execution_calls();
 const std::vector<std::string>& system_commands();
 

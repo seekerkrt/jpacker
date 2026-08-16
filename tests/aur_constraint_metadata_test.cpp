@@ -20,6 +20,9 @@ static_assert(
                 AurPackageConstraintMetadata::package_version)>);
 static_assert(
         !std::is_pointer_v<decltype(
+                AurPackageConstraintMetadata::relations)>);
+static_assert(
+        !std::is_pointer_v<decltype(
                 ProviderConstraintMetadata::provided_capability)>);
 
 void expect(bool condition, const std::string& message) {
@@ -294,6 +297,114 @@ void test_provides_reject_non_equality_and_present_empty() {
             "malformed AUR Provide");
 }
 
+void test_conflicts_and_replaces_are_typed_once_in_source_order() {
+    AurPackageInfo package = package_info(
+            "declaring-child", "declaring-base", "4.0-1");
+    package.Conflicts = {"old-component>=2:1.0-3", "second-conflict"};
+    package.Replaces = {"legacy-component=1.0-1", "second-replacement"};
+
+    const AurPackageConstraintMetadata metadata =
+            project_package(package, "AUR declared relations");
+    expect(
+            metadata.relations.size() == 4,
+            "AUR relation count or field ordering differs");
+
+    const DeclaredPackageRelation& first_conflict = metadata.relations[0];
+    const DeclaredPackageRelation& second_conflict = metadata.relations[1];
+    const DeclaredPackageRelation& first_replacement = metadata.relations[2];
+    const DeclaredPackageRelation& second_replacement = metadata.relations[3];
+    expect(
+            first_conflict.kind() == PackageRelationKind::Conflict &&
+                    first_conflict.declaring_package_name() ==
+                            "declaring-child" &&
+                    first_conflict.declaring_package_base() ==
+                            "declaring-base" &&
+                    first_conflict.raw_specification() ==
+                            "old-component>=2:1.0-3" &&
+                    first_conflict.target_component() == "old-component" &&
+                    first_conflict.constraint().has_value() &&
+                    first_conflict.constraint()->relation() ==
+                            DependencyVersionRelation::GreaterThanOrEqual &&
+                    first_conflict.constraint()->version() == "2:1.0-3",
+            "First AUR conflict lost kind, identity, raw, or constraint");
+    expect(
+            second_conflict.kind() == PackageRelationKind::Conflict &&
+                    second_conflict.raw_specification() ==
+                            "second-conflict" &&
+                    second_conflict.target_component() ==
+                            "second-conflict" &&
+                    !second_conflict.constraint().has_value(),
+            "Second AUR conflict lost field-local ordering");
+    expect(
+            first_replacement.kind() == PackageRelationKind::Replacement &&
+                    first_replacement.raw_specification() ==
+                            "legacy-component=1.0-1" &&
+                    first_replacement.target_component() ==
+                            "legacy-component" &&
+                    first_replacement.constraint().has_value() &&
+                    first_replacement.constraint()->relation() ==
+                            DependencyVersionRelation::Equal &&
+                    first_replacement.constraint()->version() == "1.0-1" &&
+                    second_replacement.kind() ==
+                            PackageRelationKind::Replacement &&
+                    second_replacement.target_component() ==
+                            "second-replacement",
+            "AUR replacement kind or ordering was flattened");
+
+    expect(
+            package.Conflicts == std::vector<std::string>(
+                                         {"old-component>=2:1.0-3",
+                                          "second-conflict"}) &&
+                    package.Replaces == std::vector<std::string>(
+                                                {"legacy-component=1.0-1",
+                                                 "second-replacement"}),
+            "Typed projection changed raw AUR relation arrays");
+}
+
+void test_relation_failure_preserves_field_index_and_source_identity() {
+    AurPackageInfo conflict_package = package_info(
+            "conflict-child", "conflict-base", "1.0-1");
+    conflict_package.Conflicts = {"valid-conflict", "broken-conflict>="};
+    const AurConstraintMetadataProjectionFailure& conflict_failure =
+            require_alternative<AurConstraintMetadataProjectionFailure>(
+                    project_aur_constraint_metadata(conflict_package),
+                    "malformed AUR conflict");
+    expect(
+            conflict_failure.package_name == "conflict-child" &&
+                    conflict_failure.package_base == "conflict-base" &&
+                    conflict_failure.field ==
+                            AurConstraintMetadataField::Conflicts &&
+                    conflict_failure.item_index == 1 &&
+                    conflict_failure.reason.kind ==
+                            DependencyConstraintParseFailureKind::
+                                    MissingVersion &&
+                    conflict_failure.reason.raw_specification ==
+                            "broken-conflict>=",
+            "Malformed Conflict lost package/Base/field/index/raw attribution");
+
+    AurPackageInfo replacement_package = package_info(
+            "replacement-child", "replacement-base", "1.0-1");
+    replacement_package.Replaces = {
+            "valid-replacement", "another-valid", "broken-replacement==1"};
+    const AurConstraintMetadataProjectionFailure& replacement_failure =
+            require_alternative<AurConstraintMetadataProjectionFailure>(
+                    project_aur_constraint_metadata(replacement_package),
+                    "malformed AUR replacement");
+    expect(
+            replacement_failure.package_name == "replacement-child" &&
+                    replacement_failure.package_base ==
+                            "replacement-base" &&
+                    replacement_failure.field ==
+                            AurConstraintMetadataField::Replaces &&
+                    replacement_failure.item_index == 2 &&
+                    replacement_failure.reason.kind ==
+                            DependencyConstraintParseFailureKind::
+                                    UnsupportedConsumerOperator &&
+                    replacement_failure.reason.raw_specification ==
+                            "broken-replacement==1",
+            "Malformed Replace lost package/Base/field/index/raw attribution");
+}
+
 void test_partial_candidate_failure_preserves_order_and_identity() {
     AurPackageInfo first_package = package_info(
             "provider-a", "provider-a-base", "3.0-1");
@@ -551,6 +662,8 @@ int main() {
         test_exact_identity_and_version_states();
         test_provides_equality_only_and_version_separation();
         test_provides_reject_non_equality_and_present_empty();
+        test_conflicts_and_replaces_are_typed_once_in_source_order();
+        test_relation_failure_preserves_field_index_and_source_identity();
         test_partial_candidate_failure_preserves_order_and_identity();
         test_refresh_unavailable_metadata_preserves_selected_identity();
         test_refresh_rejects_known_unavailable_identity_changes();

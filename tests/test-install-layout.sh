@@ -3,12 +3,13 @@
 set -eu
 
 repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
 stage_root=$(mktemp -d)
 stage_dir=$stage_root/root
 test_home=$stage_dir/home/test-user
-xdg_config_home=$test_home/.config
-xdg_state_home=$test_home/.local/state
-xdg_cache_home=$test_home/.cache
+current_package_fixture=$repo_root/tests/fixtures/current-package
+current_package_contract=$current_package_fixture/contract.env
+install_payload_authority=$current_package_fixture/install-payload.txt
 
 cleanup() {
     rm -rf "$stage_root"
@@ -20,6 +21,24 @@ fail() {
     exit 1
 }
 
+for authority_file in "$current_package_contract" "$install_payload_authority"
+do
+    [ -f "$authority_file" ] && [ ! -L "$authority_file" ] &&
+        [ -s "$authority_file" ] ||
+        fail "current package authority must be a non-empty regular non-symlink: $authority_file"
+done
+# shellcheck source=fixtures/current-package/contract.env
+. "$current_package_contract"
+
+xdg_config_home=$test_home/.config
+xdg_state_home=$test_home/.local/state
+xdg_cache_home=$test_home/.cache
+
+[ -f "$repo_root/VERSION" ] && [ ! -L "$repo_root/VERSION" ] ||
+    fail 'VERSION must be a regular non-symlink'
+current_version=$(tr -d '[:space:]' < "$repo_root/VERSION")
+[ -n "$current_version" ] || fail 'VERSION is empty'
+
 run_make() {
     HOME=$test_home \
     XDG_CONFIG_HOME=$xdg_config_home \
@@ -29,17 +48,17 @@ run_make() {
             PREFIX=/usr DESTDIR="$stage_dir" "$@"
 }
 
-binary_file=$stage_dir/usr/bin/moguet
+binary_file=$stage_dir/usr/bin/$COMMAND_NAME
 legacy_binary_file=$stage_dir/usr/bin/jpacker
-bash_completion_file=$stage_dir/usr/share/bash-completion/completions/moguet
-zsh_completion_file=$stage_dir/usr/share/zsh/site-functions/_moguet
-fish_completion_file=$stage_dir/usr/share/fish/vendor_completions.d/moguet.fish
-english_man_file=$stage_dir/usr/share/man/man1/moguet.1
-japanese_man_file=$stage_dir/usr/share/man/ja/man1/moguet.1
-catalog_file=$stage_dir/usr/share/locale/ja/LC_MESSAGES/moguet.mo
-built_catalog_file=$repo_root/build/locale/ja/LC_MESSAGES/moguet.mo
-license_dir=$stage_dir/usr/share/licenses/moguet
-doc_dir=$stage_dir/usr/share/doc/moguet
+bash_completion_file=$stage_dir/usr/share/bash-completion/completions/$COMMAND_NAME
+zsh_completion_file=$stage_dir/usr/share/zsh/site-functions/_$COMMAND_NAME
+fish_completion_file=$stage_dir/usr/share/fish/vendor_completions.d/$COMMAND_NAME.fish
+english_man_file=$stage_dir/usr/share/man/man1/$COMMAND_NAME.1
+japanese_man_file=$stage_dir/usr/share/man/ja/man1/$COMMAND_NAME.1
+catalog_file=$stage_dir/usr/share/locale/ja/LC_MESSAGES/$GETTEXT_DOMAIN.mo
+built_catalog_file=$repo_root/build/locale/ja/LC_MESSAGES/$GETTEXT_DOMAIN.mo
+license_dir=$stage_dir/usr/share/licenses/$PACKAGE_NAME
+doc_dir=$stage_dir/usr/share/doc/$PACKAGE_NAME
 migration_dir=$doc_dir/docs/migration
 licensing_file=$doc_dir/docs/LICENSING.md
 
@@ -108,27 +127,35 @@ assert_no_symlinks() {
 }
 
 assert_exact_payload() {
-    expected_payload='/usr/bin/moguet
-/usr/share/bash-completion/completions/moguet
-/usr/share/doc/moguet/README.ja.md
-/usr/share/doc/moguet/README.md
-/usr/share/doc/moguet/THIRD_PARTY_NOTICES.md
-/usr/share/doc/moguet/docs/LICENSING.md
-/usr/share/doc/moguet/docs/migration/v1-to-v2.ja.md
-/usr/share/doc/moguet/docs/migration/v1-to-v2.md
-/usr/share/fish/vendor_completions.d/moguet.fish
-/usr/share/licenses/moguet/LICENSE
-/usr/share/licenses/moguet/bjoern-hoehrmann-utf8-MIT.txt
-/usr/share/licenses/moguet/curl.txt
-/usr/share/licenses/moguet/jpacker-MIT-legacy.txt
-/usr/share/licenses/moguet/nlohmann-json-MIT.txt
-/usr/share/licenses/moguet/tomlplusplus-MIT.txt
-/usr/share/locale/ja/LC_MESSAGES/moguet.mo
-/usr/share/man/ja/man1/moguet.1
-/usr/share/man/man1/moguet.1
-/usr/share/zsh/site-functions/_moguet'
-    actual_payload=$(find "$stage_dir" -type f -print |
-        sed "s|^$stage_dir||" | LC_ALL=C sort)
+    if expected_payload=$(cat "$install_payload_authority"); then
+        :
+    else
+        payload_status=$?
+        fail "install payload authority read failed with status $payload_status"
+    fi
+    payload_paths_raw=$stage_root/payload-paths.raw
+    payload_paths_normalized=$stage_root/payload-paths.normalized
+    payload_paths_sorted=$stage_root/payload-paths.sorted
+    if validation_capture_output "$payload_paths_raw" \
+        find "$stage_dir" -type f -print; then
+        :
+    else
+        payload_status=$?
+        fail "payload path producer failed with status $payload_status; raw=$payload_paths_raw"
+    fi
+    if sed "s|^$stage_dir||" "$payload_paths_raw" \
+        >"$payload_paths_normalized"; then
+        :
+    else
+        payload_status=$?
+        fail "payload path normalization failed with status $payload_status"
+    fi
+    if LC_ALL=C sort "$payload_paths_normalized" >"$payload_paths_sorted"; then
+        actual_payload=$(cat "$payload_paths_sorted")
+    else
+        payload_status=$?
+        fail "payload path sorting failed with status $payload_status"
+    fi
     [ "$actual_payload" = "$expected_payload" ] || {
         printf 'install-layout-test: unexpected payload:\n%s\n' \
             "$actual_payload" >&2
@@ -180,16 +207,16 @@ PY
 }
 
 assert_package_artifacts_installed() {
-    assert_installed_file "$repo_root/moguet" "$binary_file" 755
+    assert_installed_file "$repo_root/$COMMAND_NAME" "$binary_file" 755
     assert_absent "$legacy_binary_file"
-    assert_installed_file "$repo_root/completions/moguet.bash" \
+    assert_installed_file "$repo_root/completions/$COMMAND_NAME.bash" \
         "$bash_completion_file"
-    assert_installed_file "$repo_root/completions/_moguet" \
+    assert_installed_file "$repo_root/completions/_$COMMAND_NAME" \
         "$zsh_completion_file"
-    assert_installed_file "$repo_root/completions/moguet.fish" \
+    assert_installed_file "$repo_root/completions/$COMMAND_NAME.fish" \
         "$fish_completion_file"
-    assert_installed_file "$repo_root/man/moguet.1" "$english_man_file"
-    assert_installed_file "$repo_root/man/ja/moguet.1" "$japanese_man_file"
+    assert_installed_file "$repo_root/man/$COMMAND_NAME.1" "$english_man_file"
+    assert_installed_file "$repo_root/man/ja/$COMMAND_NAME.1" "$japanese_man_file"
     assert_installed_file "$built_catalog_file" "$catalog_file"
 
     assert_installed_file "$repo_root/LICENSE" "$license_dir/LICENSE"
@@ -216,11 +243,11 @@ assert_package_artifacts_installed() {
         "$migration_dir/v1-to-v2.ja.md"
 
     assert_installed_text "$licensing_file" \
-        '/usr/share/licenses/moguet/LICENSE'
+        "/usr/share/licenses/$PACKAGE_NAME/LICENSE"
     assert_installed_text "$doc_dir/THIRD_PARTY_NOTICES.md" \
-        '/usr/share/licenses/moguet/tomlplusplus-MIT.txt'
+        "/usr/share/licenses/$PACKAGE_NAME/tomlplusplus-MIT.txt"
     assert_installed_text "$doc_dir/THIRD_PARTY_NOTICES.md" \
-        '/usr/share/doc/moguet/docs/LICENSING.md'
+        "/usr/share/doc/$PACKAGE_NAME/docs/LICENSING.md"
     assert_installed_markdown_links
     assert_no_symlinks
 }
@@ -258,30 +285,30 @@ run_make install
 assert_package_artifacts_installed
 assert_exact_payload
 assert_absent "$stage_dir/etc"
-assert_absent "$xdg_config_home/moguet"
-assert_absent "$xdg_state_home/moguet"
-assert_absent "$xdg_cache_home/moguet"
+assert_absent "$xdg_config_home/$XDG_IDENTITY"
+assert_absent "$xdg_state_home/$XDG_IDENTITY"
+assert_absent "$xdg_cache_home/$XDG_IDENTITY"
 version_output=$(LC_ALL=C HOME=$test_home \
     XDG_CONFIG_HOME=$xdg_config_home \
     XDG_STATE_HOME=$xdg_state_home \
     XDG_CACHE_HOME=$xdg_cache_home \
     "$binary_file" --version)
-[ "$version_output" = 'Moguet v2.2.0' ] ||
+[ "$version_output" = "$PROJECT_NAME v$current_version" ] ||
     fail "staged binary version mismatch: $version_output"
-assert_absent "$xdg_config_home/moguet"
-assert_absent "$xdg_state_home/moguet"
-assert_absent "$xdg_cache_home/moguet"
+assert_absent "$xdg_config_home/$XDG_IDENTITY"
+assert_absent "$xdg_state_home/$XDG_IDENTITY"
+assert_absent "$xdg_cache_home/$XDG_IDENTITY"
 
 # Reinstall refreshes only package-owned files and leaves foreign/user/legacy
 # data untouched. These sentinels also cover uninstall preservation.
 legacy_config=$stage_dir/etc/jpacker/jpacker.conf
 legacy_preference=$stage_dir/etc/jpacker/package.build/fastfetch
-foreign_system_file=$stage_dir/etc/moguet/foreign-admin-file
-user_config=$xdg_config_home/moguet/config.toml
-canonical_preference_dir=$xdg_config_home/moguet/source-build.d
+foreign_system_file=$stage_dir/etc/$XDG_IDENTITY/foreign-admin-file
+user_config=$xdg_config_home/$XDG_IDENTITY/config.toml
+canonical_preference_dir=$xdg_config_home/$XDG_IDENTITY/source-build.d
 canonical_preference=$canonical_preference_dir/fastfetch
-user_state=$xdg_state_home/moguet/moguet.log
-user_cache=$xdg_cache_home/moguet/cache-entry
+user_state=$xdg_state_home/$XDG_IDENTITY/$COMMAND_NAME.log
+user_cache=$xdg_cache_home/$XDG_IDENTITY/cache-entry
 foreign_doc=$doc_dir/foreign-file.keep
 foreign_license=$license_dir/foreign-file.keep
 foreign_completion=$(dirname "$bash_completion_file")/foreign-command
@@ -335,9 +362,9 @@ assert_file_text "$foreign_license" 'foreign license'
 assert_file_text "$foreign_completion" 'foreign completion'
 assert_file_text "$foreign_catalog" 'foreign catalog'
 assert_directory "$stage_dir/etc/jpacker/package.build"
-assert_directory "$xdg_config_home/moguet"
-assert_directory "$xdg_state_home/moguet"
-assert_directory "$xdg_cache_home/moguet"
+assert_directory "$xdg_config_home/$XDG_IDENTITY"
+assert_directory "$xdg_state_home/$XDG_IDENTITY"
+assert_directory "$xdg_cache_home/$XDG_IDENTITY"
 assert_no_symlinks
 
 # A final reinstall/uninstall cycle proves that retained foreign entries do not

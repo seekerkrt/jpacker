@@ -30,6 +30,52 @@
       "Version": "1.0-1",
       "Replaces": ["replace-legacy"]
     },
+    "planned-conflict-root": {
+      "Name": "planned-conflict-root",
+      "PackageBase": "planned-conflict-root",
+      "Version": "1.0-1",
+      "Depends": ["planned-conflict-target"],
+      "Conflicts": ["planned-conflict-target"]
+    },
+    "planned-conflict-target": {
+      "Name": "planned-conflict-target",
+      "PackageBase": "planned-conflict-target",
+      "Version": "1.0-1",
+      "Depends": []
+    },
+    "no-match-root": {
+      "Name": "no-match-root",
+      "PackageBase": "no-match-root",
+      "Version": "1.0-1",
+      "Conflicts": ["absent-relation-target"]
+    },
+    "unknown-relation-root": {
+      "Name": "unknown-relation-root",
+      "PackageBase": "unknown-relation-root",
+      "Version": "1.0-1",
+      "Conflicts": ["unknown-relation-target>=2"]
+    },
+    "foo-git": {
+      "Name": "foo-git",
+      "PackageBase": "foo-git",
+      "Version": "1.0-1",
+      "Provides": ["foo"],
+      "Conflicts": ["foo"]
+    },
+    "foo-git-with-target": {
+      "Name": "foo-git-with-target",
+      "PackageBase": "foo-git-with-target",
+      "Version": "1.0-1",
+      "Depends": ["foo"],
+      "Provides": ["foo"],
+      "Conflicts": ["foo"]
+    },
+    "foo": {
+      "Name": "foo",
+      "PackageBase": "foo",
+      "Version": "1.0-1",
+      "Depends": []
+    },
     "dependency-risk-root": {
       "Name": "dependency-risk-root",
       "PackageBase": "dependency-risk-root",

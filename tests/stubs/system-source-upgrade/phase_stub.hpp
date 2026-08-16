@@ -27,6 +27,8 @@ enum class EventKind {
     Progress,
     SystemCommand,
     RepositoryProviderTransaction,
+    SourcePreparation,
+    PackageBaseSourceExecution,
     SourceExecution,
 };
 
@@ -58,6 +60,22 @@ struct MetadataSessionScript {
 };
 
 struct SourceExecutionCall {
+    std::string package_name;
+    std::string package_base;
+    SourceBuildRequest request;
+    ConfigSnapshot config;
+};
+
+struct SourcePreparationCall {
+    std::string package_name;
+    std::string package_base;
+    SourceBuildRequest request;
+    SourceBuildUpdatePolicy update_policy =
+            SourceBuildUpdatePolicy::AlwaysBuild;
+    ConfigSnapshot config;
+};
+
+struct PackageBaseSourceExecutionCall {
     std::string package_name;
     std::string package_base;
     SourceBuildRequest request;
@@ -108,6 +126,32 @@ void enqueue_source_cleanup_failure(
         ArtifactInstallExecutionOutcome outcome,
         std::string diagnostic);
 void enqueue_source_unknown_failure();
+void enqueue_package_base_success(
+        std::string package_base,
+        std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
+        std::vector<ArtifactPackageIdentity> unselected_artifacts = {});
+void enqueue_package_base_cleanup_failure(
+        std::string package_base,
+        std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
+        std::vector<ArtifactPackageIdentity> unselected_artifacts,
+        std::string diagnostic);
+void enqueue_package_base_selection_failure(
+        PackageBaseArtifactIdentitySelectionFailure failure,
+        std::string diagnostic);
+void enqueue_package_base_mixed_reason_failure(
+        MixedPackageBaseInstallReasonUnsupported failure,
+        std::string diagnostic);
+void enqueue_package_base_phase_failure(
+        SeparatedPackageBaseSourceBuildFailurePhase phase,
+        std::string diagnostic);
+void enqueue_package_base_transaction_failure(
+        PackageBaseArtifactInstallTransactionFailureKind failure_kind,
+        std::string package_base,
+        std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts,
+        std::optional<int> exit_code,
+        std::string diagnostic);
+void enqueue_package_base_metadata_failure(
+        PackageMetadataFailure failure);
 
 void record_progress(const std::string& subject);
 
@@ -115,6 +159,9 @@ const std::vector<Event>& events();
 const std::vector<ConfigSnapshot>& supported_option_configs();
 const std::vector<ConfigSnapshot>& invocation_configs();
 const std::vector<SourceExecutionCall>& source_execution_calls();
+const std::vector<SourcePreparationCall>& source_preparation_calls();
+const std::vector<PackageBaseSourceExecutionCall>&
+package_base_source_execution_calls();
 const std::vector<std::string>& system_commands();
 
 void require_script_consumed();

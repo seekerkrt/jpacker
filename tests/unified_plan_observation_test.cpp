@@ -1,6 +1,7 @@
 #include "aur_update_execution_preflight.hpp"
 #include "source_install.hpp"
 #include "system_source_upgrade.hpp"
+#include "package_relation_assessment_fixture.hpp"
 #include "unified_plan_observation.hpp"
 #include "upgrade_all_operation.hpp"
 
@@ -539,22 +540,40 @@ void test_build_unit_and_required_artifact_identity() {
             "Local build unit lost source-root identity");
 
     const ResolvedSourceBuildIdentity remote_source{
-            "repository-child", "repository-base",
-            "repo:repository-base",
-            "https://example.invalid/repository-base.git",
-            SourceBuildSourceKind::Repository, true};
+            ResolvedRepositorySourceBuildIdentity{
+                    RepositoryPackagePresent{
+                            "extra", 0, "repository-child",
+                            "repository-base"}}};
     ProductionSourceBuildWorkItem remote_work;
-    remote_work.request.package_name = remote_source.requested_name;
-    remote_work.request.checkout_name = remote_source.package_base;
-    remote_work.request.git_url = remote_source.git_url;
+    remote_work.request.package_name = remote_source.requested_name();
+    remote_work.request.checkout_name = remote_source.package_base();
+    remote_work.request.git_url = remote_source.git_url();
     remote_work.required_targets.push_back(RequiredPackageArtifactTarget{
-            remote_source.package_base, remote_source.requested_name,
+            remote_source.package_base(), remote_source.requested_name(),
             DesiredInstallReason::Explicit});
+    remote_work.required_target_provenance =
+            RequiredTargetProvenance::RepositoryExactPackageProjection;
+    remote_work.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::PackageBaseSet;
+    remote_work.repository_identity = *remote_source.repository_identity();
+    remote_work.uses_system_update_baseline = true;
     const PreparedRemoteSourceBuildUnitReference inspected_remote_unit(
             std::cref(remote_source), std::cref(remote_work));
     expect(
             inspected_remote_unit.has_complete_identity(),
             "Prepared remote source build unit is incomplete");
+    remote_work.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::SingularCompatibility;
+    expect(
+            inspected_remote_unit.has_complete_identity(),
+            "Prepared remote source reference rejected supported singular sync work");
+    remote_work.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::Unspecified;
+    expect(
+            !inspected_remote_unit.has_complete_identity(),
+            "Prepared remote source reference accepted an unsupported lifecycle");
+    remote_work.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::PackageBaseSet;
 
     const RequiredPackageArtifactTarget root_target{
             "shared-suite", "same-name", DesiredInstallReason::Explicit};
@@ -638,6 +657,88 @@ void test_build_unit_and_required_artifact_identity() {
             "Artifact/build-unit mismatch was not rejected");
 }
 
+void test_prepared_system_source_lifecycle_matrix() {
+    const RepositoryPackagePresent exact{
+            "extra", 0, "registered-repository-child",
+            "registered-repository-base"};
+    RegisteredSourcePreferenceSnapshot repository_source;
+    repository_source.preference_package_name =
+            "registered-repository-child";
+    repository_source.canonical_source_identity_key =
+            "repository:registered-repository-base";
+    repository_source.resolved_package_base =
+            "registered-repository-base";
+    repository_source.source_kind = SourceBuildSourceKind::Repository;
+    repository_source.repository_identity =
+            ResolvedRepositorySourceBuildIdentity{exact};
+    repository_source.required_target_provenance =
+            RequiredTargetProvenance::RepositoryExactPackageProjection;
+    repository_source.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::PackageBaseSet;
+    const std::string repository_child = "registered-repository-child";
+    const std::string repository_base = "registered-repository-base";
+    const std::vector<RequiredPackageArtifactTarget> repository_targets{
+            RequiredPackageArtifactTarget{
+                    repository_base, repository_child,
+                    DesiredInstallReason::Explicit}};
+    const PreparedSystemSourceBuildUnitReference repository_set(
+            std::cref(repository_source), std::cref(repository_child),
+            std::cref(repository_base),
+            RequiredTargetProvenance::RepositoryExactPackageProjection,
+            ArtifactLifecycleIntent::PackageBaseSet, true,
+            std::cref(repository_targets));
+    expect(
+            repository_set.has_complete_identity(),
+            "Prepared registered repository Set identity is incomplete");
+
+    repository_source.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::SingularCompatibility;
+    const PreparedSystemSourceBuildUnitReference repository_singular(
+            std::cref(repository_source), std::cref(repository_child),
+            std::cref(repository_base),
+            RequiredTargetProvenance::RepositoryExactPackageProjection,
+            ArtifactLifecycleIntent::SingularCompatibility, true,
+            std::cref(repository_targets));
+    expect(
+            !repository_singular.has_complete_identity(),
+            "Prepared registered repository singular lifecycle was accepted");
+
+    RegisteredSourcePreferenceSnapshot aur_source;
+    aur_source.preference_package_name = "registered-aur";
+    aur_source.canonical_source_identity_key = "aur:registered-aur";
+    aur_source.resolved_package_base = "registered-aur";
+    aur_source.source_kind = SourceBuildSourceKind::Aur;
+    aur_source.required_target_provenance =
+            RequiredTargetProvenance::AurBuildPlanProjection;
+    aur_source.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::SingularCompatibility;
+    const std::string aur_name = "registered-aur";
+    const std::vector<RequiredPackageArtifactTarget> aur_targets{
+            RequiredPackageArtifactTarget{
+                    aur_name, aur_name, DesiredInstallReason::Explicit}};
+    const PreparedSystemSourceBuildUnitReference aur_singular(
+            std::cref(aur_source), std::cref(aur_name),
+            std::cref(aur_name),
+            RequiredTargetProvenance::AurBuildPlanProjection,
+            ArtifactLifecycleIntent::SingularCompatibility, false,
+            std::cref(aur_targets));
+    expect(
+            aur_singular.has_complete_identity(),
+            "Prepared registered AUR singular identity is incomplete");
+
+    aur_source.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::PackageBaseSet;
+    const PreparedSystemSourceBuildUnitReference aur_set(
+            std::cref(aur_source), std::cref(aur_name),
+            std::cref(aur_name),
+            RequiredTargetProvenance::AurBuildPlanProjection,
+            ArtifactLifecycleIntent::PackageBaseSet, false,
+            std::cref(aur_targets));
+    expect(
+            !aur_set.has_complete_identity(),
+            "Prepared registered AUR Set lifecycle was accepted");
+}
+
 void test_typed_blockers() {
     const BuildPlanDependencyEdge unknown =
             unknown_dependency_edge_fixture();
@@ -677,14 +778,16 @@ void test_typed_blockers() {
             ResolvedDependencyCandidate{RepositoryExactPackage{
                     ConfiguredRepositoryIdentity{"extra", 1},
                     "constraint-runtime",
+                    "constraint-runtime",
                     ObservedVersion::available(
                             ObservedVersionSource::RepositoryExactPackage,
                             "1"),
                     {}}},
             ConstraintEvaluation::unsatisfied()};
-    const BuildPlanMetadataRisk metadata_risk{
-            "risky-child", "risky-base", {"old-package"},
-            {"replacement"}};
+    const PlanDeclaredRelationReason relation_reason =
+            package_relation_assessment_fixture::
+                    confirmed_installed_conflict_reason(
+                            "risky-child", "risky-base", "old-package");
     const AurUpdateExecutionIssue route_preflight{
             AurUpdateExecutionReason::BuildPlanInconsistent,
             "route-package",
@@ -713,9 +816,7 @@ void test_typed_blockers() {
     blockers.push_back(ConstraintFailureUnifiedPlanBlocker{
             UnifiedPlanBorrowedAuthorityReference<BuildPlanDependencyEdge>(
                     constraint_edge)});
-    blockers.push_back(MetadataRiskUnifiedPlanBlocker{
-            UnifiedPlanBorrowedAuthorityReference<BuildPlanMetadataRisk>(
-                    metadata_risk)});
+    blockers.push_back(MetadataRiskUnifiedPlanBlocker{relation_reason});
     blockers.push_back(RoutePreflightUnifiedPlanBlocker{
             RoutePreflightUnifiedPlanBlockerDetail{
                     UnifiedPlanBorrowedAuthorityReference<
@@ -821,6 +922,7 @@ void test_transaction_intent_boundaries() {
     const UnifiedPlanRootReference root = repository_root(0, "root-package");
     const RepositoryExactPackage dependency{
             ConfiguredRepositoryIdentity{"extra", 1},
+            "exact-dependency",
             "exact-dependency",
             ObservedVersion::available(
                     ObservedVersionSource::RepositoryExactPackage, "3.0-1"),
@@ -1001,6 +1103,7 @@ int main() {
         test_source_aware_root_identity();
         test_dependency_authority_reference();
         test_build_unit_and_required_artifact_identity();
+        test_prepared_system_source_lifecycle_matrix();
         test_typed_blockers();
         test_transaction_intent_boundaries();
         test_phase_and_owner_vocabulary();

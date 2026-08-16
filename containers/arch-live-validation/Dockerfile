@@ -5,9 +5,9 @@ LABEL org.opencontainers.image.title="Moguet Arch live provider validation" \
       org.opencontainers.image.base.name="docker.io/library/archlinux:latest"
 
 # base-devel supplies the C++ toolchain, GNU Make, makepkg, gettext, and
-# pkgconf.  Rust toolchains are deliberately absent: cargo must remain an
-# unresolved virtual dependency whose current repository providers are
-# discovered from the real sync databases at runtime.
+# pkgconf.  The fixture's reviewed providers are deliberately absent so its
+# virtual dependency remains unresolved until production Moguet discovers the
+# current repository candidates at runtime.
 RUN pacman-key --init \
     && pacman-key --populate archlinux \
     && pacman -Syu --needed --noconfirm \
@@ -74,11 +74,14 @@ RUN install -d -o root -g root -m 0711 \
     && install -o root -g root -m 0555 \
         containers/arch-live-validation/pacman-sentinel.sh \
         /usr/bin/pacman \
+    && install -o root -g root -m 0444 \
+        containers/arch-live-validation/fixtures/local-package/contract.env \
+        /usr/libexec/moguet-live-validation/contract.env \
     && install -d -o root -g moguet-validation -m 0750 \
         /var/log/moguet-live-validation \
     && for case_name in \
-        sentinel-accept-rust \
-        sentinel-accept-rustup-noconfirm \
+        sentinel-accept-first-provider \
+        sentinel-accept-second-provider-noconfirm \
         sentinel-reject-pacman-u \
         sentinel-reject-remove \
         sentinel-reject-syu \
@@ -87,8 +90,8 @@ RUN install -d -o root -g root -m 0711 \
         sentinel-reject-option \
         sentinel-reject-unknown-target \
         provider-discovery \
-        rust-selection \
-        rustup-selection \
+        first-provider-selection \
+        second-provider-selection \
         invalid-retry \
         cancel-empty \
         cancel-q \

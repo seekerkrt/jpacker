@@ -13,6 +13,7 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -77,8 +78,8 @@ run_fail() {
     output_file=$1
     shift
     : > "$command_log"
-    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected command to fail: $*" >&2
+    if ! validation_expect_status pacman-routing-business-failure 1 \
+        "$output_file" "$output_file" "$test_binary" "$@" </dev/null; then
         exit 1
     fi
 }
@@ -107,6 +108,20 @@ assert_only_command() {
     assert_command "$expected"
     if [ "$(wc -l < "$command_log")" -ne 1 ]; then
         echo "unexpected additional command(s)" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_only_two_commands() {
+    first_expected=$1
+    second_expected=$2
+    first_actual=$(sed -n '1p' "$command_log")
+    second_actual=$(sed -n '2p' "$command_log")
+    if [ "$first_actual" != "$first_expected" ] || \
+       [ "$second_actual" != "$second_expected" ] || \
+       [ "$(wc -l < "$command_log")" -ne 2 ]; then
+        echo "unexpected command sequence" >&2
         cat "$command_log" >&2
         exit 1
     fi
@@ -178,7 +193,9 @@ done
 
 # custom upgradeとgeneric -Syuの既存routingを保ち、upgrade-aurはpacmanへ委譲しない。
 run_ok "$tmp_dir/custom-upgrade.out" upgrade
-assert_only_command "sudo pacman -Syu"
+assert_only_two_commands \
+    "pacman-conf --verbose RootDir DBPath" \
+    "sudo pacman -Syu"
 run_ok "$tmp_dir/generic-system-upgrade.out" -Syu
 assert_only_command "sudo pacman -Syu"
 run_fail "$tmp_dir/upgrade-aur-target.out" upgrade-aur unexpected-target

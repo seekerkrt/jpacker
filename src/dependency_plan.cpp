@@ -1,11 +1,13 @@
 #include "dependency_plan.hpp"
 
+#include "build_plan_relation_assessment.hpp"
 #include "dependency_plan_projection_support.hpp"
 #include "dependency_provider.hpp"
 #include "dependency_spec.hpp"
 #include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
+#include "package_relation_observation_adapter.hpp"
 #include "repository_query.hpp"
 
 #include <algorithm>
@@ -42,6 +44,7 @@ struct ProviderCandidateDiscovery {
     bool                            is_complete = true;
     std::optional<ObservedVersionUnknownReason> incomplete_reason =
             std::nullopt;
+    std::vector<RepositoryExactPackage> repository_observations;
 };
 
 class AurConstraintMetadataProjectionError : public std::runtime_error {
@@ -236,7 +239,8 @@ RepositoryPackageQueryStatus query_repository_package(
         if(is_repo_package(package_name)) {
             if(present_package != nullptr) {
                 *present_package = RepositoryPackagePresent{
-                        {}, 0, package_name, std::nullopt};
+                        {}, 0, package_name, {}, std::nullopt,
+                        std::nullopt, {}};
             }
             return RepositoryPackageQueryStatus::Present;
         }
@@ -307,8 +311,9 @@ RepositoryExactPackage repository_candidate(
                     present.repository_name, present.configured_order},
             present.package_name.empty() ? package_name
                                          : present.package_name,
+            present.package_base,
             observed_version,
-            {}};
+            present.provides};
 }
 
 AurResolvedDependencyCandidate aur_candidate(
@@ -367,6 +372,29 @@ ObservedVersion provider_observed_version(
     return ObservedVersion::unknown(
             source,
             ObservedVersionUnknownReason::CandidateVersionUnavailable);
+}
+
+const RepositoryExactPackage* repository_provider_observation(
+        const ProviderCandidateDiscovery& discovery,
+        const ProvidedDependency& provider) {
+    const auto* origin =
+            std::get_if<RepositoryProviderOrigin>(&provider.origin);
+    if(origin == nullptr || !origin->configured_order.has_value()) {
+        return nullptr;
+    }
+    const auto matching = std::find_if(
+            discovery.repository_observations.begin(),
+            discovery.repository_observations.end(),
+            [&provider, origin](const RepositoryExactPackage& package) {
+                return package.package_name == provider.package_name &&
+                       package.repository.repository_name ==
+                               origin->repository_name &&
+                       package.repository.configured_order ==
+                               origin->configured_order.value();
+            });
+    return matching == discovery.repository_observations.end()
+            ? nullptr
+            : &(*matching);
 }
 
 ProviderCandidateDiscovery find_aur_providers(
@@ -483,7 +511,8 @@ ProviderCandidateDiscovery find_dependency_providers(
                 dependency_name, failure->diagnostic);
         return ProviderCandidateDiscovery{
                 {}, false,
-                ObservedVersionUnknownReason::MetadataQueryFailure};
+                ObservedVersionUnknownReason::MetadataQueryFailure,
+                {}};
     }
     RepositoryProviderQuerySnapshot repository =
             std::get<RepositoryProviderQuerySnapshot>(std::move(result));
@@ -499,13 +528,15 @@ ProviderCandidateDiscovery find_dependency_providers(
         }
         return ProviderCandidateDiscovery{
                 std::move(repository.candidates), false,
-                ObservedVersionUnknownReason::PartialSourceFailure};
+                ObservedVersionUnknownReason::PartialSourceFailure,
+                std::move(repository.observed_packages)};
     }
 
     // POLICY: pacman-first。official repo provider が見つかる場合は AUR provider を混ぜない。
     if(!repository.candidates.empty()) {
         return ProviderCandidateDiscovery{
-                std::move(repository.candidates), true, std::nullopt};
+                std::move(repository.candidates), true, std::nullopt,
+                std::move(repository.observed_packages)};
     }
     return find_aur_providers(
             dependency_name, failure_context,
@@ -1035,6 +1066,57 @@ void add_planned_package_target(
             plan, info.Name, package_base_name(info), roles, root);
 }
 
+PackageRelationRootAttribution relation_root_attribution(
+        const RootTargetIdentity& root) {
+    return PackageRelationRootAttribution{
+            root.invocation_index, root.requested_name};
+}
+
+void add_planned_relation_observation(
+        BuildPlan& plan,
+        PlannedPackageRelationObservation observation,
+        const RootTargetIdentity& root) {
+    if(observation.package.role !=
+       PackageRelationObservationRole::PlannedTarget) {
+        throw std::logic_error(
+                "BuildPlan relation observation is not a planned target.");
+    }
+    add_package_relation_root_attribution(
+            observation.package, relation_root_attribution(root));
+
+    const auto same_identity = [&observation](
+                                       const PlannedPackageRelationObservation&
+                                               existing) {
+        return existing.package.package_name ==
+                       observation.package.package_name &&
+               existing.package.source == observation.package.source;
+    };
+    auto existing = std::find_if(
+            plan.planned_relation_observations.begin(),
+            plan.planned_relation_observations.end(), same_identity);
+    if(existing == plan.planned_relation_observations.end()) {
+        plan.planned_relation_observations.push_back(std::move(observation));
+        return;
+    }
+    // POLICY(#353): Existing BuildPlan metadata uses the first package
+    // snapshot as its invocation authority. Observation collection must not
+    // add a new metadata-change guard before Slice 4 assessment.
+    for(auto& observed_root : observation.package.roots) {
+        add_package_relation_root_attribution(
+                existing->package, std::move(observed_root));
+    }
+}
+
+void add_relation_root_to_package(
+        BuildPlan& plan, const std::string& package_name,
+        const RootTargetIdentity& root) {
+    for(auto& observation : plan.planned_relation_observations) {
+        if(observation.package.package_name != package_name) continue;
+        add_package_relation_root_attribution(
+                observation.package, relation_root_attribution(root));
+    }
+}
+
 std::vector<TypedPackageDependency> typed_dependencies_for_specification(
         const std::vector<TypedPackageDependency>& dependencies,
         const std::string& specification) {
@@ -1090,9 +1172,17 @@ void propagate_root_identities(BuildPlan& plan) {
             PlannedPackageTarget* target = find_package_target(plan, package_name);
             if(target == nullptr) continue;
             add_root_identity(target->roots, root);
+            add_relation_root_to_package(plan, package_name, root);
 
             for(const auto& edge : plan.dependency_edges) {
                 if(edge.parent_package_name != package_name) continue;
+                if(edge.resolved_package_name.has_value()) {
+                    add_relation_root_to_package(
+                            plan, edge.resolved_package_name.value(), root);
+                } else if(edge.resolved_provider.has_value()) {
+                    add_relation_root_to_package(
+                            plan, edge.resolved_provider->package_name, root);
+                }
                 std::optional<std::string> dependency_name = resolved_aur_dependency_name(edge);
                 if(!dependency_name.has_value() ||
                    find_package_target(plan, dependency_name.value()) == nullptr) {
@@ -1549,6 +1639,11 @@ void resolve_build_plan_dependency(
         }
         RepositoryExactPackage candidate = repository_candidate(
                 present_repository_package.value(), dep_name);
+        add_planned_relation_observation(
+                plan,
+                project_repository_planned_relation_observation(
+                        candidate, {}),
+                root);
         edge.kind = DependencyKind::Repo;
         edge.resolved_package_name = candidate.package_name;
         edge.resolved_candidate = candidate;
@@ -1776,6 +1871,16 @@ void resolve_build_plan_dependency(
         edge.resolved_candidate = ProviderResolvedDependencyCandidate{
                 provider, provider_observed_version(provider)};
         edge.constraint_evaluation = provider_evaluation;
+        if(const RepositoryExactPackage* repository_observation =
+                   repository_provider_observation(
+                           provider_discovery, provider);
+           repository_observation != nullptr) {
+            add_planned_relation_observation(
+                    plan,
+                    project_repository_planned_relation_observation(
+                            *repository_observation, {}),
+                    root);
+        }
         add_build_plan_provided_dependency(
                 plan, dependency, provider, provider_resolution);
         add_build_plan_dependency_edges(plan, edge, matching_dependencies);
@@ -1928,6 +2033,11 @@ void collect_aur_build_plan(
     add_build_plan_metadata_risk(plan, info.value());
     // POLICY(#218/#268): role/rootとPackageBase child identityはpackage visitedより先にmergeする。
     add_planned_package_target(plan, info.value(), roles, root);
+    add_planned_relation_observation(
+            plan,
+            project_aur_relation_observation(
+                    info->constraint_metadata.value(), {}),
+            root);
     add_build_plan_entry(plan, info.value());
 
     std::string build_unit = package_base_name(info.value());
@@ -2214,7 +2324,10 @@ BuildPlan resolve_build_plan_with_interaction(
                                       const ProviderSelectionCallback& selector) {
         return resolve_build_plan_once(targets, resolution_mode, selector);
     };
-    return resolve_with_provider_interaction(resolve_once, select_provider);
+    BuildPlan plan =
+            resolve_with_provider_interaction(resolve_once, select_provider);
+    finalize_build_plan_relation_assessments(plan);
+    return plan;
 }
 
 BuildPlan resolve_fetch_plan_once(
@@ -2271,7 +2384,10 @@ BuildPlan resolve_fetch_plan_with_interaction(
                                       const ProviderSelectionCallback& selector) {
         return resolve_fetch_plan_once(targets, selector);
     };
-    return resolve_with_provider_interaction(resolve_once, select_provider);
+    BuildPlan plan =
+            resolve_with_provider_interaction(resolve_once, select_provider);
+    finalize_build_plan_relation_assessments(plan);
+    return plan;
 }
 
 } // namespace

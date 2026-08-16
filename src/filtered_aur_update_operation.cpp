@@ -87,7 +87,8 @@ bool same_preflight_issue(
            lhs.dependency_specification == rhs.dependency_specification &&
            lhs.diagnostic == rhs.diagnostic &&
            lhs.build_plan_projection_issue ==
-                   rhs.build_plan_projection_issue;
+                   rhs.build_plan_projection_issue &&
+           lhs.relation_reason == rhs.relation_reason;
 }
 
 bool same_preflight_target(

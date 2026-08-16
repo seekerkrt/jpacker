@@ -4,6 +4,7 @@
 #include "dependency_spec.hpp"
 #include "localization.hpp"
 #include "package_identifier.hpp"
+#include "package_relation_presentation.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -42,7 +43,8 @@ bool same_issue(
            lhs.dependency_specification == rhs.dependency_specification &&
            lhs.diagnostic == rhs.diagnostic &&
            lhs.build_plan_projection_issue ==
-                   rhs.build_plan_projection_issue;
+                   rhs.build_plan_projection_issue &&
+           lhs.relation_reason == rhs.relation_reason;
 }
 
 void add_issue(
@@ -1089,15 +1091,35 @@ void inspect_unresolved_cycles_and_risks(
         }
     }
 
-    for(const auto& risk : plan.metadata_risks) {
+    const PlanStateProjection state = project_build_plan_state(plan);
+    const ExecutionReadiness& install_readiness = execution_readiness(
+            state, ExecutionCapability::Install);
+    for(const auto& readiness_reason : install_readiness.reasons) {
+        const auto* relation = std::get_if<PlanDeclaredRelationReason>(
+                &readiness_reason.reason);
+        if(relation == nullptr ||
+           !readiness_reason.blocks_production_guard) {
+            continue;
+        }
+        AurUpdateExecutionIssue issue = make_localized_execution_issue(
+                AurUpdateExecutionReason::ConflictsOrReplacesUnresolved,
+                package_relation_assessment_diagnostic_display(
+                        relation->assessment),
+                relation->assessment.declaring_package.package_name,
+                relation->assessment.declaring_package.package_base,
+                std::nullopt);
+        issue.relation_reason = *relation;
+
+        std::vector<RootTargetIdentity> roots;
+        for(const auto& root :
+            relation->assessment.declaring_package.roots) {
+            add_root_identity(
+                    roots,
+                    RootTargetIdentity{
+                            root.invocation_index, root.requested_name});
+        }
         add_attributed_issue(
-                issues,
-                make_localized_execution_issue(
-                        AurUpdateExecutionReason::ConflictsOrReplacesUnresolved,
-                        "Package declares conflicts or replaces metadata that requires policy.",
-                        risk.package_name, risk.package_base),
-                roots_for_package(
-                        plan, risk.package_name, risk.package_base));
+                issues, std::move(issue), std::move(roots));
     }
 
 }

@@ -62,6 +62,23 @@ std::vector<ProvidedDependency> repository_providers(
         return {provider(
                 "aur", "case14-provider", "case14-virtual=1", "1.0-1")};
     }
+    if(dependency_name == "case23-virtual") {
+        ProviderCapability capability(
+                "case23-virtual=6", "case23-virtual",
+                std::optional<std::string>{"6"});
+        return {ProvidedDependency::from_repository_constraint_metadata(
+                "extra", 1, "case23-provider",
+                ProviderConstraintMetadata{
+                        capability,
+                        ObservedVersion::available(
+                                ObservedVersionSource::
+                                        RepositoryExactPackage,
+                                "5.0-1"),
+                        ObservedVersion::available(
+                                ObservedVersionSource::
+                                        RepositoryProviderCapability,
+                                "6")})};
+    }
     if(dependency_name == "conflict-virtual") {
         return {
                 provider(
@@ -145,10 +162,12 @@ StrictRepositoryPackageQueryResult query_repository_package_strict(
     }
     if(package_name == "case6-repo-lib") {
         return RepositoryPackagePresent{
-                "core", 0, package_name,
+                "core", 0, package_name, package_name,
                 ObservedVersion::available(
                         ObservedVersionSource::RepositoryExactPackage,
-                        "1.0-1")};
+                        "1.0-1"),
+                std::nullopt,
+                {}};
     }
     return RepositoryPackageNotFound{};
 }
@@ -186,6 +205,29 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
                 std::optional<std::string>{"core"},
                 "strict repository provider metadata failure"};
     }
+    if(dependency_name == "case23-virtual") {
+        ProviderCapability capability(
+                "case23-virtual=6", "case23-virtual",
+                std::optional<std::string>{"6"});
+        return RepositoryProviderQuerySnapshot{
+                repository_providers(dependency_name),
+                {},
+                std::vector<std::string>{"core", "extra"},
+                {RepositoryExactPackage{
+                        ConfiguredRepositoryIdentity{"extra", 1},
+                        "case23-provider",
+                        "case23-provider-base",
+                        ObservedVersion::available(
+                                ObservedVersionSource::
+                                        RepositoryExactPackage,
+                                "5.0-1"),
+                        {RepositoryProviderCapability{
+                                capability,
+                                ObservedVersion::available(
+                                        ObservedVersionSource::
+                                                RepositoryProviderCapability,
+                                        "6")}}}}};
+    }
     if(dependency_name ==
        "preflight-repository-partial-provider-virtual") {
         return RepositoryProviderQuerySnapshot{
@@ -208,7 +250,9 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
                         RepositoryMetadataFailureKind::
                                 SyncDatabaseUnavailable,
                         std::optional<std::string>{"extra"},
-                        "partial repository provider metadata failure"}}};
+                        "partial repository provider metadata failure"}},
+                std::nullopt,
+                {}};
     }
     if(dependency_name == "target-metadata-change-virtual") {
         const bool changed = g_target_metadata_provider_queries++ > 0;
@@ -249,6 +293,8 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
                                                         RepositoryProviderCapability,
                                                 "4")}),
                 },
+                {},
+                std::nullopt,
                 {}};
     }
     if(dependency_name == "selected-source-change-virtual" &&
@@ -269,8 +315,10 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
                                         ObservedVersionSource::
                                                 RepositoryProviderCapability,
                                         "1")})},
+                {},
+                std::nullopt,
                 {}};
     }
     return RepositoryProviderQuerySnapshot{
-            repository_providers(dependency_name), {}};
+            repository_providers(dependency_name), {}, std::nullopt, {}};
 }

@@ -1,4 +1,4 @@
-.TH MOGUET 1 "August 2026" "Moguet 2.2.0" "User Commands"
+.TH MOGUET 1 "August 2026" "Moguet 2.3.0" "User Commands"
 .\" parity:name
 .SH NAME
 moguet \- pacman-first AUR helper with verified source builds
@@ -11,7 +11,7 @@ moguet \- pacman-first AUR helper with verified source builds
 .RI [ targets... ]
 .
 .B moguet
-.B -S --select
+.B -S --select [--needed]
 .I query
 .
 .B moguet
@@ -67,6 +67,19 @@ When a target enters an AUR or source-build route, an option whose meaning
 cannot be preserved is rejected before external mutation instead of being
 silently ignored.
 Command and option tokens are locale-independent.
+Closed Moguet grammar accepts only environment assignments after the one
+primary remote or local build operand. It rejects an extra bare build operand,
+and rejects target operands for
+.BR upgrade ,
+.BR upgrade-aur ,
+.BR upgrade-all ,
+.BR clean ,
+and
+.BR list-src .
+.BR deps ,
+.BR plan ,
+.BR fetch ,
+and source-maintenance forms marked with an ellipsis remain multi-target.
 .
 .\" parity:commands
 .SH COMMANDS
@@ -150,8 +163,8 @@ PKGBUILD, retrieve dependencies, build, or install.
 Global and pacman options are unsupported.
 .
 .TP
-.B "deps [--recursive] <pkg>"
-Classify AUR runtime, make, and check dependencies.
+.B "deps [--recursive] <pkg>..."
+Classify AUR runtime, make, and check dependencies for one or more packages.
 With
 .BR --recursive ,
 traverse exact AUR dependencies and user-selected AUR providers.
@@ -165,25 +178,42 @@ the output distinguishes user-selected providers from unresolved ambiguity.
 Constraint results and reasons are displayed. Unsatisfied or unknown results
 warn but do not stop this read-only command; invalid or conflicting input
 fails closed.
+Conflict and replacement declarations are shown with their current typed
+assessment, including the declaring package and any matched installed or
+planned package. This read-only command does not perform replacement or
+conflict resolution.
 This command does not clone, build, install, or calculate a build order.
 .
 .TP
-.B "plan <pkg>"
-Display an AUR build-order plan and direct official repository package sizes.
-Unknown dependencies, unselected ambiguous providers, cycles, and conflicts/replacements
-that Moguet cannot resolve make the plan incomplete.
+.B "plan <pkg>..."
+Display AUR build-order plans and direct official repository package sizes for
+one or more packages.
+Unknown dependencies, unselected ambiguous providers, and cycles make the
+plan incomplete.
 The plan distinguishes uniquely resolved, user-selected, and still-ambiguous
 providers.
 Metadata-size unavailability does not suppress the plan body.
 Unsatisfied or unknown dependency constraints make the plan incomplete and
 are shown with their result and reason. Invalid or conflicting constraints
 fail plan construction.
+The plan also distinguishes installed conflicts, planned-target conflicts,
+potential replacement impacts, unavailable or not-yet-completed judgments,
+invalid metadata or observations, and a complete observation with no matching
+current or planned target.
+Confirmed installed or planned conflicts and potential replacement impacts can
+leave plan completeness Complete while build and install require review and
+remain blocked by the safety guard; Moguet does not resolve them automatically.
+An unavailable or not-yet-completed relation judgment leaves completeness
+Unknown and fails closed. Invalid relation metadata or observation makes
+completeness Incomplete and blocks build and install.
+A complete observation with no matching current or planned target adds no
+relation blocker. These results do not add a separate command status taxonomy.
 This command does not clone, build, or install.
 .
 .TP
-.B "fetch <pkg>"
-Retrieve the AUR PackageBase repositories needed by a complete inspection
-plan.
+.B "fetch <pkg>..."
+Retrieve the AUR PackageBase repositories needed by complete inspection plans
+for one or more packages.
 A selected AUR provider's PackageBase is included; a selected official
 repository provider is not cloned.
 Unsatisfied or unknown dependency constraints stop before clone or fetch.
@@ -194,15 +224,17 @@ Moguet does not pull, merge, reset, advance the working tree, build, or
 install.
 .
 .TP
-.B "add-src <pkg> [V=K]"
-Register a source-build preference and optional build environment assignments
-for one package.
+.B "add-src <item>..."
+Register one or more source-build preferences from ordered items.
+A package item starts a preference and following
+.I V=K
+items belong to that package until the next package item.
 The v2 configuration file is not a source-preference table.
 The first write creates the managed XDG directories when necessary.
 .
 .TP
-.B "edit-src <pkg>"
-Edit an existing source-build preference, or create a new one, using
+.B "edit-src <pkg>..."
+Edit one or more existing source-build preferences, or create them, using
 .B VISUAL
 or
 .BR EDITOR .
@@ -216,20 +248,21 @@ assignments.
 The complete directory snapshot is validated before any entry is printed.
 .
 .TP
-.B "del-src <pkg>"
-Remove one source-build preference without reinstalling the binary package.
-A missing entry succeeds without creating preference directories.
+.B "del-src <pkg>..."
+Remove one or more source-build preferences without reinstalling binary
+packages. A missing entry succeeds without creating preference directories.
 .
 .TP
-.B "revert <pkg>"
-Remove one source-build preference and reinstall the official binary package
-when the target exists in configured official repositories.
+.B "revert <pkg>..."
+Remove one or more source-build preferences and reinstall the corresponding
+official binary packages when the targets exist in configured official
+repositories.
 A missing preference does not create directories and does not suppress the
 repository reinstall.
 Review the displayed pacman transaction before confirming it.
 .
 .TP
-.B "-S <pkg>"
+.B "-S <pkg> | -S --select [--needed] <query>"
 Install packages.
 Auto routing uses official repositories first, honors an applicable source
 preference, and otherwise considers AUR.
@@ -242,6 +275,9 @@ With
 the single operand is a search query rather than an exact package target;
 Moguet displays source-aware official-repository and AUR candidates and
 requires an explicit interactive selection.
+On this route,
+.B --needed
+applies only to each route-owned final installation.
 .
 .TP
 .B "-Syu"
@@ -266,6 +302,9 @@ Show package information.
 Auto mode prefers official repository information and falls back to exact AUR
 metadata when the package is absent.
 Source selectors restrict the lookup to their named source.
+For AUR metadata, declared conflicts and replacements are shown as metadata;
+the installed/planned assessment is explicitly deferred to planning and build
+preflight.
 .
 .TP
 .B "-Qua"
@@ -273,6 +312,9 @@ Ask pacman for foreign-package updates, including installed packages that may
 have AUR updates.
 This remains a pacman-compatible query and is distinct from executing
 .BR upgrade-aur .
+The pacman-compatible forms above are examples of delegated open grammar, not
+a closed allowlist. Arguments that Moguet does not consume remain owned by
+pacman when the selected route can preserve their meaning.
 .\" PUBLIC COMMANDS END
 .
 .\" parity:options
@@ -631,6 +673,17 @@ It does not use
 to cross such a guard.
 .
 .PP
+Before build or install, Moguet assesses declared conflicts and replacements
+against installed and planned packages, including provided components and
+versioned relations. Diagnostics distinguish installed conflicts from planned
+target conflicts. A matching replacement is only a potential impact requiring
+review; Moguet does not remove, replace, or resolve packages automatically.
+Unavailable or invalid judgments fail closed and are not reported as absence.
+Only a complete observation with no matching current or planned package or
+provided component releases that relation guard. The declaration remains, and
+pacman/libalpm remains the transaction authority.
+.
+.PP
 When multiple dependency providers remain, an interactive TTY displays
 source-aware numbered candidates and requires exactly one selection, with no
 default. Empty input, q, quit, cancel, or EOF cancels; invalid or out-of-range
@@ -673,11 +726,29 @@ selected AUR roots to enter the existing source-build lifecycle. A later AUR
 failure does not roll back the completed repository transaction.
 .
 .PP
-The registered-source phase offers provider selection only when every
-candidate is from an official repository. A candidate set containing an AUR
-provider remains ambiguous and fails closed before system or source execution,
-because the singular source lifecycle cannot schedule that provider's
-PackageBase.
+The registered AUR route offers provider selection only when every candidate
+is from an official repository. A candidate set containing an AUR provider
+remains ambiguous and fails closed before system or source execution, because
+this singular compatibility route cannot schedule that provider's PackageBase.
+.
+.PP
+Official-repository source identity comes from the exact configured libalpm
+snapshot. Only a confirmed
+.B NotFound
+may fall back to AUR; query, configuration, or metadata failure stops instead
+of being treated as absence. Standalone official builds use
+.BR PackageBaseSet ;
+registered official sources use it after
+.B OnlyIfUpdated
+preparation. They build the authoritative PackageBase once, install only the
+requested explicit child, and report sibling and debug outputs as unselected
+and not installed. The sync repository route remains
+.B SingularCompatibility
+with its existing
+.B --needed
+behavior, and registered AUR remains
+.B SingularCompatibility
+with its existing provider and split-package guards.
 .
 .PP
 .B deps

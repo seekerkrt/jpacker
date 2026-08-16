@@ -70,6 +70,10 @@ struct LocalPackageState {
     alpm_pkgreason_t reason = ALPM_PKG_REASON_EXPLICIT;
     bool              name_is_null = false;
     bool              version_is_null = false;
+    std::vector<package_metadata_test_stub::RepositoryProvidedPackageMetadata>
+            provides;
+    std::vector<alpm_depend_t> provide_dependencies;
+    std::vector<alpm_list_t>   provide_nodes;
 };
 
 struct LocalPackageQueryExpectation {
@@ -88,6 +92,8 @@ struct RepositoryPackageState {
     PackageLookupMode lookup_mode = PackageLookupMode::Absent;
     alpm_errno_t      query_error = ALPM_ERR_DB_OPEN;
     std::string       returned_name;
+    std::string       package_base;
+    bool              package_base_is_null = false;
     std::string       version;
     bool              version_is_null = false;
     std::string       description;
@@ -440,7 +446,10 @@ void configure_foreign_inventory_from_environment() {
                 std::move(package_version),
                 reason,
                 false,
-                false});
+                false,
+                {},
+                {},
+                {}});
     }
 
     if(state_file.bad()) {
@@ -518,22 +527,40 @@ void configure_repository_package_from_environment(
     }
 
     package_state.lookup_mode = PackageLookupMode::Absent;
-    std::string fixture_repository;
-    std::string fixture_package;
-    off_t       package_size = 0;
-    off_t       installed_size = 0;
-    while(state_file >> fixture_repository >> fixture_package >> package_size >> installed_size) {
+    std::string line;
+    while(std::getline(state_file, line)) {
+        if(line.empty()) continue;
+
+        std::istringstream fields(line);
+        std::string fixture_repository;
+        std::string fixture_package;
+        off_t       package_size = 0;
+        off_t       installed_size = 0;
+        std::string fixture_package_base;
+        std::string unexpected_field;
+        if(!(fields >> fixture_repository >> fixture_package >> package_size >>
+             installed_size) ||
+           ((fields >> fixture_package_base) &&
+            (fields >> unexpected_field))) {
+            package_state.lookup_mode = PackageLookupMode::Failure;
+            package_state.query_error = ALPM_ERR_DB_OPEN;
+            return;
+        }
         if(fixture_repository != repository_name || fixture_package != package_name) continue;
 
         package_state.lookup_mode = PackageLookupMode::Present;
         package_state.returned_name = fixture_package;
+        package_state.package_base = fixture_package_base.empty()
+                ? fixture_package
+                : fixture_package_base;
+        package_state.package_base_is_null = false;
         package_state.package_size = package_size;
         package_state.installed_size = installed_size;
         package_state.name_is_null = false;
         return;
     }
 
-    if(!state_file.eof()) {
+    if(state_file.bad()) {
         package_state.lookup_mode = PackageLookupMode::Failure;
         package_state.query_error = ALPM_ERR_DB_OPEN;
     }
@@ -563,6 +590,38 @@ RepositoryPackageState& repository_package_state(
 }
 
 void rebuild_repository_provides(RepositoryPackageState& package_state) {
+    package_state.provide_dependencies.clear();
+    package_state.provide_dependencies.reserve(package_state.provides.size());
+    for(auto& provided : package_state.provides) {
+        package_state.provide_dependencies.push_back(alpm_depend_t{
+                provided.package_name.has_value()
+                        ? provided.package_name->data()
+                        : nullptr,
+                provided.version.has_value()
+                        ? provided.version->data()
+                        : nullptr,
+                nullptr,
+                0,
+                provided.relation});
+    }
+
+    package_state.provide_nodes.resize(
+            package_state.provide_dependencies.size());
+    for(std::size_t index = 0;
+        index < package_state.provide_nodes.size();
+        ++index) {
+        package_state.provide_nodes[index] = alpm_list_t{
+                &package_state.provide_dependencies[index],
+                index == 0
+                        ? nullptr
+                        : &package_state.provide_nodes[index - 1],
+                index + 1 == package_state.provide_nodes.size()
+                        ? nullptr
+                        : &package_state.provide_nodes[index + 1]};
+    }
+}
+
+void rebuild_local_provides(LocalPackageState& package_state) {
     package_state.provide_dependencies.clear();
     package_state.provide_dependencies.reserve(package_state.provides.size());
     for(auto& provided : package_state.provides) {
@@ -723,7 +782,10 @@ void enqueue_local_package_query_present(
                             std::move(version),
                             reason,
                             false,
-                            false},
+                            false,
+                            {},
+                            {},
+                            {}},
                     ALPM_ERR_OK});
     g_state.local_package_query_strict_mode = true;
 }
@@ -772,8 +834,21 @@ void set_local_packages(const std::vector<LocalPackageMetadata>& packages) {
                 package.version,
                 package.reason,
                 false,
-                false});
+                false,
+                package.provides,
+                {},
+                {}});
+        rebuild_local_provides(g_state.local_packages.back());
     }
+}
+
+void set_local_package_provides(
+        std::size_t package_index,
+        const std::vector<RepositoryProvidedPackageMetadata>& provides) {
+    if(package_index >= g_state.local_packages.size()) return;
+    LocalPackageState& package = g_state.local_packages[package_index];
+    package.provides = provides;
+    rebuild_local_provides(package);
 }
 
 void set_local_package_cache_entry_null(std::size_t package_index) {
@@ -900,6 +975,7 @@ void set_repository_package_metadata(
     package_state = RepositoryPackageState{};
     package_state.lookup_mode = PackageLookupMode::Present;
     package_state.returned_name = package_name;
+    package_state.package_base = package_name;
     package_state.package_size = package_size;
     package_state.installed_size = installed_size;
 }
@@ -921,6 +997,25 @@ void set_repository_package_version_null(
             repository_package_state(repository_name, package_name);
     package_state.version.clear();
     package_state.version_is_null = true;
+}
+
+void set_repository_package_base(
+        const std::string& repository_name,
+        const std::string& package_name,
+        const std::string& package_base) {
+    RepositoryPackageState& package_state =
+            repository_package_state(repository_name, package_name);
+    package_state.package_base = package_base;
+    package_state.package_base_is_null = false;
+}
+
+void set_repository_package_base_null(
+        const std::string& repository_name,
+        const std::string& package_name) {
+    RepositoryPackageState& package_state =
+            repository_package_state(repository_name, package_name);
+    package_state.package_base.clear();
+    package_state.package_base_is_null = true;
 }
 
 void set_repository_package_provides(
@@ -1636,7 +1731,22 @@ const char* alpm_pkg_get_version(alpm_pkg_t* package) {
     return package_state->version.c_str();
 }
 
+const char* alpm_pkg_get_base(alpm_pkg_t* package) {
+    RepositoryPackageState* package_state = repository_package_state(package);
+    if(package_state == nullptr || package_state->package_base_is_null) {
+        return nullptr;
+    }
+    return package_state->package_base.c_str();
+}
+
 alpm_list_t* alpm_pkg_get_provides(alpm_pkg_t* package) {
+    if(package != nullptr && package->kind == AlpmStubDatabaseKind::Local) {
+        LocalPackageState* package_state = local_package_state(package);
+        if(package_state == nullptr || package_state->provide_nodes.empty()) {
+            return nullptr;
+        }
+        return package_state->provide_nodes.data();
+    }
     RepositoryPackageState* package_state = repository_package_state(package);
     if(package_state == nullptr || package_state->provide_nodes.empty()) {
         return nullptr;

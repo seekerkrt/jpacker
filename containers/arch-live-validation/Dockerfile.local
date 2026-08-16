@@ -4,9 +4,13 @@ LABEL org.opencontainers.image.title="Moguet Arch live local PKGBUILD validation
       org.opencontainers.image.source="https://github.com/seekerkrt/moguet" \
       org.opencontainers.image.base.name="docker.io/library/archlinux:latest"
 
-# This is a standalone image. cargo intentionally remains absent so the
-# tracked local fixture exercises a selected provider before local build/install.
-RUN pacman-key --init \
+COPY containers/arch-live-validation/fixtures/local-package/contract.env \
+     /tmp/moguet-live-local-contract.env
+
+# This is a standalone image. Reviewed providers intentionally remain absent
+# so the tracked local fixture exercises selection before local build/install.
+RUN . /tmp/moguet-live-local-contract.env \
+    && pacman-key --init \
     && pacman-key --populate archlinux \
     && pacman -Syu --needed --noconfirm \
         base-devel \
@@ -21,9 +25,24 @@ RUN pacman-key --init \
         tomlplusplus \
         util-linux \
         zstd \
-    && ! pacman -Qq rust \
-    && ! pacman -Qq rustup \
-    && ! pacman -Qq moguet-live-fixture \
+    && saved_ifs=$IFS \
+    && IFS=, \
+    && for provider_package in $EXPECTED_PROVIDER_PACKAGES; do \
+        if pacman -Qq "$provider_package"; then \
+            exit 1; \
+        else \
+            query_status=$?; \
+            test "$query_status" -eq 1 || exit "$query_status"; \
+        fi; \
+    done \
+    && IFS=$saved_ifs \
+    && if pacman -Qq "$PACKAGE_NAME"; then \
+        exit 1; \
+    else \
+        query_status=$?; \
+        test "$query_status" -eq 1 || exit "$query_status"; \
+    fi \
+    && rm -f -- /tmp/moguet-live-local-contract.env \
     && rm -f /var/cache/pacman/pkg/*
 
 ARG VALIDATION_UID=1000
@@ -66,6 +85,8 @@ RUN install -d -o root -g root -m 0755 \
     && install -o root -g root -m 0444 \
         containers/arch-live-validation/fixtures/local-package/PKGBUILD \
         containers/arch-live-validation/fixtures/local-package/contract.env \
+        containers/arch-live-validation/fixtures/local-package/expected.srcinfo \
+        containers/arch-live-validation/fixtures/local-package/payload-authority.tsv \
         /usr/libexec/moguet-live-local/fixtures/local-package/
 
 USER moguet-validation:moguet-validation
@@ -75,8 +96,8 @@ RUN env -u MAKEFLAGS -u MFLAGS make clean \
 
 USER root:root
 
-# Only this local-validation gateway can reach the real pacman. It accepts
-# one selected cargo provider and one staged local fixture artifact.
+# Only this local-validation gateway can reach the real pacman. It accepts one
+# selected reviewed provider and one staged local fixture artifact.
 RUN install -d -o root -g root -m 0755 \
         /usr/libexec/moguet-live-local \
     && install -o root -g root -m 0755 \
@@ -85,6 +106,12 @@ RUN install -d -o root -g root -m 0755 \
     && install -o root -g root -m 0755 \
         containers/arch-live-validation/local-stage-artifact.py \
         /usr/libexec/moguet-live-local/local-stage-artifact.py \
+    && install -o root -g root -m 0755 \
+        scripts/validation-status.sh \
+        /usr/libexec/moguet-live-local/validation-status.sh \
+    && install -o root -g root -m 0755 \
+        containers/arch-live-validation/local-archive-validator.sh \
+        /usr/libexec/moguet-live-local/local-archive-validator.sh \
     && install -d -o root -g root -m 0711 \
         /var/lib/moguet-live-local \
     && install -d -o root -g moguet-validation -m 0750 \

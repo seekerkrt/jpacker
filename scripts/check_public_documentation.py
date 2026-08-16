@@ -20,6 +20,9 @@ from generate_completions import (
 ANSI_HELP_ENTRY = re.compile(r"^    \x1b\[1m(.*?)\x1b\[0m", re.MULTILINE)
 LONG_TOKEN = re.compile(r"(?<![A-Za-z0-9-])--[a-z][a-z0-9-]*(?![A-Za-z0-9-])")
 SHORT_TOKEN = re.compile(r"(?<![A-Za-z0-9-])-(?!-)[A-Za-z][A-Za-z]*(?![A-Za-z0-9-])")
+CLI_DASH_TOKEN = re.compile(
+    r"(?<![A-Za-z0-9-])(?:--[a-z][a-z0-9-]*|-(?!-)[A-Za-z][A-Za-z]*)(?![A-Za-z0-9-])"
+)
 MARKDOWN_MARKER = re.compile(r"^<!-- parity:([a-z0-9][a-z0-9-]*) -->\s*$")
 MAN_MARKER = re.compile(r'^\.\\" parity:([a-z0-9][a-z0-9-]*)\s*$')
 README_SECTION_SLUGS = (
@@ -85,11 +88,21 @@ def read_text(path: Path) -> str:
         fail(f"missing required file: {path.relative_to(REPOSITORY_ROOT)}")
 
 
-def expected_surface() -> PublicSurface:
-    schema = load_schema()
+def shown_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPOSITORY_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def expected_surface(schema) -> PublicSurface:
     return PublicSurface(
         frozenset(operation.token for operation in schema.operations),
-        frozenset(option.token for option in schema.options),
+        frozenset(
+            option.token
+            for option in schema.options
+            if option.definition_role != "schema-only"
+        ),
     )
 
 
@@ -220,25 +233,158 @@ def man_public_entry_payloads(region: str, category: str, path: Path) -> list[st
     return payloads
 
 
+def normalized_cli_form(value: str) -> str:
+    normalized = " ".join(value.strip().split())
+    if normalized.startswith("moguet "):
+        return normalized[len("moguet ") :].lstrip()
+    return normalized
+
+
+def man_command_forms(payloads: list[str]) -> list[str]:
+    forms: list[str] = []
+    for payload in payloads:
+        normalized = normalized_cli_form(payload)
+        forms.extend(
+            normalized_cli_form(form)
+            for form in re.split(r"\s+\|\s+", normalized)
+        )
+    return forms
+
+
+def option_tokens_for_ids(schema, identities: tuple[int, ...]) -> set[str]:
+    identity_set = set(identities)
+    return {
+        option.token
+        for option in schema.options
+        if option.identity in identity_set
+    }
+
+
+def is_closed_command_form(form: str, schema) -> bool:
+    words = form.split()
+    if not words:
+        return False
+    operation = next(
+        (operation for operation in schema.operations if operation.token == words[0]),
+        None,
+    )
+    if operation is None or not operation.forms:
+        return False
+    if not operation.open_grammar:
+        return True
+
+    selector_ids = tuple(
+        dict.fromkeys(
+            identity
+            for operation_form in operation.forms
+            for identity in operation_form.selector_ids
+        )
+    )
+    selector_tokens = option_tokens_for_ids(schema, selector_ids)
+    return bool(selector_tokens.intersection(CLI_DASH_TOKEN.findall(form)))
+
+
+def format_form_counts(forms: Counter[str]) -> str:
+    return ", ".join(
+        f"{form!r}" if count == 1 else f"{form!r} x{count}"
+        for form, count in sorted(forms.items())
+    )
+
+
+def assert_man_command_projection(
+    path: Path, payloads: list[str], schema
+) -> None:
+    expected_forms = Counter(
+        normalized_cli_form(form) for form in schema.canonical_grammar
+    )
+    actual_forms = Counter(
+        form
+        for form in man_command_forms(payloads)
+        if is_closed_command_form(form, schema)
+    )
+    if actual_forms == expected_forms:
+        return
+
+    missing = expected_forms - actual_forms
+    unexpected = actual_forms - expected_forms
+    details: list[str] = []
+    if missing:
+        details.append("missing forms: " + format_form_counts(missing))
+    if unexpected:
+        details.append("unexpected forms: " + format_form_counts(unexpected))
+    fail(
+        f"{shown_path(path)} PUBLIC COMMANDS differs from "
+        f"the canonical form projection ({'; '.join(details)})"
+    )
+
+
+def expected_option_definition_counts(schema) -> Counter[str]:
+    return Counter(
+        option.token
+        for option in schema.options
+        if option.definition_role == "definition"
+    )
+
+
+def assert_man_option_definition_projection(
+    path: Path, payloads: list[str], schema
+) -> Counter[str]:
+    expected_counts = expected_option_definition_counts(schema)
+    actual_counts: Counter[str] = Counter()
+    unknown: set[str] = set()
+    known_options = {option.token for option in schema.options}
+    for payload in payloads:
+        tokens = CLI_DASH_TOKEN.findall(payload)
+        if not tokens:
+            unknown.add(payload.strip())
+        for token in tokens:
+            if token in known_options:
+                actual_counts[token] += 1
+            else:
+                unknown.add(token)
+
+    if unknown:
+        fail(
+            f"{shown_path(path)} PUBLIC OPTIONS contains "
+            f"tokens outside src/cli_authority.hpp: {format_tokens(unknown)}"
+        )
+    if actual_counts != expected_counts:
+        missing = expected_counts - actual_counts
+        unexpected = actual_counts - expected_counts
+        details: list[str] = []
+        if missing:
+            details.append("missing definitions: " + format_form_counts(missing))
+        if unexpected:
+            details.append(
+                "unexpected or duplicate definitions: "
+                + format_form_counts(unexpected)
+            )
+        fail(
+            f"{shown_path(path)} PUBLIC OPTIONS differs from "
+            f"the option-definition projection ({'; '.join(details)})"
+        )
+    return actual_counts
+
+
 def exact_man_public_surface(
-    path: Path, expected: PublicSurface
+    path: Path, expected: PublicSurface, schema
 ) -> PublicSurface:
     text = read_text(path)
     operation_counts: Counter[str] = Counter()
-    option_counts: Counter[str] = Counter()
+    command_option_counts: Counter[str] = Counter()
     unknown_commands: set[str] = set()
-    unknown_options: set[str] = set()
 
     command_region = man_public_region(text, "COMMANDS", path)
-    for payload in man_public_entry_payloads(command_region, "COMMANDS", path):
-        dash_tokens = set(LONG_TOKEN.findall(payload)) | set(SHORT_TOKEN.findall(payload))
+    command_payloads = man_public_entry_payloads(command_region, "COMMANDS", path)
+    assert_man_command_projection(path, command_payloads, schema)
+    for payload in command_payloads:
+        dash_tokens = CLI_DASH_TOKEN.findall(payload)
+        entry_operations: set[str] = set()
         for token in dash_tokens:
             if token in expected.operations:
-                operation_counts[token] += 1
+                entry_operations.add(token)
             elif token in expected.options:
-                # Operation-specific syntax such as `deps --recursive` owns a
-                # public option even though it is not repeated in OPTIONS.
-                option_counts[token] += 1
+                command_option_counts[token] += 1
             else:
                 unknown_commands.add(token)
 
@@ -250,47 +396,31 @@ def exact_man_public_surface(
             if word is not None:
                 token = word.group(1)
                 if token in expected.operations:
-                    operation_counts[token] += 1
+                    entry_operations.add(token)
                 else:
                     unknown_commands.add(token)
+        operation_counts.update(entry_operations)
 
     option_region = man_public_region(text, "OPTIONS", path)
-    for payload in man_public_entry_payloads(option_region, "OPTIONS", path):
-        dash_tokens = set(LONG_TOKEN.findall(payload)) | set(SHORT_TOKEN.findall(payload))
-        if not dash_tokens:
-            unknown_options.add(payload.strip())
-        for token in dash_tokens:
-            if token in expected.options:
-                option_counts[token] += 1
-            else:
-                unknown_options.add(token)
+    option_payloads = man_public_entry_payloads(option_region, "OPTIONS", path)
+    definition_option_counts = assert_man_option_definition_projection(
+        path, option_payloads, schema
+    )
 
     if unknown_commands:
         fail(
             f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC COMMANDS contains "
             f"tokens outside src/cli_authority.hpp: {format_tokens(unknown_commands)}"
         )
-    if unknown_options:
-        fail(
-            f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC OPTIONS contains "
-            f"tokens outside src/cli_authority.hpp: {format_tokens(unknown_options)}"
-        )
-
     duplicate_operations = {token for token, count in operation_counts.items() if count != 1}
-    duplicate_options = {token for token, count in option_counts.items() if count != 1}
     if duplicate_operations:
         fail(
             f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC COMMANDS repeats: "
             + format_tokens(duplicate_operations)
         )
-    if duplicate_options:
-        fail(
-            f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC OPTIONS repeats: "
-            + format_tokens(duplicate_options)
-        )
-
     actual = PublicSurface(
-        frozenset(operation_counts), frozenset(option_counts)
+        frozenset(operation_counts),
+        frozenset(command_option_counts) | frozenset(definition_option_counts),
     )
     assert_surface(str(path.relative_to(REPOSITORY_ROOT)), actual, expected)
     return actual
@@ -464,8 +594,7 @@ def check_generated_man(source: Path, generated: Path, version: str) -> None:
         )
 
 
-def check_generated_completions() -> None:
-    schema = load_schema()
+def check_generated_completions(schema) -> None:
     descriptions = load_descriptions(schema, "en")
     outputs = generated_files(
         schema, descriptions, "en", REPOSITORY_ROOT / "completions"
@@ -482,6 +611,142 @@ def check_generated_completions() -> None:
         )
 
 
+def assert_canonical_syntax_present(
+    label: str, text: str, canonical_grammar: tuple[str, ...]
+) -> None:
+    normalized = text.replace(r"\-", "-")
+    missing = [syntax for syntax in canonical_grammar if syntax not in normalized]
+    if missing:
+        fail(f"{label} is missing canonical syntax: {', '.join(missing)}")
+
+
+def assert_document_contract(
+    path: Path,
+    required_fragments: tuple[str, ...],
+    forbidden_fragments: tuple[str, ...] = (),
+) -> None:
+    text = " ".join(read_text(path).split())
+    compact_text = text.replace(" ", "")
+    missing = [
+        fragment
+        for fragment in required_fragments
+        if fragment not in text and fragment.replace(" ", "") not in compact_text
+    ]
+    forbidden = [fragment for fragment in forbidden_fragments if fragment in text]
+    if missing:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} is missing required contract text: "
+            + ", ".join(repr(fragment) for fragment in missing)
+        )
+    if forbidden:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} retains obsolete contract text: "
+            + ", ".join(repr(fragment) for fragment in forbidden)
+        )
+
+
+def check_package_relation_documentation() -> None:
+    obsolete = (
+        "DeclaredMetadataActualRelationUnassessed",
+        "actual relation: unassessed (#353)",
+        "conflicts/replacements that Moguet cannot resolve",
+        "安全に解決できないconflicts / replacesがあるplan",
+    )
+    contracts = {
+        REPOSITORY_ROOT / "README.md": (
+            "AUR `Conflicts` and `Replaces` declarations are assessed before build and install",
+            "including provided components and versioned relations",
+            "potential impact that requires review",
+            "does not remove a package, select a replacement target, or resolve a conflict automatically",
+            "unavailable (`Unknown`) or invalid relation assessment fails closed",
+            "complete observation that confirms no matching current or planned package or provided component",
+            "transaction authority",
+            "never authorizes automatic removal or replacement",
+        ),
+        REPOSITORY_ROOT / "README.ja.md": (
+            "AURの`Conflicts` / `Replaces`宣言",
+            "provided componentとversion付きrelation",
+            "reviewが必要なpotential impact",
+            "packageの削除、replacement targetの選択、conflict解決を自動実行しません",
+            "relation assessmentが利用不能（`Unknown`）またはinvalidならfail-closed",
+            "current / planned packageまたはprovided componentに一致がないと確認できた場合だけ",
+            "transaction authorityはpacman / libalpm",
+            "自動削除や自動置換を許可しません",
+        ),
+        REPOSITORY_ROOT / "docs/COMPATIBILITY.md": (
+            "metadata observation、typed classification、pre-transaction diagnostic、safety stop",
+            "automatic package removal、automatic replacement、automatic conflict resolution",
+            "full dependency / conflict solverの置換",
+            "libalpm transaction prepare / commit",
+            "replacement matchはautomatic replacementの予告や許可ではない",
+            "`Unknown`とinvalid result",
+            "completeな観測がpackageとprovided componentのいずれにも一致しない",
+            "dry-run / unified planは同じblocking truthを`Blocked`とnon-zero statusへ投影する",
+        ),
+        REPOSITORY_ROOT / "man/moguet.1.in": (
+            "including provided components and versioned relations",
+            "Moguet does not remove, replace, or resolve packages automatically",
+            "Unavailable or invalid judgments fail closed and are not reported as absence",
+            "complete observation with no matching current or planned package or provided component",
+            "Confirmed installed or planned conflicts",
+            "potential replacement impacts can leave plan completeness Complete",
+            "build and install require review and remain blocked by the safety guard",
+            "Moguet does not resolve them automatically",
+            "unavailable or not-yet-completed relation judgment",
+            "completeness Unknown and fails closed",
+            "Invalid relation metadata or observation",
+            "completeness Incomplete and blocks build and install",
+            "complete observation with no matching current or planned target",
+            "adds no relation blocker",
+            "pacman/libalpm remains the transaction authority",
+        ),
+        REPOSITORY_ROOT / "man/ja/moguet.1.in": (
+            "provided componentとversion付きrelation",
+            "packageの削除・置換・conflict解決を自動実行しません",
+            "利用不能またはinvalidなjudgmentはfail-closedとし、absenceとして表示しません",
+            "current / planned packageとprovided componentのいずれにも一致しない場合だけ",
+            "確認済みのinstalled / planned conflict",
+            "potential replacement impactがあっても",
+            "plan completenessはCompleteのままになり得ます",
+            "build / installは確認が必要で、safety guardにより停止します",
+            "Moguetはこれらを自動解決しません",
+            "relation judgmentが利用不能または未完了",
+            "completenessはUnknownとなり、fail-closed",
+            "relation metadataまたはobservationがinvalid",
+            "completenessはIncompleteとなり、build / installをblock",
+            "complete observationでcurrent / planned targetにmatchがなければ",
+            "relation blockerはありません",
+            "transaction authorityはpacman / libalpm",
+        ),
+    }
+    for path, required in contracts.items():
+        assert_document_contract(path, required, obsolete)
+
+
+def markdown_canonical_grammar(path: Path) -> tuple[str, ...]:
+    text = read_text(path)
+    begin_marker = "<!-- CLI CANONICAL GRAMMAR BEGIN -->"
+    end_marker = "<!-- CLI CANONICAL GRAMMAR END -->"
+    if text.count(begin_marker) != 1 or text.count(end_marker) != 1:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} must contain exactly one "
+            "CLI canonical grammar marker pair"
+        )
+    begin = text.index(begin_marker) + len(begin_marker)
+    end = text.index(end_marker, begin)
+    region = text[begin:end]
+    lines = [line.strip() for line in region.splitlines()]
+    try:
+        fence_start = lines.index("```text")
+        fence_end = lines.index("```", fence_start + 1)
+    except ValueError:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} canonical grammar must use "
+            "one ```text block"
+        )
+    return tuple(line for line in lines[fence_start + 1 : fence_end] if line)
+
+
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Check bilingual public-document and CLI schema parity."
@@ -493,7 +758,8 @@ def parse_arguments() -> argparse.Namespace:
 
 def main() -> int:
     arguments = parse_arguments()
-    expected = expected_surface()
+    schema = load_schema()
+    expected = expected_surface(schema)
 
     english_help = help_surface(arguments.help_en, expected)
     japanese_help = help_surface(arguments.help_ja, expected)
@@ -501,6 +767,16 @@ def main() -> int:
     assert_surface("Japanese runtime help", japanese_help, expected)
     if english_help != japanese_help:
         fail("English and Japanese runtime help token sets differ")
+    assert_canonical_syntax_present(
+        "English runtime help",
+        read_text(arguments.help_en),
+        schema.canonical_grammar,
+    )
+    assert_canonical_syntax_present(
+        "Japanese runtime help",
+        read_text(arguments.help_ja),
+        schema.canonical_grammar,
+    )
 
     version = read_text(REPOSITORY_ROOT / "VERSION").strip()
     if not version:
@@ -525,13 +801,31 @@ def main() -> int:
         MAN_SECTION_SLUGS,
     )
     english_man_surface = exact_man_public_surface(
-        REPOSITORY_ROOT / "man/moguet.1.in", expected
+        REPOSITORY_ROOT / "man/moguet.1.in", expected, schema
     )
     japanese_man_surface = exact_man_public_surface(
-        REPOSITORY_ROOT / "man/ja/moguet.1.in", expected
+        REPOSITORY_ROOT / "man/ja/moguet.1.in", expected, schema
     )
     if english_man_surface != japanese_man_surface:
         fail("English and Japanese man PUBLIC token sets differ")
+    assert_canonical_syntax_present(
+        "English man page",
+        man_public_region(
+            read_text(REPOSITORY_ROOT / "man/moguet.1.in"),
+            "COMMANDS",
+            REPOSITORY_ROOT / "man/moguet.1.in",
+        ),
+        schema.canonical_grammar,
+    )
+    assert_canonical_syntax_present(
+        "Japanese man page",
+        man_public_region(
+            read_text(REPOSITORY_ROOT / "man/ja/moguet.1.in"),
+            "COMMANDS",
+            REPOSITORY_ROOT / "man/ja/moguet.1.in",
+        ),
+        schema.canonical_grammar,
+    )
 
     compare_marked_documents(
         "README",
@@ -552,7 +846,21 @@ def main() -> int:
         MIGRATION_SECTION_SLUGS,
     )
 
-    check_generated_completions()
+    for path in (
+        REPOSITORY_ROOT / "README.md",
+        REPOSITORY_ROOT / "README.ja.md",
+        REPOSITORY_ROOT / "docs/COMPATIBILITY.md",
+    ):
+        documented = markdown_canonical_grammar(path)
+        if documented != schema.canonical_grammar:
+            fail(
+                f"{path.relative_to(REPOSITORY_ROOT)} canonical grammar differs "
+                "from the structured CLI authority: "
+                f"documented={documented}, expected={schema.canonical_grammar}"
+            )
+
+    check_package_relation_documentation()
+    check_generated_completions(schema)
     print("public-documentation-check: all checks passed")
     return 0
 

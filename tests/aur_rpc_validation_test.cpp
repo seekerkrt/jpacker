@@ -46,7 +46,8 @@ void print_constraint_metadata(
               << metadata.depends.size() << '|'
               << metadata.make_depends.size() << '|'
               << metadata.check_depends.size() << '|'
-              << metadata.provides.size() << '\n';
+              << metadata.provides.size() << '|'
+              << metadata.relations.size() << '\n';
 }
 
 #ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS

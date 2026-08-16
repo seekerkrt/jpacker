@@ -14,6 +14,7 @@ pty_runner=$repo_root/tests/run-with-pty.py
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 
 cleanup() {
@@ -166,7 +167,7 @@ assert_not_contains() {
 assert_output_count() {
     expected_count=$1
     expected=$2
-    actual_count=$(grep -Fc -- "$expected" "$output_file" || true)
+    actual_count=$(validation_grep_count -Fc -- "$expected" "$output_file")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected output count in case $case_name: $expected" >&2
         echo "actual: $actual_count, expected: $expected_count" >&2
@@ -228,7 +229,7 @@ assert_event_prefix_absent() {
 assert_event_count() {
     expected_count=$1
     expected=$2
-    actual_count=$(grep -Fxc -- "$expected" "$command_log" || true)
+    actual_count=$(validation_grep_count -Fxc -- "$expected" "$command_log")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected event count in case $case_name: $expected" >&2
         echo "actual: $actual_count, expected: $expected_count" >&2
@@ -249,7 +250,8 @@ assert_event_pattern() {
 assert_event_pattern_count() {
     expected_count=$1
     expected_pattern=$2
-    actual_count=$(grep -Ec -- "$expected_pattern" "$command_log" || true)
+    actual_count=$(validation_grep_count -Ec -- \
+        "$expected_pattern" "$command_log")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected event pattern count in case $case_name: $expected_pattern" >&2
         echo "actual: $actual_count, expected: $expected_count" >&2
@@ -295,7 +297,14 @@ assert_event_count_before() {
         cat "$command_log" >&2
         exit 1
     fi
-    actual_count=$(sed -n "1,$((boundary_line - 1))p" "$command_log" | grep -Fxc -- "$expected" || true)
+    pre_boundary_log=$case_dir/pre-boundary.log
+    sed -n "1,$((boundary_line - 1))p" "$command_log" \
+        >"$pre_boundary_log" || {
+        echo "failed to capture pre-boundary events in case $case_name" >&2
+        exit 1
+    }
+    actual_count=$(validation_grep_count \
+        -Fxc -- "$expected" "$pre_boundary_log")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected pre-boundary event count in case $case_name: $expected" >&2
         echo "actual: $actual_count, expected: $expected_count" >&2
@@ -639,8 +648,8 @@ assert_command_log_empty
 
 setup_case aur-install-rejects-option-before-plan
 run_status 1 -S --aur plan-a --config config-value plan-b
-assert_contains "Error: Unsupported pacman option for AUR/source-build target: --config" "$output_file"
-assert_contains "Error: Rerun --aur without this option." "$output_file"
+assert_contains "Error: Unsupported: Unsupported pacman option for AUR/source-build target: --config" "$output_file"
+assert_contains "Error: Unsupported: Rerun --aur without this option." "$output_file"
 assert_output_count 2 "Error:"
 assert_command_log_empty
 
@@ -699,18 +708,18 @@ assert_event_at 6 "git clone https://aur.archlinux.org/plan-a.git plan-a"
 assert_event_at 7 "git config --get remote.origin.url"
 assert_event_at 8 "makepkg --packagelist"
 assert_event_at 9 "makepkg -sc --noconfirm"
-assert_event_pattern '^pacman -U --print --print-format .* -- .*/plan-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_event_pattern '^pacman -Qp --color never -- .*/plan-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_event_pattern '^sudo pacman -U --noconfirm --needed -- .*/plan-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_event_at 12 "git clone https://aur.archlinux.org/plan-b.git plan-b"
 assert_event_at 13 "git config --get remote.origin.url"
 assert_event_at 14 "makepkg --packagelist"
 assert_event_at 15 "makepkg -sc --noconfirm"
-assert_event_pattern '^pacman -U --print --print-format .* -- .*/plan-b-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_event_pattern '^pacman -Qp --color never -- .*/plan-b-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_event_pattern '^sudo pacman -U --noconfirm --needed -- .*/plan-b-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_event_count 1 "pacman-conf --verbose RootDir DBPath"
 assert_event_count 2 "makepkg --packagelist"
 assert_event_count 2 "makepkg -sc --noconfirm"
-assert_event_pattern_count 2 '^pacman -U --print --print-format '
+assert_event_pattern_count 2 '^pacman -Qp --color never '
 assert_event_pattern_count 2 '^sudo pacman -U --noconfirm --needed -- '
 assert_event_absent "sudo pacman -S --noconfirm --needed plan-a plan-b"
 assert_not_contains "Loading custom build flags" "$output_file"
@@ -730,7 +739,7 @@ assert_event_at 5 "pacman-conf --verbose RootDir DBPath"
 assert_event_at 6 "git clone https://aur.archlinux.org/plan-a.git plan-a"
 assert_event_at 8 "makepkg --packagelist"
 assert_event_at 9 "makepkg -sc --noconfirm"
-assert_event_pattern_count 0 '^pacman -U --print --print-format '
+assert_event_pattern_count 0 '^pacman -Qp --color never '
 assert_event_pattern_count 0 '^sudo pacman -U '
 assert_event_absent "git clone https://aur.archlinux.org/plan-b.git plan-b"
 assert_event_absent "sudo pacman -S --noconfirm --needed plan-a plan-b"
@@ -755,7 +764,7 @@ assert_not_contains "Failed while building/installing PackageBase" "$output_file
 assert_not_contains "Pacman failed." "$output_file"
 assert_not_contains "pacman -U failed" "$output_file"
 assert_not_contains "The update failed." "$output_file"
-assert_event_pattern_count 1 '^pacman -U --print --print-format '
+assert_event_pattern_count 1 '^pacman -Qp --color never '
 assert_event_pattern_count 1 '^sudo pacman -U --noconfirm -- '
 assert_event_absent "git clone https://aur.archlinux.org/plan-b.git plan-b"
 assert_cache_entry_absent plan-b
@@ -787,8 +796,8 @@ assert_event_at 1 "pacman-conf --verbose RootDir DBPath"
 assert_event_at 2 "pacman-conf --repo-list"
 assert_event_prefix_absent '^aur '
 assert_no_mutation_events
-assert_contains "Error: Unsupported pacman option for AUR/source-build target: --config" "$output_file"
-assert_contains "Error: Split official repository and AUR/source-build targets, or rerun without this option." "$output_file"
+assert_contains "Error: Unsupported: Unsupported pacman option for AUR/source-build target: --config" "$output_file"
+assert_contains "Error: Unsupported: Split official repository and AUR/source-build targets, or rerun without this option." "$output_file"
 assert_output_count 2 "Error:"
 
 setup_case auto-install-all-source-guard-before-pacman
@@ -825,8 +834,16 @@ assert_cache_entry_absent source-a
 assert_cache_entry_absent source-b
 auto_preflight_after=$(cksum \
     "$XDG_CACHE_HOME/moguet/preflight-sentinel/state")
-auto_preflight_entry_count=$(find "$XDG_CACHE_HOME/moguet" \
-    -mindepth 1 -maxdepth 1 -print | wc -l)
+auto_preflight_entries_raw=$case_dir/auto-preflight-entries.raw
+if validation_capture_output "$auto_preflight_entries_raw" \
+    find "$XDG_CACHE_HOME/moguet" \
+    -mindepth 1 -maxdepth 1 -print; then
+    auto_preflight_entry_count=$(wc -l <"$auto_preflight_entries_raw")
+else
+    preflight_status=$?
+    echo "Auto mixed PKGDEST cache producer failed with status $preflight_status" >&2
+    exit 1
+fi
 if [ "$auto_preflight_after" != "$auto_preflight_checksum" ] ||
    [ "$auto_preflight_entry_count" -ne 1 ]; then
     echo "Auto mixed PKGDEST preflight mutated the cache tree" >&2
@@ -853,7 +870,7 @@ assert_event_before "git clone https://gitlab.archlinux.org/archlinux/packaging/
 assert_event_count 5 "pacman-conf --verbose RootDir DBPath"
 assert_event_count 3 "makepkg --packagelist"
 assert_event_count 3 "makepkg -sc --noconfirm"
-assert_event_pattern_count 3 '^pacman -U --print --print-format '
+assert_event_pattern_count 3 '^pacman -Qp --color never '
 assert_event_pattern_count 3 '^sudo pacman -U --noconfirm --needed -- '
 assert_event_absent "sudo pacman -S --noconfirm official-a --needed source-a forced-official source-b"
 assert_event_absent "sudo pacman -S --noconfirm source-a"
@@ -915,7 +932,7 @@ assert_event "sudo pacman -S --noconfirm official-a"
 assert_event_before "sudo pacman -S --noconfirm official-a" "git clone https://aur.archlinux.org/source-a.git source-a"
 assert_event "makepkg --packagelist"
 assert_event "makepkg -sc --noconfirm"
-assert_event_pattern_count 0 '^pacman -U --print --print-format '
+assert_event_pattern_count 0 '^pacman -Qp --color never '
 assert_event_pattern_count 0 '^sudo pacman -U '
 assert_event_absent "git clone https://aur.archlinux.org/source-b.git source-b"
 assert_cache_entry_present source-a
@@ -930,21 +947,25 @@ assert_event_before "pacman-conf --verbose RootDir DBPath" "sudo pacman -Syu --n
 assert_event_before "sudo pacman -Syu --noconfirm" "git clone https://aur.archlinux.org/source-a.git source-a"
 assert_event "makepkg --packagelist"
 assert_event "makepkg -sc --noconfirm"
-assert_event_pattern '^pacman -U --print --print-format .* -- .*/source-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_event_pattern '^pacman -Qp --color never -- .*/source-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_event_pattern '^sudo pacman -U --noconfirm -- .*/source-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_event_absent "sudo pacman -Syu --noconfirm source-a"
 
 # P0-8/P0-9: Issue #217 production root search/selection route and phase barrier.
 setup_case select-nontty-gate-before-query
 run_status 1 -S --select select-scope
-assert_contains "Interactive package selection requires a TTY on standard input." "$output_file"
+assert_contains \
+    "Error: Unavailable: Interactive package selection requires a TTY on standard input." \
+    "$output_file"
 assert_event_prefix_absent '^root search '
 assert_command_log_empty
 assert_state_log_absent
 
 setup_case select-noconfirm-gate-before-query
 run_status 1 --noconfirm -S --select select-scope
-assert_contains "Interactive package selection is not available with --noconfirm." "$output_file"
+assert_contains \
+    "Error: Unavailable: Interactive package selection is not available with --noconfirm." \
+    "$output_file"
 assert_event_prefix_absent '^root search '
 assert_command_log_empty
 assert_state_log_absent
@@ -952,7 +973,8 @@ assert_state_log_absent
 setup_case select-no-candidates-without-prompt
 run_status_pty 1 '' -S --select select-empty
 assert_event_at 1 "root search all select-empty"
-assert_contains "No package candidates were found." "$output_file"
+assert_contains "Error: Unavailable: No package candidates were found." \
+    "$output_file"
 assert_not_contains "Package candidates:" "$output_file"
 assert_not_contains "Select package numbers" "$output_file"
 assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
@@ -985,9 +1007,21 @@ assert_contains "1) source=repository repository=aur package=repo-presented vers
 assert_contains "    repository presentation fixture" "$output_file"
 assert_contains "2) source=AUR package=aur-presented PackageBase=aur-presented version=4.0-1" "$output_file"
 assert_contains "    AUR presentation fixture" "$output_file"
-assert_contains "Package selection index is outside the displayed range 1-2." "$output_file"
+assert_contains \
+    "Invalid: Package selection index is outside the displayed range 1-2." \
+    "$output_file"
 assert_output_count 2 "Select package numbers, ascending ranges, or displayed @group; press Enter or enter q/quit/cancel to cancel:"
-assert_contains "Package selection was cancelled." "$output_file"
+assert_contains "Cancelled: Package selection was cancelled." "$output_file"
+assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
+assert_state_log_absent
+
+setup_case select-ambiguous-alternative-retry-cancel
+run_status_pty 1 '1-2\nq\n' -S --select select-alternative-conflict
+assert_event_at 1 "root search all select-alternative-conflict"
+assert_contains \
+    "Ambiguous: Package shared-alternative was selected from more than one source; select exactly one source. [package=shared-alternative]" \
+    "$output_file"
+assert_contains "Cancelled: Package selection was cancelled." "$output_file"
 assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
 assert_state_log_absent
 
@@ -996,7 +1030,7 @@ run_status_pty 1 'q\n' -S --select --repo select-scope
 assert_event_at 1 "root search repository select-scope"
 assert_contains "source=repository repository=core package=scope-repo" "$output_file"
 assert_not_contains "source=AUR package=scope-aur" "$output_file"
-assert_contains "Package selection was cancelled." "$output_file"
+assert_contains "Cancelled: Package selection was cancelled." "$output_file"
 assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
 assert_state_log_absent
 
@@ -1005,7 +1039,7 @@ run_status_pty 1 'q\n' -S --select --aur select-scope
 assert_event_at 1 "root search aur select-scope"
 assert_not_contains "source=repository repository=core package=scope-repo" "$output_file"
 assert_contains "source=AUR package=scope-aur PackageBase=scope-aur" "$output_file"
-assert_contains "Package selection was cancelled." "$output_file"
+assert_contains "Cancelled: Package selection was cancelled." "$output_file"
 assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
 assert_state_log_absent
 
