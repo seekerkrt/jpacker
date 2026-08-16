@@ -49,11 +49,13 @@ a new storage direction: source-build preferences now use only the executing
 user's XDG config context, while the published v2.0.0 tag, Release, and release
 notes remain historical records.
 
-Moguet v2.2.0 is the latest release. It makes installed-state visibility for
-ambiguous providers explicit, validates version constraints across repository,
-AUR, provider, and local observations, and adds a unified human-readable plan
-with global `--dry-run` coverage for supported workflows. See the
-[v2.2.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.2.0) for
+Moguet v2.3.0 is the latest release. It strengthens validation and release
+reliability, aligns the public CLI and diagnostics, and adds typed
+pre-transaction assessment for `Conflicts` and `Replaces`. Official-repository
+source builds now safely select the requested package from multiple-artifact
+PackageBases, while per-package build assignments remain effective after
+makepkg loads its configuration. See the
+[v2.3.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.3.0) for
 the complete user-visible changes.
 
 The canonical repository identity is Moguet on GitHub, with a GitLab mirror.

@@ -360,19 +360,14 @@ ccache / mold parityは必要なreleaseでの追加validationであり、上記d
 
     git add -- \
         VERSION \
-        README.ja.md \
         README.md \
+        README.ja.md \
         RELEASE_NOTES.md \
         docs/DEVELOPMENT.md \
-        man/ja/moguet.1 \
         man/moguet.1 \
-        po/ja.po \
+        man/ja/moguet.1 \
         po/moguet.pot \
-        scripts/check-license-compliance.sh \
-        scripts/check-packaging-metadata.sh \
-        scripts/extract-release-notes.sh \
-        tests/test-install-layout.sh \
-        tests/test-package-transition.sh
+        po/ja.po
 
     git diff --cached --name-only | LC_ALL=C sort
     git status --short
@@ -381,11 +376,14 @@ ccache / mold parityは必要なreleaseでの追加validationであり、上記d
 
     gh pr create --base main --head release/vX.Y.Z
 
-上記の`git add`は、現在のv2.2.0 release preparationでstage対象とするpathを1件ずつ明示した
+上記の`git add`は、現在のv2.3.0 release preparationでstage対象とするpathを1件ずつ明示した
 current release用のexact path setです。`git add .`や代表pathだけのpartial listへ置き換えません。commit前に
 cached path一覧をこのreleaseのdiffと再照合し、release scopeのunstaged / untracked pathや
-unrelatedなstaged pathがないことを確認します。現在のv2.2.0 release preparationでは、上記の
-14-path listがstage対象のcurrent release scopeのauthorityです。v2.1.0固有の履歴は、下記の
+unrelatedなstaged pathがないことを確認します。現在のv2.3.0 release preparationでは、上記の
+9-path listがstage対象のcurrent release scopeのauthorityです。`PKGBUILD`はroot `VERSION`を動的に
+読み、published tagへprojectします。man templateは`@VERSION@` authorityを維持し、completionは
+version independent、`po/POTFILES.in`はsource inventory変更なしのため、これらはcurrent listへ
+含めません。v2.1.0固有の履歴は、下記の
 `v2.1.0 post-release closure`として別に扱い、current listの根拠にはしません。将来のrelease
 では、このlistを流用せず、そのreleaseで監査済みのexact path setへ置き換えます。
 
