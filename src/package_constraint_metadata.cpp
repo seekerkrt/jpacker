@@ -19,17 +19,15 @@ ObservedVersion exact_package_version(
     return ObservedVersion::available(source, *version);
 }
 
-std::string provider_capability_specification(
+std::string provider_metadata_diagnostic(
         const RepositoryProvidedPackageMetadata& metadata) {
     const std::string package_name = metadata.package_name.value_or("");
     const std::string version = metadata.version.value_or("");
     switch(metadata.relation) {
         case RepositoryProvidedPackageRelation::Unversioned:
-            // A version attached to an unversioned relation is malformed rather
-            // than an equality capability inferred by the adapter.
-            return !metadata.version.has_value()
+            return version.empty()
                     ? package_name
-                    : package_name + ">" + version;
+                    : package_name + "=" + version;
         case RepositoryProvidedPackageRelation::Equal:
             return package_name + "=" + version;
         case RepositoryProvidedPackageRelation::GreaterThanOrEqual:
@@ -41,9 +39,13 @@ std::string provider_capability_specification(
         case RepositoryProvidedPackageRelation::LessThan:
             return package_name + "<" + version;
         case RepositoryProvidedPackageRelation::Unsupported:
-            return package_name + ">" + version;
+            return version.empty()
+                    ? package_name
+                    : package_name + "=" + version;
     }
-    return package_name + ">" + version;
+    return version.empty()
+            ? package_name
+            : package_name + "=" + version;
 }
 
 } // namespace
@@ -55,27 +57,68 @@ project_package_metadata_provides(
     std::vector<RepositoryProviderCapability> capabilities;
     capabilities.reserve(metadata.size());
     for(const auto& provided : metadata) {
-        ProviderCapabilityParseResult parse_result = parse_provider_capability(
-                provider_capability_specification(provided));
-        if(const auto* failure = parse_result.failure(); failure != nullptr) {
+        const std::string package_name =
+                provided.package_name.value_or("");
+        ProviderCapabilityParseResult identity_result =
+                make_provider_capability_from_metadata(
+                        package_name, std::nullopt);
+        if(const auto* failure = identity_result.failure();
+           failure != nullptr) {
             return *failure;
         }
 
-        const ProviderCapability* capability = parse_result.capability();
+        std::optional<std::string> version;
+        switch(provided.relation) {
+            case RepositoryProvidedPackageRelation::Unversioned:
+                if(provided.version.has_value() &&
+                   !provided.version->empty()) {
+                    return DependencyConstraintParseFailure{
+                            DependencyConstraintParseFailureKind::
+                                    InvalidVersion,
+                            provider_metadata_diagnostic(provided)};
+                }
+                break;
+            case RepositoryProvidedPackageRelation::Equal:
+                if(!provided.version.has_value() ||
+                   provided.version->empty()) {
+                    return DependencyConstraintParseFailure{
+                            DependencyConstraintParseFailureKind::
+                                    MissingVersion,
+                            provider_metadata_diagnostic(provided)};
+                }
+                version = provided.version;
+                break;
+            case RepositoryProvidedPackageRelation::GreaterThanOrEqual:
+            case RepositoryProvidedPackageRelation::LessThanOrEqual:
+            case RepositoryProvidedPackageRelation::GreaterThan:
+            case RepositoryProvidedPackageRelation::LessThan:
+            case RepositoryProvidedPackageRelation::Unsupported:
+            default:
+                return DependencyConstraintParseFailure{
+                        DependencyConstraintParseFailureKind::
+                                UnsupportedProviderOperator,
+                        provider_metadata_diagnostic(provided)};
+        }
+
+        ProviderCapabilityParseResult projection_result =
+                make_provider_capability_from_metadata(
+                        package_name, std::move(version));
+        if(const auto* failure = projection_result.failure();
+           failure != nullptr) {
+            return *failure;
+        }
+
+        const ProviderCapability* capability =
+                projection_result.capability();
         if(capability == nullptr) {
             return DependencyConstraintParseFailure{
                     DependencyConstraintParseFailureKind::InvalidPackageIdentity,
-                    provider_capability_specification(provided)};
+                    provider_metadata_diagnostic(provided)};
         }
 
-        ObservedVersion provided_version = capability->version().has_value()
-                ? ObservedVersion::available(
-                          version_source,
-                          capability->version().value())
-                : ObservedVersion::unknown(
-                          version_source,
-                          ObservedVersionUnknownReason::
-                                  UnversionedProviderCapability);
+        ObservedVersion provided_version =
+                ObservedVersion::from_provider_capability(
+                        version_source, *capability);
         capabilities.push_back(RepositoryProviderCapability{
                 *capability,
                 std::move(provided_version)});
