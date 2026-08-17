@@ -45,8 +45,9 @@ using ProviderCapabilityMetadataProjectionResult = std::variant<
         std::vector<RepositoryProviderCapability>,
         DependencyConstraintParseFailure>;
 
-// libalpm由来のowned provide metadataを一度だけtyped capabilityへ変換する。
-// Installed / repository adapterは同じparser authorityを共有する。
+// libalpm由来のowned provide metadataをrelation-awareにtyped capabilityへ
+// 変換する。Installed / repository adapterは同じprovider-domain authorityを
+// 共有し、typed fieldをsynthetic dependency stringとして再parseしない。
 ProviderCapabilityMetadataProjectionResult
 project_package_metadata_provides(
         const std::vector<RepositoryProvidedPackageMetadata>& metadata,

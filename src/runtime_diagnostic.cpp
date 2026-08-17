@@ -13,10 +13,14 @@ std::string diagnostic_class_label(DiagnosticClass classification) {
         return localization::translate_message("Unsupported");
     case DiagnosticClass::Ambiguous:
         return localization::translate_message("Ambiguous");
+    case DiagnosticClass::Declined:
+        return localization::translate_message("Declined");
     case DiagnosticClass::Cancelled:
         return localization::translate_message("Cancelled");
     case DiagnosticClass::Unavailable:
         return localization::translate_message("Unavailable");
+    case DiagnosticClass::InputFailure:
+        return localization::translate_message("Input failure");
     case DiagnosticClass::QueryFailure:
         return localization::translate_message("Query failure");
     case DiagnosticClass::MetadataFailure:

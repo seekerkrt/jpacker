@@ -14,6 +14,7 @@ contractの規範上の正本は各文書の日本語本文である。英語利
 | [separated source-build `--rmdeps`](source-build-rmdeps.md) | #269 | cleanup ownershipを証明できないsource-buildのfail-closedとpacman-only no-op |
 | [XDG cache cutover safety](xdg-cache-safety.md) | #305 | cache filesystem identityとlegacy cache非変更 |
 | [source-build preference XDG authority](source-build-preference-xdg.md) | #335 | user XDG authority、ownership、atomic filesystem操作 |
+| [interactive confirmation](interactive-confirmation.md) | #431 | boolean confirmationのsuffix、fixed token、typed outcome、exit / cancellation境界 |
 | [ambiguous provider selection](ambiguous-provider-selection.md) | #272 | invocation-localな明示選択とmutation前preflight |
 | [root package selection](root-package-selection.md) | #217 | `-S --select`のsource-aware root selectionとroute固定 |
 | [local PKGBUILD](local-pkgbuild.md) | #271 | local root identity、metadata authority、source tree非破壊境界 |

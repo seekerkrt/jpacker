@@ -2,6 +2,7 @@
 
 #include "commands_sync.hpp"
 #include "diagnostic_model.hpp"
+#include "interactive_confirmation.hpp"
 #include "local_source_root.hpp"
 #include "package_metadata.hpp"
 #include "root_package_selection.hpp"
@@ -13,6 +14,13 @@
 
 DiagnosticSourceKind upgrade_all_source_kind(
         UpgradeAllOperationPhase phase) noexcept;
+
+NormalizedDiagnostic<ConfirmationResult>
+project_confirmation_diagnostic(
+        const ConfirmationResult& result,
+        DiagnosticOperation operation,
+        DiagnosticPhase phase,
+        DiagnosticIdentity identity = {});
 
 std::vector<NormalizedDiagnostic<RootPackageSelectionIssue>>
 project_root_selection_diagnostics(

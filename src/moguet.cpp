@@ -24,6 +24,7 @@
 #include "commands_sync.hpp"
 #include "commands_upgrade_all.hpp"
 #include "dry_run.hpp"
+#include "interactive_confirmation.hpp"
 #include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
@@ -591,6 +592,8 @@ int run_moguet(int argc, char* argv[]) {
             }
             std::string cmd_prefix = needs_sudo ? "sudo pacman " : "pacman ";
             return run_command(cmd_prefix + join_pacman_args(args));
+        } catch(const ConfirmationOperationStopped&) {
+            return 1;
         } catch(const std::exception& e) {
             try {
                 Logger::error(e.what());

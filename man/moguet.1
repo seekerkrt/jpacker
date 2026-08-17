@@ -1,4 +1,4 @@
-.TH MOGUET 1 "August 2026" "Moguet 2.3.0" "User Commands"
+.TH MOGUET 1 "August 2026" "Moguet 2.3.1" "User Commands"
 .\" parity:name
 .SH NAME
 moguet \- pacman-first AUR helper with verified source builds
@@ -671,6 +671,55 @@ state authoritatively.
 It does not use
 .B --noconfirm
 to cross such a guard.
+.
+.SS "INTERACTIVE CONFIRMATION"
+Moguet-owned boolean prompts use
+.B [Y/n]
+for a Yes default,
+.B [y/N]
+for a No default, and
+.B [y/n]
+when there is no default.
+The fixed, locale-neutral, case-insensitive ASCII responses are
+.BR y / yes ,
+.BR n / no ,
+and
+.BR q / quit / cancel .
+The q-family cancels the current Moguet operation instead of acting as a
+question-specific No. Other input warns and re-prompts. Empty input at
+.B [y/n]
+also warns and re-prompts; it is never implicit approval.
+.
+.PP
+.B --noconfirm
+uses only a declared default: Yes for
+.B [Y/n]
+and the safe No for
+.BR [y/N] .
+It cannot answer
+.BR [y/n] .
+Non-TTY standard input may use only the safe
+.B [y/N]
+No default; it does not select the Yes default or approve a no-default prompt.
+.
+.PP
+Clean EOF during an interactive confirmation cancels with an end-of-input
+reason. An actual stream read failure remains an input failure. Neither is
+treated as implicit Yes.
+.
+.PP
+A decline is the negative answer owned by the question; cancellation stops the
+current Moguet operation. Both are presented separately from actual input,
+external-command, build, validation, or internal failures. Presentation
+severity and process status are independent: an optional No or normal skip may
+complete with status zero, while a decline, cancellation, EOF, or unavailable
+approval that leaves a required operation incomplete is non-zero.
+An input failure and other actual failures are also non-zero.
+.
+.PP
+Cancellation stops work from that point onward. It does not imply that the
+whole invocation was side-effect free and does not roll back an already
+completed Git, editor, pacman, or earlier system phase.
 .
 .PP
 Before build or install, Moguet assesses declared conflicts and replacements

@@ -44,12 +44,12 @@ Moguet v2.0.1は、採用済みXDG storage契約のうちsource-preference部分
 preferenceは実行user自身のXDG config contextだけを使い、公開済みv2.0.0のtag、Release、
 release noteは歴史的記録のまま変更しません。
 
-Moguet v2.3.0は最新releaseです。validationとrelease reliabilityを強化し、public CLIと
-diagnosticを整合させ、`Conflicts` / `Replaces`をtransaction前にtyped評価します。
-official repository source-buildではmultiple-artifact PackageBaseからrequested packageを
-安全に選択でき、package単位のbuild assignmentはmakepkgがconfigを読み込んだ後も
-effectiveになります。利用者から見える変更の全体は
-[v2.3.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.3.0)を参照してください。
+Moguet v2.3.1は最新releaseです。Git automatic maintenanceとtrusted source checkoutの
+raceを防ぎ、有効なlegacy libalpm SONAME `Provides` metadataを受理し、shared prompt
+grammarによってconfirmationのdecline / cancelを実際のoperation failureから区別します。
+また、GitHub Discussionsをcommunityの一次入口とし、観測情報が十分なbugのdirect formと
+private security reportを維持します。利用者から見える変更の全体は
+[v2.3.1 release](https://github.com/seekerkrt/moguet/releases/tag/v2.3.1)を参照してください。
 
 canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ちます。Moguet
 packageは`jpacker` command aliasを提供しません。AUR publicationは将来の別判断であり、
@@ -141,6 +141,15 @@ fail-closedで停止します。v2.xは、Moguetのsource-aware入口、安全�
 - `--noconfirm`は対話停止を避ける指定であり、「すべてyes」ではありません。source
   selection、plan、identity、conflict、ownershipのguardを突破せず、自動削除や自動置換を
   許可しません。
+- Moguet-owned boolean confirmationは、`[Y/n]`をYes default、`[y/N]`をNo default、
+  `[y/n]`をdefaultなしとして扱います。fixedかつcase-insensitiveなASCII tokenとして
+  `y` / `yes`、`n` / `no`、`q` / `quit` / `cancel`を受理します。`[y/n]`でのEnterは
+  approvalではなくwarning後の再promptです。`--noconfirm`は宣言済みdefaultだけを使い、
+  non-TTY inputはsafe Noだけを利用できます。どちらもapproval-requiredなdefaultなし
+  promptをYesへ変えません。question固有のDeclined、current operationのCancelled、actual
+  input / command / internal failureは互いに区別します。cancellationは後続処理を停止しますが、
+  完了済みphaseをrollbackしません。詳細は[interactive confirmation contract](https://github.com/seekerkrt/moguet/blob/develop/docs/contracts/interactive-confirmation.md)を
+  参照してください。
 - 複数phaseのupgradeは単一atomic transactionではありません。failure時は後続処理を
   止めますが、完了済みpackage transactionをrollbackしません。install成功後にcleanup
   だけ失敗した場合、packageはinstall済みの可能性があるため、結果を確認せず再試行
@@ -540,10 +549,20 @@ per-user migrationだけがXDG authorityを変更します。
 
 canonical development repositoryは
 [GitHub](https://github.com/seekerkrt/moguet)、backup mirrorは
-[GitLab](https://gitlab.com/seekerkrt/moguet)です。Issueとpull requestはGitHubで管理します。
+[GitLab](https://gitlab.com/seekerkrt/moguet)です。質問、不具合かもしれない相談、機能要望は
+[GitHub Discussions](https://github.com/seekerkrt/moguet/discussions)を最初の入口にしてください。
+[GitHub Issues](https://github.com/seekerkrt/moguet/issues)はmaintainerが管理する具体的な作業を
+追跡します。十分な再現・観測情報があるbugは、
+[Bug Issue Form](https://github.com/seekerkrt/moguet/issues/new?template=bug-report.yml)から
+直接報告できます。pull requestはGitHubで管理します。
+
+変更を提案する前に
+[CONTRIBUTING.md](https://github.com/seekerkrt/moguet/blob/develop/CONTRIBUTING.md)を
+確認してください。Security-sensitiveな内容をpublicなDiscussionやIssueへ投稿せず、
+[SECURITY.md](https://github.com/seekerkrt/moguet/blob/develop/SECURITY.md)に従って
+[非公開で報告してください](https://github.com/seekerkrt/moguet/security/advisories/new)。
 
 active integration branchは`develop`、stable releaseは`main`です。
-[CONTRIBUTING.md](https://github.com/seekerkrt/moguet/blob/develop/CONTRIBUTING.md)、
 [docs/DEVELOPMENT.md](https://github.com/seekerkrt/moguet/blob/develop/docs/DEVELOPMENT.md)、
 [docs/VERSIONING.md](https://github.com/seekerkrt/moguet/blob/develop/docs/VERSIONING.md)を
 参照してください。Moguet v2.xではAUR helper

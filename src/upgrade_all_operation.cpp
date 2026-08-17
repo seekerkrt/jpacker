@@ -2,6 +2,7 @@
 
 #include "app_config.hpp"
 #include "cache_authority.hpp"
+#include "interactive_confirmation.hpp"
 #include "localization.hpp"
 
 #include <algorithm>
@@ -1546,6 +1547,8 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
                 config,
                 progress_observer,
                 execution_cache_root.value());
+    } catch(const ConfirmationOperationStopped&) {
+        throw;
     } catch(const std::exception& error) {
         const UpgradeAllOperationPhase stopped_phase =
                 aggregate_phase_for_system_source(

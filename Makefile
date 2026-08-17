@@ -24,6 +24,7 @@ FISH_COMPLETION := completions/moguet.fish
 COMPLETION_FILES := $(BASH_COMPLETION) $(ZSH_COMPLETION) $(FISH_COMPLETION)
 TEST_TARGET := build/tests/moguet-test
 APPLICATION_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/application-identity-test
+INTERACTIVE_CONFIRMATION_TEST_TARGET := $(BUILD_DIR)/tests/interactive-confirmation-test
 LOCALIZATION_TEST_TARGET := $(BUILD_DIR)/tests/localization-test
 LOCALIZATION_MISSING_CATALOG_TEST_TARGET := $(BUILD_DIR)/tests/localization-missing-catalog-test
 CLI_LOCALIZATION_TEST_TARGET := $(BUILD_DIR)/tests/moguet-cli-localization-test
@@ -1177,6 +1178,9 @@ PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	$(SRC_DIR)/cache_authority.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_build.cpp \
+	$(SRC_DIR)/interactive_confirmation.cpp \
+	$(SRC_DIR)/diagnostic_projection.cpp \
+	$(SRC_DIR)/runtime_diagnostic.cpp \
 	$(SRC_DIR)/separated_source_build.cpp \
 	$(SRC_DIR)/separated_package_base_source_build.cpp \
 	$(SRC_DIR)/package_base_artifact_install_executor.cpp \
@@ -1337,6 +1341,10 @@ PACKAGE_METADATA_INTEGRATION_TEST_SRCS := \
 	$(SRC_DIR)/logging.cpp
 APPLICATION_IDENTITY_TEST_SRCS := \
 	tests/application_identity_test.cpp
+INTERACTIVE_CONFIRMATION_TEST_SRCS := \
+	tests/interactive_confirmation_test.cpp \
+	$(SRC_DIR)/interactive_confirmation.cpp \
+	$(SRC_DIR)/logging.cpp
 LOCALIZATION_TEST_SRCS := \
 	tests/localization_test.cpp \
 	$(SRC_DIR)/localization.cpp
@@ -1585,7 +1593,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(UNIFIED_PLAN_RENDERER_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-relation-link-firewall check-package-relation-observation-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-host-release test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-relation test-package-relation-observation test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-dry-run-command test-commands-inspect test-commands-source-maintenance test-commands-sync test-fixture-authority test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check release-check-exclusive install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-relation-link-firewall check-package-relation-observation-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-host-release test-internal-identity test-application-identity test-interactive-confirmation test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-relation test-package-relation-observation test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-dry-run-command test-commands-inspect test-commands-source-maintenance test-commands-sync test-fixture-authority test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check release-check-exclusive install uninstall
 .PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: check-makepkg-assignment-precedence-link-firewall test-makepkg-assignment-precedence
@@ -1771,6 +1779,7 @@ WRAP_GETEUID_LINK_ARG := -Wl$(comma)--wrap=geteuid
 
 NON_HEAVY_TARGETS := \
 	$(APPLICATION_IDENTITY_TEST_TARGET) \
+	$(INTERACTIVE_CONFIRMATION_TEST_TARGET) \
 	$(LOCALIZATION_TEST_TARGET) \
 	$(LOCALIZATION_MISSING_CATALOG_TEST_TARGET) \
 	$(XDG_PATHS_TEST_TARGET) \
@@ -1913,6 +1922,7 @@ $(CXX) $($(1)_DIRECT_COMPILE_ARGS) \
 endef
 
 $(eval $(call define_non_heavy_test_profile,APPLICATION_IDENTITY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(APPLICATION_IDENTITY_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,INTERACTIVE_CONFIRMATION,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(INTERACTIVE_CONFIRMATION_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,LOCALIZATION,$(CPPFLAGS) $(CXXFLAGS) $(BASE_CXXFLAGS) -DMOGUET_LOCALE_DIRECTORY=\"$(MOGUET_TEST_CATALOG_DIR)\" -I$(SRC_DIR),$(LOCALIZATION_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,LOCALIZATION_MISSING_CATALOG,$(CPPFLAGS) $(CXXFLAGS) $(BASE_CXXFLAGS) -DMOGUET_LOCALE_DIRECTORY=\"$(LOCALIZATION_MISSING_CATALOG_DIR)\" -I$(SRC_DIR),$(LOCALIZATION_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,XDG_PATHS,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(XDG_PATHS_TEST_SRCS)))
@@ -2103,6 +2113,11 @@ $(APPLICATION_IDENTITY_TEST_TARGET): $(APPLICATION_IDENTITY_TEST_SRCS) $(SRC_DIR
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling application identity test binary"
 	$(call compile_non_heavy_test,APPLICATION_IDENTITY)
+
+$(INTERACTIVE_CONFIRMATION_TEST_TARGET): $(INTERACTIVE_CONFIRMATION_TEST_SRCS) $(SRC_DIR)/interactive_confirmation.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling interactive confirmation test binary"
+	$(call compile_non_heavy_test,INTERACTIVE_CONFIRMATION)
 
 $(LOCALIZATION_TEST_TARGET): $(LOCALIZATION_TEST_SRCS) $(SRC_DIR)/localization.hpp $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -2534,6 +2549,9 @@ test-cli-localization-surface: check-pot $(POT_FILE) $(POTFILES_FILE) scripts/ch
 
 test-application-identity: $(APPLICATION_IDENTITY_TEST_TARGET)
 	$(abspath $(APPLICATION_IDENTITY_TEST_TARGET)) "$(VERSION)"
+
+test-interactive-confirmation: $(INTERACTIVE_CONFIRMATION_TEST_TARGET)
+	$(abspath $(INTERACTIVE_CONFIRMATION_TEST_TARGET))
 
 test-localization: check-catalogs $(LOCALIZATION_TEST_TARGET) $(LOCALIZATION_MISSING_CATALOG_TEST_TARGET) $(CLI_LOCALIZATION_TEST_TARGET) $(MO_FILES) $(MOGUET_TEST_ZZ_MO) $(MOGUET_TEST_BROKEN_MO) $(LOCALIZATION_INVALID_FORMAT_PO)
 	sh tests/test-localization.sh \
@@ -3834,6 +3852,7 @@ test-container-live:
 test: \
 	test-internal-identity \
 	test-application-identity \
+	test-interactive-confirmation \
 	test-localization \
 	test-catalog-metadata-gate \
 	test-cli-localization-surface \

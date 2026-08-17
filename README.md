@@ -49,13 +49,13 @@ a new storage direction: source-build preferences now use only the executing
 user's XDG config context, while the published v2.0.0 tag, Release, and release
 notes remain historical records.
 
-Moguet v2.3.0 is the latest release. It strengthens validation and release
-reliability, aligns the public CLI and diagnostics, and adds typed
-pre-transaction assessment for `Conflicts` and `Replaces`. Official-repository
-source builds now safely select the requested package from multiple-artifact
-PackageBases, while per-package build assignments remain effective after
-makepkg loads its configuration. See the
-[v2.3.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.3.0) for
+Moguet v2.3.1 is the latest release. It prevents Git automatic maintenance from
+racing trusted source checkouts, accepts valid legacy libalpm SONAME `Provides`
+metadata, and distinguishes declined or cancelled confirmations from actual
+operation failures through one shared prompt grammar. It also makes GitHub
+Discussions the primary community entry while retaining a direct form for
+well-observed bugs and private security reporting. See the
+[v2.3.1 release](https://github.com/seekerkrt/moguet/releases/tag/v2.3.1) for
 the complete user-visible changes.
 
 The canonical repository identity is Moguet on GitHub, with a GitLab mirror.
@@ -168,6 +168,16 @@ detailed plan.
 - `--noconfirm` avoids interactive blocking. It is not “yes to everything” and
   does not bypass source selection, planning, identity, conflict, or ownership
   guards, and it never authorizes automatic removal or replacement.
+- Moguet-owned boolean confirmations use `[Y/n]` for a Yes default, `[y/N]`
+  for a No default, and `[y/n]` for no default. They accept the fixed
+  case-insensitive ASCII tokens `y` / `yes`, `n` / `no`, and `q` / `quit` /
+  `cancel`. Enter at `[y/n]` warns and re-prompts instead of approving.
+  `--noconfirm` uses only a declared default, while non-TTY input may use only
+  a safe No; neither turns an approval-required no-default prompt into Yes.
+  A question-specific decline and cancellation of the current operation are
+  distinct from each other and from actual input, command, or internal
+  failure. Cancellation stops later work but does not roll back completed
+  phases. See the [interactive confirmation contract](https://github.com/seekerkrt/moguet/blob/develop/docs/contracts/interactive-confirmation.md).
 - Multi-phase upgrades are not one atomic transaction. A failure stops later
   work but does not roll back an already completed package transaction. If
   cleanup fails after installation succeeds, inspect the result before
@@ -597,12 +607,24 @@ changes the XDG authority.
 
 The canonical development repository is
 [GitHub](https://github.com/seekerkrt/moguet), with a
-[GitLab mirror](https://gitlab.com/seekerkrt/moguet). Issues and pull requests
-are managed on GitHub.
+[GitLab mirror](https://gitlab.com/seekerkrt/moguet). Questions, suspected
+bugs, and feature ideas should start in
+[GitHub Discussions](https://github.com/seekerkrt/moguet/discussions).
+[GitHub Issues](https://github.com/seekerkrt/moguet/issues) track concrete work
+managed by the maintainer; a reproducible bug with sufficient observation
+details may be submitted directly through the
+[Bug Issue Form](https://github.com/seekerkrt/moguet/issues/new?template=bug-report.yml).
+Pull requests are managed on GitHub.
+
+See
+[CONTRIBUTING.md](https://github.com/seekerkrt/moguet/blob/develop/CONTRIBUTING.md)
+before proposing a change. Do not post security-sensitive details in public
+Discussions or Issues; follow
+[SECURITY.md](https://github.com/seekerkrt/moguet/blob/develop/SECURITY.md) and
+[report them privately](https://github.com/seekerkrt/moguet/security/advisories/new).
 
 The active integration branch is `develop`; stable releases are on `main`.
 See
-[CONTRIBUTING.md](https://github.com/seekerkrt/moguet/blob/develop/CONTRIBUTING.md),
 [docs/DEVELOPMENT.md](https://github.com/seekerkrt/moguet/blob/develop/docs/DEVELOPMENT.md),
 and
 [docs/VERSIONING.md](https://github.com/seekerkrt/moguet/blob/develop/docs/VERSIONING.md).

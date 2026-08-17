@@ -674,6 +674,66 @@ void test_diagnostic_projection_preserves_typed_reasons() {
                             DiagnosticRequiredAction::EnableInteraction,
             "Non-interactive root-selection reason lost its action");
 
+    const ConfirmationResult declined_result = ConfirmationDeclined{
+            ConfirmationDecisionOrigin::ExplicitToken};
+    const auto declined = project_confirmation_diagnostic(
+            declined_result, DiagnosticOperation::Build,
+            DiagnosticPhase::Metadata);
+    expect(
+            declined.classification == DiagnosticClass::Declined &&
+                    declined.severity == DiagnosticSeverity::Warning &&
+                    std::get<ConfirmationDeclined>(declined.reason).origin ==
+                            ConfirmationDecisionOrigin::ExplicitToken &&
+                    declined.required_action ==
+                            DiagnosticRequiredAction::None &&
+                    declined.exit_status_effect ==
+                            DiagnosticExitStatusEffect::Failure,
+            "Confirmation decline lost typed presentation dimensions");
+
+    const ConfirmationResult confirmation_cancelled_result =
+            ConfirmationCancelled{
+                    ConfirmationCancellationReason::EndOfInput};
+    const auto confirmation_cancelled = project_confirmation_diagnostic(
+            confirmation_cancelled_result, DiagnosticOperation::Build,
+            DiagnosticPhase::Preflight);
+    expect(
+            confirmation_cancelled.classification ==
+                            DiagnosticClass::Cancelled &&
+                    confirmation_cancelled.severity ==
+                            DiagnosticSeverity::Warning &&
+                    std::get<ConfirmationCancelled>(
+                            confirmation_cancelled.reason)
+                                    .reason ==
+                            ConfirmationCancellationReason::EndOfInput,
+            "Confirmation cancellation lost its EOF reason");
+
+    const ConfirmationResult confirmation_unavailable_result =
+            ConfirmationUnavailable{
+                    ConfirmationUnavailableReason::NoConfirm};
+    const auto confirmation_unavailable = project_confirmation_diagnostic(
+            confirmation_unavailable_result, DiagnosticOperation::Build,
+            DiagnosticPhase::Metadata);
+    expect(
+            confirmation_unavailable.classification ==
+                            DiagnosticClass::Unavailable &&
+                    confirmation_unavailable.severity ==
+                            DiagnosticSeverity::Error &&
+                    confirmation_unavailable.required_action ==
+                            DiagnosticRequiredAction::EnableInteraction,
+            "Confirmation unavailability lost its typed gate reason");
+
+    const ConfirmationResult input_failure_result =
+            ConfirmationInputFailure{};
+    const auto input_failure = project_confirmation_diagnostic(
+            input_failure_result, DiagnosticOperation::Build,
+            DiagnosticPhase::Preflight);
+    expect(
+            input_failure.classification == DiagnosticClass::InputFailure &&
+                    input_failure.severity == DiagnosticSeverity::Error &&
+                    input_failure.required_action ==
+                            DiagnosticRequiredAction::ResolveBlocker,
+            "Confirmation input failure was flattened to cancellation");
+
     const auto local = project_local_source_root_diagnostic(
             LocalSourceRootFailure{
                     LocalSourceRootStage::SrcinfoRead,
@@ -763,12 +823,14 @@ void test_diagnostic_projection_preserves_typed_reasons() {
                             DiagnosticSourceKind::Aur,
             "upgrade-all phase/source authority diverged by projection");
 
-    constexpr std::array<DiagnosticClass, 12> taxonomy = {
+    constexpr std::array<DiagnosticClass, 14> taxonomy = {
             DiagnosticClass::Invalid,
             DiagnosticClass::Unsupported,
             DiagnosticClass::Ambiguous,
+            DiagnosticClass::Declined,
             DiagnosticClass::Cancelled,
             DiagnosticClass::Unavailable,
+            DiagnosticClass::InputFailure,
             DiagnosticClass::QueryFailure,
             DiagnosticClass::MetadataFailure,
             DiagnosticClass::RequiresCheck,
@@ -776,7 +838,7 @@ void test_diagnostic_projection_preserves_typed_reasons() {
             DiagnosticClass::PartialFailure,
             DiagnosticClass::ExecutionFailure,
             DiagnosticClass::InternalInconsistency};
-    static_assert(taxonomy.size() == 12);
+    static_assert(taxonomy.size() == 14);
 }
 
 OperationStateProjection project_fixture(

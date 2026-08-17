@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions, bug triage, and ideas / 質問・不具合相談・機能要望
+    url: https://github.com/seekerkrt/moguet/discussions
+    about: Start with GitHub Discussions unless you have a concrete reproducible bug / 再現情報が揃った不具合以外はDiscussionsから相談してください
+  - name: Private security report / 非公開のセキュリティ報告
+    url: https://github.com/seekerkrt/moguet/security/advisories/new
+    about: Do not post security-sensitive details publicly / security-sensitiveな内容をpublicに投稿しないでください

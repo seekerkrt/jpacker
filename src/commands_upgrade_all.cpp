@@ -5,6 +5,7 @@
 #include "cli_authority.hpp"
 #include "cli_parser.hpp"
 #include "cli_runtime_contract.hpp"
+#include "interactive_confirmation.hpp"
 #include "localization.hpp"
 #include "logging.hpp"
 #include "operation_state_model.hpp"
@@ -2039,6 +2040,8 @@ int cmd_upgrade_all(const AppConfig& config) {
 
         print_operation_result(result);
         return result.is_success() ? 0 : 1;
+    } catch(const ConfirmationOperationStopped&) {
+        return 1;
     } catch(const std::exception& error) {
         Logger::error(localization::format_translated_message(
                 // TRANSLATORS: The first placeholder is the literal command

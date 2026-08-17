@@ -92,6 +92,15 @@ state observation、plan constructionとcompletenessとexecution readiness、sev
 exit-status effectはそれぞれ独立したdimensionである。successful-unverifiedはrequired actionを
 伴うsuccessとして保持し、failureへ丸めない。`Unknown`も`NoOp`へ丸めない。
 
+<a id="compat-interactive-confirmation"></a>
+## Interactive confirmation compatibility
+
+Moguet-owned boolean confirmationは、`[Y/n]`をYes default、`[y/N]`をNo default、`[y/n]`をdefaultなしとして扱う。fixed ASCII / locale-neutral / case-insensitive tokenとして`y` / `yes`、`n` / `no`、`q` / `quit` / `cancel`だけを受理し、日本語response tokenは追加しない。q-familyは全boolean confirmationでformal cancellationであり、question固有のNoへflattenしない。invalid inputとdefaultなしのempty inputはwarning後に再promptする。
+
+`--noconfirm`は宣言済みdefaultだけを利用し、`[y/n]`をapprovalへ変えない。non-TTY stdinは`[Y/n]`のYes defaultを選ばずUnavailableとなり、`[y/N]`だけがsafe Noへ進める。interactive clean EOFはCancelled / EndOfInput、actual stream read failureはInputFailureとして区別する。
+
+Declinedはquestion固有のnegative answer、Cancelledはcurrent Moguet operationの停止であり、actual command / input / internal failureとも区別する。presentation classificationとprocess exit statusは別dimensionで、optional No、normal skip、inspection result等はroute contractに従ってexit 0となり得る一方、required operationを未完了にするDeclined / Cancelled / EOF / Unavailableとactual failureはnon-zeroとなる。cancellationはその時点以降を停止するだけで、既に完了したGit、editor、pacman、system等のphaseをrollbackしない。詳細は[interactive confirmation contract](contracts/interactive-confirmation.md)を正本とする。
+
 <a id="compat-aur-update"></a>
 ## AUR update operation summary
 
@@ -149,6 +158,7 @@ PackageBaseはclone / fetch / build repositoryの単位であり、package name�
 | separated source-build `--rmdeps` | source-buildではownershipを証明できないためmutation前に拒否。pacman-onlyではMoguetが消費するが作用させず、pacmanへ転送しない | [source-build `--rmdeps`](contracts/source-build-rmdeps.md) |
 | XDG cache cutover | trusted root、filesystem identity、symlink、root escape、legacy cache非変更を守る。implementation moduleは固定しない | [XDG cache safety](contracts/xdg-cache-safety.md) |
 | source-build preference | `${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/`をreader / writer共通のauthorityとする。legacy storeへfallbackしない | [source-build preference XDG authority](contracts/source-build-preference-xdg.md) |
+| interactive confirmation | `[Y/n]` / `[y/N]` / `[y/n]`、fixed yes / no / cancel token、non-TTY / `--noconfirm` gate、Declined / Cancelled / failure、route-owned exit、non-rollbackを統一する | [interactive confirmation](contracts/interactive-confirmation.md) |
 | ambiguous provider | exact / unique provider以外は候補順で選ばず、interactive TTYの明示selectionだけを受け付ける。non-TTY / `--noconfirm`は停止 | [ambiguous provider selection](contracts/ambiguous-provider-selection.md) |
 | root package selection | `-S --select`だけが対話root selection。`-Ss`は非対話search。候補が1件でもdefault選択せず、source identityを保持する | [root package selection](contracts/root-package-selection.md) |
 | local PKGBUILD | `build --local <directory>`を明示入口とし、local treeをAUR rootへfallbackせず、metadata / source identity / artifactをfail closedで検証するproduction接続済みroute | [local PKGBUILD](contracts/local-pkgbuild.md) |

@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -56,6 +57,33 @@ void expect_provider_parse_failure(
             result.failure()->kind == expected_kind &&
                     result.failure()->raw_specification == specification,
             "Provider parse failure differs");
+}
+
+ProviderCapability require_provider_metadata_capability(
+        std::string package_name,
+        std::optional<std::string> version,
+        const std::string& context) {
+    const ProviderCapabilityParseResult result =
+            make_provider_capability_from_metadata(
+                    std::move(package_name), std::move(version));
+    expect(result.failure() == nullptr, context + ": unexpected failure");
+    expect(result.capability() != nullptr, context + ": missing capability");
+    return *result.capability();
+}
+
+void expect_provider_metadata_failure(
+        std::string package_name,
+        std::optional<std::string> version,
+        DependencyConstraintParseFailureKind expected_kind,
+        const std::string& context) {
+    const ProviderCapabilityParseResult result =
+            make_provider_capability_from_metadata(
+                    std::move(package_name), std::move(version));
+    expect(result.capability() == nullptr, context + ": invalid metadata passed");
+    expect(result.failure() != nullptr, context + ": missing typed failure");
+    expect(
+            result.failure()->kind == expected_kind,
+            context + ": failure kind differs");
 }
 
 void test_consumer_requirement_grammar() {
@@ -133,6 +161,137 @@ void test_provider_capability_grammar() {
             DependencyConstraintParseFailureKind::UnsupportedProviderOperator);
     expect_provider_parse_failure(
             "virtual-api==1", DependencyConstraintParseFailureKind::InvalidVersion);
+}
+
+void test_typed_provider_metadata_supports_legacy_soname_v1() {
+    const ProviderCapability unversioned =
+            require_provider_metadata_capability(
+                    "virtual-api", std::nullopt,
+                    "typed unversioned provider");
+    expect(
+            unversioned.raw_specification() == "virtual-api" &&
+                    !unversioned.version().has_value(),
+            "Typed unversioned provider differs");
+
+    const ProviderCapability ordinary =
+            require_provider_metadata_capability(
+                    "virtual-api", std::string("2:1.0-3"),
+                    "typed ordinary equality provider");
+    expect(
+            ordinary.raw_specification() == "virtual-api=2:1.0-3" &&
+                    ordinary.version() ==
+                            std::optional<std::string>("2:1.0-3"),
+            "Typed ordinary equality provider differs");
+
+    const ProviderCapability explicit_soname =
+            require_provider_metadata_capability(
+                    "libexample.so", std::string("1-64"),
+                    "explicit SONAME v1 provider");
+    expect(
+            explicit_soname.raw_specification() ==
+                            "libexample.so=1-64" &&
+                    explicit_soname.version() ==
+                            std::optional<std::string>("1-64"),
+            "Explicit SONAME v1 provider differs");
+
+    const ProviderCapability unversioned_soname =
+            require_provider_metadata_capability(
+                    "libexample.so",
+                    std::string("libexample.so-64"),
+                    "unversioned SONAME v1 provider");
+    const ObservedVersion observed_soname =
+            ObservedVersion::from_provider_capability(
+                    ObservedVersionSource::RepositoryProviderCapability,
+                    unversioned_soname);
+    expect(
+            unversioned_soname.raw_specification() ==
+                            "libexample.so=libexample.so-64" &&
+                    unversioned_soname.version() ==
+                            std::optional<std::string>(
+                                    "libexample.so-64") &&
+                    observed_soname.version() != nullptr &&
+                    *observed_soname.version() == "libexample.so-64",
+            "Unversioned SONAME v1 provider was not retained exactly");
+
+    const ProviderCapability unversioned_soname_32 =
+            require_provider_metadata_capability(
+                    "libexample.so",
+                    std::string("libexample.so-32"),
+                    "32-bit unversioned SONAME v1 provider");
+    expect(
+            unversioned_soname_32.version() ==
+                            std::optional<std::string>(
+                                    "libexample.so-32") &&
+                    ObservedVersion::from_provider_capability(
+                            ObservedVersionSource::
+                                    RepositoryProviderCapability,
+                            unversioned_soname_32)
+                                    .version() != nullptr,
+            "32-bit unversioned SONAME v1 provider was not accepted");
+
+    const ProviderCapability observed_shape =
+            require_provider_metadata_capability(
+                    "libgegl-npd-0.4.so",
+                    std::string("libgegl-npd-0.4.so-64"),
+                    "observed legacy SONAME v1 provider");
+    expect(
+            ObservedVersion::from_provider_capability(
+                    ObservedVersionSource::InstalledProviderCapability,
+                    observed_shape)
+                            .version() != nullptr,
+            "Observed gegl SONAME shape was not accepted in provider domain");
+
+    for(const std::string& ordinary_version :
+        {std::string("libexample.so-128"),
+         std::string("other.so-64")}) {
+        const ProviderCapability ordinary_ambiguous =
+                require_provider_metadata_capability(
+                        "libexample.so", ordinary_version,
+                        "ordinary ambiguous equality " + ordinary_version);
+        expect(
+                ordinary_ambiguous.version() ==
+                                std::optional<std::string>(ordinary_version) &&
+                        ObservedVersion::from_provider_capability(
+                                ObservedVersionSource::
+                                        RepositoryProviderCapability,
+                                ordinary_ambiguous)
+                                        .version() != nullptr,
+                "Valid ordinary equality was rejected as malformed SONAME");
+    }
+
+    for(const std::string& malformed :
+        {std::string("libexample.so-x86_64"),
+         std::string("libexample.so -64"),
+         std::string("libexample.so/evil-64"),
+         std::string("libexample.so-nonnumeric")}) {
+        expect_provider_metadata_failure(
+                "libexample.so", malformed,
+                DependencyConstraintParseFailureKind::InvalidVersion,
+                "malformed SONAME v1 lookalike " + malformed);
+    }
+    expect_provider_metadata_failure(
+            "libexample.so", std::string(""),
+            DependencyConstraintParseFailureKind::MissingVersion,
+            "empty SONAME v1 provider");
+
+    const ObservedVersion ordinary_ambiguous_version =
+            ObservedVersion::available(
+                    ObservedVersionSource::RepositoryExactPackage,
+                    "libexample.so-128");
+    expect(
+            ordinary_ambiguous_version.version() != nullptr &&
+                    *ordinary_ambiguous_version.version() ==
+                            "libexample.so-128",
+            "Valid ordinary package version was not retained");
+
+    const ObservedVersion generic_version = ObservedVersion::available(
+            ObservedVersionSource::RepositoryExactPackage,
+            "libgegl-npd-0.4.so-64");
+    expect(
+            generic_version.invalid_reason() != nullptr &&
+                    *generic_version.invalid_reason() ==
+                            ConstraintInvalidReason::InvalidVersionIdentity,
+            "Generic package-version validation was broadened for SONAME data");
 }
 
 void test_direct_libalpm_evaluation_and_unknown() {
@@ -249,6 +408,7 @@ int main() {
     try {
         test_consumer_requirement_grammar();
         test_provider_capability_grammar();
+        test_typed_provider_metadata_supports_legacy_soname_v1();
         test_direct_libalpm_evaluation_and_unknown();
         test_invalid_and_aggregate_conflicting_results();
         std::cout << "dependency constraint tests: all checks passed\n";

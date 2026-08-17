@@ -1,5 +1,6 @@
 #include "aur_update_execution_runner.hpp"
 
+#include "interactive_confirmation.hpp"
 #include "localization.hpp"
 #include "trusted_cache.hpp"
 
@@ -807,6 +808,8 @@ execute_prepared_aur_update_source_build_invocation(
         } catch(const TrustedCacheError&) {
             // Aggregate ownerがcache authorityのtyped payloadを転写できるよう、
             // ordinary work-item failureへcontainせずrethrowする。
+            throw;
+        } catch(const ConfirmationOperationStopped&) {
             throw;
         } catch(const std::exception& error) {
             work_item_result.status = AurUpdateWorkItemExecutionStatus::Failed;

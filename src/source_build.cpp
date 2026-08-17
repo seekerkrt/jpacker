@@ -1,11 +1,14 @@
 #include "source_build.hpp"
 
 #include "app_config.hpp"
+#include "diagnostic_projection.hpp"
+#include "interactive_confirmation.hpp"
 #include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "persistent_checkout.hpp"
 #include "process.hpp"
+#include "runtime_diagnostic.hpp"
 #include "separated_package_base_source_build.hpp"
 #include "separated_source_build.hpp"
 #include "shell_words.hpp"
@@ -18,7 +21,6 @@
 #include <exception>
 #include <fcntl.h>
 #include <filesystem>
-#include <iostream>
 #include <linux/openat2.h>
 #include <optional>
 #include <sstream>
@@ -117,12 +119,6 @@ public:
     }
 };
 
-enum class PromptDefault {
-    Yes,
-    No,
-    None,
-};
-
 enum class UpdateCheckResult {
     NeedsBuild,
     UpToDate,
@@ -185,13 +181,6 @@ std::string trim(const std::string& str) {
     return str.substr(first, (last - first + 1));
 }
 
-std::string to_lower(std::string str) {
-    std::transform(str.begin(), str.end(), str.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return str;
-}
-
 bool is_safe_command_token(const std::string& token) {
     if(token.empty()) return false;
     return std::all_of(token.begin(), token.end(), [](unsigned char ch) {
@@ -228,100 +217,23 @@ std::string join_comma_display_values(const std::vector<std::string>& values) {
     return ss.str();
 }
 
-std::optional<bool> prompt_default_value(PromptDefault default_answer) {
-    switch(default_answer) {
-        case PromptDefault::Yes:
-            return true;
-        case PromptDefault::No:
-            return false;
-        case PromptDefault::None:
-            return std::nullopt;
-    }
-    return std::nullopt;
+void report_confirmation_stop(
+        const ConfirmationResult& result,
+        DiagnosticPhase phase,
+        DiagnosticIdentity identity = {}) {
+    report_runtime_diagnostic(
+            project_confirmation_diagnostic(
+                    result, DiagnosticOperation::Build, phase,
+                    std::move(identity)),
+            confirmation_stop_diagnostic(result));
 }
 
-std::string prompt_suffix(PromptDefault default_answer) {
-    // NO_TRANSLATE: These tokens define the accepted/default prompt input.
-    switch(default_answer) {
-        case PromptDefault::Yes:
-            return "[Y/n]";
-        case PromptDefault::No:
-            return "[y/N]";
-        case PromptDefault::None:
-            return "[y/n]";
-    }
-    return "[y/n]";
-}
-
-bool ask_user(
-        const std::string& question, PromptDefault default_answer,
-        const AppConfig& config) {
-    std::optional<bool> default_value = prompt_default_value(default_answer);
-
-    if(config.no_confirm) {
-        // POLICY: --noconfirm でも default を持たない prompt は自動回答しない。
-        if(default_value.has_value()) {
-            if(default_value.value()) {
-                // TRANSLATORS: The placeholders are the literal --noconfirm option and a complete prompt question.
-                Logger::info(localization::format_translated_message(
-                        "Skipping prompt ({}): {} -> yes",
-                        "--noconfirm",
-                        question));
-            } else {
-                // TRANSLATORS: The placeholders are the literal --noconfirm option and a complete prompt question.
-                Logger::info(localization::format_translated_message(
-                        "Skipping prompt ({}): {} -> no",
-                        "--noconfirm",
-                        question));
-            }
-            return default_value.value();
-        }
-        // TRANSLATORS: The placeholders are the literal --noconfirm option and a complete prompt question.
-        throw std::runtime_error(localization::format_translated_message(
-                "Cannot answer prompt without interaction ({}): {}",
-                "--noconfirm",
-                question));
-    }
-
-    if(!isatty(STDIN_FILENO)) {
-        // LANDMINE: 非対話 stdin では、破壊的になり得る yes default を安全に選べない。
-        if(default_value.has_value() && default_value.value() == false) {
-            // TRANSLATORS: The placeholders are the literal stdin identity and a complete prompt question.
-            Logger::info(localization::format_translated_message(
-                    "Skipping prompt (non-interactive {}): {} -> no",
-                    "stdin", question));
-            return false;
-        }
-        // TRANSLATORS: The placeholder is a complete prompt question.
-        throw std::runtime_error(localization::format_translated_message(
-                "Cannot safely answer prompt with non-interactive standard input: {}",
-                question));
-    }
-
-    for(;;) {
-        // NO_TRANSLATE: Prompt framing and response tokens are fixed UI syntax;
-        // question is a complete translated sentence.
-        std::cout << ":: " << question << " " << prompt_suffix(default_answer) << " ";
-        std::string input;
-        if(!std::getline(std::cin, input)) {
-            // TRANSLATORS: The placeholder is a complete prompt question.
-            throw std::runtime_error(localization::format_translated_message(
-                    "Failed to read the answer to this prompt: {}", question));
-        }
-
-        input = to_lower(trim(input));
-        if(input.empty()) {
-            if(default_value.has_value()) return default_value.value();
-            Logger::warn(localization::translate_message(
-                    "Please answer yes or no."));
-            continue;
-        }
-        if(input == "y" || input == "yes") return true;
-        if(input == "n" || input == "no") return false;
-
-        Logger::warn(localization::translate_message(
-                "Please answer yes or no."));
-    }
+[[noreturn]] void stop_after_confirmation(
+        ConfirmationResult result,
+        DiagnosticPhase phase,
+        DiagnosticIdentity identity = {}) {
+    report_confirmation_stop(result, phase, std::move(identity));
+    throw ConfirmationOperationStopped(std::move(result));
 }
 
 std::string build_editor_command(const std::string& editor, const fs::path& target) {
@@ -428,10 +340,11 @@ void review_build_files(
     const std::string edit_pkgbuild_question =
             localization::format_translated_message(
                     "Edit {}?", "PKGBUILD");
-    if(ask_user(
-               edit_pkgbuild_question,
-               PromptDefault::No,
-               config)) {
+    ConfirmationResult edit_pkgbuild_confirmation = request_confirmation(
+            edit_pkgbuild_question, ConfirmationDefault::No,
+            config.no_confirm);
+    if(std::holds_alternative<ConfirmationAccepted>(
+               edit_pkgbuild_confirmation)) {
         require_safe_persistent_checkout_review_targets(checkout, install_scripts);
         if(run_command(build_editor_command(config.editor, "PKGBUILD")) != 0) {
             throw std::runtime_error(localization::translate_message(
@@ -439,13 +352,24 @@ void review_build_files(
         }
         require_safe_persistent_checkout_review_targets(checkout, install_scripts);
         edited = true;
+    } else if(!std::holds_alternative<ConfirmationDeclined>(
+                      edit_pkgbuild_confirmation)) {
+        DiagnosticIdentity identity;
+        identity.canonical_source_identity = pkg_dir.string();
+        stop_after_confirmation(
+                std::move(edit_pkgbuild_confirmation),
+                DiagnosticPhase::Preflight, std::move(identity));
     }
 
     for(const auto& install_script : install_scripts) {
         // TRANSLATORS: The placeholder is an install script path.
         const std::string edit_question = localization::format_translated_message(
                 "Edit install script {}?", install_script.string());
-        if(ask_user(edit_question, PromptDefault::No, config)) {
+        ConfirmationResult edit_install_confirmation = request_confirmation(
+                edit_question, ConfirmationDefault::No,
+                config.no_confirm);
+        if(std::holds_alternative<ConfirmationAccepted>(
+                   edit_install_confirmation)) {
             require_safe_persistent_checkout_review_targets(checkout, install_scripts);
             if(run_command(build_editor_command(config.editor, install_script)) != 0) {
                 throw std::runtime_error(localization::translate_message(
@@ -453,18 +377,30 @@ void review_build_files(
             }
             require_safe_persistent_checkout_review_targets(checkout, install_scripts);
             edited = true;
+        } else if(!std::holds_alternative<ConfirmationDeclined>(
+                          edit_install_confirmation)) {
+            DiagnosticIdentity identity;
+            identity.canonical_source_identity = pkg_dir.string();
+            stop_after_confirmation(
+                    std::move(edit_install_confirmation),
+                    DiagnosticPhase::Preflight, std::move(identity));
         }
     }
 
     // LANDMINE(#197): editor はreview対象を置換できるため、review開始時の検証結果を持ち越さない。
     require_safe_persistent_checkout_review_targets(checkout, install_scripts);
-    if(edited &&
-       !ask_user(
-               localization::translate_message("Proceed with build?"),
-               PromptDefault::Yes,
-               config)) {
-        throw std::runtime_error(localization::translate_message(
-                "Aborted."));
+    if(edited) {
+        ConfirmationResult proceed_confirmation = request_confirmation(
+                localization::translate_message("Proceed with build?"),
+                ConfirmationDefault::Yes, config.no_confirm);
+        if(!std::holds_alternative<ConfirmationAccepted>(
+                   proceed_confirmation)) {
+            DiagnosticIdentity identity;
+            identity.canonical_source_identity = pkg_dir.string();
+            stop_after_confirmation(
+                    std::move(proceed_confirmation),
+                    DiagnosticPhase::Preflight, std::move(identity));
+        }
     }
 }
 
@@ -619,11 +555,20 @@ MakepkgBuildOptions resolve_makepkg_build_options(
     if(config.user_config.build.mode == BuildMode::Clean) {
         options.clean_build = true;
     } else if(has_local_srcdir(pkg_dir)) {
-        options.clean_build = ask_user(
+        ConfirmationResult clean_confirmation = request_confirmation(
                 localization::translate_message(
                         "Clean build existing build directory?"),
-                PromptDefault::No,
-                config);
+                ConfirmationDefault::No, config.no_confirm);
+        if(std::holds_alternative<ConfirmationAccepted>(
+                   clean_confirmation)) {
+            options.clean_build = true;
+        } else if(std::holds_alternative<ConfirmationDeclined>(
+                          clean_confirmation)) {
+            options.clean_build = false;
+        } else {
+            stop_after_confirmation(
+                    std::move(clean_confirmation), DiagnosticPhase::Build);
+        }
     }
 
     if(config.user_config.build.mode == BuildMode::Rebuild) {
@@ -631,9 +576,19 @@ MakepkgBuildOptions resolve_makepkg_build_options(
     } else if(options.clean_build && has_artifact) {
         options.rebuild = true;
     } else if(has_artifact) {
-        options.rebuild = ask_user(
+        ConfirmationResult rebuild_confirmation = request_confirmation(
                 localization::translate_message("Rebuild package?"),
-                PromptDefault::No, config);
+                ConfirmationDefault::No, config.no_confirm);
+        if(std::holds_alternative<ConfirmationAccepted>(
+                   rebuild_confirmation)) {
+            options.rebuild = true;
+        } else if(std::holds_alternative<ConfirmationDeclined>(
+                          rebuild_confirmation)) {
+            options.rebuild = false;
+        } else {
+            stop_after_confirmation(
+                    std::move(rebuild_confirmation), DiagnosticPhase::Build);
+        }
     }
 
     return options;
@@ -728,14 +683,28 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                     if(diff_ret == 1) {
                         log_update_diff_guidance(
                                 pkg_path, request.git_url, branch);
-                        if(ask_user(
-                                   localization::format_translated_message(
-                                           "Updates were detected in the existing cache repository. View the {} diff?",
-                                           "Git"),
-                                   PromptDefault::No,
-                                   config)) {
+                        ConfirmationResult diff_confirmation =
+                                request_confirmation(
+                                        localization::format_translated_message(
+                                                "Updates were detected in the existing cache repository. View the {} diff?",
+                                                "Git"),
+                                        ConfirmationDefault::No,
+                                        config.no_confirm);
+                        if(std::holds_alternative<ConfirmationAccepted>(
+                                   diff_confirmation)) {
                             static_cast<void>(trusted_git_show_diff(
                                     pkg_path, request.git_url, branch));
+                        } else if(!std::holds_alternative<
+                                          ConfirmationDeclined>(
+                                          diff_confirmation)) {
+                            DiagnosticIdentity identity;
+                            identity.requested_package =
+                                    request.package_name;
+                            identity.package_base = request.checkout_name;
+                            stop_after_confirmation(
+                                    std::move(diff_confirmation),
+                                    DiagnosticPhase::Fetch,
+                                    std::move(identity));
                         }
                     }
                 }
@@ -836,9 +805,29 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                 // TRANSLATORS: The placeholder is the literal PKGBUILD artifact name.
                 Logger::warn(localization::format_translated_message(
                         "Skipping pre-review {} evaluation.", "PKGBUILD"));
-                if(config.no_confirm) {
-                    const SourceBuildUpdateStatusUnknownSkipReason reason =
-                            SourceBuildUpdateStatusUnknownSkipReason::NoConfirm;
+                ConfirmationResult continue_confirmation =
+                        request_confirmation(
+                                localization::format_translated_message(
+                                        "Update status is unknown because {} is missing or incomplete. Continue to review/build?",
+                                        ".SRCINFO"),
+                                ConfirmationDefault::No,
+                                config.no_confirm);
+                if(const auto* declined =
+                           std::get_if<ConfirmationDeclined>(
+                                   &continue_confirmation)) {
+                    SourceBuildUpdateStatusUnknownSkipReason reason =
+                            SourceBuildUpdateStatusUnknownSkipReason::
+                                    UserDeclined;
+                    if(declined->origin ==
+                       ConfirmationDecisionOrigin::NoConfirm) {
+                        reason = SourceBuildUpdateStatusUnknownSkipReason::
+                                NoConfirm;
+                    } else if(declined->origin ==
+                              ConfirmationDecisionOrigin::
+                                      NonInteractiveDefault) {
+                        reason = SourceBuildUpdateStatusUnknownSkipReason::
+                                NonInteractiveStdin;
+                    }
                     std::string diagnostic = unknown_update_skip_diagnostic(
                             request.package_name, reason);
                     Logger::warn(diagnostic);
@@ -849,34 +838,15 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                             reason,
                             std::move(diagnostic)};
                 }
-                if(!isatty(STDIN_FILENO)) {
-                    const SourceBuildUpdateStatusUnknownSkipReason reason =
-                            SourceBuildUpdateStatusUnknownSkipReason::NonInteractiveStdin;
-                    std::string diagnostic = unknown_update_skip_diagnostic(
-                            request.package_name, reason);
-                    Logger::warn(diagnostic);
-                    static_cast<void>(revalidate_trusted_cache_path(
-                            pkg_path,
-                            CachePathRequirement::ExistingDirectory));
-                    return SourceBuildUpdateStatusUnknownSkipped{
-                            reason,
-                            std::move(diagnostic)};
-                }
-                if(!ask_user(
-                           localization::format_translated_message(
-                                   "Update status is unknown because {} is missing or incomplete. Continue to review/build?",
-                                   ".SRCINFO"),
-                           PromptDefault::No,
-                           config)) {
-                    const SourceBuildUpdateStatusUnknownSkipReason reason =
-                            SourceBuildUpdateStatusUnknownSkipReason::UserDeclined;
-                    static_cast<void>(revalidate_trusted_cache_path(
-                            pkg_path,
-                            CachePathRequirement::ExistingDirectory));
-                    return SourceBuildUpdateStatusUnknownSkipped{
-                            reason,
-                            unknown_update_skip_diagnostic(
-                                    request.package_name, reason)};
+                if(!std::holds_alternative<ConfirmationAccepted>(
+                           continue_confirmation)) {
+                    DiagnosticIdentity identity;
+                    identity.requested_package = request.package_name;
+                    identity.package_base = request.checkout_name;
+                    stop_after_confirmation(
+                            std::move(continue_confirmation),
+                            DiagnosticPhase::Preflight,
+                            std::move(identity));
                 }
             }
         }
@@ -991,6 +961,8 @@ SourceBuildPreparationOutcome prepare_source_build_for_execution(
             return prepare_private_trusted_cache_root(cache_root);
         } catch(const TrustedCacheError&) {
             throw;
+        } catch(const ConfirmationOperationStopped&) {
+            throw;
         } catch(const std::exception& error) {
             throw SourceBuildPreparationError(
                     SourceBuildPreparationFailureStage::ArtifactRoot,
@@ -1010,6 +982,8 @@ SourceBuildPreparationOutcome prepare_source_build_for_execution(
                     request, display_name, update_policy, cache_root,
                     config);
         } catch(const TrustedCacheError&) {
+            throw;
+        } catch(const ConfirmationOperationStopped&) {
             throw;
         } catch(const std::exception& error) {
             throw SourceBuildPreparationError(
