@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.3.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-15 14:42+0900\n"
+"POT-Creation-Date: 2026-08-17 12:33+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -2765,36 +2765,6 @@ msgstr "安全でないコマンドトークンです: {}"
 msgid "Editor command is empty."
 msgstr "エディターコマンドが空です。"
 
-#, c++-format
-msgid "Skipping prompt ({}): {} -> yes"
-msgstr "確認をスキップします（{}）: {} -> yes"
-
-#, c++-format
-msgid "Skipping prompt ({}): {} -> no"
-msgstr "確認をスキップします（{}）: {} -> no"
-
-#, c++-format
-msgid "Cannot answer prompt without interaction ({}): {}"
-msgstr "対話なしでは確認に回答できません（{}）: {}"
-
-#, c++-format
-msgid "Skipping prompt (non-interactive {}): {} -> no"
-msgstr "確認をスキップします（非対話{}）: {} -> no"
-
-#, c++-format
-msgid "Cannot safely answer prompt with non-interactive standard input: {}"
-msgstr "標準入力が非対話のため、この確認へ安全に回答できません: {}"
-
-#, c++-format
-msgid "Failed to read the answer to this prompt: {}"
-msgstr "この確認への回答を読み取れませんでした: {}"
-
-msgid "A non-default confirmation requires an explicit yes answer."
-msgstr "デフォルトを持たない確認には明示的なyes回答が必要です。"
-
-msgid "Please answer yes or no."
-msgstr "yesまたはnoで回答してください。"
-
 msgid "Source preference load event has no entry path."
 msgstr "ソース設定の読み込みイベントにエントリーパスがありません。"
 
@@ -2902,9 +2872,6 @@ msgstr "{}のレビュー中にローカルソースルートの識別情報が�
 msgid "Proceed with build?"
 msgstr "ビルドを続行しますか？"
 
-msgid "Aborted."
-msgstr "中止しました。"
-
 #, c++-format
 msgid "{} changed during review"
 msgstr "レビュー中に{}が変更されました"
@@ -2947,9 +2914,6 @@ msgstr "{}にはローカルメタデータの評価が必要です: {}。"
 #, c++-format
 msgid "Evaluate {} metadata with {}?"
 msgstr "{}メタデータを{}で評価しますか？"
-
-msgid "Local metadata evaluation was not approved."
-msgstr "ローカルメタデータの評価が承認されませんでした。"
 
 #, c++-format
 msgid "Local package {} does not support architecture {}."
@@ -4691,6 +4655,9 @@ msgstr "{}（バージョン制約が不正です）"
 msgid "{} (version constraint is not verified)"
 msgstr "{}（バージョン制約は未検証です）"
 
+msgid "An accepted confirmation has no stopping diagnostic."
+msgstr "承認済みの確認結果には停止診断がありません。"
+
 msgid "Dry-run projection did not produce an observation."
 msgstr "dry-runの投影で観測結果が生成されませんでした。"
 
@@ -4905,6 +4872,50 @@ msgstr "準備済みの絞り込み{}更新操作は不正か、すでに使用�
 #, c++-format
 msgid "Prepared filtered {} update operation lost its source-build preparation snapshot."
 msgstr "準備済みの絞り込み{}更新操作からソースビルド準備スナップショットが失われました。"
+
+msgid "Unknown interactive confirmation default."
+msgstr "不明な対話確認のデフォルト値です。"
+
+#, c++-format
+msgid "Skipping prompt ({}): {} -> yes"
+msgstr "確認をスキップします（{}）: {} -> yes"
+
+#, c++-format
+msgid "Skipping prompt ({}): {} -> no"
+msgstr "確認をスキップします（{}）: {} -> no"
+
+#, c++-format
+msgid "Skipping prompt (non-interactive {}): {} -> no"
+msgstr "確認をスキップします（非対話{}）: {} -> no"
+
+#, c++-format
+msgid "(type {} to cancel)"
+msgstr "（{} と入力するとキャンセル）"
+
+msgid "Please answer yes, no, or cancel."
+msgstr "yes、no、cancelのいずれかで回答してください。"
+
+msgid "The required confirmation was declined. Any earlier completed phases remain unchanged."
+msgstr "必須の確認が拒否されました。これより前に完了した処理は変更されません。"
+
+msgid "The current operation was cancelled because interactive input ended. Any earlier completed phases remain unchanged."
+msgstr "対話入力が終了したため、現在の操作をキャンセルしました。これより前に完了した処理は変更されません。"
+
+msgid "The current operation was cancelled at an interactive confirmation. Any earlier completed phases remain unchanged."
+msgstr "対話確認で現在の操作をキャンセルしました。これより前に完了した処理は変更されません。"
+
+#, c++-format
+msgid "The required confirmation is unavailable while {} is set. Any earlier completed phases remain unchanged."
+msgstr "{} が指定されているため、必須の確認を利用できません。これより前に完了した処理は変更されません。"
+
+msgid "The required confirmation is unavailable because standard input is non-interactive. Any earlier completed phases remain unchanged."
+msgstr "標準入力が非対話のため、必須の確認を利用できません。これより前に完了した処理は変更されません。"
+
+msgid "Failed to read the interactive confirmation input."
+msgstr "対話確認の入力を読み取れませんでした。"
+
+msgid "An accepted confirmation cannot stop an operation."
+msgstr "承認済みの確認結果で操作を停止することはできません。"
 
 #, c++-format
 msgid "{} required artifact target projection failed before local source-build dependency preparation."
@@ -6102,6 +6113,12 @@ msgstr "リポジトリプロバイダーのcapabilityメタデータが無効�
 
 msgid "Unsupported"
 msgstr "未対応"
+
+msgid "Declined"
+msgstr "拒否"
+
+msgid "Input failure"
+msgstr "入力失敗"
 
 msgid "Query failure"
 msgstr "問い合わせ失敗"
@@ -8418,6 +8435,23 @@ msgstr "{}のデフォルト状態ログを段階{}で安全に使用できま�
 
 msgid "Unknown state log error code."
 msgstr "不明な状態ログエラーコードです。"
+
+#, c++-format
+#~ msgid "Cannot answer prompt without interaction ({}): {}"
+#~ msgstr "対話なしでは確認に回答できません（{}）: {}"
+
+#, c++-format
+#~ msgid "Cannot safely answer prompt with non-interactive standard input: {}"
+#~ msgstr "標準入力が非対話のため、この確認へ安全に回答できません: {}"
+
+#~ msgid "A non-default confirmation requires an explicit yes answer."
+#~ msgstr "デフォルトを持たない確認には明示的なyes回答が必要です。"
+
+#~ msgid "Aborted."
+#~ msgstr "中止しました。"
+
+#~ msgid "Local metadata evaluation was not approved."
+#~ msgstr "ローカルメタデータの評価が承認されませんでした。"
 
 #~ msgid "Package declares conflicts or replaces metadata that requires policy."
 #~ msgstr "パッケージに、方針による判断が必要な競合または置換メタデータが宣言されています。"

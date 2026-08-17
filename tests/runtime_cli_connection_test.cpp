@@ -194,8 +194,10 @@ void test_typed_runtime_diagnostic_connection() {
             DiagnosticClass::Invalid,
             DiagnosticClass::Unsupported,
             DiagnosticClass::Ambiguous,
+            DiagnosticClass::Declined,
             DiagnosticClass::Cancelled,
             DiagnosticClass::Unavailable,
+            DiagnosticClass::InputFailure,
             DiagnosticClass::QueryFailure,
             DiagnosticClass::MetadataFailure,
             DiagnosticClass::RequiresCheck,
@@ -204,8 +206,9 @@ void test_typed_runtime_diagnostic_connection() {
             DiagnosticClass::ExecutionFailure,
             DiagnosticClass::InternalInconsistency};
     const std::array labels = {
-            "Invalid", "Unsupported", "Ambiguous", "Cancelled",
-            "Unavailable", "Query failure", "Metadata failure",
+            "Invalid", "Unsupported", "Ambiguous", "Declined",
+            "Cancelled", "Unavailable", "Input failure",
+            "Query failure", "Metadata failure",
             "Requires check", "Blocked", "Partial failure",
             "Execution failure", "Internal inconsistency"};
     for(std::size_t index = 0; index < classifications.size(); ++index) {

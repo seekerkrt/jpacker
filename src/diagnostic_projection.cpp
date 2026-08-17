@@ -1,5 +1,8 @@
 #include "diagnostic_projection.hpp"
 
+#include "localization.hpp"
+
+#include <stdexcept>
 #include <utility>
 
 namespace {
@@ -151,9 +154,13 @@ DiagnosticRequiredAction required_action_for(
         return DiagnosticRequiredAction::ResolveBlocker;
     case DiagnosticClass::Ambiguous:
         return DiagnosticRequiredAction::SelectCandidate;
+    case DiagnosticClass::Declined:
     case DiagnosticClass::Cancelled:
         return DiagnosticRequiredAction::None;
     case DiagnosticClass::Unavailable:
+        return DiagnosticRequiredAction::EnableInteraction;
+    case DiagnosticClass::InputFailure:
+        return DiagnosticRequiredAction::ResolveBlocker;
     case DiagnosticClass::QueryFailure:
         return DiagnosticRequiredAction::RetryQuery;
     case DiagnosticClass::MetadataFailure:
@@ -192,6 +199,44 @@ DiagnosticPhase upgrade_all_phase(UpgradeAllOperationPhase phase) noexcept {
 }
 
 } // namespace
+
+NormalizedDiagnostic<ConfirmationResult>
+project_confirmation_diagnostic(
+        const ConfirmationResult& result,
+        DiagnosticOperation operation,
+        DiagnosticPhase phase,
+        DiagnosticIdentity identity) {
+    DiagnosticClass classification;
+    DiagnosticSeverity severity;
+    if(std::holds_alternative<ConfirmationDeclined>(result)) {
+        classification = DiagnosticClass::Declined;
+        severity = DiagnosticSeverity::Warning;
+    } else if(std::holds_alternative<ConfirmationCancelled>(result)) {
+        classification = DiagnosticClass::Cancelled;
+        severity = DiagnosticSeverity::Warning;
+    } else if(std::holds_alternative<ConfirmationUnavailable>(result)) {
+        classification = DiagnosticClass::Unavailable;
+        severity = DiagnosticSeverity::Error;
+    } else if(std::holds_alternative<ConfirmationInputFailure>(result)) {
+        classification = DiagnosticClass::InputFailure;
+        severity = DiagnosticSeverity::Error;
+    } else {
+        throw std::logic_error(localization::translate_message(
+                "An accepted confirmation has no stopping diagnostic."));
+    }
+
+    return NormalizedDiagnostic<ConfirmationResult>{
+            classification,
+            severity,
+            operation,
+            phase,
+            std::move(identity),
+            result,
+            required_action_for(classification),
+            DiagnosticBlockingDecision::BlocksCurrentOperation,
+            DiagnosticExitStatusEffect::Failure,
+            std::nullopt};
+}
 
 DiagnosticSourceKind upgrade_all_source_kind(
         UpgradeAllOperationPhase phase) noexcept {

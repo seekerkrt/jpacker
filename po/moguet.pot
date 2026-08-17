@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.3.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-15 20:01+0900\n"
+"POT-Creation-Date: 2026-08-17 12:33+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2772,36 +2772,6 @@ msgstr ""
 msgid "Editor command is empty."
 msgstr ""
 
-#, c++-format
-msgid "Skipping prompt ({}): {} -> yes"
-msgstr ""
-
-#, c++-format
-msgid "Skipping prompt ({}): {} -> no"
-msgstr ""
-
-#, c++-format
-msgid "Cannot answer prompt without interaction ({}): {}"
-msgstr ""
-
-#, c++-format
-msgid "Skipping prompt (non-interactive {}): {} -> no"
-msgstr ""
-
-#, c++-format
-msgid "Cannot safely answer prompt with non-interactive standard input: {}"
-msgstr ""
-
-#, c++-format
-msgid "Failed to read the answer to this prompt: {}"
-msgstr ""
-
-msgid "A non-default confirmation requires an explicit yes answer."
-msgstr ""
-
-msgid "Please answer yes or no."
-msgstr ""
-
 msgid "Source preference load event has no entry path."
 msgstr ""
 
@@ -2909,9 +2879,6 @@ msgstr ""
 msgid "Proceed with build?"
 msgstr ""
 
-msgid "Aborted."
-msgstr ""
-
 #, c++-format
 msgid "{} changed during review"
 msgstr ""
@@ -2953,9 +2920,6 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the literal PKGBUILD artifact name and makepkg option.
 #, c++-format
 msgid "Evaluate {} metadata with {}?"
-msgstr ""
-
-msgid "Local metadata evaluation was not approved."
 msgstr ""
 
 #, c++-format
@@ -4698,6 +4662,9 @@ msgstr ""
 msgid "{} (version constraint is not verified)"
 msgstr ""
 
+msgid "An accepted confirmation has no stopping diagnostic."
+msgstr ""
+
 msgid "Dry-run projection did not produce an observation."
 msgstr ""
 
@@ -4911,6 +4878,50 @@ msgstr ""
 #. TRANSLATORS: {} is the literal service name "AUR".
 #, c++-format
 msgid "Prepared filtered {} update operation lost its source-build preparation snapshot."
+msgstr ""
+
+msgid "Unknown interactive confirmation default."
+msgstr ""
+
+#, c++-format
+msgid "Skipping prompt ({}): {} -> yes"
+msgstr ""
+
+#, c++-format
+msgid "Skipping prompt ({}): {} -> no"
+msgstr ""
+
+#, c++-format
+msgid "Skipping prompt (non-interactive {}): {} -> no"
+msgstr ""
+
+#, c++-format
+msgid "(type {} to cancel)"
+msgstr ""
+
+msgid "Please answer yes, no, or cancel."
+msgstr ""
+
+msgid "The required confirmation was declined. Any earlier completed phases remain unchanged."
+msgstr ""
+
+msgid "The current operation was cancelled because interactive input ended. Any earlier completed phases remain unchanged."
+msgstr ""
+
+msgid "The current operation was cancelled at an interactive confirmation. Any earlier completed phases remain unchanged."
+msgstr ""
+
+#, c++-format
+msgid "The required confirmation is unavailable while {} is set. Any earlier completed phases remain unchanged."
+msgstr ""
+
+msgid "The required confirmation is unavailable because standard input is non-interactive. Any earlier completed phases remain unchanged."
+msgstr ""
+
+msgid "Failed to read the interactive confirmation input."
+msgstr ""
+
+msgid "An accepted confirmation cannot stop an operation."
 msgstr ""
 
 #, c++-format
@@ -6108,6 +6119,12 @@ msgid "Repository provider capability metadata is invalid."
 msgstr ""
 
 msgid "Unsupported"
+msgstr ""
+
+msgid "Declined"
+msgstr ""
+
+msgid "Input failure"
 msgstr ""
 
 msgid "Query failure"

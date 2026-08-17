@@ -3,6 +3,7 @@
 #include "app_config.hpp"
 #include "cache_authority.hpp"
 #include "dependency_plan.hpp"
+#include "interactive_confirmation.hpp"
 #include "localization.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
@@ -2440,6 +2441,8 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                 result.stopped_phase =
                         SystemSourceUpgradePhase::RegisteredSource;
                 return result;
+            } catch(const ConfirmationOperationStopped&) {
+                throw;
             } catch(const std::exception& error) {
                 source_result.status = RegisteredSourceUpgradeStatus::Failed;
                 source_result.failure_kind =
@@ -2497,6 +2500,8 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
         }
 
         return result;
+    } catch(const ConfirmationOperationStopped&) {
+        throw;
     } catch(const std::exception& error) {
         record_unexpected_execution_failure(
                 result,
