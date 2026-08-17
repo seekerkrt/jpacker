@@ -400,6 +400,30 @@ run_clean_tty_fail() {
     fi
 }
 
+run_build_local_tty_fail() {
+    answers=$1
+    shift
+    : > "$command_log"
+    local_input=$case_dir/build-local-tty.input
+    printf '%b' "$answers" >"$local_input"
+    if timeout 5 script -qec \
+        "$test_binary --noedit build --local $local_root $*" \
+        /dev/null <"$local_input" >"$output_file" 2>&1; then
+        tty_status=0
+    else
+        tty_status=$?
+    fi
+    if ! validation_assert_status build-local-tty-failure 1 \
+        "$tty_status" "$output_file" "$output_file" timeout 5 \
+        script -qec \
+        "$test_binary --noedit build --local $local_root $*" \
+        /dev/null; then
+        sed -n '1,260p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 run_source_ok() {
     refresh_repository_metadata_fixture
     : > "$command_log"
@@ -1258,7 +1282,9 @@ local_root=$case_dir/local-source
 prepare_local_source_root "$local_root" local-eval local-eval
 rm "$local_root/.SRCINFO"
 run_fail --noedit --noconfirm build --local "$local_root"
-assert_contains "Cannot answer prompt without interaction (--noconfirm):" "$output_file"
+assert_contains "Unavailable:" "$output_file"
+assert_contains "--noconfirm" "$output_file"
+assert_not_contains "Build Error:" "$output_file"
 assert_command_content_absent "makepkg"
 assert_command_content_absent "sudo pacman"
 assert_path_absent "$local_root/.SRCINFO"
@@ -1271,55 +1297,84 @@ source_tree_before=$case_dir/source-tree-before.snapshot
 snapshot_source_tree "$local_root" "$source_tree_before"
 run_fail_nonblocking --noedit build --local "$local_root" < /dev/null
 assert_contains \
-    "Cannot safely answer prompt with non-interactive standard input:" \
+    "Unavailable: The required confirmation is unavailable because standard input is non-interactive." \
     "$output_file"
+assert_not_contains "Build Error:" "$output_file"
 assert_command_content_absent "makepkg"
 assert_command_content_absent "sudo pacman"
 assert_path_absent "$local_root/.SRCINFO"
 assert_source_tree_unchanged "$local_root" "$source_tree_before"
 
-for metadata_rejection in empty quit; do
-    setup_case "build-local-metadata-tty-$metadata_rejection-rejected"
+for metadata_decline in n no; do
+    setup_case "build-local-metadata-tty-$metadata_decline-declined"
     local_root=$case_dir/local-source
     prepare_local_source_root "$local_root" local-eval local-eval
     rm "$local_root/.SRCINFO"
     source_tree_before=$case_dir/source-tree-before.snapshot
     snapshot_source_tree "$local_root" "$source_tree_before"
-    case $metadata_rejection in
-        empty)
-            metadata_input='\n'
-            expected_diagnostic="A non-default confirmation requires an explicit yes answer."
-            ;;
-        quit)
-            metadata_input='q\n'
-            expected_diagnostic="Local metadata evaluation was not approved."
-            ;;
-    esac
-    : > "$command_log"
-    metadata_input_file=$case_dir/metadata-rejection.input
-    printf '%b' "$metadata_input" >"$metadata_input_file"
-    if timeout 5 script -qec \
-        "$test_binary --noedit build --local $local_root" \
-        /dev/null <"$metadata_input_file" >"$output_file" 2>&1; then
-        tty_exit_code=0
-    else
-        tty_exit_code=$?
-    fi
-    if ! validation_assert_status \
-        "metadata-rejection-$metadata_rejection" 1 "$tty_exit_code" \
-        "$output_file" "$output_file" timeout 5 script -qec \
-        "$test_binary --noedit build --local $local_root" /dev/null; then
-        sed -n '1,260p' "$output_file" >&2
-        exit 1
-    fi
-    assert_contains "$expected_diagnostic" "$output_file"
+    run_build_local_tty_fail "$metadata_decline\n"
+    assert_contains "Declined:" "$output_file"
+    assert_not_contains "Build Error:" "$output_file"
     assert_command_content_absent "makepkg"
     assert_command_content_absent "sudo pacman"
     assert_path_absent "$local_root/.SRCINFO"
     assert_source_tree_unchanged "$local_root" "$source_tree_before"
 done
 
-setup_case build-local-metadata-explicit-consent
+for metadata_cancel in q quit cancel; do
+    setup_case "build-local-metadata-tty-$metadata_cancel-cancelled"
+    local_root=$case_dir/local-source
+    prepare_local_source_root "$local_root" local-eval local-eval
+    rm "$local_root/.SRCINFO"
+    source_tree_before=$case_dir/source-tree-before.snapshot
+    snapshot_source_tree "$local_root" "$source_tree_before"
+    run_build_local_tty_fail "$metadata_cancel\n"
+    assert_contains "Cancelled:" "$output_file"
+    assert_not_contains "Build Error:" "$output_file"
+    assert_command_content_absent "makepkg"
+    assert_command_content_absent "sudo pacman"
+    assert_path_absent "$local_root/.SRCINFO"
+    assert_source_tree_unchanged "$local_root" "$source_tree_before"
+done
+
+for metadata_retry in empty invalid; do
+    setup_case "build-local-metadata-tty-$metadata_retry-then-n"
+    local_root=$case_dir/local-source
+    prepare_local_source_root "$local_root" local-eval local-eval
+    rm "$local_root/.SRCINFO"
+    source_tree_before=$case_dir/source-tree-before.snapshot
+    snapshot_source_tree "$local_root" "$source_tree_before"
+    case $metadata_retry in
+        empty) metadata_input='\nn\n' ;;
+        invalid) metadata_input='later\nn\n' ;;
+    esac
+    run_build_local_tty_fail "$metadata_input"
+    assert_contains "Please answer yes, no, or cancel." "$output_file"
+    assert_contains "Declined:" "$output_file"
+    assert_not_contains "Build Error:" "$output_file"
+    assert_command_content_absent "makepkg"
+    assert_command_content_absent "sudo pacman"
+    assert_path_absent "$local_root/.SRCINFO"
+    assert_source_tree_unchanged "$local_root" "$source_tree_before"
+done
+
+setup_case build-local-metadata-tty-eof-cancelled
+local_root=$case_dir/local-source
+prepare_local_source_root "$local_root" local-eval local-eval
+rm "$local_root/.SRCINFO"
+source_tree_before=$case_dir/source-tree-before.snapshot
+snapshot_source_tree "$local_root" "$source_tree_before"
+run_build_local_tty_fail ''
+assert_contains "Cancelled:" "$output_file"
+assert_contains "interactive input ended" "$output_file"
+assert_not_contains "Build Error:" "$output_file"
+assert_command_content_absent "makepkg"
+assert_command_content_absent "sudo pacman"
+assert_path_absent "$local_root/.SRCINFO"
+assert_source_tree_unchanged "$local_root" "$source_tree_before"
+
+for metadata_accept in y yes; do
+setup_case "build-local-metadata-explicit-consent-$metadata_accept"
 local_root=$case_dir/local-source
 prepare_local_source_root "$local_root" local-eval local-eval
 metadata_output=$case_dir/evaluated.SRCINFO
@@ -1338,7 +1393,7 @@ export MOGUET_TEST_MAKEPKG_ENV_LOG=$makepkg_env_log
 export MOGUET_TEST_MAKEPKG_ENV_KEYS='FIRST EMPTY'
 export MOGUET_TEST_MAKEPKG_CWD_LOG=$makepkg_cwd_log
 export MOGUET_TEST_MAKEPKG_ARGV_LOG=$makepkg_argv_log
-if ! printf 'y\n' |
+if ! printf '%s\n' "$metadata_accept" |
     script -qec \
         "$test_binary --noedit build --local $local_root FIRST=one EMPTY= FIRST=last" \
         /dev/null > "$output_file" 2>&1; then
@@ -1387,6 +1442,7 @@ if sed -n '2,$p' "$makepkg_cwd_log" | grep -Fx -- "$local_root" >/dev/null; then
     cat "$makepkg_cwd_log" >&2
     exit 1
 fi
+done
 
 echo "  ok: #271 Slice 5 local build/install route"
 
@@ -1859,6 +1915,30 @@ if [ ! -d "$cache_root/alpha" ]; then
     exit 1
 fi
 assert_contains "Skipped Moguet cache cleaning." "$output_file"
+
+setup_case clean-prompt-default-no
+mkdir -p "$cache_root/alpha"
+run_clean_tty_ok ''
+if [ ! -d "$cache_root/alpha" ]; then
+    echo "clean removed cache after the default No answer" >&2
+    exit 1
+fi
+assert_contains "Skipped Moguet cache cleaning." "$output_file"
+
+for clean_cancel in q quit cancel; do
+    setup_case "clean-prompt-$clean_cancel-cancelled"
+    mkdir -p "$cache_root/alpha"
+    run_clean_tty_fail "$clean_cancel"
+    assert_command "sudo pacman -Sc"
+    assert_contains "Cancelled:" "$output_file"
+    assert_contains "earlier completed phases remain unchanged" "$output_file"
+    assert_not_contains "Build Error:" "$output_file"
+    assert_not_contains "Skipped Moguet cache cleaning." "$output_file"
+    if [ ! -d "$cache_root/alpha" ]; then
+        echo "clean removed cache after cancellation" >&2
+        exit 1
+    fi
+done
 
 setup_case clean-empty-cache
 mkdir -p "$cache_root"

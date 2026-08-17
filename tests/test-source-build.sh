@@ -197,6 +197,27 @@ run_tty_ok() {
     fi
 }
 
+run_tty_fail() {
+    answers=$1
+    shift
+    : > "$command_log"
+    tty_input=$case_dir/source-build-tty.input
+    printf '%b' "$answers" >"$tty_input"
+    if script -qec "$test_runner $*" /dev/null \
+        <"$tty_input" >"$output_file" 2>&1; then
+        tty_status=0
+    else
+        tty_status=$?
+    fi
+    if ! validation_assert_status source-build-tty-failure 1 \
+        "$tty_status" "$output_file" "$output_file" \
+        script -qec "$test_runner $*" /dev/null; then
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 run_upgrade_tty_ok() {
     answers=$1
     shift
@@ -204,6 +225,29 @@ run_upgrade_tty_ok() {
     if ! printf '%b' "$answers" |
         PATH=$upgrade_metadata_path script -qec "$upgrade_metadata_test_runner $*" /dev/null > "$output_file" 2>&1; then
         echo "expected interactive upgrade metadata command to succeed: $*" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+    assert_command_prefix_absent "pacman -Q "
+}
+
+run_upgrade_tty_fail() {
+    answers=$1
+    shift
+    : > "$command_log"
+    tty_input=$case_dir/source-upgrade-tty.input
+    printf '%b' "$answers" >"$tty_input"
+    if PATH=$upgrade_metadata_path \
+        script -qec "$upgrade_metadata_test_runner $*" /dev/null \
+        <"$tty_input" >"$output_file" 2>&1; then
+        tty_status=0
+    else
+        tty_status=$?
+    fi
+    if ! validation_assert_status source-upgrade-tty-failure 1 \
+        "$tty_status" "$output_file" "$output_file" \
+        script -qec "$upgrade_metadata_test_runner $*" /dev/null; then
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -534,6 +578,18 @@ assert_contains "Updates were detected in the existing cache repository. View th
 assert_command_absent "git diff HEAD..origin/main --color=always"
 assert_command "git reset --hard origin/main"
 
+setup_case changed-diff-cancel
+create_existing_checkout
+export MOGUET_TEST_GIT_DIFF_QUIET_EXIT_CODE=1
+export MOGUET_TEST_GIT_CHANGED_FILES='PKGBUILD\n'
+run_tty_fail 'q\n' --noedit build clean-root
+assert_contains "Cancelled:" "$output_file"
+assert_not_contains "Build Error:" "$output_file"
+assert_command "git fetch origin"
+assert_command_absent "git diff HEAD..origin/main --color=always"
+assert_command_absent "git reset --hard origin/main"
+assert_command_prefix_absent "makepkg "
+
 setup_case changed-diff-nodiff
 create_existing_checkout
 export MOGUET_TEST_GIT_DIFF_QUIET_EXIT_CODE=1
@@ -543,6 +599,33 @@ assert_not_contains "Update diff range:" "$output_file"
 assert_not_contains "Updates were detected in the existing cache repository. View the Git diff?" "$output_file"
 assert_command_prefix_absent "git diff "
 assert_command "git reset --hard origin/main"
+
+# Optional build-mode No/default keeps the existing continuation branch;
+# q-family cancellation stops after checkout update and before makepkg.
+setup_case clean-build-prompt-no-continues
+create_existing_checkout
+mkdir -p "$checkout_dir/src"
+run_tty_ok 'n\n' --noedit --nodiff build clean-root
+assert_command "git reset --hard origin/main"
+assert_command "makepkg --packagelist"
+assert_not_contains "Cancelled:" "$output_file"
+
+setup_case clean-build-prompt-default-no-continues
+create_existing_checkout
+mkdir -p "$checkout_dir/src"
+run_tty_ok '\n' --noedit --nodiff build clean-root
+assert_command "git reset --hard origin/main"
+assert_command "makepkg --packagelist"
+assert_not_contains "Cancelled:" "$output_file"
+
+setup_case clean-build-prompt-cancel-stops
+create_existing_checkout
+mkdir -p "$checkout_dir/src"
+run_tty_fail 'cancel\n' --noedit --nodiff build clean-root
+assert_contains "Cancelled:" "$output_file"
+assert_not_contains "Build Error:" "$output_file"
+assert_command "git reset --hard origin/main"
+assert_command_prefix_absent "makepkg "
 
 # P0-3: only_if_updated runs after fetch/reset and preserves all unknown-status branches.
 setup_case update-newer
@@ -619,6 +702,16 @@ assert_command "git reset --hard origin/main"
 assert_command_absent "pacman -Q clean-root"
 assert_command_prefix_absent "makepkg "
 
+setup_case update-unknown-interactive-cancel
+prepare_upgrade_case
+run_upgrade_tty_fail 'q\n' --noedit --nodiff upgrade
+assert_contains "Cancelled:" "$output_file"
+assert_not_contains "Build Error:" "$output_file"
+assert_command "sudo pacman -Syu"
+assert_command "git reset --hard origin/main"
+assert_command_absent "pacman -Q clean-root"
+assert_command_prefix_absent "makepkg "
+
 setup_case update-unknown-interactive-yes
 prepare_upgrade_case
 run_upgrade_tty_ok 'y\n' --noedit --nodiff upgrade
@@ -642,6 +735,51 @@ assert_command_before "git clone $official_url clean-root" "makepkg --packagelis
 assert_checkout_retained
 
 # Issue #226: EDITOR環境変数の実argv境界を固定する。
+for proceed_decline in n no; do
+    setup_case "proceed-with-build-$proceed_decline-declined"
+    create_existing_checkout
+    export MOGUET_TEST_CONFIG_FILE="$config_file"
+    export EDITOR='moguet-test-editor'
+    run_config_tty_fail "y\n$proceed_decline\n" build clean-root
+    assert_contains "Declined:" "$output_file"
+    assert_not_contains "Build Error:" "$output_file"
+    assert_command "moguet-test-editor ./PKGBUILD"
+    assert_command_prefix_absent "makepkg "
+done
+
+for proceed_cancel in q cancel; do
+    setup_case "proceed-with-build-$proceed_cancel-cancelled"
+    create_existing_checkout
+    export MOGUET_TEST_CONFIG_FILE="$config_file"
+    export EDITOR='moguet-test-editor'
+    run_config_tty_fail "y\n$proceed_cancel\n" build clean-root
+    assert_contains "Cancelled:" "$output_file"
+    assert_not_contains "Build Error:" "$output_file"
+    assert_command "moguet-test-editor ./PKGBUILD"
+    assert_command_prefix_absent "makepkg "
+done
+
+setup_case proceed-with-build-eof-cancelled
+create_existing_checkout
+export MOGUET_TEST_CONFIG_FILE="$config_file"
+export EDITOR='moguet-test-editor'
+run_config_tty_fail 'y\n' build clean-root
+assert_contains "Cancelled:" "$output_file"
+assert_contains "interactive input ended" "$output_file"
+assert_not_contains "Build Error:" "$output_file"
+assert_command "moguet-test-editor ./PKGBUILD"
+assert_command_prefix_absent "makepkg "
+
+setup_case proceed-with-build-default-yes
+create_existing_checkout
+export MOGUET_TEST_CONFIG_FILE="$config_file"
+export EDITOR='moguet-test-editor'
+run_config_tty_ok 'y\n\n' build clean-root
+assert_command "moguet-test-editor ./PKGBUILD"
+assert_command "makepkg --packagelist"
+assert_not_contains "Declined:" "$output_file"
+assert_not_contains "Cancelled:" "$output_file"
+
 setup_case editor-environment-argv
 create_existing_checkout
 printf 'post_install() { :; }\n' > "$checkout_dir/-option.install"

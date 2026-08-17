@@ -1,5 +1,7 @@
 #include "source_install.hpp"
 
+#include "interactive_confirmation.hpp"
+
 #include "app_config.hpp"
 #include "aur_rpc.hpp"
 #include "build_plan_artifact_target_projection.hpp"
@@ -981,6 +983,8 @@ prepare_package_base_source_build_work_item_typed(
                 config);
     } catch(const TrustedCacheError&) {
         throw;
+    } catch(const ConfirmationOperationStopped&) {
+        throw;
     } catch(const std::exception& error) {
         // registered CLIの既存prefix ownerへ原診断を返し、checkout failureを
         // PackageBase lower phaseの文言へ置換しない。
@@ -1033,6 +1037,8 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
     } catch(const TrustedCacheError&) {
         // Cache authority failureはtyped callerがphase/codeを保持できるよう、
         // generic build/install diagnosticへwrapしない。
+        throw;
+    } catch(const ConfirmationOperationStopped&) {
         throw;
     } catch(const std::exception& error) {
         // TRANSLATORS: The placeholders are the PackageBase identity, an AUR PackageBase name, package name, and build/install diagnostic.

@@ -141,6 +141,15 @@ fail-closedで停止します。v2.xは、Moguetのsource-aware入口、安全�
 - `--noconfirm`は対話停止を避ける指定であり、「すべてyes」ではありません。source
   selection、plan、identity、conflict、ownershipのguardを突破せず、自動削除や自動置換を
   許可しません。
+- Moguet-owned boolean confirmationは、`[Y/n]`をYes default、`[y/N]`をNo default、
+  `[y/n]`をdefaultなしとして扱います。fixedかつcase-insensitiveなASCII tokenとして
+  `y` / `yes`、`n` / `no`、`q` / `quit` / `cancel`を受理します。`[y/n]`でのEnterは
+  approvalではなくwarning後の再promptです。`--noconfirm`は宣言済みdefaultだけを使い、
+  non-TTY inputはsafe Noだけを利用できます。どちらもapproval-requiredなdefaultなし
+  promptをYesへ変えません。question固有のDeclined、current operationのCancelled、actual
+  input / command / internal failureは互いに区別します。cancellationは後続処理を停止しますが、
+  完了済みphaseをrollbackしません。詳細は[interactive confirmation contract](https://github.com/seekerkrt/moguet/blob/develop/docs/contracts/interactive-confirmation.md)を
+  参照してください。
 - 複数phaseのupgradeは単一atomic transactionではありません。failure時は後続処理を
   止めますが、完了済みpackage transactionをrollbackしません。install成功後にcleanup
   だけ失敗した場合、packageはinstall済みの可能性があるため、結果を確認せず再試行

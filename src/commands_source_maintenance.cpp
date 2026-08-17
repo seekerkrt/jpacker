@@ -6,6 +6,7 @@
 #include "cli_authority.hpp"
 #include "cli_runtime_contract.hpp"
 #include "diagnostic_projection.hpp"
+#include "interactive_confirmation.hpp"
 #include "local_source_build.hpp"
 #include "local_source_install.hpp"
 #include "local_source_metadata_evaluation.hpp"
@@ -48,19 +49,6 @@ namespace fs = std::filesystem;
 
 namespace {
 
-enum class PromptDefault {
-    Yes,
-    No,
-    None,
-};
-
-std::string trim(const std::string& str) {
-    size_t first = str.find_first_not_of(" \t\n\r");
-    if(first == std::string::npos) return "";
-    size_t last = str.find_last_not_of(" \t\n\r");
-    return str.substr(first, (last - first + 1));
-}
-
 bool same_temporary_file_state(
         const struct stat& expected, const struct stat& actual) {
     return expected.st_dev == actual.st_dev &&
@@ -73,13 +61,6 @@ bool same_temporary_file_state(
            expected.st_mtim.tv_nsec == actual.st_mtim.tv_nsec &&
            expected.st_ctim.tv_sec == actual.st_ctim.tv_sec &&
            expected.st_ctim.tv_nsec == actual.st_ctim.tv_nsec;
-}
-
-std::string to_lower(std::string str) {
-    std::transform(str.begin(), str.end(), str.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return str;
 }
 
 bool is_safe_command_token(const std::string& token) {
@@ -151,103 +132,24 @@ void require_valid_add_src_packages(
     }
 }
 
-std::optional<bool> prompt_default_value(PromptDefault default_answer) {
-    switch(default_answer) {
-        case PromptDefault::Yes:
-            return true;
-        case PromptDefault::No:
-            return false;
-        case PromptDefault::None:
-            return std::nullopt;
-    }
-    return std::nullopt;
+void report_confirmation_stop(
+        const ConfirmationResult& result,
+        DiagnosticOperation operation,
+        DiagnosticPhase phase,
+        DiagnosticIdentity identity = {}) {
+    report_runtime_diagnostic(
+            project_confirmation_diagnostic(
+                    result, operation, phase, std::move(identity)),
+            confirmation_stop_diagnostic(result));
 }
 
-std::string prompt_suffix(PromptDefault default_answer) {
-    // NO_TRANSLATE: These tokens define the accepted/default prompt input.
-    switch(default_answer) {
-        case PromptDefault::Yes:
-            return "[Y/n]";
-        case PromptDefault::No:
-            return "[y/N]";
-        case PromptDefault::None:
-            return "[y/n]";
-    }
-    return "[y/n]";
-}
-
-bool ask_user(
-        const std::string& question,
-        PromptDefault default_answer,
-        const AppConfig& config) {
-    std::optional<bool> default_value = prompt_default_value(default_answer);
-
-    if(config.no_confirm) {
-        // POLICY: --noconfirm でも default を持たない prompt は自動回答しない。
-        if(default_value.has_value()) {
-            if(default_value.value()) {
-                // TRANSLATORS: The placeholders are the literal --noconfirm option and a complete prompt question.
-                Logger::info(localization::format_translated_message(
-                        "Skipping prompt ({}): {} -> yes",
-                        "--noconfirm",
-                        question));
-            } else {
-                // TRANSLATORS: The placeholders are the literal --noconfirm option and a complete prompt question.
-                Logger::info(localization::format_translated_message(
-                        "Skipping prompt ({}): {} -> no",
-                        "--noconfirm",
-                        question));
-            }
-            return default_value.value();
-        }
-        // TRANSLATORS: The placeholders are the literal --noconfirm option and a complete prompt question.
-        throw std::runtime_error(localization::format_translated_message(
-                "Cannot answer prompt without interaction ({}): {}",
-                "--noconfirm",
-                question));
-    }
-
-    if(!isatty(STDIN_FILENO)) {
-        // LANDMINE: 非対話 stdin では、破壊的になり得る yes default を安全に選べない。
-        if(default_value.has_value() && default_value.value() == false) {
-            // TRANSLATORS: The placeholders are the literal stdin identity and a complete prompt question.
-            Logger::info(localization::format_translated_message(
-                    "Skipping prompt (non-interactive {}): {} -> no",
-                    "stdin", question));
-            return false;
-        }
-        // TRANSLATORS: The placeholder is a complete prompt question.
-        throw std::runtime_error(localization::format_translated_message(
-                "Cannot safely answer prompt with non-interactive standard input: {}",
-                question));
-    }
-
-    for(;;) {
-        // NO_TRANSLATE: Prompt framing and response tokens are fixed UI syntax;
-        // question is a complete translated sentence.
-        std::cout << ":: " << question << " " << prompt_suffix(default_answer) << " ";
-        std::string input;
-        if(!std::getline(std::cin, input)) {
-            // TRANSLATORS: The placeholder is a complete prompt question.
-            throw std::runtime_error(localization::format_translated_message(
-                    "Failed to read the answer to this prompt: {}", question));
-        }
-
-        input = to_lower(trim(input));
-        if(input.empty()) {
-            if(default_value.has_value()) return default_value.value();
-            throw std::runtime_error(localization::translate_message(
-                    "A non-default confirmation requires an explicit yes answer."));
-        }
-        if(input == "y" || input == "yes") return true;
-        if(input == "n" || input == "no" || input == "q" ||
-           input == "quit" || input == "cancel") {
-            return false;
-        }
-
-        Logger::warn(localization::translate_message(
-                "Please answer yes or no."));
-    }
+[[noreturn]] void stop_after_confirmation(
+        ConfirmationResult result,
+        DiagnosticOperation operation,
+        DiagnosticPhase phase,
+        DiagnosticIdentity identity = {}) {
+    report_confirmation_stop(result, operation, phase, std::move(identity));
+    throw ConfirmationOperationStopped(std::move(result));
 }
 
 void present_system_source_upgrade_event(
@@ -411,14 +313,24 @@ ReviewedLocalSourceRoot review_local_source_root(
     // TRANSLATORS: The placeholder is an absolute PKGBUILD path.
     Logger::info(localization::format_translated_message(
             "Review target: {}", pkgbuild_path.string()));
-    const bool edit = ask_user(
+    ConfirmationResult edit_confirmation = request_confirmation(
             localization::format_translated_message(
                     // TRANSLATORS: The placeholder is the literal PKGBUILD artifact name.
                     "Edit {}?", "PKGBUILD"),
-            PromptDefault::No, config);
-    if(!edit) {
+            ConfirmationDefault::No, config.no_confirm);
+    if(std::holds_alternative<ConfirmationDeclined>(
+               edit_confirmation)) {
         source_root.require_unchanged_identity();
         return ReviewedLocalSourceRoot{std::move(source_root), false};
+    }
+    if(!std::holds_alternative<ConfirmationAccepted>(
+               edit_confirmation)) {
+        DiagnosticIdentity identity;
+        identity.source_kind = DiagnosticSourceKind::Local;
+        identity.local_root = source_root.canonical_path();
+        stop_after_confirmation(
+                std::move(edit_confirmation), DiagnosticOperation::Build,
+                DiagnosticPhase::Preflight, std::move(identity));
     }
 
     const LocalSourceDirectoryIdentity expected_directory =
@@ -439,11 +351,18 @@ ReviewedLocalSourceRoot review_local_source_root(
                 "PKGBUILD"));
     }
     const bool pkgbuild_changed = reviewed.pkgbuild() != expected_pkgbuild;
-    if(!ask_user(
-               localization::translate_message("Proceed with build?"),
-               PromptDefault::Yes, config)) {
-        throw std::runtime_error(localization::translate_message(
-                "Aborted."));
+    ConfirmationResult proceed_confirmation = request_confirmation(
+            localization::translate_message("Proceed with build?"),
+            ConfirmationDefault::Yes, config.no_confirm);
+    if(!std::holds_alternative<ConfirmationAccepted>(
+               proceed_confirmation)) {
+        DiagnosticIdentity identity;
+        identity.source_kind = DiagnosticSourceKind::Local;
+        identity.local_root = reviewed.canonical_path();
+        stop_after_confirmation(
+                std::move(proceed_confirmation),
+                DiagnosticOperation::Build, DiagnosticPhase::Preflight,
+                std::move(identity));
     }
     return ReviewedLocalSourceRoot{
             std::move(reviewed), pkgbuild_changed};
@@ -521,14 +440,21 @@ LocalSourceBuildMetadata accept_local_source_build_metadata(
     Logger::warn(localization::format_translated_message(
             "Local metadata evaluation is required for {}: {}.",
             source_root.canonical_path().string(), reason));
-    if(!ask_user(
-               localization::format_translated_message(
-                       // TRANSLATORS: The placeholders are the literal PKGBUILD artifact name and makepkg option.
-                       "Evaluate {} metadata with {}?", "PKGBUILD",
-                       "makepkg --printsrcinfo"),
-               PromptDefault::None, config)) {
-        throw std::runtime_error(localization::translate_message(
-                "Local metadata evaluation was not approved."));
+    ConfirmationResult evaluation_confirmation = request_confirmation(
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholders are the literal PKGBUILD artifact name and makepkg option.
+                    "Evaluate {} metadata with {}?", "PKGBUILD",
+                    "makepkg --printsrcinfo"),
+            ConfirmationDefault::None, config.no_confirm);
+    if(!std::holds_alternative<ConfirmationAccepted>(
+               evaluation_confirmation)) {
+        DiagnosticIdentity identity;
+        identity.source_kind = DiagnosticSourceKind::Local;
+        identity.local_root = source_root.canonical_path();
+        stop_after_confirmation(
+                std::move(evaluation_confirmation),
+                DiagnosticOperation::Build, DiagnosticPhase::Metadata,
+                std::move(identity));
     }
     return evaluate_local_source_metadata(
             source_root, std::move(source_environment),
@@ -922,6 +848,8 @@ int cmd_build_local(
         Logger::error(
                 local_source_workspace_failure_diagnostic(error.failure()));
         return 1;
+    } catch(const ConfirmationOperationStopped&) {
+        return 1;
     } catch(const std::exception& error) {
         // TRANSLATORS: The placeholder is a diagnostic from the failed build.
         Logger::error(localization::format_translated_message(
@@ -953,6 +881,8 @@ int cmd_build(
     } catch(const SeparatedSourceBuildCleanupError& error) {
         // Package transactionは成功済みなので、generic Build Error prefixを付けない。
         Logger::error(error.what());
+        return 1;
+    } catch(const ConfirmationOperationStopped&) {
         return 1;
     } catch(const std::exception& e) {
         // TRANSLATORS: The placeholder is a diagnostic from the failed build.
@@ -1374,7 +1304,11 @@ int cmd_clean(const AppConfig& config) {
                         "Clean {} build cache ({})?",
                         application_identity::PROJECT_NAME,
                         cleanup.cache_path().string());
-        if(ask_user(clean_question, PromptDefault::No, config)) {
+        ConfirmationResult clean_confirmation = request_confirmation(
+                clean_question, ConfirmationDefault::No,
+                config.no_confirm);
+        if(std::holds_alternative<ConfirmationAccepted>(
+                   clean_confirmation)) {
             Logger::info(localization::translate_message(
                     "Removing cached build files..."));
             bool cleanup_failed = false;
@@ -1399,10 +1333,16 @@ int cmd_clean(const AppConfig& config) {
                         "{} cache cleaned.",
                         application_identity::PROJECT_NAME));
             }
-        } else {
+        } else if(std::holds_alternative<ConfirmationDeclined>(
+                          clean_confirmation)) {
             Logger::info(localization::format_translated_message(
                     "Skipped {} cache cleaning.",
                     application_identity::PROJECT_NAME));
+        } else {
+            report_confirmation_stop(
+                    clean_confirmation, DiagnosticOperation::Clean,
+                    DiagnosticPhase::Cleanup);
+            return 1;
         }
     } else {
         Logger::info(localization::format_translated_message(

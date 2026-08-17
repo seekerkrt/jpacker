@@ -22,11 +22,13 @@ bool is_failure_class(DiagnosticClass classification) noexcept {
     case DiagnosticClass::MetadataFailure:
     case DiagnosticClass::PartialFailure:
     case DiagnosticClass::ExecutionFailure:
+    case DiagnosticClass::InputFailure:
     case DiagnosticClass::InternalInconsistency:
         return true;
     case DiagnosticClass::Invalid:
     case DiagnosticClass::Unsupported:
     case DiagnosticClass::Ambiguous:
+    case DiagnosticClass::Declined:
     case DiagnosticClass::Cancelled:
     case DiagnosticClass::Unavailable:
     case DiagnosticClass::RequiresCheck:

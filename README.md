@@ -168,6 +168,16 @@ detailed plan.
 - `--noconfirm` avoids interactive blocking. It is not “yes to everything” and
   does not bypass source selection, planning, identity, conflict, or ownership
   guards, and it never authorizes automatic removal or replacement.
+- Moguet-owned boolean confirmations use `[Y/n]` for a Yes default, `[y/N]`
+  for a No default, and `[y/n]` for no default. They accept the fixed
+  case-insensitive ASCII tokens `y` / `yes`, `n` / `no`, and `q` / `quit` /
+  `cancel`. Enter at `[y/n]` warns and re-prompts instead of approving.
+  `--noconfirm` uses only a declared default, while non-TTY input may use only
+  a safe No; neither turns an approval-required no-default prompt into Yes.
+  A question-specific decline and cancellation of the current operation are
+  distinct from each other and from actual input, command, or internal
+  failure. Cancellation stops later work but does not roll back completed
+  phases. See the [interactive confirmation contract](https://github.com/seekerkrt/moguet/blob/develop/docs/contracts/interactive-confirmation.md).
 - Multi-phase upgrades are not one atomic transaction. A failure stops later
   work but does not roll back an already completed package transaction. If
   cleanup fails after installation succeeds, inspect the result before
