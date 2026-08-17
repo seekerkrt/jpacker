@@ -607,12 +607,24 @@ changes the XDG authority.
 
 The canonical development repository is
 [GitHub](https://github.com/seekerkrt/moguet), with a
-[GitLab mirror](https://gitlab.com/seekerkrt/moguet). Issues and pull requests
-are managed on GitHub.
+[GitLab mirror](https://gitlab.com/seekerkrt/moguet). Questions, suspected
+bugs, and feature ideas should start in
+[GitHub Discussions](https://github.com/seekerkrt/moguet/discussions).
+[GitHub Issues](https://github.com/seekerkrt/moguet/issues) track concrete work
+managed by the maintainer; a reproducible bug with sufficient observation
+details may be submitted directly through the
+[Bug Issue Form](https://github.com/seekerkrt/moguet/issues/new?template=bug-report.yml).
+Pull requests are managed on GitHub.
+
+See
+[CONTRIBUTING.md](https://github.com/seekerkrt/moguet/blob/develop/CONTRIBUTING.md)
+before proposing a change. Do not post security-sensitive details in public
+Discussions or Issues; follow
+[SECURITY.md](https://github.com/seekerkrt/moguet/blob/develop/SECURITY.md) and
+[report them privately](https://github.com/seekerkrt/moguet/security/advisories/new).
 
 The active integration branch is `develop`; stable releases are on `main`.
 See
-[CONTRIBUTING.md](https://github.com/seekerkrt/moguet/blob/develop/CONTRIBUTING.md),
 [docs/DEVELOPMENT.md](https://github.com/seekerkrt/moguet/blob/develop/docs/DEVELOPMENT.md),
 and
 [docs/VERSIONING.md](https://github.com/seekerkrt/moguet/blob/develop/docs/VERSIONING.md).
