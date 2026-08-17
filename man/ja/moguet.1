@@ -645,6 +645,52 @@ authoritativeに確定できなければ、対応するexternal mutation前に�
 .B --noconfirm
 でguardを突破しません。
 .
+.SS "対話確認"
+Moguet-owned boolean promptは、
+.B [Y/n]
+をYes default、
+.B [y/N]
+をNo default、
+.B [y/n]
+をdefaultなしとして扱います。
+fixedかつlocale-neutral、case-insensitiveなASCII responseは
+.BR y / yes 、
+.BR n / no 、
+.BR q / quit / cancel
+です。q-familyはquestion固有のNoではなくcurrent Moguet operationをcancelします。
+その他のinputはwarning後に再promptします。
+.B [y/n]
+のempty inputも再promptし、implicit approvalにはなりません。
+.
+.PP
+.B --noconfirm
+は宣言済みdefaultだけを使います。
+.B [Y/n]
+ではYes、
+.B [y/N]
+ではsafe Noとなり、
+.B [y/n]
+へanswerできません。non-TTY standard inputが利用できるのは
+.B [y/N]
+のsafe Noだけで、Yes defaultやdefaultなしpromptをapprovalへ変えません。
+.
+.PP
+interactive confirmation中のclean EOFはend-of-input reasonを持つcancellationです。
+actual stream read failureはinput failureのまま区別し、どちらもimplicit Yesとして
+扱いません。
+.
+.PP
+Declinedはquestionが所有するnegative answer、Cancelledはcurrent Moguet operationの停止です。
+actual input、external command、build、validation、internal failureともpresentation上で
+区別します。presentation severityとprocess statusは別dimensionです。optional Noやnormal skipは
+終了code 0で正常完了し得ますが、required operationを未完了にするDeclined、Cancelled、EOF、
+approval Unavailableはnon-zeroです。
+InputFailureその他のactual failureもnon-zeroです。
+.
+.PP
+cancellationはその時点以降の処理を停止します。invocation全体に副作用がなかったことや、
+完了済みGit、editor、pacman、先行system phaseのrollbackを意味しません。
+.
 .PP
 build / install前に、Moguetはprovided componentとversion付きrelationを含め、declared
 conflict / replacementをinstalled / planned packageへ照合します。diagnosticはinstalled
