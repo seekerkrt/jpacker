@@ -1,0 +1,100 @@
+name: Reproducible bug report / 再現情報のある不具合報告
+description: Report a concrete Moguet bug with reproduction and observation details / 再現・観測情報が揃ったMoguetの不具合を報告します
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a concrete bug with sufficient reproduction and observation details.
+        再現・観測情報が十分に揃った具体的なbugだけを、このformから報告してください。
+
+        If you are unsure whether the behavior is a bug, do not know the expected behavior, or cannot yet reproduce it, start in [GitHub Discussions](https://github.com/seekerkrt/moguet/discussions). Questions and feature ideas also belong in Discussions.
+        bugかどうか、期待する挙動、再現条件がまだ不明な場合は、[GitHub Discussions](https://github.com/seekerkrt/moguet/discussions)から相談してください。質問や機能要望もDiscussionsが入口です。
+
+        Do not include security-sensitive details. Use [private vulnerability reporting](https://github.com/seekerkrt/moguet/security/advisories/new) instead.
+        Security-sensitiveな内容は記載せず、[Private vulnerability reporting](https://github.com/seekerkrt/moguet/security/advisories/new)から非公開で報告してください。
+  - type: input
+    id: version
+    attributes:
+      label: Moguet version / Moguetのversion
+      description: Include the output of `moguet --version` when available. / 分かる場合は`moguet --version`の出力を記載してください。
+      placeholder: "Moguet vX.Y.Z"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment / 実行環境
+      description: Include the OS or Arch Linux environment, architecture, and relevant package or tool versions. / OSまたはArch Linux環境、architecture、関連するpackageやtoolのversionを記載してください。
+      placeholder: |
+        OS / Arch Linux environment:
+        Architecture:
+        Relevant package or tool versions:
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command / 実行したcommand
+      description: Provide the exact command without secrets or credentials. / Secretやcredentialを含めず、実行したcommandを正確に記載してください。
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps / 再現手順
+      description: Describe the preconditions and steps needed to reproduce the behavior. / 挙動を再現するための前提条件と手順を記載してください。
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / 期待する挙動
+      description: Describe what you expected to happen. / どのような挙動を期待したか記載してください。
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior / 実際の挙動
+      description: Describe what actually happened. / 実際に何が起きたか記載してください。
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics / Log・diagnostic
+      description: Add relevant logs or diagnostics if available, after redacting sensitive data. / 利用可能なlogやdiagnosticがあれば、sensitive dataを除いて記載してください。
+    validations:
+      required: false
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: Reproduction frequency / 再現頻度
+      options:
+        - Every time / 毎回
+        - Often / よく発生する
+        - Sometimes / ときどき発生する
+        - Once / 1回だけ
+        - Not re-tested / 再確認していない
+    validations:
+      required: true
+  - type: checkboxes
+    id: existing_reports
+    attributes:
+      label: Existing reports / 既存投稿
+      options:
+        - label: I searched existing Discussions and Issues for the same report. / 同じ内容の既存DiscussionとIssueを検索しました。
+          required: true
+  - type: checkboxes
+    id: public_report_safety
+    attributes:
+      label: Public report safety / 公開投稿の安全確認
+      options:
+        - label: This report contains no security-sensitive details. If it does, I will use [private vulnerability reporting](https://github.com/seekerkrt/moguet/security/advisories/new). / この報告にsecurity-sensitiveな内容は含まれていません。該当する場合は[非公開の報告経路](https://github.com/seekerkrt/moguet/security/advisories/new)を使います。
+          required: true

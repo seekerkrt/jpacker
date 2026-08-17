@@ -549,10 +549,20 @@ per-user migrationだけがXDG authorityを変更します。
 
 canonical development repositoryは
 [GitHub](https://github.com/seekerkrt/moguet)、backup mirrorは
-[GitLab](https://gitlab.com/seekerkrt/moguet)です。Issueとpull requestはGitHubで管理します。
+[GitLab](https://gitlab.com/seekerkrt/moguet)です。質問、不具合かもしれない相談、機能要望は
+[GitHub Discussions](https://github.com/seekerkrt/moguet/discussions)を最初の入口にしてください。
+[GitHub Issues](https://github.com/seekerkrt/moguet/issues)はmaintainerが管理する具体的な作業を
+追跡します。十分な再現・観測情報があるbugは、
+[Bug Issue Form](https://github.com/seekerkrt/moguet/issues/new?template=bug-report.yml)から
+直接報告できます。pull requestはGitHubで管理します。
+
+変更を提案する前に
+[CONTRIBUTING.md](https://github.com/seekerkrt/moguet/blob/develop/CONTRIBUTING.md)を
+確認してください。Security-sensitiveな内容をpublicなDiscussionやIssueへ投稿せず、
+[SECURITY.md](https://github.com/seekerkrt/moguet/blob/develop/SECURITY.md)に従って
+[非公開で報告してください](https://github.com/seekerkrt/moguet/security/advisories/new)。
 
 active integration branchは`develop`、stable releaseは`main`です。
-[CONTRIBUTING.md](https://github.com/seekerkrt/moguet/blob/develop/CONTRIBUTING.md)、
 [docs/DEVELOPMENT.md](https://github.com/seekerkrt/moguet/blob/develop/docs/DEVELOPMENT.md)、
 [docs/VERSIONING.md](https://github.com/seekerkrt/moguet/blob/develop/docs/VERSIONING.md)を
 参照してください。Moguet v2.xではAUR helper
