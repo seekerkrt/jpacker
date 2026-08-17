@@ -66,6 +66,11 @@ add_installed_package root-old 1.0-1
 add_installed_package root-legacy 1.0-1
 add_installed_package unknown-relation-provider 1.0-1 \
     unknown-relation-target
+add_installed_package gegl 0.4.70-3 \
+    'libgegl-0.4.so=0-64
+libgegl-npd-0.4.so=libgegl-npd-0.4.so-64
+libgegl-sc-0.4.so=libgegl-sc-0.4.so-64'
+add_installed_package soname-regression-git 0.9-1 wezterm
 
 port_file=$tmp_dir/port
 python3 "$repo_root/tests/aur_rpc_fixture_server.py" \
@@ -232,6 +237,47 @@ assert_not_contains "ConfirmedNoMatchingCurrentOrPlannedTarget" \
 assert_contains "completeness: Complete" "$tmp_dir/no-match-plan.out"
 assert_contains "Build readiness: Ready" "$tmp_dir/no-match-plan.out"
 assert_contains "Install readiness: Ready" "$tmp_dir/no-match-plan.out"
+
+: > "$command_log"
+run_ok "$tmp_dir/soname-old-self-plan.out" plan soname-regression-git
+assert_not_contains "Installed package provides metadata is malformed." \
+    "$tmp_dir/soname-old-self-plan.out"
+assert_not_contains "Invalid relation metadata or observation" \
+    "$tmp_dir/soname-old-self-plan.out"
+assert_contains "Confirmed no matching current or planned target" \
+    "$tmp_dir/soname-old-self-plan.out"
+assert_not_contains "Installed conflict confirmed" \
+    "$tmp_dir/soname-old-self-plan.out"
+assert_contains "completeness: Complete" \
+    "$tmp_dir/soname-old-self-plan.out"
+assert_contains "Build readiness: Ready" \
+    "$tmp_dir/soname-old-self-plan.out"
+assert_contains "Install readiness: Ready" \
+    "$tmp_dir/soname-old-self-plan.out"
+assert_no_relation_mutation
+
+add_installed_package wezterm 1.0-1
+run_ok "$tmp_dir/soname-real-conflict-plan.out" plan soname-regression-git
+assert_not_contains "Installed package provides metadata is malformed." \
+    "$tmp_dir/soname-real-conflict-plan.out"
+assert_contains "Installed conflict confirmed" \
+    "$tmp_dir/soname-real-conflict-plan.out"
+assert_contains "matched installed package wezterm" \
+    "$tmp_dir/soname-real-conflict-plan.out"
+assert_not_contains "matched installed package soname-regression-git" \
+    "$tmp_dir/soname-real-conflict-plan.out"
+assert_contains "completeness: Complete" \
+    "$tmp_dir/soname-real-conflict-plan.out"
+assert_contains "Build readiness: Requires check" \
+    "$tmp_dir/soname-real-conflict-plan.out"
+assert_contains "Install readiness: Requires check" \
+    "$tmp_dir/soname-real-conflict-plan.out"
+
+: > "$command_log"
+run_fail "$tmp_dir/soname-real-conflict-build.out" build soname-regression-git
+assert_contains "Installed conflict confirmed" \
+    "$tmp_dir/soname-real-conflict-build.out"
+assert_no_relation_mutation
 
 : > "$command_log"
 run_fail "$tmp_dir/conflict-dry-run.out" --dry-run build conflict-only
@@ -448,5 +494,27 @@ run_ok "$tmp_dir/split-fetch.out" fetch split-child
 assert_contains "git clone https://aur.archlinux.org/split-base.git split-base" "$command_log"
 assert_not_contains "makepkg " "$command_log"
 assert_not_contains "sudo " "$command_log"
+
+add_installed_package unsupported-provides 1.0-1 \
+    'unsupported-capability>=1'
+: > "$command_log"
+run_ok "$tmp_dir/unsupported-provides-plan.out" plan no-match-root
+assert_contains "Installed package provides metadata is malformed." \
+    "$tmp_dir/unsupported-provides-plan.out"
+assert_contains "Invalid relation metadata or observation" \
+    "$tmp_dir/unsupported-provides-plan.out"
+assert_contains "completeness: Incomplete" \
+    "$tmp_dir/unsupported-provides-plan.out"
+assert_contains "Build readiness: Blocked" \
+    "$tmp_dir/unsupported-provides-plan.out"
+assert_contains "Install readiness: Blocked" \
+    "$tmp_dir/unsupported-provides-plan.out"
+assert_no_relation_mutation
+
+: > "$command_log"
+run_fail "$tmp_dir/unsupported-provides-build.out" build no-match-root
+assert_contains "Installed package provides metadata is malformed." \
+    "$tmp_dir/unsupported-provides-build.out"
+assert_no_relation_mutation
 
 echo "conflicts/replaces integration tests: all checks passed"

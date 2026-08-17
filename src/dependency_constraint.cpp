@@ -87,6 +87,41 @@ bool is_valid_package_version(std::string_view value) noexcept {
             is_valid_pkgrel(version.substr(release_separator + 1));
 }
 
+bool is_valid_legacy_soname_v1_unversioned_provide(
+        std::string_view capability_name,
+        std::string_view version) noexcept {
+    if(!capability_name.ends_with(".so") ||
+       version.size() != capability_name.size() + 3 ||
+       !version.starts_with(capability_name) ||
+       version[capability_name.size()] != '-') {
+        return false;
+    }
+
+    const std::string_view architecture =
+            version.substr(capability_name.size() + 1);
+    return architecture == "32" || architecture == "64";
+}
+
+bool is_valid_provider_capability_version(
+        std::string_view capability_name,
+        std::string_view version) noexcept {
+    // ALPM provisions are a structurally ambiguous union. A value that is not
+    // a confirmed SONAME v1 form may still be an ordinary component version.
+    if(is_valid_legacy_soname_v1_unversioned_provide(
+               capability_name, version)) {
+        return true;
+    }
+    return is_valid_package_version(version);
+}
+
+std::string provider_capability_specification(
+        const std::string& package_name,
+        const std::optional<std::string>& version) {
+    return version.has_value()
+            ? package_name + "=" + version.value()
+            : package_name;
+}
+
 bool is_valid_soname_payload(std::string_view payload) noexcept {
     if(payload.empty()) return false;
     return std::all_of(payload.begin(), payload.end(), [](char ch) {
@@ -395,6 +430,29 @@ ProviderCapabilityParseResult parse_provider_capability(
             ProviderCapability(raw, package_name, version));
 }
 
+ProviderCapabilityParseResult make_provider_capability_from_metadata(
+        std::string package_name, std::optional<std::string> version) {
+    const std::string raw =
+            provider_capability_specification(package_name, version);
+    if(!is_valid_package_identity(package_name)) {
+        return ProviderCapabilityParseResult(failure(
+                DependencyConstraintParseFailureKind::InvalidPackageIdentity,
+                raw));
+    }
+    if(version.has_value() && version->empty()) {
+        return ProviderCapabilityParseResult(failure(
+                DependencyConstraintParseFailureKind::MissingVersion, raw));
+    }
+    if(version.has_value() &&
+       (version->find_first_of("<>=") != std::string::npos ||
+        !is_valid_provider_capability_version(package_name, *version))) {
+        return ProviderCapabilityParseResult(failure(
+                DependencyConstraintParseFailureKind::InvalidVersion, raw));
+    }
+    return ProviderCapabilityParseResult(ProviderCapability(
+            raw, std::move(package_name), std::move(version)));
+}
+
 ObservedVersion::ObservedVersion(
         ObservedVersionSource source,
         std::variant<std::string, ObservedVersionUnknownReason,
@@ -410,6 +468,26 @@ ObservedVersion ObservedVersion::available(
                 source, ConstraintInvalidReason::InvalidVersionIdentity);
     }
     return ObservedVersion(source, std::move(version));
+}
+
+ObservedVersion ObservedVersion::from_provider_capability(
+        ObservedVersionSource source,
+        const ProviderCapability& capability) {
+    if(!is_valid_package_identity(capability.package_name())) {
+        return ObservedVersion::invalid(
+                source, ConstraintInvalidReason::InvalidPackageIdentity);
+    }
+    if(!capability.version().has_value()) {
+        return ObservedVersion::unknown(
+                source,
+                ObservedVersionUnknownReason::UnversionedProviderCapability);
+    }
+    if(!is_valid_provider_capability_version(
+               capability.package_name(), capability.version().value())) {
+        return ObservedVersion::invalid(
+                source, ConstraintInvalidReason::InvalidVersionIdentity);
+    }
+    return ObservedVersion(source, capability.version().value());
 }
 
 ObservedVersion ObservedVersion::unknown(

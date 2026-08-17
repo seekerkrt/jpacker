@@ -196,6 +196,10 @@ private:
 
     friend ProviderCapabilityParseResult parse_provider_capability(
             std::string_view specification);
+    friend ProviderCapabilityParseResult
+    make_provider_capability_from_metadata(
+            std::string package_name,
+            std::optional<std::string> version);
 };
 
 // The parser is a metadata trust-boundary operation. Consumers retain this
@@ -204,6 +208,12 @@ DependencyRequirementParseResult parse_dependency_requirement(
         std::string_view specification);
 ProviderCapabilityParseResult parse_provider_capability(
         std::string_view specification);
+
+// Typed provider metadata has already separated identity and version. This
+// factory validates that provider-domain value without reparsing a synthetic
+// dependency specification.
+ProviderCapabilityParseResult make_provider_capability_from_metadata(
+        std::string package_name, std::optional<std::string> version);
 
 enum class ObservedVersionSource {
     InstalledExactPackage,
@@ -246,6 +256,9 @@ public:
 
     [[nodiscard]] static ObservedVersion available(
             ObservedVersionSource source, std::string version);
+    [[nodiscard]] static ObservedVersion from_provider_capability(
+            ObservedVersionSource source,
+            const ProviderCapability& capability);
     [[nodiscard]] static ObservedVersion unknown(
             ObservedVersionSource source,
             ObservedVersionUnknownReason unknown_reason);

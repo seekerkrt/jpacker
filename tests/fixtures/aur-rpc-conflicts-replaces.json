@@ -70,6 +70,13 @@
       "Provides": ["foo"],
       "Conflicts": ["foo"]
     },
+    "soname-regression-git": {
+      "Name": "soname-regression-git",
+      "PackageBase": "soname-regression-git",
+      "Version": "1.0-1",
+      "Provides": ["wezterm"],
+      "Conflicts": ["wezterm"]
+    },
     "foo": {
       "Name": "foo",
       "PackageBase": "foo",

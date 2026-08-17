@@ -112,6 +112,30 @@ RepositoryProviderCapability repository_relation_capability(
                                       UnversionedProviderCapability)};
 }
 
+RepositoryProviderCapability require_single_provide_projection(
+        RepositoryProvidedPackageMetadata metadata,
+        ObservedVersionSource source,
+        const std::string& context) {
+    const std::vector<RepositoryProviderCapability> projected =
+            require_alternative<
+                    std::vector<RepositoryProviderCapability>>(
+                    project_package_metadata_provides(
+                            {std::move(metadata)}, source),
+                    context);
+    expect(projected.size() == 1, context + ": capability count differs");
+    return projected.front();
+}
+
+DependencyConstraintParseFailure require_provide_projection_failure(
+        RepositoryProvidedPackageMetadata metadata,
+        const std::string& context) {
+    return require_alternative<DependencyConstraintParseFailure>(
+            project_package_metadata_provides(
+                    {std::move(metadata)},
+                    ObservedVersionSource::RepositoryProviderCapability),
+            context);
+}
+
 PackageMetadataFailure repository_relation_query_failure(
         const std::string& diagnostic) {
     return PackageMetadataFailure{
@@ -621,7 +645,211 @@ void test_repository_provides_use_equality_only_capabilities() {
             "Provider package version was substituted for capability version");
 }
 
-void test_repository_provides_reject_empty_unversioned_metadata() {
+void test_typed_provides_projection_relation_contract() {
+    const RepositoryProviderCapability installed_null =
+            require_single_provide_projection(
+                    RepositoryProvidedPackageMetadata{
+                            std::string("installed-null"),
+                            std::nullopt,
+                            RepositoryProvidedPackageRelation::Unversioned},
+                    ObservedVersionSource::InstalledProviderCapability,
+                    "installed ANY plus null");
+    const RepositoryProviderCapability installed_empty =
+            require_single_provide_projection(
+                    RepositoryProvidedPackageMetadata{
+                            std::string("installed-empty"),
+                            std::string(""),
+                            RepositoryProvidedPackageRelation::Unversioned},
+                    ObservedVersionSource::InstalledProviderCapability,
+                    "installed ANY plus empty");
+    expect(
+            !installed_null.capability.version().has_value() &&
+                    !installed_empty.capability.version().has_value() &&
+                    installed_null.provided_version.unknown_reason() !=
+                            nullptr &&
+                    installed_empty.provided_version.unknown_reason() !=
+                            nullptr &&
+                    *installed_null.provided_version.unknown_reason() ==
+                            ObservedVersionUnknownReason::
+                                    UnversionedProviderCapability &&
+                    *installed_empty.provided_version.unknown_reason() ==
+                            ObservedVersionUnknownReason::
+                                    UnversionedProviderCapability,
+            "Installed ANY null/empty did not share unversioned semantics");
+
+    const RepositoryProviderCapability repository_null =
+            require_single_provide_projection(
+                    RepositoryProvidedPackageMetadata{
+                            std::string("repository-null"),
+                            std::nullopt,
+                            RepositoryProvidedPackageRelation::Unversioned},
+                    ObservedVersionSource::RepositoryProviderCapability,
+                    "repository ANY plus null");
+    const RepositoryProviderCapability repository_empty =
+            require_single_provide_projection(
+                    RepositoryProvidedPackageMetadata{
+                            std::string("repository-empty"),
+                            std::string(""),
+                            RepositoryProvidedPackageRelation::Unversioned},
+                    ObservedVersionSource::RepositoryProviderCapability,
+                    "repository ANY plus empty");
+    expect(
+            !repository_null.capability.version().has_value() &&
+                    repository_null.capability.raw_specification() ==
+                            "repository-null" &&
+                    !repository_empty.capability.version().has_value() &&
+                    repository_empty.capability.raw_specification() ==
+                            "repository-empty",
+            "Repository ANY null/empty did not normalize without an operator");
+
+    const DependencyConstraintParseFailure unversioned_with_value =
+            require_provide_projection_failure(
+                    RepositoryProvidedPackageMetadata{
+                            std::string("foo"),
+                            std::string("1"),
+                            RepositoryProvidedPackageRelation::Unversioned},
+                    "ANY plus non-empty version");
+    expect(
+            unversioned_with_value.kind ==
+                            DependencyConstraintParseFailureKind::
+                                    InvalidVersion &&
+                    unversioned_with_value.raw_specification == "foo=1",
+            "ANY plus non-empty version was not rejected as inconsistent");
+
+    const RepositoryProviderCapability ordinary =
+            require_single_provide_projection(
+                    RepositoryProvidedPackageMetadata{
+                            std::string("virtual-api"),
+                            std::string("2:1.0-3"),
+                            RepositoryProvidedPackageRelation::Equal},
+                    ObservedVersionSource::RepositoryProviderCapability,
+                    "ordinary equality Provide");
+    expect(
+            ordinary.capability.version() ==
+                            std::optional<std::string>("2:1.0-3") &&
+                    ordinary.provided_version.version() != nullptr &&
+                    *ordinary.provided_version.version() == "2:1.0-3",
+            "Ordinary equality Provide did not retain its exact version");
+
+    for(const std::optional<std::string>& missing_version :
+        {std::optional<std::string>{},
+         std::optional<std::string>{std::string("")}}) {
+        const DependencyConstraintParseFailure failure =
+                require_provide_projection_failure(
+                        RepositoryProvidedPackageMetadata{
+                                std::string("foo"),
+                                missing_version,
+                                RepositoryProvidedPackageRelation::Equal},
+                        "EQ plus missing/empty version");
+        expect(
+                failure.kind ==
+                        DependencyConstraintParseFailureKind::MissingVersion,
+                "EQ plus missing/empty version was not malformed");
+    }
+
+    const RepositoryProviderCapability soname =
+            require_single_provide_projection(
+                    RepositoryProvidedPackageMetadata{
+                            std::string("libgegl-npd-0.4.so"),
+                            std::string("libgegl-npd-0.4.so-64"),
+                            RepositoryProvidedPackageRelation::Equal},
+                    ObservedVersionSource::RepositoryProviderCapability,
+                    "legacy SONAME v1 Provide");
+    expect(
+            soname.capability.raw_specification() ==
+                            "libgegl-npd-0.4.so="
+                            "libgegl-npd-0.4.so-64" &&
+                    soname.capability.version() ==
+                            std::optional<std::string>(
+                                    "libgegl-npd-0.4.so-64") &&
+                    soname.provided_version.version() != nullptr &&
+                    *soname.provided_version.version() ==
+                            "libgegl-npd-0.4.so-64",
+            "Legacy SONAME v1 Provide was not retained exactly");
+
+    for(const std::string& ordinary_version :
+        {std::string("libexample.so-128"),
+         std::string("other.so-64")}) {
+        const RepositoryProviderCapability ordinary_ambiguous =
+                require_single_provide_projection(
+                        RepositoryProvidedPackageMetadata{
+                                std::string("libexample.so"),
+                                ordinary_version,
+                                RepositoryProvidedPackageRelation::Equal},
+                        ObservedVersionSource::
+                                RepositoryProviderCapability,
+                        "ordinary ambiguous equality " + ordinary_version);
+        expect(
+                ordinary_ambiguous.capability.version() ==
+                                std::optional<std::string>(ordinary_version) &&
+                        ordinary_ambiguous.provided_version.version() !=
+                                nullptr &&
+                        *ordinary_ambiguous.provided_version.version() ==
+                                ordinary_version,
+                "Valid ordinary equality was rejected as malformed SONAME");
+    }
+
+    for(const std::string& malformed_version :
+        {std::string("bad version"),
+         std::string("libgegl-npd-0.4.so-128"),
+         std::string("libgegl-npd-0.4.so-x86_64"),
+         std::string("libgegl-npd-0.4.so/path-64")}) {
+        const DependencyConstraintParseFailure failure =
+                require_provide_projection_failure(
+                        RepositoryProvidedPackageMetadata{
+                                std::string("libgegl-npd-0.4.so"),
+                                malformed_version,
+                                RepositoryProvidedPackageRelation::Equal},
+                        "malformed ordinary/SONAME version " +
+                                malformed_version);
+        expect(
+                failure.kind ==
+                        DependencyConstraintParseFailureKind::InvalidVersion,
+                "Malformed ordinary/SONAME version did not fail closed");
+    }
+
+    for(const RepositoryProvidedPackageRelation relation :
+        {RepositoryProvidedPackageRelation::GreaterThanOrEqual,
+         RepositoryProvidedPackageRelation::LessThanOrEqual,
+         RepositoryProvidedPackageRelation::GreaterThan,
+         RepositoryProvidedPackageRelation::LessThan,
+         RepositoryProvidedPackageRelation::Unsupported,
+         static_cast<RepositoryProvidedPackageRelation>(999)}) {
+        const DependencyConstraintParseFailure failure =
+                require_provide_projection_failure(
+                        RepositoryProvidedPackageMetadata{
+                                std::string("foo"),
+                                std::string("1"),
+                                relation},
+                        "unsupported provider relation");
+        expect(
+                failure.kind ==
+                        DependencyConstraintParseFailureKind::
+                                UnsupportedProviderOperator,
+                "Unsupported/future provider relation did not fail closed");
+    }
+
+    for(const std::optional<std::string>& invalid_name :
+        {std::optional<std::string>{},
+         std::optional<std::string>{std::string("")},
+         std::optional<std::string>{std::string("bad/name")}}) {
+        const DependencyConstraintParseFailure failure =
+                require_provide_projection_failure(
+                        RepositoryProvidedPackageMetadata{
+                                invalid_name,
+                                std::nullopt,
+                                RepositoryProvidedPackageRelation::
+                                        Unversioned},
+                        "invalid provider identity");
+        expect(
+                failure.kind ==
+                        DependencyConstraintParseFailureKind::
+                                InvalidPackageIdentity,
+                "Invalid provider identity did not fail closed");
+    }
+}
+
+void test_repository_provides_normalize_empty_unversioned_metadata() {
     stub::reset_alpm_stub();
     stub::set_repository_package_metadata(
             "core", "empty-unversioned-provider", 10, 20);
@@ -644,22 +872,24 @@ void test_repository_provides_reject_empty_unversioned_metadata() {
                             configuration,
                             "empty-unversioned-provider"),
                     "empty unversioned repository Provide");
-    const RepositoryExactPackageSourceFailure& source_failure =
-            require_alternative<RepositoryExactPackageSourceFailure>(
+    const RepositoryExactPackage& package =
+            require_alternative<RepositoryExactPackage>(
                     observation.source_results[0],
-                    "empty unversioned provider source failure");
-    const DependencyConstraintParseFailure& parse_failure =
-            require_alternative<DependencyConstraintParseFailure>(
-                    source_failure.reason,
-                    "empty unversioned provider parse failure");
+                    "empty unversioned provider package");
     expect(
-            source_failure.repository ==
+            package.repository ==
                             ConfiguredRepositoryIdentity{"core", 0} &&
-                    parse_failure.kind ==
-                            DependencyConstraintParseFailureKind::
-                                    UnsupportedProviderOperator &&
-                    parse_failure.raw_specification == "foo>",
-            "Empty unversioned repository Provide became a valid capability");
+                    package.provides.size() == 1 &&
+                    package.provides.front().capability.raw_specification() ==
+                            "foo" &&
+                    !package.provides.front().capability.version().has_value() &&
+                    package.provides.front().provided_version.unknown_reason() !=
+                            nullptr &&
+                    *package.provides.front()
+                             .provided_version.unknown_reason() ==
+                            ObservedVersionUnknownReason::
+                                    UnversionedProviderCapability,
+            "Empty unversioned repository Provide did not normalize");
 }
 
 void test_repository_provides_reject_non_equality_operator() {
@@ -807,6 +1037,141 @@ void test_installed_relation_inventory_retains_versions_and_provides() {
     expect(
             package_relation_confirms_no_match(exact_miss),
             "Complete installed inventory did not prove exact miss");
+}
+
+void test_installed_gegl_soname_inventory_remains_complete() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages(
+            {stub::LocalPackageMetadata{
+                     "before-package",
+                     "1.0-1",
+                     ALPM_PKG_REASON_EXPLICIT,
+                     {stub::RepositoryProvidedPackageMetadata{
+                             std::string("before-capability"),
+                             std::nullopt,
+                             ALPM_DEP_MOD_ANY}}},
+             stub::LocalPackageMetadata{
+                     "gegl",
+                     "0.4.70-3",
+                     ALPM_PKG_REASON_EXPLICIT,
+                     {stub::RepositoryProvidedPackageMetadata{
+                              std::string("libgegl-0.4.so"),
+                              std::string("0-64"),
+                              ALPM_DEP_MOD_EQ},
+                      stub::RepositoryProvidedPackageMetadata{
+                              std::string("libgegl-npd-0.4.so"),
+                              std::string("libgegl-npd-0.4.so-64"),
+                              ALPM_DEP_MOD_EQ},
+                      stub::RepositoryProvidedPackageMetadata{
+                              std::string("libgegl-sc-0.4.so"),
+                              std::string("libgegl-sc-0.4.so-64"),
+                              ALPM_DEP_MOD_EQ}}},
+             stub::LocalPackageMetadata{
+                     "after-package",
+                     "2.0-1",
+                     ALPM_PKG_REASON_EXPLICIT,
+                     {stub::RepositoryProvidedPackageMetadata{
+                             std::string("after-capability"),
+                             std::string(""),
+                             ALPM_DEP_MOD_ANY}}}});
+
+    PackageMetadataSession session = open_installed_session();
+    const InstalledPackageRelationInventory inventory =
+            require_alternative<InstalledPackageRelationInventory>(
+                    observe_installed_package_relations(
+                            session, installed_relation_source()),
+                    "installed gegl SONAME inventory");
+    expect(
+            inventory.packages.size() == 3 &&
+                    inventory.packages[0].package_name == "before-package" &&
+                    inventory.packages[1].package_name == "gegl" &&
+                    inventory.packages[1].provides.size() == 3 &&
+                    inventory.packages[1]
+                                    .provides[1]
+                                    .capability.raw_specification() ==
+                            "libgegl-npd-0.4.so="
+                            "libgegl-npd-0.4.so-64" &&
+                    inventory.packages[2].package_name == "after-package" &&
+                    inventory.packages[2].provides.size() == 1 &&
+                    !inventory.packages[2]
+                             .provides[0]
+                             .capability.version()
+                             .has_value(),
+            "Installed gegl-shaped inventory lost valid package/capability entries");
+
+    const PackageRelationObservationSet observations =
+            project_installed_relation_observations(
+                    InstalledPackageRelationInventoryResult{inventory});
+    expect(
+            observations.completeness ==
+                            PackageRelationObservationCompleteness::Complete &&
+                    observations.packages.size() == 3 &&
+                    observations.failures.empty(),
+            "Valid SONAME v1 poisoned installed relation completeness");
+}
+
+void test_repository_gegl_soname_projection_and_unrelated_lookup() {
+    stub::reset_alpm_stub();
+    stub::set_repository_package_absent("core", "gegl");
+    stub::set_repository_package_metadata("extra", "gegl", 10, 20);
+    stub::set_repository_package_version("extra", "gegl", "0.4.70-3");
+    stub::set_repository_package_provides(
+            "extra",
+            "gegl",
+            {stub::RepositoryProvidedPackageMetadata{
+                     std::string("libgegl-0.4.so"),
+                     std::string("0-64"),
+                     ALPM_DEP_MOD_EQ},
+             stub::RepositoryProvidedPackageMetadata{
+                     std::string("libgegl-npd-0.4.so"),
+                     std::string("libgegl-npd-0.4.so-64"),
+                     ALPM_DEP_MOD_EQ},
+             stub::RepositoryProvidedPackageMetadata{
+                     std::string("libgegl-sc-0.4.so"),
+                     std::string("libgegl-sc-0.4.so-64"),
+                     ALPM_DEP_MOD_EQ},
+             stub::RepositoryProvidedPackageMetadata{
+                     std::string("unrelated-capability"),
+                     std::nullopt,
+                     ALPM_DEP_MOD_ANY}});
+    const PacmanRepositoryConfiguration configuration =
+            repository_configuration();
+
+    const RepositoryExactPackageObservation exact_observation =
+            require_repository_observation(
+                    observe_repository_exact_package(configuration, "gegl"),
+                    "repository gegl exact observation");
+    const RepositoryExactPackage exact_package =
+            require_alternative<RepositoryExactPackage>(
+                    exact_observation.source_results[1],
+                    "repository gegl exact package");
+    expect(
+            exact_package.repository ==
+                            ConfiguredRepositoryIdentity{"extra", 1} &&
+                    exact_package.package_name == "gegl" &&
+                    exact_package.provides.size() == 4 &&
+                    exact_package.provides[1]
+                                    .capability.raw_specification() ==
+                            "libgegl-npd-0.4.so="
+                            "libgegl-npd-0.4.so-64",
+            "Repository exact gegl SONAME projection failed");
+
+    const RepositoryProviderObservation provider_observation =
+            require_alternative<RepositoryProviderObservation>(
+                    observe_repository_providers(
+                            configuration, "unrelated-capability"),
+                    "repository unrelated capability lookup");
+    const RepositoryProviderSourceObservation extra_source =
+            require_alternative<RepositoryProviderSourceObservation>(
+                    provider_observation.source_results[1],
+                    "repository unrelated capability source");
+    expect(
+            extra_source.repository ==
+                            ConfiguredRepositoryIdentity{"extra", 1} &&
+                    extra_source.packages.size() == 1 &&
+                    extra_source.packages.front().package_name == "gegl" &&
+                    extra_source.packages.front().provides.size() == 4,
+            "Valid SONAME entry poisoned an unrelated repository capability lookup");
 }
 
 void test_installed_inventory_empty_and_failures_are_distinct() {
@@ -1281,9 +1646,12 @@ int main() {
         test_global_repository_open_failure_remains_top_level();
         test_repository_missing_and_invalid_versions_are_typed();
         test_repository_provides_use_equality_only_capabilities();
-        test_repository_provides_reject_empty_unversioned_metadata();
+        test_typed_provides_projection_relation_contract();
+        test_repository_provides_normalize_empty_unversioned_metadata();
         test_repository_provides_reject_non_equality_operator();
         test_installed_relation_inventory_retains_versions_and_provides();
+        test_installed_gegl_soname_inventory_remains_complete();
+        test_repository_gegl_soname_projection_and_unrelated_lookup();
         test_installed_inventory_empty_and_failures_are_distinct();
         test_installed_inventory_rejects_invalid_identity_and_provides();
         test_repository_and_aur_observation_adapters_retain_source();
