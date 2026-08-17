@@ -1,7 +1,95 @@
-# Moguet v2.3.0
+# Moguet v2.3.1
 
 This tracked file is the source of truth for release bodies. The English and
 Japanese sections for each release describe the same scope.
+
+## English
+
+Moguet v2.3.1 is a maintenance release that makes trusted source checkouts and
+installed package-relation observations more reliable, gives Moguet-owned
+confirmation and cancellation one consistent contract, and establishes
+Discussions-first community routing. It preserves the existing ownership of
+Git, pacman, libalpm, and makepkg and keeps ambiguous or malformed states
+fail-closed.
+
+### Trusted Git fetch stability
+
+- Managed source-repository fetches pass `--no-auto-maintenance` to Git so
+  background automatic maintenance cannot race trusted-checkout revalidation
+  after `git fetch` returns.
+- Trusted cache, repository binding, descendant, and concurrent-replacement
+  validation remain in place; the change does not relax checkout trust.
+
+### Valid libalpm Provides projection
+
+- Installed and repository `Provides` projection accepts valid legacy ALPM
+  SONAME v1 metadata instead of misclassifying the whole relation inventory as
+  malformed.
+- Unversioned and ordinary package-version equality semantics remain intact.
+  Missing, unsupported, or genuinely malformed relation data still blocks
+  unsafe planning and mutation.
+
+### Consistent confirmation and cancellation
+
+- Moguet-owned `[Y/n]`, `[y/N]`, and `[y/n]` prompts share one grammar for
+  affirmative, negative, cancel, empty-input, and EOF handling.
+- Declined, cancelled, unavailable-input, input-failure, and actual operation
+  failure outcomes remain distinct. Required declines and cancellations stay
+  non-zero, while existing optional-skip behavior is preserved.
+
+### Discussions-first community entry
+
+- README and contribution guidance route questions, suspected bugs, feature
+  ideas, and design or workflow proposals to GitHub Discussions first, while
+  Issues remain maintainer-managed concrete work items.
+- A dedicated Bug Issue Form remains available for well-observed reproducible
+  bugs, and a low-barrier Bug Discussion Form supports earlier triage.
+- Security-sensitive reports continue to use GitHub Private vulnerability
+  reporting rather than public Discussions or Issues. English and Japanese
+  guidance describe the same routing.
+
+## 日本語
+
+Moguet v2.3.1は、trusted source checkoutとinstalled package relationの観測を
+より確実にし、Moguetが所有するconfirmation / cancellationを一貫した契約へ統一し、
+Discussions-firstのcommunity routingを整備するmaintenance releaseです。Git、pacman、
+libalpm、makepkgの既存ownershipを維持し、ambiguousまたはmalformedなstateでは
+fail-closedを保ちます。
+
+### trusted Git fetchの安定化
+
+- managed source repository fetchではGitへ`--no-auto-maintenance`を渡し、`git fetch`
+  return後のbackground automatic maintenanceとtrusted checkout再検証のraceを防ぎます。
+- trusted cache、repository binding、descendant、concurrent replacementのvalidationは
+  維持し、checkout trustを緩和しません。
+
+### 有効なlibalpm Provides projection
+
+- installed / repositoryの`Provides` projectionは、有効なlegacy ALPM SONAME v1
+  metadataをrelation inventory全体のmalformedとして誤判定せず受理します。
+- unversioned relationと通常package-version equalityのsemanticsを維持します。
+  missing、unsupported、または実際にmalformedなrelation dataは、unsafeなplanや
+  mutationへ進む前に従来どおり停止します。
+
+### 一貫したconfirmationとcancellation
+
+- Moguetが所有する`[Y/n]`、`[y/N]`、`[y/n]` promptは、yes、no、cancel、empty input、
+  EOFを1つのgrammarで扱います。
+- Declined、Cancelled、input unavailable、input failure、実際のoperation failureを
+  区別します。requiredなdecline / cancelはnon-zeroを維持し、既存のoptional skip
+  behaviorも変えません。
+
+### Discussions-firstのcommunity入口
+
+- READMEとcontribution guidanceは、質問、不具合かもしれない相談、機能要望、設計・
+  workflow提案をまずGitHub Discussionsへ案内し、Issueはmaintainerが管理する具体的な
+  work itemとして維持します。
+- 観測・再現情報が十分なbugには専用Bug Issue Formを残し、早いtriageには投稿負担を
+  抑えたBug Discussion Formを用意します。
+- security-sensitiveな報告はpublic Discussion / Issueではなく、引き続きGitHub Private
+  vulnerability reportingへ案内します。English / Japaneseで同じroutingを示します。
+
+# Moguet v2.3.0
 
 ## English
 
