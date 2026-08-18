@@ -63,6 +63,7 @@ LOCAL_SOURCE_WORKSPACE_TEST_TARGET := $(BUILD_DIR)/tests/local-source-workspace-
 LOCAL_SOURCE_BUILD_TEST_TARGET := $(BUILD_DIR)/tests/local-source-build-test
 USER_CONFIG_MODULE_TEST_TARGET := $(BUILD_DIR)/tests/user-config-test
 PACKAGE_IDENTIFIER_TEST_TARGET := build/tests/package-identifier-test
+SOURCE_PACKAGE_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/source-package-identity-test
 SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
 SOURCE_ENVIRONMENT_TEST_TARGET := build/tests/source-environment-test
 ARTIFACT_WORKSPACE_TEST_TARGET := build/tests/artifact-workspace-test
@@ -1395,6 +1396,10 @@ USER_CONFIG_MODULE_TEST_SRCS := \
 PACKAGE_IDENTIFIER_TEST_SRCS := \
 	tests/package_identifier_test.cpp \
 	$(SRC_DIR)/package_identifier.cpp
+SOURCE_PACKAGE_IDENTITY_TEST_SRCS := \
+	tests/source_package_identity_test.cpp \
+	$(SRC_DIR)/source_package_identity.cpp \
+	$(SRC_DIR)/package_identifier.cpp
 SHELL_WORDS_TEST_SRCS := \
 	tests/shell_words_test.cpp \
 	$(SRC_DIR)/shell_words.cpp
@@ -1593,7 +1598,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(UNIFIED_PLAN_RENDERER_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-relation-link-firewall check-package-relation-observation-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-host-release test-internal-identity test-application-identity test-interactive-confirmation test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-relation test-package-relation-observation test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-dry-run-command test-commands-inspect test-commands-source-maintenance test-commands-sync test-fixture-authority test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check release-check-exclusive install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-relation-link-firewall check-package-relation-observation-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-host-release test-internal-identity test-application-identity test-interactive-confirmation test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-relation test-package-relation-observation test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-source-package-identity test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-dry-run-command test-commands-inspect test-commands-source-maintenance test-commands-sync test-fixture-authority test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check release-check-exclusive install uninstall
 .PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: check-makepkg-assignment-precedence-link-firewall test-makepkg-assignment-precedence
@@ -1801,6 +1806,7 @@ NON_HEAVY_TARGETS := \
 	$(LOCAL_SOURCE_BUILD_TEST_TARGET) \
 	$(USER_CONFIG_MODULE_TEST_TARGET) \
 	$(PACKAGE_IDENTIFIER_TEST_TARGET) \
+	$(SOURCE_PACKAGE_IDENTITY_TEST_TARGET) \
 	$(SHELL_WORDS_TEST_TARGET) \
 	$(SOURCE_ENVIRONMENT_TEST_TARGET) \
 	$(ARTIFACT_WORKSPACE_TEST_TARGET) \
@@ -1944,6 +1950,7 @@ $(eval $(call define_non_heavy_test_profile,LOCAL_SOURCE_WORKSPACE,$(DIRECT_COMP
 $(eval $(call define_non_heavy_test_profile,LOCAL_SOURCE_BUILD,$(DIRECT_LIBALPM_COMPILE_ARGS) -DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS -DMOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS -I$(SRC_DIR) -Itests,$(LOCAL_SOURCE_BUILD_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
 $(eval $(call define_non_heavy_test_profile,USER_CONFIG_MODULE,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(USER_CONFIG_MODULE_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,PACKAGE_IDENTIFIER,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(PACKAGE_IDENTIFIER_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,SOURCE_PACKAGE_IDENTITY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(SOURCE_PACKAGE_IDENTITY_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,SHELL_WORDS,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(SHELL_WORDS_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,SOURCE_ENVIRONMENT,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS -I$(SRC_DIR),$(SOURCE_ENVIRONMENT_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,ARTIFACT_WORKSPACE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS -DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS -I$(SRC_DIR),$(ARTIFACT_WORKSPACE_TEST_SRCS)))
@@ -2288,6 +2295,11 @@ $(PACKAGE_IDENTIFIER_TEST_TARGET): $(PACKAGE_IDENTIFIER_TEST_SRCS) $(SRC_DIR)/pa
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling package identifier test binary"
 	$(call compile_non_heavy_test,PACKAGE_IDENTIFIER)
+
+$(SOURCE_PACKAGE_IDENTITY_TEST_TARGET): $(SOURCE_PACKAGE_IDENTITY_TEST_SRCS) $(SRC_DIR)/source_package_identity.hpp $(SRC_DIR)/package_identifier.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling source package identity test binary"
+	$(call compile_non_heavy_test,SOURCE_PACKAGE_IDENTITY)
 
 $(SHELL_WORDS_TEST_TARGET): $(SHELL_WORDS_TEST_SRCS) $(SRC_DIR)/shell_words.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -3032,6 +3044,9 @@ test-user-config: $(USER_CONFIG_MODULE_TEST_TARGET)
 
 test-package-identifier: $(PACKAGE_IDENTIFIER_TEST_TARGET)
 	$(abspath $(PACKAGE_IDENTIFIER_TEST_TARGET))
+
+test-source-package-identity: $(SOURCE_PACKAGE_IDENTITY_TEST_TARGET)
+	$(abspath $(SOURCE_PACKAGE_IDENTITY_TEST_TARGET))
 
 test-package-metadata: $(PACKAGE_METADATA_TEST_TARGET)
 	$(abspath $(PACKAGE_METADATA_TEST_TARGET))
@@ -3881,6 +3896,7 @@ test: \
 	test-local-source-build \
 	test-user-config \
 	test-package-identifier \
+	test-source-package-identity \
 	test-package-metadata \
 	test-package-metadata-integration \
 	test-repository-query \

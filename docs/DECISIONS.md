@@ -238,6 +238,10 @@ decision 9〜15として旧`DECISIONS.md`に記載していた全文contractは�
 | 14 | [root package selection](contracts/root-package-selection.md) | `-S --select`によるsource-aware root selectionとroute固定 |
 | 15 | [local PKGBUILD](contracts/local-pkgbuild.md) | `build --local`のlocal root identity、metadata、source tree非破壊境界 |
 
+### v3 foundation contract
+
+Issue #355で、public profile / patch workflowより前に利用する[source-aware package identity contract](contracts/source-package-identity.md)を追加した。このcontractはpackage child、PackageBase、repository / AUR / local source、source location、source revision、package release、architectureを分離し、既存production modelからのread-only projectionだけを許可する。CLI、storage、profile、patch適用、source commit取得を有効化するdecisionではない。
+
 ### 上位原則とcontractの読み分け
 
 decision 1〜7は全contractへ適用する普遍原則であり、decision 8はlicense / third-party complianceの上位原則である。個別contractはこれらの原則を特定のbehaviorやsafety boundaryへ適用したもので、実装module、type、capability plumbingを恒久固定するものではない。利用者向けのroute差分、pass-through、対応 / 非対応一覧は`COMPATIBILITY.md`を参照する。
