@@ -11,7 +11,7 @@
 - Related contract: [PackageBase build / required-child selection](packagebase-child-selection.md)
 - Related upper decisions: [decision 1](../DECISIONS.md#decision-1)、[decision 2](../DECISIONS.md#decision-2)、[decision 3](../DECISIONS.md#decision-3)、[decision 4](../DECISIONS.md#decision-4)、[decision 6](../DECISIONS.md#decision-6)、[decision 7](../DECISIONS.md#decision-7)
 
-このfoundationはinternal non-breakingであり、public profile / patch command、storage schema、source mutation、source revision queryを有効化しない。既存production modelを置換せず、後続Sliceは既存authorityからcommon valueへのread-only projectionを使う。
+このfoundationはinternal non-breakingであり、public profile / patch command、storage schema、source mutation、source revision queryを有効化しない。既存production modelを置換せず、既存authorityからcommon valueへのread-only projectionだけを提供する。
 
 ## Current identity inventory
 
@@ -34,6 +34,22 @@ current `develop`では、必要なidentityはrouteごとのownerへ分散して
 | relation observation | `PackageRelationObservedPackage` / `PackageRelationSourceIdentity` | repository / AUR / local source、child、optional PackageBase、version、runtime filesystem provenance | conflict/replaces観測固有であり、durable profile identityへ直接置換しない |
 
 Git checkout/fetch ownerはPackageBase、remote URL、branch / remote-refを扱うが、current production source package identityとしてexact commit object IDを保持しない。したがって、既存repository / AUR modelからのprojectionはrevisionを`Known`にしてはならない。
+
+## Implemented internal boundary
+
+Issue #355のinternal foundationは次の責務別moduleで完成している。
+
+| Module | Responsibility |
+| --- | --- |
+| `source_package_identity.hpp` | closed common value、field/state validation、structural equality |
+| `source_package_identity_projection.hpp` | root、resolved source-build、local、dependency、artifact、AUR updateからのread-only projectionとtyped incomplete/failure |
+| `source_package_compatibility.hpp` | dimension別compatibility state、typed mismatch reason、aggregate classification |
+
+projection successはordered nonempty aggregateである。local sourceはaccepted metadata child orderを保ち、単一境界はsize 1を返す。1件でもcore identityを証明できなければfailure armだけを返し、partial aggregateを公開しない。AUR上のconfirmed absenceは`SourceNotFound`、query / metadata failureは`SourceMetadataUnavailable`として別issueを保持する。
+
+compatibility evaluatorは`ExactMatch`、`SamePackageChild`、`SamePackageBase`、`Incompatible`、`Indeterminate`を返す。source、PackageBase、child、revision、version、architectureの各dimension stateとreasonを同時に保持し、localized stringからclassificationを復元しない。
+
+これらのmoduleはproduction CLI / selection / build / install / update decisionへ接続していない。後続#356以降が参照できるstable internal boundaryであり、#355自体はpublic behaviorを追加しない。
 
 ## Contract本文（日本語normative source of truth）
 
@@ -142,7 +158,7 @@ structural equalityはcompatibility authorizationではない。特に`Unknown =
 
 ### Compatibility semanticsとmismatch reason
 
-Slice 4のcompatibility evaluatorは、少なくとも次をtyped resultとして区別する。
+compatibility evaluatorは、少なくとも次をtyped resultとして区別する。
 
 - exact source-aware match
 - same PackageBaseだがdifferent child

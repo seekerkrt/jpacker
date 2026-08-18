@@ -64,6 +64,8 @@ LOCAL_SOURCE_BUILD_TEST_TARGET := $(BUILD_DIR)/tests/local-source-build-test
 USER_CONFIG_MODULE_TEST_TARGET := $(BUILD_DIR)/tests/user-config-test
 PACKAGE_IDENTIFIER_TEST_TARGET := build/tests/package-identifier-test
 SOURCE_PACKAGE_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/source-package-identity-test
+SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/source-package-identity-projection-test
+SOURCE_PACKAGE_COMPATIBILITY_TEST_TARGET := $(BUILD_DIR)/tests/source-package-compatibility-test
 SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
 SOURCE_ENVIRONMENT_TEST_TARGET := build/tests/source-environment-test
 ARTIFACT_WORKSPACE_TEST_TARGET := build/tests/artifact-workspace-test
@@ -777,6 +779,24 @@ LOCAL_SOURCE_BUILD_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(LOCAL_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS), \
 		$(SRCS))
+# POLICY(#355): common identity projection test links the existing closed local
+# projection authority and source-specific value owners, but no production CLI,
+# source-install execution, or real repository/AUR transport.
+SOURCE_PACKAGE_IDENTITY_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(LOCAL_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS) \
+	$(SRC_DIR)/source_package_compatibility.cpp \
+	$(SRC_DIR)/source_package_identity.cpp \
+	$(SRC_DIR)/source_package_identity_projection.cpp
+SOURCE_PACKAGE_IDENTITY_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS := \
+	$(LOCAL_SOURCE_BUILD_REQUIRED_TEST_SUPPORT_SRCS)
+SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_SRCS := \
+	tests/source_package_identity_projection_test.cpp \
+	$(SOURCE_PACKAGE_IDENTITY_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS) \
+	$(SOURCE_PACKAGE_IDENTITY_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS)
+SOURCE_PACKAGE_IDENTITY_PROJECTION_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(SOURCE_PACKAGE_IDENTITY_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 # POLICY(#350): Slice 2 contract test links only the pure value/projection
 # owners. Production command, parser, renderer, transport, and executor owners
 # remain outside this focused binary.
@@ -1400,6 +1420,11 @@ SOURCE_PACKAGE_IDENTITY_TEST_SRCS := \
 	tests/source_package_identity_test.cpp \
 	$(SRC_DIR)/source_package_identity.cpp \
 	$(SRC_DIR)/package_identifier.cpp
+SOURCE_PACKAGE_COMPATIBILITY_TEST_SRCS := \
+	tests/source_package_compatibility_test.cpp \
+	$(SRC_DIR)/source_package_compatibility.cpp \
+	$(SRC_DIR)/source_package_identity.cpp \
+	$(SRC_DIR)/package_identifier.cpp
 SHELL_WORDS_TEST_SRCS := \
 	tests/shell_words_test.cpp \
 	$(SRC_DIR)/shell_words.cpp
@@ -1601,6 +1626,8 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-relation-link-firewall check-package-relation-observation-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-host-release test-internal-identity test-application-identity test-interactive-confirmation test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-relation test-package-relation-observation test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-source-package-identity test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-dry-run-command test-commands-inspect test-commands-source-maintenance test-commands-sync test-fixture-authority test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check release-check-exclusive install uninstall
 .PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
+.PHONY: check-source-package-identity-projection-link-firewall test-source-package-identity-projection
+.PHONY: test-source-package-compatibility
 .PHONY: check-makepkg-assignment-precedence-link-firewall test-makepkg-assignment-precedence
 .PHONY: check-unified-plan-observation-link-firewall test-unified-plan-observation test-observation-contract-gate
 .PHONY: check-unified-plan-projection-link-firewall test-unified-plan-projection test-projection-fixture-gate
@@ -1807,6 +1834,8 @@ NON_HEAVY_TARGETS := \
 	$(USER_CONFIG_MODULE_TEST_TARGET) \
 	$(PACKAGE_IDENTIFIER_TEST_TARGET) \
 	$(SOURCE_PACKAGE_IDENTITY_TEST_TARGET) \
+	$(SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_TARGET) \
+	$(SOURCE_PACKAGE_COMPATIBILITY_TEST_TARGET) \
 	$(SHELL_WORDS_TEST_TARGET) \
 	$(SOURCE_ENVIRONMENT_TEST_TARGET) \
 	$(ARTIFACT_WORKSPACE_TEST_TARGET) \
@@ -1951,6 +1980,8 @@ $(eval $(call define_non_heavy_test_profile,LOCAL_SOURCE_BUILD,$(DIRECT_LIBALPM_
 $(eval $(call define_non_heavy_test_profile,USER_CONFIG_MODULE,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(USER_CONFIG_MODULE_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,PACKAGE_IDENTIFIER,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(PACKAGE_IDENTIFIER_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,SOURCE_PACKAGE_IDENTITY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(SOURCE_PACKAGE_IDENTITY_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,SOURCE_PACKAGE_IDENTITY_PROJECTION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests,$(SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,SOURCE_PACKAGE_COMPATIBILITY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(SOURCE_PACKAGE_COMPATIBILITY_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,SHELL_WORDS,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(SHELL_WORDS_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,SOURCE_ENVIRONMENT,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS -I$(SRC_DIR),$(SOURCE_ENVIRONMENT_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,ARTIFACT_WORKSPACE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS -DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS -I$(SRC_DIR),$(ARTIFACT_WORKSPACE_TEST_SRCS)))
@@ -2300,6 +2331,16 @@ $(SOURCE_PACKAGE_IDENTITY_TEST_TARGET): $(SOURCE_PACKAGE_IDENTITY_TEST_SRCS) $(S
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling source package identity test binary"
 	$(call compile_non_heavy_test,SOURCE_PACKAGE_IDENTITY)
+
+$(SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_TARGET): $(SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_SRCS) $(SRC_DIR)/source_package_identity_projection.hpp $(SRC_DIR)/source_package_compatibility.hpp $(SRC_DIR)/source_package_identity.hpp $(SRC_DIR)/root_package_candidate.hpp $(SRC_DIR)/source_install.hpp $(SRC_DIR)/local_source_build.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/aur_update_plan.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling source package identity projection test binary"
+	$(call compile_non_heavy_test,SOURCE_PACKAGE_IDENTITY_PROJECTION)
+
+$(SOURCE_PACKAGE_COMPATIBILITY_TEST_TARGET): $(SOURCE_PACKAGE_COMPATIBILITY_TEST_SRCS) $(SRC_DIR)/source_package_compatibility.hpp $(SRC_DIR)/source_package_identity.hpp $(SRC_DIR)/package_identifier.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling source package compatibility test binary"
+	$(call compile_non_heavy_test,SOURCE_PACKAGE_COMPATIBILITY)
 
 $(SHELL_WORDS_TEST_TARGET): $(SHELL_WORDS_TEST_SRCS) $(SRC_DIR)/shell_words.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -3038,6 +3079,39 @@ check-local-source-build-link-firewall:
 
 test-local-source-build: check-local-source-build-link-firewall $(LOCAL_SOURCE_BUILD_TEST_TARGET)
 	$(abspath $(LOCAL_SOURCE_BUILD_TEST_TARGET))
+
+check-source-package-identity-projection-link-firewall:
+	@echo ":: Checking source package identity projection link firewall"
+	@set -e; for source in $(SOURCE_PACKAGE_IDENTITY_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: source package identity projection test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@set -e; for source in $(SOURCE_PACKAGE_IDENTITY_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS); do \
+		count=$$(printf '%s\n' $(SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: source package identity projection test must link support $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(SOURCE_PACKAGE_IDENTITY_PROJECTION_FORBIDDEN_TEST_SRCS),$(SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_SRCS))" || { \
+		echo "error: source package identity projection test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test "$(words $(filter tests/stubs/%,$(SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_SRCS)))" -eq "$(words $(SOURCE_PACKAGE_IDENTITY_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS))" || { \
+		echo "error: source package identity projection test links an unexpected test stub" >&2; \
+		exit 1; \
+	}
+
+test-source-package-identity-projection: check-source-package-identity-projection-link-firewall $(SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_TARGET)
+	$(abspath $(SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_TARGET))
+
+test-source-package-compatibility: $(SOURCE_PACKAGE_COMPATIBILITY_TEST_TARGET)
+	$(abspath $(SOURCE_PACKAGE_COMPATIBILITY_TEST_TARGET))
 
 test-user-config: $(USER_CONFIG_MODULE_TEST_TARGET)
 	sh tests/test-user-config.sh $(abspath $(USER_CONFIG_MODULE_TEST_TARGET))
@@ -3897,6 +3971,8 @@ test: \
 	test-user-config \
 	test-package-identifier \
 	test-source-package-identity \
+	test-source-package-identity-projection \
+	test-source-package-compatibility \
 	test-package-metadata \
 	test-package-metadata-integration \
 	test-repository-query \

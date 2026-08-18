@@ -175,7 +175,9 @@ Issue #355のcommon identityは、後続profile / snapshot / patch workflow向�
 
 current repository / AUR modelはexact source commitを保持しないためrevisionは`Unknown`であり、known commitとして推測しない。current local routeはGit repositoryをauthorityにせずfilesystem / content provenanceを使うためrevisionは`Inapplicable`である。`Unknown`、`Absent`、`Unavailable`、`Inapplicable`をknown matchやabsenceへ丸めない。
 
-repository root candidateはPackageBaseを、actual artifactはPackageBase / sourceを単体では保持しない。後続read-only adapterは既存typed contextと相関できる場合だけcomplete common identityを返し、filename、package name、URL leaf、canonical source keyから不足fieldを逆算しない。詳細なstate、equality、compatibility、projection contractは[source-aware package identity contract](contracts/source-package-identity.md)を正本とする。
+repository root candidateはPackageBaseを、actual artifactはPackageBase / sourceを単体では保持しない。internal read-only adapterは既存typed contextと相関できる場合だけcomplete common identityを返し、filename、package name、URL leaf、canonical source keyから不足fieldを逆算しない。PackageBaseを持たないrepository root、source contextを持たないartifact、installed-only dependency等はtyped failureであり、partial identityを公開しない。
+
+internal compatibility evaluatorはsource、PackageBase、child、revision、release、architectureをdimension別に判定し、`ExactMatch`、`SamePackageChild`、`SamePackageBase`、`Incompatible`、`Indeterminate`を区別する。structurally equalな`Unknown` / `Absent` / `Unavailable` / `Inapplicable`も`ExactMatch`へ昇格しない。これらのadapter / evaluatorは後続v3 model向けで、current production routeのdecisionには未接続である。詳細なstate、equality、compatibility、projection contractは[source-aware package identity contract](contracts/source-package-identity.md)を正本とする。
 
 <a id="compat-packagebase-child-selection"></a>
 ## PackageBase / required-child compatibility
