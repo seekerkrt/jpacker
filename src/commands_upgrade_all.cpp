@@ -1110,6 +1110,7 @@ std::string upgrade_all_presentation_reason_label(
 
 void print_upgrade_all_summary(
         const OperationStateProjection& operation_state,
+        const UpgradeAllPhasePackageStateObservations& phase_observations,
         const PresentationProjection& presentation) {
     std::cout << localization::format_translated_message(
                          "{} summary:", COMMAND_NAME)
@@ -1122,6 +1123,16 @@ void print_upgrade_all_summary(
                          "  package state observation: {}",
                          package_state_observation_label(
                                  operation_state.package_state.state))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "    {}: {}", "system/source",
+                         package_state_observation_label(
+                                 phase_observations.system_source.state))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "    {}: {}", AUR_SERVICE,
+                         package_state_observation_label(
+                                 phase_observations.aur.state))
               << std::endl;
     const bool reason_is_presented_as_attention =
             operation_state.outcome == OperationOutcome::Succeeded &&
@@ -1911,13 +1922,16 @@ void print_operation_result(const UpgradeAllOperationResult& result) {
 
     const OperationStateProjection operation_state =
             project_upgrade_all_operation_state(result);
+    const UpgradeAllPhasePackageStateObservations phase_observations =
+            project_upgrade_all_phase_package_state_observations(result);
     const PresentationProjection runtime_presentation =
             project_upgrade_all_presentation_with_operation_state(
                     result, operation_state);
 
     // POLICY(#350): successful operation state and package-state observation
     // remain orthogonal. Normal items are aggregated before attention detail.
-    print_upgrade_all_summary(operation_state, runtime_presentation);
+    print_upgrade_all_summary(
+            operation_state, phase_observations, runtime_presentation);
     print_upgrade_all_attention(runtime_presentation);
     print_duplicate_exclusions(result);
     print_external_satisfaction(result);

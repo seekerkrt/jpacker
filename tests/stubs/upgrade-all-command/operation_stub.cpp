@@ -1296,6 +1296,27 @@ UpgradeAllOperationResult make_issue_449_split_up_to_date_result() {
     return result;
 }
 
+UpgradeAllOperationResult
+make_issue_455_system_changed_aur_up_to_date_result() {
+    UpgradeAllOperationResult result = make_success_result(
+            UpgradeAllOperationStatus::Completed,
+            PackageStateChange::Changed);
+    result.aur.operation_result->reduced_operation_result.targets.push_back(
+            make_issue_449_split_up_to_date_target(0));
+    return result;
+}
+
+UpgradeAllOperationResult make_issue_455_aur_changed_result() {
+    UpgradeAllOperationResult result = make_success_result(
+            UpgradeAllOperationStatus::Completed,
+            PackageStateChange::NoChange);
+    result.aur.operation_result->reduced_operation_result.targets.push_back(
+            make_aur_target(
+                    "issue-455-aur-updated",
+                    AurUpdateOperationTargetStatus::Updated));
+    return result;
+}
+
 UpgradeAllOperationResult make_registered_package_base_result() {
     UpgradeAllOperationResult result = make_success_result(
             UpgradeAllOperationStatus::Completed,
@@ -2009,6 +2030,12 @@ UpgradeAllOperationResult result_for_scenario(const std::string& scenario) {
         return make_success_result(
                 UpgradeAllOperationStatus::NoUpdates,
                 PackageStateChange::NoChange);
+    }
+    if(scenario == "issue-455-system-changed-aur-up-to-date") {
+        return make_issue_455_system_changed_aur_up_to_date_result();
+    }
+    if(scenario == "issue-455-aur-changed") {
+        return make_issue_455_aur_changed_result();
     }
     if(scenario == "completed-changed") {
         return make_completed_changed_result();
