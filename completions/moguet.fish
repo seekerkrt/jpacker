@@ -15,7 +15,7 @@
 #   list-src
 #   del-src <pkg>...
 #   revert <pkg>...
-#   -G <pkg>
+#   -G <pkg> [--output-dir=DIR]
 #   -Gp <pkg>
 #   -S --select [--needed] <query>
 
@@ -69,11 +69,14 @@ function __moguet_option_id --argument-names word
         case '--local'
             echo 15
             return 0
-        case '--recursive'
+        case '--output-dir' '--output-dir=*'
             echo 16
             return 0
-        case '--needed'
+        case '--recursive'
             echo 17
+            return 0
+        case '--needed'
+            echo 18
             return 0
     end
     return 1
@@ -220,7 +223,7 @@ function __moguet_operation_allows --argument-names option_id
             contains -- $option_id 4; and return 0; or return 1
         case 'deps'
             __moguet_form_prefix_valid 'deps' 0; or return 1
-            contains -- $option_id 4 16; and return 0; or return 1
+            contains -- $option_id 4 17; and return 0; or return 1
         case 'plan'
             __moguet_form_prefix_valid 'plan' 0; or return 1
             contains -- $option_id 4; and return 0; or return 1
@@ -244,7 +247,7 @@ function __moguet_operation_allows --argument-names option_id
             contains -- $option_id 4; and return 0; or return 1
         case '-G'
             __moguet_form_prefix_valid '-G' 0; or return 1
-            return 1
+            contains -- $option_id 16; and return 0; or return 1
         case '-Gp'
             __moguet_form_prefix_valid '-Gp' 0; or return 1
             return 1
@@ -253,27 +256,27 @@ function __moguet_operation_allows --argument-names option_id
             __moguet_has_option_id 10; and set selected true
             if test $selected = true
                 __moguet_form_prefix_valid '-S' 0; or return 1
-                contains -- $option_id 10 17 0 1 2 3 4 5 6 7 8 11 12; and return 0; or return 1
+                contains -- $option_id 10 18 0 1 2 3 4 5 6 7 8 11 12; and return 0; or return 1
             else
-                contains -- $option_id 17 4 10; and return 0; or return 1
+                contains -- $option_id 18 4 10; and return 0; or return 1
             end
         case '-Syu'
-            contains -- $option_id 17 4; and return 0; or return 1
+            contains -- $option_id 18 4; and return 0; or return 1
         case '-Ss'
-            contains -- $option_id 17 4; and return 0; or return 1
+            contains -- $option_id 18 4; and return 0; or return 1
         case '-Si'
-            contains -- $option_id 17 4; and return 0; or return 1
+            contains -- $option_id 18 4; and return 0; or return 1
         case '-Qua'
-            contains -- $option_id 17 4; and return 0; or return 1
+            contains -- $option_id 18 4; and return 0; or return 1
         case __delegated__
-            contains -- $option_id 17 4; and return 0; or return 1
+            contains -- $option_id 18 4; and return 0; or return 1
     end
     return 1
 end
 
 function __moguet_candidate_available --argument-names option_id
     __moguet_operation_allows $option_id; or return 1
-    contains -- $option_id 13 14 15; and __moguet_has_option_id $option_id; and return 1
+    contains -- $option_id 13 14 15 16; and __moguet_has_option_id $option_id; and return 1
     switch $option_id
         case 0
             __moguet_has_option_id 1; and return 1
@@ -346,5 +349,6 @@ complete -c moguet -f -n '__moguet_candidate_available 10' -a '--select' -d 'Int
 complete -c moguet -f -n '__moguet_candidate_available 11' -a '--aur' -d 'Limit supported sync operations to AUR'
 complete -c moguet -f -n '__moguet_candidate_available 12' -a '--repo' -d 'Limit supported sync operations to official binary repositories'
 complete -c moguet -f -n '__moguet_candidate_available 15' -a '--local' -d 'Use one local PKGBUILD directory as the build root'
-complete -c moguet -f -n '__moguet_candidate_available 16' -a '--recursive' -d 'Resolve dependencies recursively'
-complete -c moguet -f -n '__moguet_candidate_available 17' -a '--needed' -d 'Skip reinstall at final package installation'
+complete -c moguet -f -n '__moguet_candidate_available 16' -a '--output-dir=' -d 'Select an existing export parent for -G'
+complete -c moguet -f -n '__moguet_candidate_available 17' -a '--recursive' -d 'Resolve dependencies recursively'
+complete -c moguet -f -n '__moguet_candidate_available 18' -a '--needed' -d 'Skip reinstall at final package installation'

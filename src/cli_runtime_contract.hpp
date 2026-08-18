@@ -11,6 +11,7 @@
 enum class CliInvocationIssueKind {
     UnknownOperation,
     MisplacedLocalSourceOption,
+    MisplacedPkgbuildOutputDirectoryOption,
     SelectRequiresPlainSync,
     MissingOperand,
     ExtraOperand,

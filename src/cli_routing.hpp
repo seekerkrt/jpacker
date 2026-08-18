@@ -12,6 +12,14 @@ enum class PkgbuildExportMode {
     PkgbuildStdout,
 };
 
+// `-G` / `-Gp`のstrict grammarで確定したoperation-local request。
+// output_directoryは`-G`だけが所有し、raw argvへ戻さない。
+struct PkgbuildExportInvocation {
+    PkgbuildExportMode          mode = PkgbuildExportMode::Tree;
+    std::string                 target;
+    std::optional<std::string> output_directory;
+};
+
 enum class SourceSelectableSyncOperation {
     Install,
     Search,
@@ -53,8 +61,9 @@ struct LocalSourceBuildInvocation {
 };
 
 std::optional<PkgbuildExportMode> pkgbuild_export_mode(const ParsedCliArguments& parsed);
-// Emptyならvalid。複数messageの順序はCLI presentation側でも維持する。
-std::vector<std::string> validate_pkgbuild_export_invocation(
+// parse済みargvだけを参照し、filesystem / AUR / Gitへ到達する前に
+// attached-value、scope、occurrence、targetを一つのrequestへ確定する。
+PkgbuildExportInvocation require_pkgbuild_export_invocation(
         const ParsedCliArguments& parsed);
 
 bool parsed_has_semantic_pacman_option(

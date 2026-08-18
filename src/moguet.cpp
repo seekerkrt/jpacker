@@ -297,18 +297,13 @@ int run_moguet(int argc, char* argv[]) {
         // POLICY(#167,#305): export/print はdefault state log初期化より前に
         // 分岐し、内部build cacheを作らない。
         Logger::set_diagnostics_to_stderr();
-        const std::vector<std::string> validation_errors =
-                validate_pkgbuild_export_invocation(parsed);
-        if(!validation_errors.empty()) {
-            for(const auto& error : validation_errors) Logger::error(error);
-            return 1;
-        }
-
         try {
-            if(export_mode.value() == PkgbuildExportMode::Tree) {
-                return cmd_export_pkgbuild_tree(parsed.targets.front());
+            PkgbuildExportInvocation invocation =
+                    require_pkgbuild_export_invocation(parsed);
+            if(invocation.mode == PkgbuildExportMode::Tree) {
+                return cmd_export_pkgbuild_tree(invocation);
             }
-            return cmd_print_pkgbuild(parsed.targets.front());
+            return cmd_print_pkgbuild(invocation);
         } catch(const std::exception& e) {
             Logger::error(e.what());
             return 1;
@@ -740,9 +735,9 @@ void print_help() {
             cli_special_operation_syntax(
                     SpecialOperationId::PkgbuildExport),
             localization::format_translated_message(
-                    // TRANSLATORS: AUR, PackageBase, and the destination path are literal identities.
-                    "Export one {} {} repository to {} without building or installing",
-                    "AUR", "PackageBase", "./<PackageBase>"));
+                    // TRANSLATORS: AUR and PackageBase are literal identities.
+                    "Export one {} {} repository under the command-start current directory or selected output parent without building or installing",
+                    "AUR", "PackageBase"));
     print_help_entry(
             cli_special_operation_syntax(
                     SpecialOperationId::PkgbuildPrint),
@@ -881,6 +876,14 @@ void print_help() {
                     "Pass this option to {} and {}", "pacman", "makepkg"));
     print_help_continuation(localization::translate_message(
             "Do not bypass conflict/replacement safety stops or perform automatic replacement"));
+    print_help_entry(
+            cli_option_syntax(OptionId::PkgbuildOutputDirectory),
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the literal -G CLI operation.
+                    "Select an existing export parent for {}; resolve relative paths from the command-start current directory",
+                    "-G"));
+    print_help_continuation(localization::translate_message(
+            "Reject symlink components and do not create the parent directory"));
     print_help_entry(
             cli_option_syntax(OptionId::Needed),
             localization::format_translated_message(

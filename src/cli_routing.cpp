@@ -1,6 +1,5 @@
 #include "cli_routing.hpp"
 
-#include "application_identity.hpp"
 #include "cli_authority.hpp"
 #include "cli_runtime_contract.hpp"
 #include "localization.hpp"
@@ -61,6 +60,20 @@ std::string_view trim_ascii_whitespace(std::string_view value) noexcept {
     throw std::invalid_argument(diagnostic);
 }
 
+[[noreturn]] void reject_pkgbuild_export_invocation(
+        const std::string& diagnostic) {
+    throw std::invalid_argument(diagnostic);
+}
+
+bool is_pkgbuild_output_directory_token(
+        std::string_view token) noexcept {
+    const std::string_view option =
+            cli_authority::PKGBUILD_OUTPUT_DIRECTORY_OPTION;
+    return token == option ||
+           (token.size() > option.size() && token.starts_with(option) &&
+            token[option.size()] == '=');
+}
+
 bool local_source_build_accepts_global_option(
         const std::string& option) {
     const cli_authority::GlobalOptionSpec* spec =
@@ -104,32 +117,81 @@ std::optional<PkgbuildExportMode> pkgbuild_export_mode(const ParsedCliArguments&
     return std::nullopt;
 }
 
-std::vector<std::string> validate_pkgbuild_export_invocation(
+PkgbuildExportInvocation require_pkgbuild_export_invocation(
         const ParsedCliArguments& parsed) {
-    // POLICY(#173): operation/target 以外の role は、綴りを再解釈せず元 argv 位置のまま拒否する。
-    for(const auto& token : parsed.tokens) {
-        if(token.role == CliTokenRole::Operation || token.role == CliTokenRole::Target) continue;
-
-        // TRANSLATORS: The placeholders are literal CLI tokens.
-        return {localization::format_translated_message(
-                "Unsupported option {} for operation {}.", token.value,
-                parsed.operation)};
+    const std::optional<PkgbuildExportMode> mode =
+            pkgbuild_export_mode(parsed);
+    if(!mode.has_value()) {
+        // TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
+        throw std::logic_error(localization::format_translated_message(
+                "{} export was not requested.", "PKGBUILD"));
     }
 
     if(parsed.targets.size() != 1) {
-        // TRANSLATORS: The placeholders are a literal CLI operation and the AUR project identity.
-        const std::string target_error =
+        // TRANSLATORS: The placeholders are literal CLI syntax tokens.
+        reject_pkgbuild_export_invocation(
                 localization::format_translated_message(
-                        "Operation {} requires exactly one {} package target.",
-                        parsed.operation, "AUR");
-        // TRANSLATORS: The placeholders are literal command, operation, and operand tokens.
-        const std::string usage = localization::format_translated_message(
-                "Usage: {} {} {}", application_identity::COMMAND_NAME,
-                parsed.operation, "<pkg>");
-        return {target_error, usage};
+                        "Operation {} requires exactly one {} operand.",
+                        parsed.operation, "<pkg>"));
     }
 
-    return {};
+    PkgbuildExportInvocation invocation{
+            mode.value(), parsed.targets.front(), std::nullopt};
+    const std::string_view output_option =
+            cli_authority::PKGBUILD_OUTPUT_DIRECTORY_OPTION;
+
+    // POLICY(#173,#434): parserがsemantic PacmanOptionと確定した位置だけを
+    // operation-local optionとして解釈する。option valueや`--`後の同名tokenは
+    // 昇格させない。
+    for(const ParsedCliToken& token : parsed.tokens) {
+        if(token.role == CliTokenRole::Operation ||
+           token.role == CliTokenRole::Target) {
+            continue;
+        }
+        if(token.role == CliTokenRole::PacmanOption &&
+           is_pkgbuild_output_directory_token(token.value)) {
+            if(mode.value() != PkgbuildExportMode::Tree) {
+                // TRANSLATORS: The placeholders are literal CLI tokens.
+                reject_pkgbuild_export_invocation(
+                        localization::format_translated_message(
+                                "Unsupported option {} for operation {}.",
+                                token.value, parsed.operation));
+            }
+            if(token.value == output_option) {
+                // TRANSLATORS: Both placeholders are literal CLI option forms.
+                reject_pkgbuild_export_invocation(
+                        localization::format_translated_message(
+                                "Option {} requires a non-empty attached value in the form {}.",
+                                output_option, "--output-dir=DIR"));
+            }
+            if(invocation.output_directory.has_value()) {
+                // TRANSLATORS: Both placeholders are literal CLI syntax tokens.
+                reject_pkgbuild_export_invocation(
+                        localization::format_translated_message(
+                                "Option {} may be specified only once for operation {}.",
+                                output_option, "-G"));
+            }
+
+            std::string value = token.value.substr(output_option.size() + 1);
+            if(value.empty()) {
+                // TRANSLATORS: Both placeholders are literal CLI option forms.
+                reject_pkgbuild_export_invocation(
+                        localization::format_translated_message(
+                                "Option {} requires a non-empty attached value in the form {}.",
+                                output_option, "--output-dir=DIR"));
+            }
+            invocation.output_directory = std::move(value);
+            continue;
+        }
+
+        // TRANSLATORS: The placeholders are literal CLI tokens.
+        reject_pkgbuild_export_invocation(
+                localization::format_translated_message(
+                        "Unsupported option {} for operation {}.",
+                        token.value, parsed.operation));
+    }
+
+    return invocation;
 }
 
 bool parsed_has_semantic_pacman_option(

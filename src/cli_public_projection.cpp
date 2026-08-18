@@ -15,6 +15,24 @@ using cli_authority::OptionPublicSyntax;
 using cli_authority::OptionRelationContract;
 using cli_authority::SpecialOperationId;
 
+std::string canonical_option_syntax(
+        const cli_authority::OptionContract& option) {
+    std::string syntax(option.canonical_token);
+    if(option.value.kind == cli_authority::OptionValueKind::AttachedEnum) {
+        syntax += "=";
+        for(std::size_t index = 0;
+            index < option.value.allowed_value_count; ++index) {
+            if(index != 0) syntax += "|";
+            syntax += option.value.allowed_values[index];
+        }
+    } else if(option.value.kind ==
+              cli_authority::OptionValueKind::AttachedValue) {
+        syntax += "=";
+        syntax += option.value.allowed_values.front();
+    }
+    return syntax;
+}
+
 std::string operand_placeholder(OperandKind kind) {
     switch(kind) {
     case OperandKind::Package:
@@ -46,8 +64,8 @@ void append_public_options(
         const bool optional =
                 relation.public_syntax == OptionPublicSyntax::Optional;
         if(optional) syntax += "[";
-        syntax += cli_authority::option_contract(relation.option)
-                          .canonical_token;
+        syntax += canonical_option_syntax(
+                cli_authority::option_contract(relation.option));
         if(optional) syntax += "]";
     }
 }
@@ -119,6 +137,13 @@ std::string cli_special_operation_syntax(SpecialOperationId operation) {
     const cli_authority::SpecialOperationSpec& special =
             cli_authority::special_operation_spec(operation);
     std::string syntax(special.canonical_token);
+    if(operation == SpecialOperationId::PkgbuildExport) {
+        // Public canonical form keeps the target first even though the parser
+        // also accepts the operation-local option before it.
+        append_operands(syntax, special.operands);
+        append_public_options(syntax, special.option_relations);
+        return syntax;
+    }
     append_public_options(syntax, special.option_relations);
     append_operands(syntax, special.operands);
     return syntax;
@@ -133,16 +158,7 @@ std::string cli_option_syntax(cli_authority::OptionId option_id) {
         syntax += option.aliases.values[index];
     }
     if(!syntax.empty()) syntax += ", ";
-    syntax += option.canonical_token;
-
-    if(option.value.kind == cli_authority::OptionValueKind::AttachedEnum) {
-        syntax += "=";
-        for(std::size_t index = 0;
-            index < option.value.allowed_value_count; ++index) {
-            if(index != 0) syntax += "|";
-            syntax += option.value.allowed_values[index];
-        }
-    }
+    syntax += canonical_option_syntax(option);
     return syntax;
 }
 

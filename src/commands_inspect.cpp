@@ -7,6 +7,7 @@
 #include "cache_authority.hpp"
 #include "checkout_fetch.hpp"
 #include "cli_authority.hpp"
+#include "cli_routing.hpp"
 #include "cli_runtime_contract.hpp"
 #include "dependency_plan.hpp"
 #include "dependency_provider.hpp"
@@ -1454,13 +1455,14 @@ FetchPreparation prepare_fetch_operation(
             join_comma_display_values(targets)};
 }
 
-int cmd_export_pkgbuild_tree(const std::string& target) {
-    export_pkgbuild_tree(target);
+int cmd_export_pkgbuild_tree(const PkgbuildExportInvocation& invocation) {
+    export_pkgbuild_tree(
+            invocation.target, invocation.output_directory);
     return 0;
 }
 
-int cmd_print_pkgbuild(const std::string& target) {
-    std::string pkgbuild = load_pkgbuild_for_stdout(target);
+int cmd_print_pkgbuild(const PkgbuildExportInvocation& invocation) {
+    std::string pkgbuild = load_pkgbuild_for_stdout(invocation.target);
     if(pkgbuild.size() >
        static_cast<size_t>(std::numeric_limits<std::streamsize>::max())) {
         throw std::runtime_error(localization::format_translated_message(

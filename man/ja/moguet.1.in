@@ -141,13 +141,23 @@ clone、build、pacman、sudoを開始します。
 state logは再生成可能cacheに含みません。
 .
 .TP
-.B "-G <pkg>"
-exactly one AUR packageの完全なPackageBase repositoryを
-.I ./<PackageBase>
-へexportします。
+.B "-G <pkg> [--output-dir=DIR]"
+exactly one AUR packageの完全なPackageBase repositoryをexportします。
+.B --output-dir
+未指定時のparentはcommand開始時current directoryです。
+.B --output-dir=DIR
+指定時はnamed existing directoryをparentとし、relative valueはcommand開始時current
+directoryから解決します。validated PackageBaseが常にdirect-childのdestination nameです。
+parentは作成せず、final / intermediate symlink componentを拒否し、Moguet独自のtilde
+expansionは行いません。absolute pathまたは
+.B --output-dir="$HOME/src/aur"
+のようなattached valueを使用します。
 種類を問わずdestinationが存在すればhard failureです。
+parentのrename、replacement、symlink replacement、identity driftはno-replace publish前に
+fail closedになります。
 build cacheを使わず、PKGBUILD評価、dependency取得、build、installを行いません。
-このoperationではglobal / pacman optionはunsupportedです。
+attached output-directory formだけを受理し、その他のglobal / pacman optionはこのoperationで
+unsupportedです。
 .
 .TP
 .B "-Gp <pkg>"
@@ -399,6 +409,15 @@ local PKGBUILD metadata評価にもdefaultはなく、このoptionは
 を許可しません。
 「すべてyes」ではなく、unresolved / ambiguous dependency、cycle、source selection、
 conflicts / replaces、artifact identity、ownership等のsafety guardを突破しません。
+.
+.TP
+.B "--output-dir=DIR"
+.B -G
+の既存export parentを指定します。このoperation-local optionはnon-empty attached valueを
+必須とし、1回だけ指定でき、configへ保存せず、
+.B -Gp
+や他operationではunsupportedです。relative valueはcommand開始時current directoryを
+基準にします。parentの作成、symlink componentのfollow、tilde expansionは行いません。
 .
 .TP
 .B "--select"
@@ -819,6 +838,12 @@ repository fallbackなしでAUR packageをinstallする:
 clone / buildせずAUR dependency graphを調査する:
 .RS
 .B moguet deps --recursive google-chrome
+.RE
+.
+.TP
+既存relative parent直下へPackageBaseをexportする:
+.RS
+.B moguet -G wezterm-git --output-dir=./exports
 .RE
 .
 .TP

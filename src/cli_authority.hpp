@@ -132,6 +132,11 @@ inline constexpr std::string_view BUILD_MODE_CLEAN_OPTION =
 // だけが解釈する。
 inline constexpr std::string_view LOCAL_SOURCE_OPTION = "--local";
 
+// PKGBUILD exportだけが解釈するoperation-local attached-value option。
+// GlobalOptionSpecやCliOverridesへ昇格させない。
+inline constexpr std::string_view PKGBUILD_OUTPUT_DIRECTORY_OPTION =
+        "--output-dir";
+
 inline constexpr std::string_view HELP_SHORT_OPTION = "-h";
 inline constexpr std::string_view HELP_LONG_OPTION = "--help";
 inline constexpr std::string_view VERSION_SHORT_OPTION = "-V";
@@ -260,6 +265,7 @@ enum class OptionId {
     Help,
     Version,
     LocalSource,
+    PkgbuildOutputDirectory,
     Recursive,
     Needed,
     EndOfOptions,
@@ -324,6 +330,7 @@ constexpr TokenAliasSet token_alias(std::string_view alias) noexcept {
 enum class OptionValueKind {
     None,
     AttachedEnum,
+    AttachedValue,
     Marker,
 };
 
@@ -342,6 +349,11 @@ constexpr OptionValueContract build_mode_value() noexcept {
             OptionValueKind::AttachedEnum,
             {BUILD_MODE_NORMAL, BUILD_MODE_REBUILD, BUILD_MODE_CLEAN},
             3};
+}
+
+constexpr OptionValueContract output_directory_value() noexcept {
+    return OptionValueContract{
+            OptionValueKind::AttachedValue, {"DIR", {}, {}}, 1};
 }
 
 enum class OptionOccurrence {
@@ -431,6 +443,7 @@ enum class OptionSemanticScope : std::uint32_t {
     PacmanDelegation = 1U << 10,
     ParserBoundary = 1U << 11,
     DependencyCleanup = 1U << 12,
+    PackageExport = 1U << 13,
 };
 
 using OptionSemanticScopeMask = std::uint32_t;
@@ -679,6 +692,18 @@ inline constexpr std::array<OptionContract,
                  OptionPublicDefinitionRole::SyntaxOnly,
                  OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.build.local"},
+                {OptionId::PkgbuildOutputDirectory,
+                 PKGBUILD_OUTPUT_DIRECTORY_OPTION,
+                 no_token_aliases(),
+                 output_directory_value(),
+                 OptionOccurrence::Once,
+                 no_option_conflicts(),
+                 OptionLexicalPlacement::OperationLocal,
+                 option_scope(OptionSemanticScope::PackageExport),
+                 GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
+                 "cli.pkgbuild.output-directory"},
                 {OptionId::Recursive,
                  "--recursive",
                  no_token_aliases(),
@@ -730,7 +755,8 @@ constexpr const OptionContract* find_option_contract(
         if(token == contract.canonical_token || contract.aliases.contains(token)) {
             return &contract;
         }
-        if(contract.value.kind == OptionValueKind::AttachedEnum &&
+        if((contract.value.kind == OptionValueKind::AttachedEnum ||
+            contract.value.kind == OptionValueKind::AttachedValue) &&
            token.size() > contract.canonical_token.size() &&
            token.starts_with(contract.canonical_token) &&
            token[contract.canonical_token.size()] == '=') {
@@ -1275,7 +1301,11 @@ inline constexpr std::array<SpecialOperationSpec,
                  one_operand_term(OperandKind::Package, 1, 1,
                                   OperandOrderingRule::PreserveInputOrder),
                  TargetPolicy::ExactlyOne,
-                 no_operation_option_relations(), "exit.mutation",
+                 operation_option_relations(
+                         public_syntax_option_relation(
+                                 OptionId::PkgbuildOutputDirectory,
+                                 OptionPublicSyntax::Optional)),
+                 "exit.mutation",
                  "cli.pkgbuild.export"},
                 {SpecialOperationId::PkgbuildPrint,
                  PKGBUILD_PRINT_OPERATION, no_token_aliases(),

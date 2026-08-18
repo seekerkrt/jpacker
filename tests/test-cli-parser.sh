@@ -957,4 +957,54 @@ assert_contains \
 assert_not_contains "supported only with operation build" "$output_file"
 assert_pre_log_exit
 
+# Matrix O: `--output-dir=DIR`は-Gだけが所有するattached-value optionであり、
+# global/configや-Gpへ昇格させない。
+assert_output_directory_rejected_pre_log() {
+    case_name=$1
+    expected=$2
+    shift 2
+
+    setup_case "$case_name"
+    run_fail "$@"
+    assert_contains "$expected" "$output_file"
+    assert_pre_log_exit
+}
+
+assert_output_directory_rejected_pre_log output-directory-bare \
+    "Option --output-dir requires a non-empty attached value in the form --output-dir=DIR." \
+    -G clean-root --output-dir
+assert_output_directory_rejected_pre_log output-directory-empty \
+    "Option --output-dir requires a non-empty attached value in the form --output-dir=DIR." \
+    -G clean-root --output-dir=
+assert_output_directory_rejected_pre_log output-directory-space-separated \
+    "Operation -G requires exactly one <pkg> operand." \
+    -G clean-root --output-dir ./exports
+assert_output_directory_rejected_pre_log output-directory-duplicate-same \
+    "Option --output-dir may be specified only once for operation -G." \
+    -G clean-root --output-dir=./exports --output-dir=./exports
+assert_output_directory_rejected_pre_log output-directory-duplicate-different \
+    "Option --output-dir may be specified only once for operation -G." \
+    -G clean-root --output-dir=./exports --output-dir=/tmp
+assert_output_directory_rejected_pre_log output-directory-print-scope \
+    "Option --output-dir=DIR is supported only with operation -G." \
+    -Gp clean-root --output-dir=./exports
+assert_output_directory_rejected_pre_log output-directory-other-operation \
+    "Option --output-dir=DIR is supported only with operation -G." \
+    plan clean-root --output-dir=./exports
+assert_output_directory_rejected_pre_log output-directory-global-position \
+    "Option --output-dir=DIR is supported only with operation -G." \
+    --output-dir=./exports -G clean-root
+assert_output_directory_rejected_pre_log output-directory-after-marker \
+    "Operation -G requires exactly one <pkg> operand." \
+    -G clean-root -- --output-dir=./exports
+
+# pacman option valueとopaque operandに現れた同名tokenはsemantic optionではない。
+setup_case output-directory-name-as-pacman-option-value
+run_ok -Q --root --output-dir=./exports filesystem
+assert_only_command "pacman -Q --root --output-dir=./exports filesystem"
+
+setup_case output-directory-name-as-opaque-operand
+run_ok -U -- --output-dir=./exports
+assert_only_command "sudo pacman -U -- --output-dir=./exports"
+
 echo "CLI parser integration tests: all checks passed"

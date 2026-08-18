@@ -145,13 +145,27 @@ and, after confirmation, the resolved Moguet cache.
 The state log is not part of the reproducible cache.
 .
 .TP
-.B "-G <pkg>"
-Export exactly one AUR package's complete PackageBase repository to
-.IR ./<PackageBase> .
+.B "-G <pkg> [--output-dir=DIR]"
+Export exactly one AUR package's complete PackageBase repository.
+Without
+.BR --output-dir ,
+the parent is the command-start current directory.
+With
+.BR --output-dir=DIR ,
+the parent is the named existing directory; relative values are resolved from
+the command-start current directory. The validated PackageBase is always the
+direct-child destination name.
+The parent is not created, final and intermediate symlink components are
+rejected, and Moguet does not expand a leading tilde. Use an absolute path or
+an attached value such as
+.BR --output-dir="$HOME/src/aur" .
 An existing destination of any type is a hard failure.
+Parent rename, replacement, symlink replacement, and identity drift fail
+closed before the no-replace publish.
 The command does not use the build cache, evaluate PKGBUILD, retrieve
 dependencies, build, or install.
-Global and pacman options are unsupported for this operation.
+Only the attached output-directory form is accepted; all other global and
+pacman options are unsupported for this operation.
 .
 .TP
 .B "-Gp <pkg>"
@@ -420,6 +434,17 @@ authorizes
 This is not \(dqyes to everything\(dq and does not bypass unresolved or
 ambiguous dependencies, cycles, source selection, conflicts/replacements,
 artifact identity, ownership, or other safety guards.
+.
+.TP
+.B "--output-dir=DIR"
+Select an existing export parent for
+.BR -G .
+This operation-local option requires a non-empty attached value, may appear
+only once, is not stored in configuration, and is not supported by
+.BR -Gp
+or any other operation. Relative values use the command-start current
+directory. Moguet does not create the parent, follow symlink components, or
+perform tilde expansion.
 .
 .TP
 .B "--select"
@@ -860,6 +885,12 @@ Install an official binary while ignoring a source preference for this run:
 Inspect an AUR dependency graph without cloning or building:
 .RS
 .B moguet deps --recursive google-chrome
+.RE
+.
+.TP
+Export a PackageBase under an existing relative parent:
+.RS
+.B moguet -G wezterm-git --output-dir=./exports
 .RE
 .
 .TP

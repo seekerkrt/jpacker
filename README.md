@@ -287,7 +287,7 @@ edit-src <pkg>...
 list-src
 del-src <pkg>...
 revert <pkg>...
--G <pkg>
+-G <pkg> [--output-dir=DIR]
 -Gp <pkg>
 -S --select [--needed] <query>
 ```
@@ -333,7 +333,10 @@ moguet del-src <pkg>...
 moguet revert <pkg>...
 
 # Export one PackageBase checkout or print only its PKGBUILD
-moguet -G <pkg>
+moguet -G wezterm-git
+moguet -G wezterm-git --output-dir=./exports
+moguet -G wezterm-git --output-dir="$HOME/src/aur"
+moguet -G wezterm-git --output-dir=/home/user/src/aur
 moguet -Gp <pkg>
 
 # Observe every supported mutating route without changing persistent state
@@ -346,6 +349,16 @@ moguet --dry-run upgrade
 moguet --dry-run upgrade-aur
 moguet --dry-run upgrade-all
 ```
+
+`-G` exports to the command-start current directory when `--output-dir` is
+omitted. `--output-dir=DIR` selects an existing parent directory for that
+invocation only; a relative value is resolved from the command-start current
+directory, and the validated PackageBase remains the direct-child destination
+name. Moguet does not create the parent, follow any symlink component in the
+specified path, overwrite an existing destination, or provide its own tilde
+expansion. Use `--output-dir="$HOME/src/aur"` or an absolute path instead of
+`--output-dir=~/src/aur`. The option is not supported by `-Gp` or other
+operations, and only the attached form is accepted.
 
 `--dry-run` is a global observation modifier for the Moguet-owned `-S` install
 and system-update routes, `fetch`, remote and local `build`, `upgrade`,

@@ -59,7 +59,9 @@ KNOWN_OPTION_PLACEMENTS = frozenset(
         "end-of-options",
     }
 )
-KNOWN_OPTION_VALUE_KINDS = frozenset({"none", "attached-enum", "marker"})
+KNOWN_OPTION_VALUE_KINDS = frozenset(
+    {"none", "attached-enum", "attached-value", "marker"}
+)
 KNOWN_OPTION_CONFLICT_RULES = frozenset(
     {"none", "mutually-exclusive", "final-value-must-agree"}
 )
@@ -78,6 +80,7 @@ KNOWN_OPTION_SEMANTIC_SCOPES = frozenset(
         "pacman-delegation",
         "parser-boundary",
         "dependency-cleanup",
+        "package-export",
     }
 )
 KNOWN_GRAMMAR_OWNERSHIPS = frozenset(
@@ -736,6 +739,12 @@ def validate_option_projection(schema: CliSchema) -> dict[int, Option]:
                 or option.completion_token != option.token + "="
             ):
                 fail(f"invalid attached-enum option projection: {option.token}")
+        elif option.value_kind == "attached-value":
+            if (
+                len(option.allowed_values) != 1
+                or option.completion_token != option.token + "="
+            ):
+                fail(f"invalid attached-value option projection: {option.token}")
         elif option.allowed_values or option.completion_token != option.token:
             fail(f"invalid valueless option projection: {option.token}")
 

@@ -91,6 +91,15 @@ public:
     }
     OwnedFileDescriptor(const OwnedFileDescriptor&) = delete;
     OwnedFileDescriptor& operator=(const OwnedFileDescriptor&) = delete;
+    OwnedFileDescriptor(OwnedFileDescriptor&& other) noexcept
+        : descriptor_(other.release()) {
+    }
+    OwnedFileDescriptor& operator=(OwnedFileDescriptor&& other) noexcept {
+        if(this == &other) return *this;
+        if(descriptor_ >= 0) close(descriptor_);
+        descriptor_ = other.release();
+        return *this;
+    }
     ~OwnedFileDescriptor() {
         if(descriptor_ >= 0) close(descriptor_);
     }
@@ -108,7 +117,7 @@ struct DirectoryIdentity {
 };
 
 enum class DirectoryIdentityContext {
-    CurrentExport,
+    ExportParent,
     TemporaryParent,
     TemporaryExport,
     ExportedGit,
@@ -121,10 +130,11 @@ DirectoryIdentity require_directory_identity(
     struct stat status {};
     if(fstat(descriptor, &status) != 0) {
         switch(context) {
-            case DirectoryIdentityContext::CurrentExport:
-                // TRANSLATORS: The placeholder is a system error message.
+            case DirectoryIdentityContext::ExportParent:
+                // TRANSLATORS: The placeholders are an export parent path and a system error message.
                 throw std::runtime_error(localization::format_translated_message(
-                        "Failed to inspect the current export directory: {}",
+                        "Failed to inspect export directory {}: {}",
+                        display_path.string(),
                         std::strerror(errno)));
             case DirectoryIdentityContext::TemporaryParent:
                 // TRANSLATORS: The placeholders are a directory path and a system error message.
@@ -150,9 +160,11 @@ DirectoryIdentity require_directory_identity(
     }
     if(!S_ISDIR(status.st_mode)) {
         switch(context) {
-            case DirectoryIdentityContext::CurrentExport:
-                throw std::runtime_error(localization::translate_message(
-                        "The current export directory is not a directory."));
+            case DirectoryIdentityContext::ExportParent:
+                // TRANSLATORS: The placeholder is an export parent path.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Export path {} is not a directory.",
+                        display_path.string()));
             case DirectoryIdentityContext::TemporaryParent:
                 // TRANSLATORS: The placeholder is a directory path.
                 throw std::runtime_error(localization::format_translated_message(
@@ -187,6 +199,59 @@ bool filesystem_identity_matches(
            (expected.st_mode & S_IFMT) == (actual.st_mode & S_IFMT);
 }
 
+OwnedFileDescriptor open_export_directory_components(
+        int base_descriptor, const fs::path& traversal_path,
+        const fs::path& display_path, bool is_revalidation) {
+    int retained_descriptor = fcntl(base_descriptor, F_DUPFD_CLOEXEC, 0);
+    if(retained_descriptor < 0) {
+        // TRANSLATORS: The placeholders are an export parent path and a system error message.
+        throw std::runtime_error(localization::format_translated_message(
+                "Unable to retain the resolution base for export directory {}: {}",
+                display_path.string(), std::strerror(errno)));
+    }
+    OwnedFileDescriptor current(retained_descriptor);
+
+    for(const fs::path& component : traversal_path) {
+        if(component.empty() || component == "/" || component == ".") {
+            continue;
+        }
+        int next_descriptor = openat(
+                current.get(), component.c_str(),
+                O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        if(next_descriptor < 0) {
+            const int open_error = errno;
+            if(is_revalidation) {
+                // TRANSLATORS: The placeholders are an export parent path and a system error message.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Unable to safely revalidate export directory {}: {}",
+                        display_path.string(), std::strerror(open_error)));
+            }
+            // TRANSLATORS: The placeholders are an export parent path and a system error message.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Unable to safely open existing export directory {}: {}",
+                    display_path.string(), std::strerror(open_error)));
+        }
+        current = OwnedFileDescriptor(next_descriptor);
+    }
+    return current;
+}
+
+OwnedFileDescriptor open_absolute_export_directory(
+        const fs::path& absolute_path, bool is_revalidation) {
+    int root_descriptor = open(
+            "/", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(root_descriptor < 0) {
+        // TRANSLATORS: The placeholder is a system error message.
+        throw std::runtime_error(localization::format_translated_message(
+                "Unable to open the filesystem root for export resolution: {}",
+                std::strerror(errno)));
+    }
+    OwnedFileDescriptor root(root_descriptor);
+    return open_export_directory_components(
+            root.get(), absolute_path.relative_path(), absolute_path,
+            is_revalidation);
+}
+
 fs::path proc_file_descriptor_path(int descriptor) {
     return fs::path("/proc") / std::to_string(getpid()) / "fd" /
            std::to_string(descriptor);
@@ -196,15 +261,29 @@ class AnchoredDirectory {
     fs::path            display_path_;
     OwnedFileDescriptor descriptor_;
     DirectoryIdentity   identity_;
+    std::optional<fs::path> named_path_;
+    std::optional<fs::path> resolution_base_named_path_;
+    std::optional<DirectoryIdentity> resolution_base_identity_;
 
     AnchoredDirectory(
-            fs::path display_path, int descriptor, DirectoryIdentity identity)
-        : display_path_(std::move(display_path)), descriptor_(descriptor), identity_(identity) {
+            fs::path display_path, int descriptor, DirectoryIdentity identity,
+            std::optional<fs::path> named_path = std::nullopt,
+            std::optional<fs::path> resolution_base_named_path =
+                    std::nullopt,
+            std::optional<DirectoryIdentity> resolution_base_identity =
+                    std::nullopt)
+        : display_path_(std::move(display_path)), descriptor_(descriptor),
+          identity_(identity), named_path_(std::move(named_path)),
+          resolution_base_named_path_(
+                  std::move(resolution_base_named_path)),
+          resolution_base_identity_(resolution_base_identity) {
     }
 
 public:
     AnchoredDirectory(const AnchoredDirectory&) = delete;
     AnchoredDirectory& operator=(const AnchoredDirectory&) = delete;
+    AnchoredDirectory(AnchoredDirectory&&) noexcept = default;
+    AnchoredDirectory& operator=(AnchoredDirectory&&) noexcept = default;
 
     static AnchoredDirectory open_temporary_parent(const fs::path& path) {
         int descriptor = open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
@@ -239,9 +318,18 @@ public:
         return AnchoredDirectory(path, opened_directory.release(), identity);
     }
 
-    static AnchoredDirectory adopt_current_directory(
-            fs::path display_path, int descriptor, DirectoryIdentity identity) {
-        return AnchoredDirectory(std::move(display_path), descriptor, identity);
+    static AnchoredDirectory adopt_export_parent(
+            fs::path display_path, int descriptor, DirectoryIdentity identity,
+            fs::path named_path,
+            std::optional<fs::path> resolution_base_named_path =
+                    std::nullopt,
+            std::optional<DirectoryIdentity> resolution_base_identity =
+                    std::nullopt) {
+        return AnchoredDirectory(
+                std::move(display_path), descriptor, identity,
+                std::move(named_path),
+                std::move(resolution_base_named_path),
+                resolution_base_identity);
     }
 
     int descriptor() const {
@@ -254,6 +342,52 @@ public:
 
     const fs::path& display_path() const {
         return display_path_;
+    }
+
+    void require_named_identity() const {
+        if(!named_path_.has_value()) return;
+
+        const DirectoryIdentity open_identity = require_directory_identity(
+                descriptor_.get(), DirectoryIdentityContext::ExportParent,
+                display_path_);
+        if(open_identity.device != identity_.device ||
+           open_identity.inode != identity_.inode) {
+            // TRANSLATORS: The placeholder is an export parent path.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Export directory descriptor changed identity: {}",
+                    display_path_.string()));
+        }
+
+        if(resolution_base_named_path_.has_value() &&
+           resolution_base_identity_.has_value()) {
+            OwnedFileDescriptor reopened_base =
+                    open_absolute_export_directory(
+                            resolution_base_named_path_.value(), true);
+            const DirectoryIdentity actual_base = require_directory_identity(
+                    reopened_base.get(),
+                    DirectoryIdentityContext::ExportParent,
+                    resolution_base_named_path_.value());
+            if(actual_base.device != resolution_base_identity_->device ||
+               actual_base.inode != resolution_base_identity_->inode) {
+                // TRANSLATORS: The placeholder is the command-start current directory path.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Refusing changed command-start current directory path: {}",
+                        resolution_base_named_path_->string()));
+            }
+        }
+
+        OwnedFileDescriptor reopened = open_absolute_export_directory(
+                named_path_.value(), true);
+        const DirectoryIdentity named_identity = require_directory_identity(
+                reopened.get(), DirectoryIdentityContext::ExportParent,
+                named_path_.value());
+        if(named_identity.device != identity_.device ||
+           named_identity.inode != identity_.inode) {
+            // TRANSLATORS: The placeholder is an export parent path.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Refusing changed export directory path: {}",
+                    display_path_.string()));
+        }
     }
 };
 
@@ -673,9 +807,9 @@ AnchoredDirectory require_export_current_directory() {
                 std::strerror(errno)));
     }
     OwnedFileDescriptor current_directory_descriptor(descriptor);
-    DirectoryIdentity current_identity = require_directory_identity(
+    const DirectoryIdentity current_identity = require_directory_identity(
             descriptor,
-            DirectoryIdentityContext::CurrentExport,
+            DirectoryIdentityContext::ExportParent,
             ".");
 
     std::error_code ec;
@@ -685,32 +819,57 @@ AnchoredDirectory require_export_current_directory() {
         throw std::runtime_error(localization::format_translated_message(
                 "Unable to read the current directory: {}", ec.message()));
     }
-    current_directory = fs::canonical(current_directory, ec);
-    if(ec) {
-        // TRANSLATORS: The placeholder is a system error message.
-        throw std::runtime_error(localization::format_translated_message(
-                "Unable to canonicalize the current directory: {}",
-                ec.message()));
+    current_directory = current_directory.lexically_normal();
+    AnchoredDirectory anchored = AnchoredDirectory::adopt_export_parent(
+            current_directory, current_directory_descriptor.release(),
+            current_identity, current_directory);
+    anchored.require_named_identity();
+    return anchored;
+}
+
+AnchoredDirectory require_export_parent(
+        const std::optional<std::string>& output_directory) {
+    if(!output_directory.has_value()) {
+        return require_export_current_directory();
     }
 
-    struct stat named_status {};
-    if(fstatat(
-               AT_FDCWD, current_directory.c_str(), &named_status,
-               AT_SYMLINK_NOFOLLOW) != 0) {
-        // TRANSLATORS: The placeholders are the current directory path and a system error message.
-        throw std::runtime_error(localization::format_translated_message(
-                "Unable to revalidate current directory {}: {}",
-                current_directory.string(),
-                std::strerror(errno)));
+    const fs::path requested_path(output_directory.value());
+    if(requested_path.empty()) {
+        // TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
+        throw std::invalid_argument(localization::format_translated_message(
+                "The {} export directory must not be empty.",
+                "PKGBUILD"));
     }
-    if(!directory_identity_matches(current_identity, named_status)) {
-        // TRANSLATORS: The placeholder is the current directory path.
-        throw std::runtime_error(localization::format_translated_message(
-                "Refusing changed current directory path: {}",
-                current_directory.string()));
+
+    if(requested_path.is_absolute()) {
+        const fs::path display_path = requested_path.lexically_normal();
+        OwnedFileDescriptor opened =
+                open_absolute_export_directory(requested_path, false);
+        const DirectoryIdentity identity = require_directory_identity(
+                opened.get(), DirectoryIdentityContext::ExportParent,
+                display_path);
+        AnchoredDirectory anchored = AnchoredDirectory::adopt_export_parent(
+                display_path, opened.release(), identity, requested_path);
+        anchored.require_named_identity();
+        return anchored;
     }
-    return AnchoredDirectory::adopt_current_directory(
-            current_directory, current_directory_descriptor.release(), current_identity);
+
+    AnchoredDirectory command_start = require_export_current_directory();
+    const fs::path display_path =
+            (command_start.display_path() / requested_path)
+                    .lexically_normal();
+    const fs::path named_path =
+            command_start.display_path() / requested_path;
+    OwnedFileDescriptor opened = open_export_directory_components(
+            command_start.descriptor(), requested_path, display_path, false);
+    const DirectoryIdentity identity = require_directory_identity(
+            opened.get(), DirectoryIdentityContext::ExportParent,
+            display_path);
+    AnchoredDirectory anchored = AnchoredDirectory::adopt_export_parent(
+            display_path, opened.release(), identity, named_path,
+            command_start.display_path(), command_start.identity());
+    anchored.require_named_identity();
+    return anchored;
 }
 
 AnchoredDirectory require_export_temporary_parent() {
@@ -732,7 +891,8 @@ AnchoredDirectory require_export_temporary_parent() {
 }
 
 fs::path require_missing_export_destination(
-        const AnchoredDirectory& current_directory, const std::string& package_base) {
+        const AnchoredDirectory& export_parent,
+        const std::string& package_base) {
     if(!is_valid_aur_export_identifier(package_base)) {
         // TRANSLATORS: The placeholders are the literal AUR and PackageBase identities and a PackageBase name.
         throw std::runtime_error(localization::format_translated_message(
@@ -741,18 +901,19 @@ fs::path require_missing_export_destination(
     }
 
     fs::path destination_path =
-            (current_directory.display_path() / package_base).lexically_normal();
-    // POLICY(#167): export destination は command 開始時 cwd の direct child に固定する。
-    if(destination_path.parent_path() != current_directory.display_path() ||
-       !is_path_contained(current_directory.display_path(), destination_path, false)) {
+            (export_parent.display_path() / package_base).lexically_normal();
+    // POLICY(#167,#434): validated PackageBaseはsafe export parentの
+    // direct-child leafに固定する。
+    if(destination_path.parent_path() != export_parent.display_path() ||
+       !is_path_contained(export_parent.display_path(), destination_path, false)) {
         // TRANSLATORS: The placeholder is an export destination path.
         throw std::runtime_error(localization::format_translated_message(
-                "Export destination resolves outside the current directory: {}",
+                "Export destination resolves outside the export directory: {}",
                 destination_path.string()));
     }
 
     if(export_entry_status_at(
-               current_directory.descriptor(), package_base,
+               export_parent.descriptor(), package_base,
                destination_path)
                .has_value()) {
         // TRANSLATORS: The placeholder is an export destination path.
@@ -882,9 +1043,14 @@ void rename_export_without_replacement(
                 destination_display_path.string()));
     }
     temporary_directory.require_owned_identity();
+    // POLICY(#434): held fdだけでなく、利用者が指定したnamed parent pathが
+    // publish直前にも同じfilesystem objectを指すことを確認する。
+    // この後にpost-publish checkは置かず、failure表示後の既publishを作らない。
+    destination_parent.require_named_identity();
 
     // LANDMINE(#167): std::filesystem::rename may replace an entry created after preflight.
-    // directory fd と renameat2(NOREPLACE) で、開始時 cwd 以外や existing path へ publish しない。
+    // directory fd と renameat2(NOREPLACE) で、anchored parent以外や
+    // existing pathへpublishしない。
     if(syscall(
                SYS_renameat2, temporary_directory.parent_descriptor(),
                temporary_directory.leaf_name().c_str(), destination_parent.descriptor(),
@@ -906,13 +1072,18 @@ void rename_export_without_replacement(
 
 } // namespace
 
-void export_pkgbuild_tree(const std::string& target) {
+void export_pkgbuild_tree(
+        const std::string& target,
+        const std::optional<std::string>& output_directory) {
     require_valid_aur_export_target(target, "-G");
-    // command開始時のcwdをRPC/cloneより前に固定し、後続path計算の親として使い続ける。
-    AnchoredDirectory current_directory = require_export_current_directory();
-    AurExportSource   source = resolve_aur_export_source(target);
+    // Invalid parentはRPC/cloneより前に拒否する。relative指定はこの時点の
+    // command-start CWD fdをauthorityとして解決する。
+    AnchoredDirectory export_parent =
+            require_export_parent(output_directory);
+    AurExportSource source = resolve_aur_export_source(target);
     fs::path destination_path =
-            require_missing_export_destination(current_directory, source.package_base);
+            require_missing_export_destination(
+                    export_parent, source.package_base);
 
     if(source.requested_name != source.package_base) {
         // TRANSLATORS: The placeholders are the literal AUR identity, an AUR package name, the literal PackageBase identity, and its name.
@@ -924,18 +1095,26 @@ void export_pkgbuild_tree(const std::string& target) {
     }
 
     TemporaryDirectoryGuard temporary_directory =
-            TemporaryDirectoryGuard::create(current_directory);
+            TemporaryDirectoryGuard::create(export_parent);
     clone_and_validate_aur_export(source, temporary_directory);
     // LANDMINE(#167): clone後のtreeをpublish直前にもfd基準で再検証する。
     validate_aur_export_checkout(source, temporary_directory);
     rename_export_without_replacement(
-            temporary_directory, current_directory, source.package_base,
+            temporary_directory, export_parent, source.package_base,
             destination_path);
 
-    // TRANSLATORS: The placeholders are the literal AUR and PackageBase identities and a PackageBase name.
-    Logger::info(localization::format_translated_message(
-            "Exported {} {} {} in the command-start current directory.",
-            "AUR", "PackageBase", source.package_base));
+    if(output_directory.has_value()) {
+        // TRANSLATORS: The placeholders are the literal AUR and PackageBase identities, a PackageBase name, and an export parent path.
+        Logger::info(localization::format_translated_message(
+                "Exported {} {} {} under {}.",
+                "AUR", "PackageBase", source.package_base,
+                export_parent.display_path().string()));
+    } else {
+        // TRANSLATORS: The placeholders are the literal AUR and PackageBase identities and a PackageBase name.
+        Logger::info(localization::format_translated_message(
+                "Exported {} {} {} in the command-start current directory.",
+                "AUR", "PackageBase", source.package_base));
+    }
 }
 
 std::string load_pkgbuild_for_stdout(const std::string& target) {

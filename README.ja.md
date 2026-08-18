@@ -254,7 +254,7 @@ edit-src <pkg>...
 list-src
 del-src <pkg>...
 revert <pkg>...
--G <pkg>
+-G <pkg> [--output-dir=DIR]
 -Gp <pkg>
 -S --select [--needed] <query>
 ```
@@ -299,7 +299,10 @@ moguet del-src <pkg>...
 moguet revert <pkg>...
 
 # PackageBase checkoutをexport、またはPKGBUILDだけを表示
-moguet -G <pkg>
+moguet -G wezterm-git
+moguet -G wezterm-git --output-dir=./exports
+moguet -G wezterm-git --output-dir="$HOME/src/aur"
+moguet -G wezterm-git --output-dir=/home/user/src/aur
 moguet -Gp <pkg>
 
 # persistent stateを変更せず、対応する全mutating routeを観測
@@ -312,6 +315,15 @@ moguet --dry-run upgrade
 moguet --dry-run upgrade-aur
 moguet --dry-run upgrade-all
 ```
+
+`-G`は`--output-dir`未指定時、command開始時current directoryへexportします。
+`--output-dir=DIR`はそのinvocationだけの既存parent directoryを指定し、relative valueは
+command開始時current directoryを基準に解決します。validated PackageBaseが常にdirect-childの
+destination nameです。Moguetはparentを作成せず、指定pathのsymlink componentをfollowせず、
+existing destinationを上書きせず、独自のtilde expansionも行いません。
+`--output-dir=~/src/aur`ではなく、`--output-dir="$HOME/src/aur"`またはabsolute pathを
+使用してください。このoptionは`-Gp`や他operationではunsupportedで、attached formだけを
+受理します。
 
 `--dry-run`は、Moguet-owned `-S` install / system-update route、`fetch`、remote / local
 `build`、`upgrade`、`upgrade-aur`、`upgrade-all`のglobal observation modifierです。
