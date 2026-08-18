@@ -221,22 +221,22 @@ struct rlimit file_descriptor_limit() {
 
 class FileDescriptorLimitScope final {
     struct rlimit original_ {};
-    bool          changed_ = false;
+    bool          must_restore_ = false;
 
 public:
     explicit FileDescriptorLimitScope(rlim_t soft_limit) {
         original_ = file_descriptor_limit();
-        if(original_.rlim_cur <= soft_limit) {
+        if(original_.rlim_max < soft_limit) {
             throw std::runtime_error(
-                    "File descriptor limit is too low for the focused test.");
+                    "Hard file descriptor limit is too low for the focused test.");
         }
-        struct rlimit lowered = original_;
-        lowered.rlim_cur = soft_limit;
-        if(::setrlimit(RLIMIT_NOFILE, &lowered) != 0) {
+        struct rlimit scoped = original_;
+        scoped.rlim_cur = soft_limit;
+        if(::setrlimit(RLIMIT_NOFILE, &scoped) != 0) {
             throw std::runtime_error(
-                    "Failed to lower the file descriptor limit.");
+                    "Failed to set the soft file descriptor limit.");
         }
-        changed_ = true;
+        must_restore_ = true;
     }
 
     FileDescriptorLimitScope(const FileDescriptorLimitScope&) = delete;
@@ -244,7 +244,7 @@ public:
             const FileDescriptorLimitScope&) = delete;
 
     ~FileDescriptorLimitScope() noexcept {
-        if(changed_) {
+        if(must_restore_) {
             static_cast<void>(::setrlimit(RLIMIT_NOFILE, &original_));
         }
     }
@@ -1075,7 +1075,7 @@ void test_large_tree_cleanup_succeeds_with_bounded_fd_usage() {
     const std::size_t descriptors_before = open_descriptor_count();
     const struct rlimit original_limit = file_descriptor_limit();
     {
-        FileDescriptorLimitScope lowered_limit(
+        FileDescriptorLimitScope limit_scope(
                 LARGE_TREE_SOFT_NOFILE_LIMIT);
         expect(
                 file_descriptor_limit().rlim_cur ==
