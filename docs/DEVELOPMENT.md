@@ -376,10 +376,10 @@ ccache / mold parityは必要なreleaseでの追加validationであり、上記d
 
     gh pr create --base main --head release/vX.Y.Z
 
-上記の`git add`は、現在のv2.3.1 release preparationでstage対象とするpathを1件ずつ明示した
+上記の`git add`は、現在のv2.3.2 release preparationでstage対象とするpathを1件ずつ明示した
 current release用のexact path setです。`git add .`や代表pathだけのpartial listへ置き換えません。commit前に
 cached path一覧をこのreleaseのdiffと再照合し、release scopeのunstaged / untracked pathや
-unrelatedなstaged pathがないことを確認します。現在のv2.3.1 release preparationでは、上記の
+unrelatedなstaged pathがないことを確認します。現在のv2.3.2 release preparationでは、上記の
 9-path listがstage対象のcurrent release scopeのauthorityです。`PKGBUILD`はroot `VERSION`を動的に
 読み、published tagへprojectします。man templateは`@VERSION@` authorityを維持し、completionは
 version independent、`po/POTFILES.in`はsource inventory変更なしのため、これらはcurrent listへ

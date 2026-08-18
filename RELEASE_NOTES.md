@@ -1,7 +1,70 @@
-# Moguet v2.3.1
+# Moguet v2.3.2
 
 This tracked file is the source of truth for release bodies. The English and
 Japanese sections for each release describe the same scope.
+
+## English
+
+Moguet v2.3.2 is a patch maintenance release that bounds file descriptor use
+during large local-source workspace cleanup and corrects the presentation of
+already-current split AUR targets in `upgrade-all`. The cleanup change preserves
+the existing fail-closed safety invariants, and the presentation change remains
+limited to authoritative typed `UpToDate` evidence.
+
+### Bounded local-source cleanup
+
+- Large local source trees could build successfully but fail during cleanup
+  with `Too many open files` under a constrained `RLIMIT_NOFILE`.
+- Cleanup now uses bounded descriptor traversal instead of retaining one file
+  descriptor per descendant. Ownership, symlink, filesystem-boundary, and
+  concurrent-replacement checks remain fail-closed; opaque filesystem
+  generation identity continues to reject inode-reuse ABA replacement.
+- Regression coverage exercises successful cleanup of a large tree under a
+  constrained file-descriptor limit.
+
+### Correct UpToDate split AUR presentation
+
+- `upgrade-all` now projects a normal skip with authoritative typed
+  `AurUpdateExecutionReason::UpToDate` evidence as `VerifiedUnchanged`, rather
+  than `NotObserved` / `ObservationNotPrepared`.
+- The requested split child and its `PackageBase` identity remain intact, but
+  that identity difference alone no longer makes an authoritative `UpToDate`
+  target attention-required.
+- Genuine split `Updated`, `Unsupported`, `Incomplete`, failure, and other
+  attention states remain visible, while standalone `upgrade-aur` typed-skip
+  presentation is unchanged. This does not treat every skipped target as
+  `VerifiedUnchanged`.
+
+## 日本語
+
+Moguet v2.3.2は、大規模local source workspace cleanupのfile descriptor使用量を
+boundedにし、`upgrade-all`で既に最新のsplit AUR targetを正しく表示するpatch / maintenance
+releaseです。cleanupの既存fail-closed safety invariantを維持し、presentation修正は
+authoritativeなtyped `UpToDate` evidenceを持つ場合だけに限定します。
+
+### local source cleanupのFD bounded化
+
+- 大規模local source treeではbuildが成功しても、制約された`RLIMIT_NOFILE`の下でcleanupが
+  `Too many open files`により失敗することがありました。
+- cleanupはdescendantごとにfile descriptorを保持せず、boundedなdescriptor traversalを
+  使います。ownership、symlink、filesystem boundary、concurrent replacementに対する
+  fail-closed checkを維持し、opaqueなfilesystem generation identityによってinode再利用の
+  ABA replacementも引き続き拒否します。
+- 制約されたfile descriptor limitの下で大規模treeを正常にcleanupするregressionを
+  coverageへ含めています。
+
+### UpToDate split AUR presentationの修正
+
+- `upgrade-all`では、authoritativeなtyped
+  `AurUpdateExecutionReason::UpToDate` evidenceを持つnormal skipを、
+  `NotObserved` / `ObservationNotPrepared`ではなく`VerifiedUnchanged`へprojectします。
+- requested split childと`PackageBase`のidentityは維持し、そのidentity差だけを理由に
+  authoritativeな`UpToDate` targetをattention-requiredにしません。
+- 実際のsplit `Updated`、`Unsupported`、`Incomplete`、failure、その他attentionが必要な
+  stateは引き続き表示し、standalone `upgrade-aur`のtyped skip presentationも変えません。
+  すべてのskipped targetを`VerifiedUnchanged`にする変更ではありません。
+
+# Moguet v2.3.1
 
 ## English
 
