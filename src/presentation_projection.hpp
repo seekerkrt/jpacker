@@ -124,6 +124,7 @@ struct PresentationItem {
     std::vector<PresentationArtifactIdentity> selected_artifacts;
     std::vector<PresentationArtifactIdentity> unselected_artifacts;
     std::optional<PackageStateObservationValue> package_state;
+    std::optional<AurUpdateExecutionReason>     aur_normal_skip_reason;
     std::optional<DiagnosticClass>             diagnostic_class;
     std::vector<PlanPresentationReason>        plan_reasons;
     std::vector<UpgradeAllPresentationReason>  upgrade_all_reasons;

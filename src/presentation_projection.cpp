@@ -92,6 +92,27 @@ PackageStateObservationValue aur_target_observation(
             ObservationReason::InconsistentEvidence};
 }
 
+std::optional<AurUpdateExecutionReason> aur_target_normal_skip_reason(
+        const AurUpdateOperationTargetResult& result) noexcept {
+    if(result.status != AurUpdateOperationTargetStatus::Skipped) {
+        return std::nullopt;
+    }
+
+    std::optional<AurUpdateExecutionReason> reason;
+    for(const AurUpdateExecutionIssue& issue : result.preflight_issues) {
+        if(issue.reason == AurUpdateExecutionReason::None) continue;
+        if(issue.reason != AurUpdateExecutionReason::UpToDate &&
+           issue.reason != AurUpdateExecutionReason::NonAurForeign) {
+            return std::nullopt;
+        }
+        if(reason.has_value() && reason.value() != issue.reason) {
+            return std::nullopt;
+        }
+        reason = issue.reason;
+    }
+    return reason;
+}
+
 void apply_registered_source_status(
         PresentationItem& item,
         RegisteredSourceUpgradeStatus status) noexcept {
@@ -696,6 +717,10 @@ void merge_logical_failure_item(
     if(!primary.package_state.has_value()) {
         primary.package_state = std::move(secondary.package_state);
     }
+    if(!primary.aur_normal_skip_reason.has_value()) {
+        primary.aur_normal_skip_reason =
+                secondary.aur_normal_skip_reason;
+    }
     if(!primary.diagnostic_class.has_value()) {
         primary.diagnostic_class = secondary.diagnostic_class;
     }
@@ -904,6 +929,16 @@ bool is_normal_aur_target_status(
            status == AurUpdateOperationTargetStatus::Skipped;
 }
 
+bool is_authoritative_aur_up_to_date_normal_skip(
+        const PresentationItem& item) noexcept {
+    return item.source_kind == DiagnosticSourceKind::Aur &&
+           item.aur_normal_skip_reason ==
+                   AurUpdateExecutionReason::UpToDate &&
+           item.package_state.has_value() &&
+           item.package_state->state ==
+                   PackageStateObservation::VerifiedUnchanged;
+}
+
 } // namespace
 
 bool has_distinct_package_base_identity(
@@ -929,17 +964,20 @@ bool has_distinct_artifact_identity(
 }
 
 bool is_attention_required(const PresentationItem& item) noexcept {
+    const bool has_unverified_package_state =
+            item.package_state.has_value() &&
+            item.package_state->state ==
+                    PackageStateObservation::Unverified;
     if(item.is_update_candidate || item.is_blocking ||
        item.requires_check || item.requires_manual_action ||
        item.diagnostic_class.has_value() || !item.plan_reasons.empty() ||
        !item.upgrade_all_reasons.empty() ||
-       has_distinct_package_base_identity(item) ||
-       has_distinct_artifact_identity(item)) {
+       has_distinct_artifact_identity(item) ||
+       has_unverified_package_state) {
         return true;
     }
-    return item.package_state.has_value() &&
-           item.package_state->state ==
-                   PackageStateObservation::Unverified;
+    return has_distinct_package_base_identity(item) &&
+           !is_authoritative_aur_up_to_date_normal_skip(item);
 }
 
 bool should_suppress_repeated_package_base_identity(
@@ -1076,6 +1114,7 @@ PresentationItem project_aur_update_presentation_item(
                 "aur:" + item.package_base.value();
     }
     item.package_state = aur_target_observation(result);
+    item.aur_normal_skip_reason = aur_target_normal_skip_reason(result);
     item.is_update_candidate =
             result.update.classification ==
             AurUpdateClassification::UpdateAvailable;

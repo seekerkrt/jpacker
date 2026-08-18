@@ -1039,6 +1039,9 @@ void test_issue_449_non_up_to_date_controls() {
                                     .package_state->reason ==
                             ObservationReason::ObservationNotPrepared &&
                     non_aur_projection.full_items.front()
+                                    .aur_normal_skip_reason ==
+                            AurUpdateExecutionReason::NonAurForeign &&
+                    non_aur_projection.full_items.front()
                                     .package_state->state !=
                             PackageStateObservation::VerifiedUnchanged,
             "Issue #449 NonAurForeign control was treated as UpToDate");
@@ -1114,7 +1117,10 @@ void test_issue_449_split_up_to_date_presentation_contract() {
                             "ttf-noto-sans-cjk-vf" &&
                     projection.full_items.front()
                                     .canonical_source_identity ==
-                            "aur:ttf-noto-sans-cjk-vf",
+                            "aur:ttf-noto-sans-cjk-vf" &&
+                    projection.full_items.front()
+                                    .aur_normal_skip_reason ==
+                            AurUpdateExecutionReason::UpToDate,
             "Issue #449 presentation flattened split AUR identity");
 
     const PresentationItem& item = projection.full_items.front();
@@ -1153,6 +1159,21 @@ void test_issue_449_split_up_to_date_presentation_contract() {
         message += "\n  - " + violation;
     }
     expect(contract_violations.empty(), message);
+
+    PresentationItem stronger_diagnostic = item;
+    stronger_diagnostic.diagnostic_class =
+            DiagnosticClass::RequiresCheck;
+    expect(
+            is_attention_required(stronger_diagnostic),
+            "Issue #449 UpToDate exemption hid a stronger diagnostic");
+
+    PresentationItem stronger_artifact_identity = item;
+    stronger_artifact_identity.unselected_artifacts.push_back(
+            PresentationArtifactIdentity{"sibling", "2.004-1"});
+    expect(
+            has_distinct_artifact_identity(stronger_artifact_identity) &&
+                    is_attention_required(stronger_artifact_identity),
+            "Issue #449 UpToDate exemption hid distinct artifact identity");
 }
 
 void test_presentation_partition_preserves_identity() {
@@ -1163,6 +1184,10 @@ void test_presentation_partition_preserves_identity() {
             "requested-child", "shared-base",
             AurUpdateClassification::UpdateAvailable,
             AurUpdateOperationTargetStatus::Updated);
+    const AurUpdateOperationTargetResult no_evidence_split = aur_target(
+            "no-evidence-child", "no-evidence-base",
+            AurUpdateClassification::UpToDate,
+            AurUpdateOperationTargetStatus::Skipped);
     AurUpdateOperationExecutionContribution selected_child;
     selected_child.selected_artifact =
             ArtifactPackageIdentity{"requested-child", "2.0-1"};
@@ -1172,8 +1197,11 @@ void test_presentation_partition_preserves_identity() {
             project_aur_update_presentation_item(ordinary);
     const PresentationItem split_item =
             project_aur_update_presentation_item(split);
+    const PresentationItem no_evidence_split_item =
+            project_aur_update_presentation_item(no_evidence_split);
     expect(
             ordinary_item.package_base == "ordinary" &&
+                    !ordinary_item.aur_normal_skip_reason.has_value() &&
                     ordinary_item.package_state->state ==
                             PackageStateObservation::NotObserved &&
                     should_suppress_repeated_package_base_identity(
@@ -1187,9 +1215,19 @@ void test_presentation_partition_preserves_identity() {
                     split_item.selected_artifacts.size() == 1 &&
                     split_item.selected_artifacts.front().package_name ==
                             "requested-child" &&
+                    !split_item.aur_normal_skip_reason.has_value() &&
                     has_distinct_package_base_identity(split_item) &&
                     is_attention_required(split_item),
             "package != PackageBase identity was flattened");
+    expect(
+            no_evidence_split_item.package_state->state ==
+                            PackageStateObservation::NotObserved &&
+                    !no_evidence_split_item.aur_normal_skip_reason
+                             .has_value() &&
+                    has_distinct_package_base_identity(
+                            no_evidence_split_item) &&
+                    is_attention_required(no_evidence_split_item),
+            "classification-only UpToDate bypassed split attention");
 
     UpgradeAllOperationResult aggregate;
     aggregate.aur.operation_result.emplace();
