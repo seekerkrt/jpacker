@@ -334,6 +334,27 @@ AurUpdateOperationTargetResult make_aur_target(
     return target;
 }
 
+AurUpdateOperationTargetResult make_issue_449_split_up_to_date_target(
+        std::size_t update_plan_index) {
+    AurUpdateOperationTargetResult target = make_aur_target(
+            "ttf-noto-sans-mono-cjk-vf",
+            AurUpdateOperationTargetStatus::Skipped,
+            "ttf-noto-sans-cjk-vf");
+    target.update_plan_index = update_plan_index;
+    target.update.installed_version = "2.004-1";
+    target.update.classification = AurUpdateClassification::UpToDate;
+    target.update.aur_package->version = "2.004-1";
+    target.update.aur_package->version_relation =
+            AurVersionRelation::SameAsInstalled;
+    target.preflight_issues.emplace_back(
+            AurUpdateExecutionReason::UpToDate,
+            "ttf-noto-sans-mono-cjk-vf",
+            "ttf-noto-sans-cjk-vf",
+            std::nullopt,
+            "fixture wording is not the UpToDate classification authority");
+    return target;
+}
+
 FilteredAurUpdateExecutionResult make_filtered_result(
         AurUpdateOperationStatus status) {
     FilteredAurUpdateExecutionResult filtered;
@@ -1266,6 +1287,15 @@ UpgradeAllOperationResult make_aur_split_multiple_result() {
     return result;
 }
 
+UpgradeAllOperationResult make_issue_449_split_up_to_date_result() {
+    UpgradeAllOperationResult result = make_aur_split_multiple_result();
+    std::vector<AurUpdateOperationTargetResult>& targets =
+            result.aur.operation_result->reduced_operation_result.targets;
+    targets.push_back(
+            make_issue_449_split_up_to_date_target(targets.size()));
+    return result;
+}
+
 UpgradeAllOperationResult make_registered_package_base_result() {
     UpgradeAllOperationResult result = make_success_result(
             UpgradeAllOperationStatus::Completed,
@@ -1985,6 +2015,9 @@ UpgradeAllOperationResult result_for_scenario(const std::string& scenario) {
     }
     if(scenario == "aur-split-multiple") {
         return make_aur_split_multiple_result();
+    }
+    if(scenario == "issue-449-split-up-to-date") {
+        return make_issue_449_split_up_to_date_result();
     }
     if(scenario == "registered-packagebase-result") {
         return make_registered_package_base_result();

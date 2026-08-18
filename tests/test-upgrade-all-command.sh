@@ -126,6 +126,25 @@ assert_not_exact_line() {
     fi
 }
 
+extract_attention_section() {
+    source_file=$1
+    section_file=$2
+    if ! awk '
+        $0 == "Attention-required details:" {
+            in_section = 1
+            found_section = 1
+            next
+        }
+        in_section && $0 !~ /^ / { exit }
+        in_section { print }
+        END {
+            if (!found_section) exit 1
+        }
+    ' "$source_file" > "$section_file"; then
+        fail_case "attention-required details section is absent"
+    fi
+}
+
 assert_occurrence_count() {
     expected_count=$1
     expected=$2
@@ -484,6 +503,23 @@ assert_line_before \
     "$stdout_file"
 assert_not_contains "selected artifact: aur-split-sibling" "$stdout_file"
 assert_not_contains "selected artifact: aur-split-suite-debug" "$stdout_file"
+
+# Issue #449: the authoritative UpToDate split child traverses the production
+# projection/renderer as one normal item, while the existing generic split
+# Updated target remains in the attention section.
+setup_case issue-449-split-up-to-date issue-449-split-up-to-date
+run_status 0 upgrade-all
+assert_exact_line \
+    "  items: 6 total, 1 normal, 5 attention-required" "$stdout_file"
+assert_exact_line \
+    "  update candidates: 4, blockers: 0, requires-check: 0, failures: 0" \
+    "$stdout_file"
+attention_section_file=$case_dir/attention-section
+extract_attention_section "$stdout_file" "$attention_section_file"
+assert_exact_line "  - package: aur-split-main" "$attention_section_file"
+assert_exact_line "    PackageBase: aur-split-suite" "$attention_section_file"
+assert_not_contains \
+    "ttf-noto-sans-mono-cjk-vf" "$attention_section_file"
 
 setup_case completed-no-change completed-no-change
 run_status 0 upgrade-all
@@ -1154,7 +1190,7 @@ assert_exact_line "  操作結果: 不整合" "$stdout_file"
 assert_exact_line "  パッケージ状態の観測: 未検証" "$stdout_file"
 assert_exact_line "    診断: 内部不整合" "$stdout_file"
 
-if [ "$case_count" -ne 227 ]; then
+if [ "$case_count" -ne 228 ]; then
     echo "upgrade-all command test scenario count drifted: $case_count" >&2
     exit 1
 fi
