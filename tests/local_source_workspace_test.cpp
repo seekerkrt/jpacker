@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -42,6 +43,10 @@ constexpr std::string_view SRCINFO_CONTENT =
         "\tpkgrel = 1\n"
         "\tarch = any\n"
         "pkgname = local-workspace-test\n";
+constexpr std::size_t LARGE_TREE_REGULAR_FILE_COUNT = 3400;
+constexpr std::size_t LARGE_TREE_DESCENDANT_COUNT =
+        LARGE_TREE_REGULAR_FILE_COUNT + 5;
+constexpr rlim_t LARGE_TREE_SOFT_NOFILE_LIMIT = 2048;
 
 void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
@@ -206,6 +211,51 @@ public:
     }
 };
 
+struct rlimit file_descriptor_limit() {
+    struct rlimit limit {};
+    if(::getrlimit(RLIMIT_NOFILE, &limit) != 0) {
+        throw std::runtime_error("Failed to read the file descriptor limit.");
+    }
+    return limit;
+}
+
+class FileDescriptorLimitScope final {
+    struct rlimit original_ {};
+    bool          must_restore_ = false;
+
+public:
+    explicit FileDescriptorLimitScope(rlim_t soft_limit) {
+        original_ = file_descriptor_limit();
+        if(original_.rlim_max < soft_limit) {
+            throw std::runtime_error(
+                    "Hard file descriptor limit is too low for the focused test.");
+        }
+        struct rlimit scoped = original_;
+        scoped.rlim_cur = soft_limit;
+        if(::setrlimit(RLIMIT_NOFILE, &scoped) != 0) {
+            throw std::runtime_error(
+                    "Failed to set the soft file descriptor limit.");
+        }
+        must_restore_ = true;
+    }
+
+    FileDescriptorLimitScope(const FileDescriptorLimitScope&) = delete;
+    FileDescriptorLimitScope& operator=(
+            const FileDescriptorLimitScope&) = delete;
+
+    ~FileDescriptorLimitScope() noexcept {
+        if(must_restore_) {
+            static_cast<void>(::setrlimit(RLIMIT_NOFILE, &original_));
+        }
+    }
+};
+
+std::size_t open_descriptor_count() {
+    return static_cast<std::size_t>(std::distance(
+            fs::directory_iterator("/proc/self/fd"),
+            fs::directory_iterator()));
+}
+
 class TemporaryTree final {
     fs::path base_path_;
 
@@ -294,6 +344,24 @@ public:
     }
 };
 
+class ScopedCleanupMetadataMatchForTest final {
+public:
+    explicit ScopedCleanupMetadataMatchForTest(
+            LocalSourceWorkspaceCleanupMetadataMatchForTest match) {
+        set_local_source_workspace_cleanup_metadata_match_for_test(
+                std::move(match));
+    }
+
+    ScopedCleanupMetadataMatchForTest(
+            const ScopedCleanupMetadataMatchForTest&) = delete;
+    ScopedCleanupMetadataMatchForTest& operator=(
+            const ScopedCleanupMetadataMatchForTest&) = delete;
+
+    ~ScopedCleanupMetadataMatchForTest() noexcept {
+        set_local_source_workspace_cleanup_metadata_match_for_test({});
+    }
+};
+
 LocalSourceWorkspaceFailure require_workspace_failure(
         const LocalSourceRoot& source_root,
         const ValidatedCacheRoot& cache_root,
@@ -342,6 +410,19 @@ void populate_representative_source_tree(const fs::path& root) {
                (root / "nested" / "hardlink-b").c_str()) != 0) {
         throw std::runtime_error("Failed to create hardlink fixture.");
     }
+}
+
+void populate_large_cleanup_source_tree(const fs::path& root) {
+    const fs::path large_tree = root / "large-tree";
+    create_fixture_directory(large_tree);
+    write_file(large_tree / "0000-sentinel", "first sentinel\n");
+    for(std::size_t index = 0; index < LARGE_TREE_REGULAR_FILE_COUNT;
+        ++index) {
+        write_file(
+                large_tree / ("entry-" + std::to_string(index)),
+                "payload\n");
+    }
+    write_file(large_tree / "zzzz-sentinel", "last sentinel\n");
 }
 
 void expect_representative_snapshot(
@@ -984,6 +1065,159 @@ void test_cleanup_rebuilds_named_lineage_before_removal() {
             "Cleanup changed the displaced replacement directory");
 }
 
+void test_cleanup_rejects_inode_reuse_aba_replacement() {
+    WorkspaceFixture fixture;
+    const std::vector<NodeSnapshot> original =
+            snapshot_tree(fixture.source_path());
+    LocalSourceRoot source_root = fixture.open_source_root();
+    ValidatedCacheRoot cache_root = fixture.prepare_cache_root();
+    const auto initial_cache_entries =
+            direct_child_names(cache_root.canonical_path());
+    LocalSourceWorkspace workspace = materialize_local_source_workspace(
+            source_root, cache_root);
+    const fs::path workspace_path = workspace.path();
+    const fs::path target = workspace_path / "PKGBUILD";
+    const struct stat original_status = node_status(target);
+    const std::vector<std::string> planned_entries =
+            relative_entry_names(workspace_path);
+    bool        hook_ran = false;
+    std::string hook_failure;
+    bool        cleanup_failed = false;
+    struct stat replacement_status {};
+
+    {
+        // The replacement normally has a different inode. Allow its primary
+        // stat tuple to match the plan so the test deterministically models
+        // allocator reuse; the opaque file handle is deliberately not
+        // overridden and remains the generation authority.
+        ScopedCleanupMetadataMatchForTest metadata_match(
+                [](const fs::path& relative_path) {
+                    return relative_path == "PKGBUILD";
+                });
+        ScopedWorkspaceTestHook hook(
+                [&](LocalSourceWorkspaceTestEvent event, const fs::path&) {
+                    if(event != LocalSourceWorkspaceTestEvent::
+                                        BeforeCleanupRemoval ||
+                       hook_ran) {
+                        return;
+                    }
+                    hook_ran = true;
+                    try {
+                        const fs::path replacement =
+                                workspace_path / "aba-replacement";
+                        write_file(replacement, "replacement\n");
+                        fs::rename(replacement, target);
+                        replacement_status = node_status(target);
+                    } catch(const std::exception& error) {
+                        hook_failure = error.what();
+                    }
+                });
+        try {
+            workspace.cleanup();
+        } catch(const LocalSourceWorkspaceError& error) {
+            cleanup_failed = true;
+            expect(
+                    error.failure().stage ==
+                                    LocalSourceWorkspaceStage::Cleanup &&
+                            error.failure().code ==
+                                    LocalSourceWorkspaceErrorCode::
+                                            CleanupFailure &&
+                            error.failure().relative_path == "PKGBUILD",
+                    "Inode-reuse ABA used the wrong typed failure");
+        }
+    }
+
+    expect(hook_ran, "Inode-reuse ABA hook did not run");
+    expect(
+            hook_failure.empty(),
+            "Inode-reuse ABA hook failed: " + hook_failure);
+    expect(cleanup_failed, "Inode-reuse ABA replacement was accepted");
+    expect(
+            (replacement_status.st_mode & S_IFMT) ==
+                            (original_status.st_mode & S_IFMT) &&
+                    replacement_status.st_dev == original_status.st_dev &&
+                    replacement_status.st_uid == original_status.st_uid,
+            "Inode-reuse ABA fixture changed a primary identity field");
+    expect(
+            relative_entry_names(workspace_path) == planned_entries,
+            "Inode-reuse ABA failure deleted a planned entry");
+    expect(
+            read_file(target) == "replacement\n",
+            "Cleanup deleted the inode-reuse ABA replacement");
+    expect(
+            snapshot_tree(fixture.source_path()) == original,
+            "Inode-reuse ABA cleanup changed the original source tree");
+
+    workspace.cleanup();
+    expect(
+            !fs::exists(workspace_path),
+            "Restored cleanup authority left the ABA workspace");
+    expect(
+            direct_child_names(cache_root.canonical_path()) ==
+                    initial_cache_entries,
+            "ABA recovery cleanup left cache entries");
+}
+
+void test_large_tree_cleanup_succeeds_with_bounded_fd_usage() {
+    WorkspaceFixture fixture;
+    populate_large_cleanup_source_tree(fixture.source_path());
+    const std::vector<NodeSnapshot> original =
+            snapshot_tree(fixture.source_path());
+    expect(
+            original.size() == LARGE_TREE_DESCENDANT_COUNT + 1,
+            "Large cleanup fixture descendant count differs");
+    LocalSourceRoot source_root = fixture.open_source_root();
+    ValidatedCacheRoot cache_root = fixture.prepare_cache_root();
+    const auto initial_cache_entries =
+            direct_child_names(cache_root.canonical_path());
+
+    LocalSourceWorkspace workspace =
+            materialize_local_source_workspace(source_root, cache_root);
+    const fs::path workspace_path = workspace.path();
+    const std::vector<std::string> workspace_entries =
+            relative_entry_names(workspace_path);
+    expect(
+            workspace_entries.size() == LARGE_TREE_DESCENDANT_COUNT,
+            "Large cleanup workspace descendant count differs");
+    expect(
+            snapshot_tree(fixture.source_path()) == original,
+            "Large workspace materialization changed the original tree");
+
+    const std::size_t descriptors_before = open_descriptor_count();
+    const struct rlimit original_limit = file_descriptor_limit();
+    {
+        FileDescriptorLimitScope limit_scope(
+                LARGE_TREE_SOFT_NOFILE_LIMIT);
+        expect(
+                file_descriptor_limit().rlim_cur ==
+                        LARGE_TREE_SOFT_NOFILE_LIMIT,
+                "Focused cleanup did not use the requested soft FD limit");
+        workspace.cleanup();
+        expect(
+                !fs::exists(workspace_path),
+                "Bounded cleanup left the large workspace");
+        expect(
+                open_descriptor_count() == descriptors_before,
+                "Successful large-tree cleanup leaked descriptors");
+    }
+
+    const struct rlimit restored_limit = file_descriptor_limit();
+    expect(
+            restored_limit.rlim_cur == original_limit.rlim_cur &&
+                    restored_limit.rlim_max == original_limit.rlim_max,
+            "Focused cleanup did not restore the original FD limit");
+    expect(
+            !fs::exists(workspace_path),
+            "Successful bounded cleanup left the large workspace");
+    expect(
+            direct_child_names(cache_root.canonical_path()) ==
+                    initial_cache_entries,
+            "Bounded cleanup left cache entries");
+    expect(
+            snapshot_tree(fixture.source_path()) == original,
+            "Bounded cleanup changed the original source tree");
+}
+
 template <typename Callable>
 void run_case(const std::string& name, Callable callable) {
     callable();
@@ -1024,6 +1258,12 @@ int main() {
         run_case(
                 "cleanup named lineage reconstruction",
                 test_cleanup_rebuilds_named_lineage_before_removal);
+        run_case(
+                "cleanup inode-reuse ABA replacement",
+                test_cleanup_rejects_inode_reuse_aba_replacement);
+        run_case(
+                "Issue #448 large-tree cleanup under bounded FD limit",
+                test_large_tree_cleanup_succeeds_with_bounded_fd_usage);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
