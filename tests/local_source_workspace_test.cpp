@@ -3,7 +3,6 @@
 #include "trusted_cache_test_support.hpp"
 
 #include <algorithm>
-#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -1048,7 +1047,7 @@ void test_cleanup_rebuilds_named_lineage_before_removal() {
             "Cleanup changed the displaced replacement directory");
 }
 
-void test_large_tree_cleanup_fd_exhaustion_characterization() {
+void test_large_tree_cleanup_succeeds_with_bounded_fd_usage() {
     WorkspaceFixture fixture;
     populate_large_cleanup_source_tree(fixture.source_path());
     const std::vector<NodeSnapshot> original =
@@ -1075,7 +1074,6 @@ void test_large_tree_cleanup_fd_exhaustion_characterization() {
 
     const std::size_t descriptors_before = open_descriptor_count();
     const struct rlimit original_limit = file_descriptor_limit();
-    std::optional<LocalSourceWorkspaceFailure> cleanup_failure;
     {
         FileDescriptorLimitScope lowered_limit(
                 LARGE_TREE_SOFT_NOFILE_LIMIT);
@@ -1083,11 +1081,13 @@ void test_large_tree_cleanup_fd_exhaustion_characterization() {
                 file_descriptor_limit().rlim_cur ==
                         LARGE_TREE_SOFT_NOFILE_LIMIT,
                 "Focused cleanup did not use the requested soft FD limit");
-        try {
-            workspace.cleanup();
-        } catch(const LocalSourceWorkspaceError& error) {
-            cleanup_failure = error.failure();
-        }
+        workspace.cleanup();
+        expect(
+                !fs::exists(workspace_path),
+                "Bounded cleanup left the large workspace");
+        expect(
+                open_descriptor_count() == descriptors_before,
+                "Successful large-tree cleanup leaked descriptors");
     }
 
     const struct rlimit restored_limit = file_descriptor_limit();
@@ -1095,61 +1095,16 @@ void test_large_tree_cleanup_fd_exhaustion_characterization() {
             restored_limit.rlim_cur == original_limit.rlim_cur &&
                     restored_limit.rlim_max == original_limit.rlim_max,
             "Focused cleanup did not restore the original FD limit");
-    // TODO(#448): Slice 2 flips this expected failure to successful cleanup
-    // under the same fixed tree and soft limit.
-    expect(
-            cleanup_failure.has_value(),
-            "Issue #448 cleanup unexpectedly succeeded before the bounded fix");
-    const LocalSourceWorkspaceFailure& failure = *cleanup_failure;
-    expect(
-            failure.stage == LocalSourceWorkspaceStage::Cleanup,
-            "Large-tree FD exhaustion used the wrong failure stage");
-    expect(
-            failure.code == LocalSourceWorkspaceErrorCode::CleanupFailure,
-            "Large-tree FD exhaustion used the wrong failure code");
-    expect(
-            failure.system_error.has_value() &&
-                    failure.system_error->value() == EMFILE,
-            "Large-tree FD exhaustion did not retain EMFILE");
-    expect(
-            !failure.relative_path.is_absolute() &&
-                    std::find(
-                            failure.relative_path.begin(),
-                            failure.relative_path.end(), fs::path("..")) ==
-                            failure.relative_path.end(),
-            "Large-tree FD exhaustion reported an unsafe relative path");
-    expect(
-            open_descriptor_count() == descriptors_before,
-            "Failed large-tree cleanup leaked retained descriptors");
-
-    expect(
-            fs::exists(workspace_path),
-            "FD exhaustion removed the workspace root");
-    expect(
-            relative_entry_names(workspace_path) == workspace_entries,
-            "FD exhaustion removed workspace entries before validation completed");
-    expect(
-            read_file(workspace_path / "large-tree" / "0000-sentinel") ==
-                            "first sentinel\n" &&
-                    read_file(
-                            workspace_path / "large-tree" /
-                            "zzzz-sentinel") == "last sentinel\n",
-            "FD exhaustion removed or changed workspace sentinels");
-    expect(
-            snapshot_tree(fixture.source_path()) == original,
-            "Failed large-tree cleanup changed the original source tree");
-
-    workspace.cleanup();
     expect(
             !fs::exists(workspace_path),
-            "Restored-limit cleanup left the large workspace");
+            "Successful bounded cleanup left the large workspace");
     expect(
             direct_child_names(cache_root.canonical_path()) ==
                     initial_cache_entries,
-            "Restored-limit cleanup left cache entries");
+            "Bounded cleanup left cache entries");
     expect(
             snapshot_tree(fixture.source_path()) == original,
-            "Restored-limit cleanup changed the original source tree");
+            "Bounded cleanup changed the original source tree");
 }
 
 template <typename Callable>
@@ -1193,8 +1148,8 @@ int main() {
                 "cleanup named lineage reconstruction",
                 test_cleanup_rebuilds_named_lineage_before_removal);
         run_case(
-                "Issue #448 large-tree cleanup FD exhaustion characterization",
-                test_large_tree_cleanup_fd_exhaustion_characterization);
+                "Issue #448 large-tree cleanup under bounded FD limit",
+                test_large_tree_cleanup_succeeds_with_bounded_fd_usage);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

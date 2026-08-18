@@ -487,14 +487,43 @@ std::vector<std::string> enumerate_cleanup_directory(
 }
 
 struct OwnedCleanupNode {
-    std::string     name;
-    OwnedDescriptor descriptor;
-    struct stat     status {};
+    std::string name;
+    struct stat status {};
     std::vector<OwnedCleanupNode> children;
 };
 
-OwnedCleanupNode open_owned_cleanup_node(
+struct OpenedOwnedCleanupNode {
+    OwnedDescriptor descriptor;
+    struct stat     status {};
+};
+
+bool same_cleanup_identity_and_type(
+        const struct stat& left, const struct stat& right) noexcept {
+    return (left.st_mode & S_IFMT) == (right.st_mode & S_IFMT) &&
+           left.st_dev == right.st_dev && left.st_ino == right.st_ino;
+}
+
+void require_owned_cleanup_identity(
+        const struct stat& named, const struct stat& opened,
+        const OwnedCleanupNode* expected,
+        std::uintmax_t expected_device, std::uintmax_t expected_owner,
+        const fs::path& relative_path) {
+    if(!same_cleanup_identity_and_type(named, opened) ||
+       (expected != nullptr &&
+        !same_cleanup_identity_and_type(opened, expected->status)) ||
+       static_cast<std::uintmax_t>(opened.st_dev) != expected_device ||
+       static_cast<std::uintmax_t>(opened.st_uid) != expected_owner ||
+       static_cast<std::uintmax_t>(named.st_uid) != expected_owner) {
+        throw_workspace_failure(
+                LocalSourceWorkspaceStage::Cleanup,
+                LocalSourceWorkspaceErrorCode::CleanupFailure,
+                relative_path);
+    }
+}
+
+OpenedOwnedCleanupNode open_owned_cleanup_node(
         int parent_descriptor, const std::string& name,
+        const OwnedCleanupNode* expected,
         std::uintmax_t expected_device, std::uintmax_t expected_owner,
         const fs::path& relative_path) {
     struct stat named {};
@@ -525,26 +554,20 @@ OwnedCleanupNode open_owned_cleanup_node(
     const struct stat opened = descriptor_status(
             retained.get(), LocalSourceWorkspaceStage::Cleanup,
             relative_path);
-    if((named.st_mode & S_IFMT) != (opened.st_mode & S_IFMT) ||
-       named.st_dev != opened.st_dev || named.st_ino != opened.st_ino ||
-       static_cast<std::uintmax_t>(opened.st_dev) != expected_device ||
-       static_cast<std::uintmax_t>(opened.st_uid) != expected_owner ||
-       static_cast<std::uintmax_t>(named.st_uid) != expected_owner) {
-        throw_workspace_failure(
-                LocalSourceWorkspaceStage::Cleanup,
-                LocalSourceWorkspaceErrorCode::CleanupFailure,
-                relative_path);
-    }
-    return OwnedCleanupNode{name, std::move(retained), opened, {}};
+    require_owned_cleanup_identity(
+            named, opened, expected, expected_device, expected_owner,
+            relative_path);
+    return OpenedOwnedCleanupNode{std::move(retained), opened};
 }
 
 void require_owned_cleanup_node_unchanged(
         int parent_descriptor, const std::string& name,
         const OwnedCleanupNode& expected,
+        int opened_descriptor,
         std::uintmax_t expected_device, std::uintmax_t expected_owner,
         const fs::path& relative_path) {
     const struct stat opened = descriptor_status(
-            expected.descriptor.get(), LocalSourceWorkspaceStage::Cleanup,
+            opened_descriptor, LocalSourceWorkspaceStage::Cleanup,
             relative_path);
     struct stat named {};
     if(::fstatat(
@@ -556,22 +579,9 @@ void require_owned_cleanup_node_unchanged(
                 LocalSourceWorkspaceErrorCode::CleanupFailure,
                 relative_path, status_error);
     }
-    if((opened.st_mode & S_IFMT) !=
-               (expected.status.st_mode & S_IFMT) ||
-       (named.st_mode & S_IFMT) !=
-               (expected.status.st_mode & S_IFMT) ||
-       opened.st_dev != expected.status.st_dev ||
-       opened.st_ino != expected.status.st_ino ||
-       named.st_dev != expected.status.st_dev ||
-       named.st_ino != expected.status.st_ino ||
-       static_cast<std::uintmax_t>(opened.st_dev) != expected_device ||
-       static_cast<std::uintmax_t>(opened.st_uid) != expected_owner ||
-       static_cast<std::uintmax_t>(named.st_uid) != expected_owner) {
-        throw_workspace_failure(
-                LocalSourceWorkspaceStage::Cleanup,
-                LocalSourceWorkspaceErrorCode::CleanupFailure,
-                relative_path);
-    }
+    require_owned_cleanup_identity(
+            named, opened, &expected, expected_device, expected_owner,
+            relative_path);
 }
 
 OwnedDescriptor open_owned_cleanup_directory(
@@ -610,9 +620,10 @@ OwnedDescriptor open_owned_cleanup_directory(
 }
 
 void make_owned_cleanup_directory_accessible(
-        const OwnedCleanupNode& directory, const fs::path& relative_path) {
+        int directory_descriptor, const OwnedCleanupNode& directory,
+        const fs::path& relative_path) {
     if(::syscall(
-               SYS_fchmodat2, directory.descriptor.get(), "", 0700,
+               SYS_fchmodat2, directory_descriptor, "", 0700,
                AT_EMPTY_PATH) != 0) {
         const int mode_error = errno;
         throw_workspace_system_failure(
@@ -621,7 +632,7 @@ void make_owned_cleanup_directory_accessible(
                 relative_path, mode_error);
     }
     const struct stat status = descriptor_status(
-            directory.descriptor.get(), LocalSourceWorkspaceStage::Cleanup,
+            directory_descriptor, LocalSourceWorkspaceStage::Cleanup,
             relative_path);
     if(!S_ISDIR(status.st_mode) || (status.st_mode & 07777) != 0700 ||
        status.st_dev != directory.status.st_dev ||
@@ -683,13 +694,14 @@ OwnedDescriptor open_owned_cleanup_parent_lineage(
                     relative_path);
         }
         relative_path /= ancestor->name;
-        require_owned_cleanup_node_unchanged(
-                current.get(), ancestor->name, *ancestor,
+        OpenedOwnedCleanupNode opened = open_owned_cleanup_node(
+                current.get(), ancestor->name, ancestor,
                 authority.device, authority.owner, relative_path);
         make_owned_cleanup_directory_accessible(
-                *ancestor, relative_path);
+                opened.descriptor.get(), *ancestor, relative_path);
         require_owned_cleanup_node_unchanged(
                 current.get(), ancestor->name, *ancestor,
+                opened.descriptor.get(),
                 authority.device, authority.owner, relative_path);
         current = open_owned_cleanup_directory(
                 current.get(), ancestor->name, *ancestor,
@@ -713,22 +725,33 @@ OwnedCleanupNode preflight_owned_workspace_node(
         OwnedCleanupDirectoryLineage& lineage, const std::string& name,
         const fs::path& parent_relative_path) {
     const fs::path relative_path = parent_relative_path / name;
-    OwnedDescriptor parent = open_owned_cleanup_parent_lineage(
-            authority, lineage);
-    OwnedCleanupNode node = open_owned_cleanup_node(
-            parent.get(), name, authority.device, authority.owner,
-            relative_path);
-    const bool is_directory = S_ISDIR(node.status.st_mode);
-    if(is_directory) {
-        make_owned_cleanup_directory_accessible(node, relative_path);
-        require_owned_cleanup_node_unchanged(
-                parent.get(), name, node, authority.device,
+    OwnedCleanupNode node;
+    node.name = name;
+    std::vector<std::string> children;
+    // Descriptor scopes end before recursive descent; the plan retains only
+    // names and identity metadata, never one descriptor per descendant.
+    {
+        OwnedDescriptor parent = open_owned_cleanup_parent_lineage(
+                authority, lineage);
+        OpenedOwnedCleanupNode opened = open_owned_cleanup_node(
+                parent.get(), name, nullptr, authority.device,
                 authority.owner, relative_path);
-        OwnedDescriptor directory = open_owned_cleanup_directory(
-                parent.get(), name, node, authority.device,
-                authority.owner, relative_path);
-        const std::vector<std::string> children =
-                enumerate_cleanup_directory(directory.get(), relative_path);
+        node.status = opened.status;
+        if(S_ISDIR(node.status.st_mode)) {
+            make_owned_cleanup_directory_accessible(
+                    opened.descriptor.get(), node, relative_path);
+            require_owned_cleanup_node_unchanged(
+                    parent.get(), name, node, opened.descriptor.get(),
+                    authority.device, authority.owner, relative_path);
+            OwnedDescriptor directory = open_owned_cleanup_directory(
+                    parent.get(), name, node, authority.device,
+                    authority.owner, relative_path);
+            children = enumerate_cleanup_directory(
+                    directory.get(), relative_path);
+        }
+    }
+
+    if(S_ISDIR(node.status.st_mode)) {
         lineage.push_back(&node);
         try {
             node.children.reserve(children.size());
@@ -742,11 +765,15 @@ OwnedCleanupNode preflight_owned_workspace_node(
         }
         lineage.pop_back();
 
-        parent = open_owned_cleanup_parent_lineage(authority, lineage);
-        require_owned_cleanup_node_unchanged(
-                parent.get(), name, node, authority.device,
+        OwnedDescriptor parent = open_owned_cleanup_parent_lineage(
+                authority, lineage);
+        OpenedOwnedCleanupNode opened = open_owned_cleanup_node(
+                parent.get(), name, &node, authority.device,
                 authority.owner, relative_path);
-        directory = open_owned_cleanup_directory(
+        require_owned_cleanup_node_unchanged(
+                parent.get(), name, node, opened.descriptor.get(),
+                authority.device, authority.owner, relative_path);
+        OwnedDescriptor directory = open_owned_cleanup_directory(
                 parent.get(), name, node, authority.device,
                 authority.owner, relative_path);
         if(enumerate_cleanup_directory(directory.get(), relative_path) !=
@@ -767,28 +794,35 @@ void revalidate_owned_workspace_node(
         const OwnedCleanupNode& node,
         const fs::path& parent_relative_path) {
     const fs::path relative_path = parent_relative_path / node.name;
-    OwnedDescriptor parent = open_owned_cleanup_parent_lineage(
-            authority, lineage);
-    require_owned_cleanup_node_unchanged(
-            parent.get(), node.name, node, authority.device,
-            authority.owner, relative_path);
-    if(!S_ISDIR(node.status.st_mode)) return;
+    {
+        OwnedDescriptor parent = open_owned_cleanup_parent_lineage(
+                authority, lineage);
+        OpenedOwnedCleanupNode opened = open_owned_cleanup_node(
+                parent.get(), node.name, &node, authority.device,
+                authority.owner, relative_path);
+        if(!S_ISDIR(node.status.st_mode)) return;
 
-    make_owned_cleanup_directory_accessible(node, relative_path);
-    require_owned_cleanup_node_unchanged(
-            parent.get(), node.name, node, authority.device,
-            authority.owner, relative_path);
-    OwnedDescriptor directory = open_owned_cleanup_directory(
-            parent.get(), node.name, node, authority.device,
-            authority.owner, relative_path);
-    const std::vector<std::string> expected_names =
-            owned_cleanup_child_names(node.children);
-    if(enumerate_cleanup_directory(directory.get(), relative_path) !=
-       expected_names) {
-        throw_workspace_failure(
-                LocalSourceWorkspaceStage::Cleanup,
-                LocalSourceWorkspaceErrorCode::CleanupFailure,
-                relative_path);
+        make_owned_cleanup_directory_accessible(
+                opened.descriptor.get(), node, relative_path);
+        require_owned_cleanup_node_unchanged(
+                parent.get(), node.name, node,
+                opened.descriptor.get(), authority.device,
+                authority.owner, relative_path);
+        OwnedDescriptor directory = open_owned_cleanup_directory(
+                parent.get(), node.name, node, authority.device,
+                authority.owner, relative_path);
+        if(enumerate_cleanup_directory(
+                   directory.get(), relative_path) !=
+           owned_cleanup_child_names(node.children)) {
+            throw_workspace_failure(
+                    LocalSourceWorkspaceStage::Cleanup,
+                    LocalSourceWorkspaceErrorCode::CleanupFailure,
+                    relative_path);
+        }
+        require_owned_cleanup_node_unchanged(
+                parent.get(), node.name, node,
+                opened.descriptor.get(), authority.device,
+                authority.owner, relative_path);
     }
 
     lineage.push_back(&node);
@@ -803,19 +837,27 @@ void revalidate_owned_workspace_node(
     }
     lineage.pop_back();
 
-    parent = open_owned_cleanup_parent_lineage(authority, lineage);
-    require_owned_cleanup_node_unchanged(
-            parent.get(), node.name, node, authority.device,
-            authority.owner, relative_path);
-    directory = open_owned_cleanup_directory(
-            parent.get(), node.name, node, authority.device,
-            authority.owner, relative_path);
-    if(enumerate_cleanup_directory(directory.get(), relative_path) !=
-       expected_names) {
-        throw_workspace_failure(
-                LocalSourceWorkspaceStage::Cleanup,
-                LocalSourceWorkspaceErrorCode::CleanupFailure,
-                relative_path);
+    {
+        OwnedDescriptor parent = open_owned_cleanup_parent_lineage(
+                authority, lineage);
+        OpenedOwnedCleanupNode opened = open_owned_cleanup_node(
+                parent.get(), node.name, &node, authority.device,
+                authority.owner, relative_path);
+        OwnedDescriptor directory = open_owned_cleanup_directory(
+                parent.get(), node.name, node, authority.device,
+                authority.owner, relative_path);
+        if(enumerate_cleanup_directory(
+                   directory.get(), relative_path) !=
+           owned_cleanup_child_names(node.children)) {
+            throw_workspace_failure(
+                    LocalSourceWorkspaceStage::Cleanup,
+                    LocalSourceWorkspaceErrorCode::CleanupFailure,
+                    relative_path);
+        }
+        require_owned_cleanup_node_unchanged(
+                parent.get(), node.name, node,
+                opened.descriptor.get(), authority.device,
+                authority.owner, relative_path);
     }
 }
 
@@ -825,13 +867,15 @@ void remove_preflighted_owned_workspace_node(
         const OwnedCleanupNode& node,
         const fs::path& parent_relative_path) {
     const fs::path relative_path = parent_relative_path / node.name;
-    OwnedDescriptor parent = open_owned_cleanup_parent_lineage(
-            authority, lineage);
-    require_owned_cleanup_node_unchanged(
-            parent.get(), node.name, node, authority.device,
-            authority.owner, relative_path);
     const bool is_directory = S_ISDIR(node.status.st_mode);
     if(is_directory) {
+        {
+            OwnedDescriptor parent = open_owned_cleanup_parent_lineage(
+                    authority, lineage);
+            static_cast<void>(open_owned_cleanup_node(
+                    parent.get(), node.name, &node, authority.device,
+                    authority.owner, relative_path));
+        }
         lineage.push_back(&node);
         try {
             for(const OwnedCleanupNode& child : node.children) {
@@ -843,11 +887,14 @@ void remove_preflighted_owned_workspace_node(
             throw;
         }
         lineage.pop_back();
+    }
 
-        parent = open_owned_cleanup_parent_lineage(authority, lineage);
-        require_owned_cleanup_node_unchanged(
-                parent.get(), node.name, node, authority.device,
-                authority.owner, relative_path);
+    OwnedDescriptor parent = open_owned_cleanup_parent_lineage(
+            authority, lineage);
+    OpenedOwnedCleanupNode opened = open_owned_cleanup_node(
+            parent.get(), node.name, &node, authority.device,
+            authority.owner, relative_path);
+    if(is_directory) {
         OwnedDescriptor directory = open_owned_cleanup_directory(
                 parent.get(), node.name, node, authority.device,
                 authority.owner, relative_path);
@@ -859,11 +906,11 @@ void remove_preflighted_owned_workspace_node(
                     relative_path);
         }
     }
-
-    parent = open_owned_cleanup_parent_lineage(authority, lineage);
+    // Keep the freshly reacquired target pinned through the immediately
+    // following name-relative mutation.
     require_owned_cleanup_node_unchanged(
-            parent.get(), node.name, node, authority.device,
-            authority.owner, relative_path);
+            parent.get(), node.name, node, opened.descriptor.get(),
+            authority.device, authority.owner, relative_path);
     if(::unlinkat(
                parent.get(), node.name.c_str(),
                is_directory ? AT_REMOVEDIR : 0) != 0) {
