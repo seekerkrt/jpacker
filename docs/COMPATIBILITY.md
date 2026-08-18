@@ -54,7 +54,7 @@ edit-src <pkg>...
 list-src
 del-src <pkg>...
 revert <pkg>...
--G <pkg>
+-G <pkg> [--output-dir=DIR]
 -Gp <pkg>
 -S --select [--needed] <query>
 ```
@@ -115,7 +115,11 @@ Declinedはquestion固有のnegative answer、Cancelledはcurrent Moguet operati
 
 `-G <pkg>`と`-Gp <pkg>`はexactly oneのAUR root PackageBaseだけを扱う。official repository probe、source preference、repository fallback、dependency plan、dependency repository、makepkg、pacman、sudo、editor、build / installは行わない。
 
-`-G`はcurrent directory直下の`./<PackageBase>`だけをdestinationとし、既存のdirectory、git repository、regular file、symlink、special fileがあればfail closedする。clone、PKGBUILD、`.git`、remote URL、containment、destination identityを検証してからno-replace publishする。`-Gp`はtemporary cloneからregular non-symlink PKGBUILD bytesだけをstdoutへ出し、通常成功・failureでpersistent checkoutやMoguet cacheを変更しない。identity replacementを証明できないtemporary artifactは手動確認用に保持し得る。
+`-G`は`--output-dir`未指定時、command開始時current directory直下の`./<PackageBase>`をdestinationとする。`--output-dir=DIR`は`-G`専用のoperation-local attached-value optionであり、指定した既存parent直下の`<PackageBase>`へexportする。relative valueはcommand開始時current directory基準で解決し、parentを自動作成せず、指定pathのfinal / intermediate symlink componentをfollowしない。Moguet独自のtilde expansionは行わないため、HOME配下には`--output-dir="$HOME/..."`またはabsolute pathを使う。space-separated value、empty value、duplicate、`-Gp`、他operationでは拒否する。
+
+export parentはdirectory fdと`st_dev` / `st_ino` identityでanchorし、publish直前にnamed pathをnofollowで再openして同じfilesystem objectであることを確認する。rename、replacement、symlink replacement、identity driftはfail closedとし、replacement側へredirectしない。destination leafはvalidated PackageBaseのdirect childへ固定する。既存のdirectory、git repository、regular file、symlink、special fileがあればfail closedし、preflight後にdestinationが現れた場合も`renameat2(..., RENAME_NOREPLACE)`相当で置換しない。clone、PKGBUILD、`.git`、remote URL、containment、temporary checkout identityを検証してからpublishする。
+
+`-Gp`はtemporary cloneからregular non-symlink PKGBUILD bytesだけをstdoutへ出し、通常成功・failureでpersistent checkoutやMoguet cacheを変更しない。`--output-dir=DIR`を受理せず、stdout lifecycleも変更しない。identity replacementを証明できないtemporary artifactは手動確認用に保持し得る。
 
 <a id="compat-conflicts-replaces"></a>
 ## AUR conflicts / replaces summary
@@ -287,6 +291,7 @@ pacmanへ直接委譲する経路では、Moguetが明示的に消費しないpa
 - `--cleanbuild`: build-only makepkgの`-C`へ変換する。
 - `--rmdeps`: source-buildでは下記contractに従い拒否し、pacman-onlyでは消費する。
 - `--aur` / `--repo`: Moguetのsource selectorであり、pacman / makepkgへ渡さない。
+- `--output-dir=DIR`: `-G`だけが消費するoperation-local export parentであり、configやpacman / makepkgへ渡さない。
 
 ### `--noconfirm`
 

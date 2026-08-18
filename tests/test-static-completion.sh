@@ -79,6 +79,15 @@ assert_reply "operation prefix" upgrade upgrade-aur upgrade-all
 run_completion moguet deps --r
 assert_reply "deps固有option prefix" --recursive
 
+run_completion moguet -G pkg --o
+assert_reply "-G output parent option prefix" --output-dir=
+
+run_completion moguet -G pkg --output-dir=./exports ""
+assert_reply "-G output parent optionは1回だけ"
+
+run_completion moguet -Gp pkg --o
+assert_reply "-Gpはoutput parent optionを提示しない"
+
 run_completion moguet --s
 assert_reply "root discovery option prefix" --select
 
@@ -240,6 +249,16 @@ CURRENT=5
 _moguet_collect_candidates deps
 has_candidate --recursive || fail 'deps multi-target form was closed'
 
+words=(moguet -G pkg '')
+CURRENT=4
+_moguet_collect_candidates -G
+has_candidate --output-dir= || fail '-G lost --output-dir='
+
+words=(moguet -Gp pkg '')
+CURRENT=4
+_moguet_collect_candidates -Gp
+has_candidate --output-dir= && fail '-Gp exposed --output-dir='
+
 words=(moguet build pkg V=1 '')
 CURRENT=5
 _moguet_collect_candidates build
@@ -341,11 +360,18 @@ __moguet_candidate_available 4; and fail 'unknown bare operation exposed options
 
 set mock_words moguet deps
 test (__moguet_operation) = deps; or fail 'deps operation identity differs'
-__moguet_candidate_available 16; or fail 'deps lost --recursive'
+__moguet_candidate_available 17; or fail 'deps lost --recursive'
 __moguet_candidate_available 15; and fail 'deps leaked --local'
 
 set mock_words moguet deps first second
-__moguet_candidate_available 16; or fail 'deps multi-target form was closed'
+__moguet_candidate_available 17; or fail 'deps multi-target form was closed'
+
+set mock_words moguet -G pkg
+__moguet_candidate_available 16; or fail '-G lost --output-dir='
+set mock_words moguet -G pkg --output-dir=./exports
+__moguet_candidate_available 16; and fail '-G repeated --output-dir='
+set mock_words moguet -Gp pkg
+__moguet_candidate_available 16; and fail '-Gp exposed --output-dir='
 
 set mock_words moguet build pkg V=1
 __moguet_candidate_available 0; or fail 'remote build assignment flow was closed'
@@ -371,12 +397,12 @@ set mock_words moguet upgrade-all unexpected-target
 __moguet_candidate_available 4; and fail 'targetless operation remained open'
 
 set mock_words moguet -S --select
-__moguet_candidate_available 17; or fail 'selected -S lost --needed'
-__moguet_candidate_available 16; and fail 'selected -S leaked --recursive'
+__moguet_candidate_available 18; or fail 'selected -S lost --needed'
+__moguet_candidate_available 17; and fail 'selected -S leaked --recursive'
 set mock_words moguet -S --select query
-__moguet_candidate_available 17; or fail 'selected -S legal query was closed'
+__moguet_candidate_available 18; or fail 'selected -S legal query was closed'
 set mock_words moguet -S --select query extra
-__moguet_candidate_available 17; and fail 'selected -S extra query remained open'
+__moguet_candidate_available 18; and fail 'selected -S extra query remained open'
 
 set mock_words moguet add-src first V=1 second
 __moguet_form_prefix_valid add-src 0; or fail 'add-src ordered multi-item form was closed'

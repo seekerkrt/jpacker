@@ -16,7 +16,7 @@
 #   list-src
 #   del-src <pkg>...
 #   revert <pkg>...
-#   -G <pkg>
+#   -G <pkg> [--output-dir=DIR]
 #   -Gp <pkg>
 #   -S --select [--needed] <query>
 
@@ -39,8 +39,9 @@ _moguet_option_id() {
         --aur) REPLY=11 ;;
         --repo) REPLY=12 ;;
         --local) REPLY=15 ;;
-        --recursive) REPLY=16 ;;
-        --needed) REPLY=17 ;;
+        --output-dir|--output-dir=*) REPLY=16 ;;
+        --recursive) REPLY=17 ;;
+        --needed) REPLY=18 ;;
     esac
     [[ -n $REPLY ]]
 }
@@ -308,7 +309,7 @@ _moguet_collect_candidates() {
             ;;
         -G)
             if _moguet_form_prefix_valid -G 0; then
-                reply=()
+                reply=(--output-dir=)
             else
                 reply=()
             fi
@@ -384,6 +385,7 @@ _moguet_description() {
         --aur) REPLY='Limit supported sync operations to AUR' ;;
         --repo) REPLY='Limit supported sync operations to official binary repositories' ;;
         --local) REPLY='Use one local PKGBUILD directory as the build root' ;;
+        --output-dir=) REPLY='Select an existing export parent for -G' ;;
         --recursive) REPLY='Resolve dependencies recursively' ;;
         --needed) REPLY='Skip reinstall at final package installation' ;;
     esac
@@ -406,7 +408,7 @@ _moguet() {
         if _moguet_option_id "$candidate"; then
             option_id=$REPLY
             case "$option_id" in
-            13|14|15)
+            13|14|15|16)
                 _moguet_has_option_id "$option_id" && continue
                 ;;
             esac

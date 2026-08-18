@@ -74,6 +74,8 @@ std::string_view value_kind_name(OptionValueKind kind) noexcept {
         return "none";
     case OptionValueKind::AttachedEnum:
         return "attached-enum";
+    case OptionValueKind::AttachedValue:
+        return "attached-value";
     case OptionValueKind::Marker:
         return "marker";
     }
@@ -273,6 +275,8 @@ void print_semantic_scopes(
                       std::string_view{"parser-boundary"}},
             std::pair{cli_authority::OptionSemanticScope::DependencyCleanup,
                       std::string_view{"dependency-cleanup"}},
+            std::pair{cli_authority::OptionSemanticScope::PackageExport,
+                      std::string_view{"package-export"}},
     };
     print_mask_names(scopes, NAMES);
 }
@@ -364,7 +368,8 @@ void print_option_token(OptionId id, std::string_view token) {
     const cli_authority::OptionContract& option =
             cli_authority::option_contract(id);
     std::cout << "OPTION\t" << enum_index(id) << '\t' << token << '\t';
-    if(option.value.kind == cli_authority::OptionValueKind::AttachedEnum) {
+    if(option.value.kind == cli_authority::OptionValueKind::AttachedEnum ||
+       option.value.kind == cli_authority::OptionValueKind::AttachedValue) {
         std::cout << token << '=';
     } else {
         std::cout << token;
@@ -443,6 +448,7 @@ int main() {
             OptionId::Aur,
             OptionId::Repo,
             OptionId::LocalSource,
+            OptionId::PkgbuildOutputDirectory,
             OptionId::Recursive,
             OptionId::Needed,
             OptionId::EndOfOptions,

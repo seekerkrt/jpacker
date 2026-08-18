@@ -341,6 +341,29 @@ def main() -> int:
             ),
         ),
         (
+            "attached free-form value semantics",
+            exported_schema(
+                target_policy="exactly-one",
+                operand_ordering="preserve-input-order",
+                operand_terms="package:1:1",
+                syntax="fixture <operand> [--output-dir=DIR]",
+                relations=(
+                    "0:optional:once:optional:moguet-control:none:none"
+                ),
+                options=(
+                    option_record(
+                        token="--output-dir",
+                        completion_token="--output-dir=",
+                        occurrence="once",
+                        placement="operation-local",
+                        value_kind="attached-value",
+                        allowed_values="DIR",
+                        semantic_scopes="package-export",
+                    ),
+                ),
+            ),
+        ),
+        (
             "public optional operation-local syntax",
             exported_schema(
                 target_policy="one-or-more",

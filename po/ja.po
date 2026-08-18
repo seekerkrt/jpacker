@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.3.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-17 12:33+0900\n"
+"POT-Creation-Date: 2026-08-19 07:09+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -1917,16 +1917,20 @@ msgid "Operation {} requires exactly one {} operand."
 msgstr "操作 {} には {} オペランドをちょうど1つ指定する必要があります。"
 
 #, c++-format
+msgid "{} export was not requested."
+msgstr "{}のエクスポートは要求されていません。"
+
+#, c++-format
 msgid "Unsupported option {} for operation {}."
 msgstr "操作 {} ではオプション {} をサポートしていません。"
 
 #, c++-format
-msgid "Operation {} requires exactly one {} package target."
-msgstr "操作 {} には {} パッケージ対象をちょうど1つ指定する必要があります。"
+msgid "Option {} requires a non-empty attached value in the form {}."
+msgstr "オプション {} には、{} の形式で空でない値を連結して指定する必要があります。"
 
 #, c++-format
-msgid "Usage: {} {} {}"
-msgstr "使用方法: {} {} {}"
+msgid "Option {} may be specified only once for operation {}."
+msgstr "オプション {} は操作 {} に対して1回だけ指定できます。"
 
 #, c++-format
 msgid "Cannot combine {} with {} refresh for operation {}."
@@ -1967,10 +1971,6 @@ msgstr "ローカルソースビルドは要求されていません。"
 #, c++-format
 msgid "Option {} is supported only with operation {}."
 msgstr "オプション {} は操作 {} でのみサポートされています。"
-
-#, c++-format
-msgid "Option {} may be specified only once for operation {}."
-msgstr "オプション {} は操作 {} に対して1回だけ指定できます。"
 
 #, c++-format
 msgid "Environment assignment requires a preceding directory: {}"
@@ -5080,10 +5080,10 @@ msgstr "パッケージとビルドのキャッシュを削除"
 msgid "{} INSPECTION"
 msgstr "{}の調査"
 
-#. TRANSLATORS: AUR, PackageBase, and the destination path are literal identities.
+#. TRANSLATORS: AUR and PackageBase are literal identities.
 #, c++-format
-msgid "Export one {} {} repository to {} without building or installing"
-msgstr "1つの{} {}リポジトリを{}へエクスポート（ビルドやインストールは行いません）"
+msgid "Export one {} {} repository under the command-start current directory or selected output parent without building or installing"
+msgstr "1つの{} {}リポジトリをコマンド開始時のカレントディレクトリまたは指定した出力先の親へエクスポート（ビルドやインストールは行いません）"
 
 #. TRANSLATORS: AUR, PackageBase, PKGBUILD, and stdout are literal identities.
 #, c++-format
@@ -5209,6 +5209,14 @@ msgstr "このオプションを{}と{}へ渡します"
 
 msgid "Do not bypass conflict/replacement safety stops or perform automatic replacement"
 msgstr "競合/置換の安全停止を回避せず、自動置換も行いません"
+
+#. TRANSLATORS: The placeholder is the literal -G CLI operation.
+#, c++-format
+msgid "Select an existing export parent for {}; resolve relative paths from the command-start current directory"
+msgstr "{}の既存エクスポート先の親を指定し、相対パスはコマンド開始時のカレントディレクトリから解決します"
+
+msgid "Reject symlink components and do not create the parent directory"
+msgstr "シンボリックリンクの構成要素を拒否し、親ディレクトリは作成しません"
 
 #. TRANSLATORS: pacman, AUR, and -S are literal identities or CLI tokens.
 #, c++-format
@@ -5790,8 +5798,8 @@ msgid "Invalid {} target for operation {}: {}"
 msgstr "無効な {} 対象です（操作 {}）: {}"
 
 #, c++-format
-msgid "Failed to inspect the current export directory: {}"
-msgstr "現在のエクスポートディレクトリを検査できませんでした: {}"
+msgid "Failed to inspect export directory {}: {}"
+msgstr "エクスポートディレクトリ {} を検査できませんでした: {}"
 
 #, c++-format
 msgid "Failed to inspect temporary directory parent {}: {}"
@@ -5808,8 +5816,9 @@ msgstr "エクスポート済み{}ディレクトリ{}を確認できません�
 msgid "Unknown export directory identity context."
 msgstr "エクスポートディレクトリの識別情報コンテキストが不明です。"
 
-msgid "The current export directory is not a directory."
-msgstr "現在のエクスポートディレクトリはディレクトリではありません。"
+#, c++-format
+msgid "Export path {} is not a directory."
+msgstr "エクスポートパス {} はディレクトリではありません。"
 
 #, c++-format
 msgid "Temporary directory parent {} is not a directory."
@@ -5824,6 +5833,22 @@ msgid "Exported {} path {} is not a directory."
 msgstr "エクスポートされた {} のパス {} はディレクトリではありません。"
 
 #, c++-format
+msgid "Unable to retain the resolution base for export directory {}: {}"
+msgstr "エクスポートディレクトリ {} の解決基準を保持できません: {}"
+
+#, c++-format
+msgid "Unable to safely revalidate export directory {}: {}"
+msgstr "エクスポートディレクトリ {} を安全に再検証できません: {}"
+
+#, c++-format
+msgid "Unable to safely open existing export directory {}: {}"
+msgstr "既存のエクスポートディレクトリ {} を安全に開けません: {}"
+
+#, c++-format
+msgid "Unable to open the filesystem root for export resolution: {}"
+msgstr "エクスポート先解決用のfilesystem rootを開けません: {}"
+
+#, c++-format
 msgid "Failed to open temporary directory parent {}: {}"
 msgstr "一時ディレクトリの親 {} を開けませんでした: {}"
 
@@ -5834,6 +5859,18 @@ msgstr "一時ディレクトリの親 {} を再検証できませんでした: 
 #, c++-format
 msgid "Refusing changed temporary directory parent path: {}"
 msgstr "変更された一時ディレクトリの親パスを拒否します: {}"
+
+#, c++-format
+msgid "Export directory descriptor changed identity: {}"
+msgstr "エクスポートディレクトリのディスクリプターidentityが変化しました: {}"
+
+#, c++-format
+msgid "Refusing changed command-start current directory path: {}"
+msgstr "コマンド開始時のカレントディレクトリパスの変更を拒否します: {}"
+
+#, c++-format
+msgid "Refusing changed export directory path: {}"
+msgstr "変更されたエクスポートディレクトリパスを拒否します: {}"
 
 #, c++-format
 msgid "Failed to scan temporary directory {}: {}"
@@ -5935,16 +5972,8 @@ msgid "Unable to read the current directory: {}"
 msgstr "現在のディレクトリを読み取れません: {}"
 
 #, c++-format
-msgid "Unable to canonicalize the current directory: {}"
-msgstr "現在のディレクトリを正規化できません: {}"
-
-#, c++-format
-msgid "Unable to revalidate current directory {}: {}"
-msgstr "現在のディレクトリ {} を再検証できません: {}"
-
-#, c++-format
-msgid "Refusing changed current directory path: {}"
-msgstr "変更された現在のディレクトリのパスを拒否します: {}"
+msgid "The {} export directory must not be empty."
+msgstr "{}のエクスポートディレクトリを空にはできません。"
 
 #, c++-format
 msgid "Unable to resolve the temporary directory: {}"
@@ -5955,8 +5984,8 @@ msgid "Unable to canonicalize the temporary directory: {}"
 msgstr "一時ディレクトリを正規化できません: {}"
 
 #, c++-format
-msgid "Export destination resolves outside the current directory: {}"
-msgstr "エクスポート先の解決先が現在のディレクトリの外にあります: {}"
+msgid "Export destination resolves outside the export directory: {}"
+msgstr "エクスポート先の解決先がエクスポートディレクトリの外にあります: {}"
 
 #, c++-format
 msgid "Export destination already exists: {}"
@@ -6001,6 +6030,10 @@ msgstr "{} のエクスポートを {} へ公開できませんでした: {}"
 #, c++-format
 msgid "{} package mapping: {} -> {} {}."
 msgstr "{} のパッケージ対応関係: {} -> {} {}。"
+
+#, c++-format
+msgid "Exported {} {} {} under {}."
+msgstr "{} {} {} を {} 直下へエクスポートしました。"
 
 #, c++-format
 msgid "Exported {} {} {} in the command-start current directory."
@@ -8435,6 +8468,22 @@ msgstr "{}のデフォルト状態ログを段階{}で安全に使用できま�
 
 msgid "Unknown state log error code."
 msgstr "不明な状態ログエラーコードです。"
+
+#, c++-format
+#~ msgid "Operation {} requires exactly one {} package target."
+#~ msgstr "操作 {} には {} パッケージ対象をちょうど1つ指定する必要があります。"
+
+#, c++-format
+#~ msgid "Usage: {} {} {}"
+#~ msgstr "使用方法: {} {} {}"
+
+#, c++-format
+#~ msgid "Failed to inspect the current export directory: {}"
+#~ msgstr "現在のエクスポートディレクトリを検査できませんでした: {}"
+
+#, c++-format
+#~ msgid "Unable to canonicalize the current directory: {}"
+#~ msgstr "現在のディレクトリを正規化できません: {}"
 
 #, c++-format
 #~ msgid "Cannot answer prompt without interaction ({}): {}"

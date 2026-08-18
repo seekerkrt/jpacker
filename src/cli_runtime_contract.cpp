@@ -28,6 +28,26 @@ bool has_semantic_option(
     return false;
 }
 
+bool is_pkgbuild_output_directory_option(
+        std::string_view token) noexcept {
+    const std::string_view option =
+            cli_authority::PKGBUILD_OUTPUT_DIRECTORY_OPTION;
+    return token == option ||
+           (token.size() > option.size() && token.starts_with(option) &&
+            token[option.size()] == '=');
+}
+
+bool has_semantic_pkgbuild_output_directory_option(
+        const ParsedCliArguments& parsed) noexcept {
+    for(const ParsedCliToken& token : parsed.tokens) {
+        if(token.role == CliTokenRole::PacmanOption &&
+           is_pkgbuild_output_directory_option(token.value)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 const OperationFormSpec& selected_operation_form(
         const ParsedCliArguments& parsed,
         const OperationMetadata& metadata) noexcept {
@@ -346,6 +366,21 @@ CliInvocationValidation validate_cli_invocation_contract(
                 DiagnosticClass::Invalid,
                 DiagnosticOperation::CliParsing);
     }
+    if(is_pkgbuild_output_directory_option(parsed.operation) ||
+       (parsed.operation != cli_authority::PKGBUILD_EXPORT_OPERATION &&
+        has_semantic_pkgbuild_output_directory_option(parsed))) {
+        return invalid_invocation(
+                contract,
+                CliInvocationIssue{
+                        CliInvocationIssueKind::
+                                MisplacedPkgbuildOutputDirectoryOption,
+                        parsed.operation,
+                        std::nullopt,
+                        TargetPolicy::None,
+                        OperandKind::None},
+                DiagnosticClass::Unsupported,
+                DiagnosticOperation::CliParsing);
+    }
     if(!contract.is_known()) {
         return invalid_invocation(
                 contract,
@@ -404,6 +439,12 @@ std::string cli_invocation_issue_message(
         return localization::format_translated_message(
                 "Option {} is supported only with operation {}.",
                 cli_authority::LOCAL_SOURCE_OPTION, "build");
+    case CliInvocationIssueKind::MisplacedPkgbuildOutputDirectoryOption:
+        return localization::format_translated_message(
+                "Option {} is supported only with operation {}.",
+                cli_option_syntax(
+                        cli_authority::OptionId::PkgbuildOutputDirectory),
+                cli_authority::PKGBUILD_EXPORT_OPERATION);
     case CliInvocationIssueKind::SelectRequiresPlainSync:
         return localization::format_translated_message(
                 "Option {} is supported only with plain {}.",

@@ -37,6 +37,14 @@ ParsedCliArguments invocation(
     return parsed;
 }
 
+ParsedCliArguments with_pacman_option(
+        ParsedCliArguments parsed, std::string option) {
+    parsed.tokens.push_back(ParsedCliToken{
+            std::move(option), parsed.tokens.size() + 1,
+            CliTokenRole::PacmanOption});
+    return parsed;
+}
+
 void expect_valid(
         const ParsedCliArguments& parsed, const std::string& context) {
     const CliInvocationValidation validation =
@@ -109,11 +117,38 @@ void test_operand_contract_connection() {
             DiagnosticClass::Invalid, "add-src assignment before package");
 
     expect_valid(invocation("-G", {"pkg"}), "-G exactly one");
+    expect_valid(
+            with_pacman_option(
+                    invocation("-G", {"pkg"}),
+                    "--output-dir=./exports"),
+            "-G attached output directory");
     expect_valid(invocation("-Gp", {"pkg"}), "-Gp exactly one");
     expect_issue(
             invocation("-G", {"one", "two"}),
             CliInvocationIssueKind::ExtraOperand,
             DiagnosticClass::Invalid, "-G extra operand");
+    expect_issue(
+            with_pacman_option(
+                    invocation("-Gp", {"pkg"}),
+                    "--output-dir=./exports"),
+            CliInvocationIssueKind::
+                    MisplacedPkgbuildOutputDirectoryOption,
+            DiagnosticClass::Unsupported,
+            "-Gp output directory scope");
+    expect_issue(
+            with_pacman_option(
+                    invocation("plan", {"pkg"}),
+                    "--output-dir=./exports"),
+            CliInvocationIssueKind::
+                    MisplacedPkgbuildOutputDirectoryOption,
+            DiagnosticClass::Unsupported,
+            "other operation output directory scope");
+    expect_issue(
+            invocation("--output-dir=./exports", {"pkg"}),
+            CliInvocationIssueKind::
+                    MisplacedPkgbuildOutputDirectoryOption,
+            DiagnosticClass::Unsupported,
+            "global-position output directory scope");
     expect_valid(
             invocation("-S", {"query"}, false, true),
             "-S --select exactly one");
@@ -180,7 +215,7 @@ void test_runtime_help_connection() {
             "list-src",
             "del-src <pkg>...",
             "revert <pkg>...",
-            "-G <pkg>",
+            "-G <pkg> [--output-dir=DIR]",
             "-Gp <pkg>",
             "-S --select [--needed] <query>",
     };
