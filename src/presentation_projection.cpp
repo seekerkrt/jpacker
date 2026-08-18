@@ -51,8 +51,8 @@ PackageStateObservationValue registered_source_observation(
 }
 
 PackageStateObservationValue aur_target_observation(
-        AurUpdateOperationTargetStatus status) noexcept {
-    switch(status) {
+        const AurUpdateOperationTargetResult& result) noexcept {
+    switch(result.status) {
     case AurUpdateOperationTargetStatus::Updated:
     case AurUpdateOperationTargetStatus::UpdatedCleanupFailed:
         return PackageStateObservationValue{
@@ -66,6 +66,17 @@ PackageStateObservationValue aur_target_observation(
                 PackageStateObservation::NotObserved,
                 ObservationReason::PhaseNotAttempted};
     case AurUpdateOperationTargetStatus::Skipped:
+        if(std::any_of(
+                   result.preflight_issues.begin(),
+                   result.preflight_issues.end(),
+                   [](const AurUpdateExecutionIssue& issue) {
+                       return issue.reason ==
+                               AurUpdateExecutionReason::UpToDate;
+                   })) {
+            return PackageStateObservationValue{
+                    PackageStateObservation::VerifiedUnchanged,
+                    std::nullopt};
+        }
         return PackageStateObservationValue{
                 PackageStateObservation::NotObserved,
                 ObservationReason::ObservationNotPrepared};
@@ -1064,7 +1075,7 @@ PresentationItem project_aur_update_presentation_item(
         item.canonical_source_identity =
                 "aur:" + item.package_base.value();
     }
-    item.package_state = aur_target_observation(result.status);
+    item.package_state = aur_target_observation(result);
     item.is_update_candidate =
             result.update.classification ==
             AurUpdateClassification::UpdateAvailable;
