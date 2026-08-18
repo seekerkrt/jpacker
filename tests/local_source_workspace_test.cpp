@@ -3,6 +3,7 @@
 #include "trusted_cache_test_support.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -19,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -42,6 +44,10 @@ constexpr std::string_view SRCINFO_CONTENT =
         "\tpkgrel = 1\n"
         "\tarch = any\n"
         "pkgname = local-workspace-test\n";
+constexpr std::size_t LARGE_TREE_REGULAR_FILE_COUNT = 3400;
+constexpr std::size_t LARGE_TREE_DESCENDANT_COUNT =
+        LARGE_TREE_REGULAR_FILE_COUNT + 5;
+constexpr rlim_t LARGE_TREE_SOFT_NOFILE_LIMIT = 2048;
 
 void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
@@ -206,6 +212,51 @@ public:
     }
 };
 
+struct rlimit file_descriptor_limit() {
+    struct rlimit limit {};
+    if(::getrlimit(RLIMIT_NOFILE, &limit) != 0) {
+        throw std::runtime_error("Failed to read the file descriptor limit.");
+    }
+    return limit;
+}
+
+class FileDescriptorLimitScope final {
+    struct rlimit original_ {};
+    bool          changed_ = false;
+
+public:
+    explicit FileDescriptorLimitScope(rlim_t soft_limit) {
+        original_ = file_descriptor_limit();
+        if(original_.rlim_cur <= soft_limit) {
+            throw std::runtime_error(
+                    "File descriptor limit is too low for the focused test.");
+        }
+        struct rlimit lowered = original_;
+        lowered.rlim_cur = soft_limit;
+        if(::setrlimit(RLIMIT_NOFILE, &lowered) != 0) {
+            throw std::runtime_error(
+                    "Failed to lower the file descriptor limit.");
+        }
+        changed_ = true;
+    }
+
+    FileDescriptorLimitScope(const FileDescriptorLimitScope&) = delete;
+    FileDescriptorLimitScope& operator=(
+            const FileDescriptorLimitScope&) = delete;
+
+    ~FileDescriptorLimitScope() noexcept {
+        if(changed_) {
+            static_cast<void>(::setrlimit(RLIMIT_NOFILE, &original_));
+        }
+    }
+};
+
+std::size_t open_descriptor_count() {
+    return static_cast<std::size_t>(std::distance(
+            fs::directory_iterator("/proc/self/fd"),
+            fs::directory_iterator()));
+}
+
 class TemporaryTree final {
     fs::path base_path_;
 
@@ -342,6 +393,19 @@ void populate_representative_source_tree(const fs::path& root) {
                (root / "nested" / "hardlink-b").c_str()) != 0) {
         throw std::runtime_error("Failed to create hardlink fixture.");
     }
+}
+
+void populate_large_cleanup_source_tree(const fs::path& root) {
+    const fs::path large_tree = root / "large-tree";
+    create_fixture_directory(large_tree);
+    write_file(large_tree / "0000-sentinel", "first sentinel\n");
+    for(std::size_t index = 0; index < LARGE_TREE_REGULAR_FILE_COUNT;
+        ++index) {
+        write_file(
+                large_tree / ("entry-" + std::to_string(index)),
+                "payload\n");
+    }
+    write_file(large_tree / "zzzz-sentinel", "last sentinel\n");
 }
 
 void expect_representative_snapshot(
@@ -984,6 +1048,110 @@ void test_cleanup_rebuilds_named_lineage_before_removal() {
             "Cleanup changed the displaced replacement directory");
 }
 
+void test_large_tree_cleanup_fd_exhaustion_characterization() {
+    WorkspaceFixture fixture;
+    populate_large_cleanup_source_tree(fixture.source_path());
+    const std::vector<NodeSnapshot> original =
+            snapshot_tree(fixture.source_path());
+    expect(
+            original.size() == LARGE_TREE_DESCENDANT_COUNT + 1,
+            "Large cleanup fixture descendant count differs");
+    LocalSourceRoot source_root = fixture.open_source_root();
+    ValidatedCacheRoot cache_root = fixture.prepare_cache_root();
+    const auto initial_cache_entries =
+            direct_child_names(cache_root.canonical_path());
+
+    LocalSourceWorkspace workspace =
+            materialize_local_source_workspace(source_root, cache_root);
+    const fs::path workspace_path = workspace.path();
+    const std::vector<std::string> workspace_entries =
+            relative_entry_names(workspace_path);
+    expect(
+            workspace_entries.size() == LARGE_TREE_DESCENDANT_COUNT,
+            "Large cleanup workspace descendant count differs");
+    expect(
+            snapshot_tree(fixture.source_path()) == original,
+            "Large workspace materialization changed the original tree");
+
+    const std::size_t descriptors_before = open_descriptor_count();
+    const struct rlimit original_limit = file_descriptor_limit();
+    std::optional<LocalSourceWorkspaceFailure> cleanup_failure;
+    {
+        FileDescriptorLimitScope lowered_limit(
+                LARGE_TREE_SOFT_NOFILE_LIMIT);
+        expect(
+                file_descriptor_limit().rlim_cur ==
+                        LARGE_TREE_SOFT_NOFILE_LIMIT,
+                "Focused cleanup did not use the requested soft FD limit");
+        try {
+            workspace.cleanup();
+        } catch(const LocalSourceWorkspaceError& error) {
+            cleanup_failure = error.failure();
+        }
+    }
+
+    const struct rlimit restored_limit = file_descriptor_limit();
+    expect(
+            restored_limit.rlim_cur == original_limit.rlim_cur &&
+                    restored_limit.rlim_max == original_limit.rlim_max,
+            "Focused cleanup did not restore the original FD limit");
+    // TODO(#448): Slice 2 flips this expected failure to successful cleanup
+    // under the same fixed tree and soft limit.
+    expect(
+            cleanup_failure.has_value(),
+            "Issue #448 cleanup unexpectedly succeeded before the bounded fix");
+    const LocalSourceWorkspaceFailure& failure = *cleanup_failure;
+    expect(
+            failure.stage == LocalSourceWorkspaceStage::Cleanup,
+            "Large-tree FD exhaustion used the wrong failure stage");
+    expect(
+            failure.code == LocalSourceWorkspaceErrorCode::CleanupFailure,
+            "Large-tree FD exhaustion used the wrong failure code");
+    expect(
+            failure.system_error.has_value() &&
+                    failure.system_error->value() == EMFILE,
+            "Large-tree FD exhaustion did not retain EMFILE");
+    expect(
+            !failure.relative_path.is_absolute() &&
+                    std::find(
+                            failure.relative_path.begin(),
+                            failure.relative_path.end(), fs::path("..")) ==
+                            failure.relative_path.end(),
+            "Large-tree FD exhaustion reported an unsafe relative path");
+    expect(
+            open_descriptor_count() == descriptors_before,
+            "Failed large-tree cleanup leaked retained descriptors");
+
+    expect(
+            fs::exists(workspace_path),
+            "FD exhaustion removed the workspace root");
+    expect(
+            relative_entry_names(workspace_path) == workspace_entries,
+            "FD exhaustion removed workspace entries before validation completed");
+    expect(
+            read_file(workspace_path / "large-tree" / "0000-sentinel") ==
+                            "first sentinel\n" &&
+                    read_file(
+                            workspace_path / "large-tree" /
+                            "zzzz-sentinel") == "last sentinel\n",
+            "FD exhaustion removed or changed workspace sentinels");
+    expect(
+            snapshot_tree(fixture.source_path()) == original,
+            "Failed large-tree cleanup changed the original source tree");
+
+    workspace.cleanup();
+    expect(
+            !fs::exists(workspace_path),
+            "Restored-limit cleanup left the large workspace");
+    expect(
+            direct_child_names(cache_root.canonical_path()) ==
+                    initial_cache_entries,
+            "Restored-limit cleanup left cache entries");
+    expect(
+            snapshot_tree(fixture.source_path()) == original,
+            "Restored-limit cleanup changed the original source tree");
+}
+
 template <typename Callable>
 void run_case(const std::string& name, Callable callable) {
     callable();
@@ -1024,6 +1192,9 @@ int main() {
         run_case(
                 "cleanup named lineage reconstruction",
                 test_cleanup_rebuilds_named_lineage_before_removal);
+        run_case(
+                "Issue #448 large-tree cleanup FD exhaustion characterization",
+                test_large_tree_cleanup_fd_exhaustion_characterization);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
