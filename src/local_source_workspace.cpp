@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -117,6 +118,8 @@ using SnapshotManifest = std::map<std::string, SnapshotManifestEntry>;
 
 #ifdef MOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS
 LocalSourceWorkspaceTestHook g_workspace_test_hook;
+LocalSourceWorkspaceCleanupMetadataMatchForTest
+        g_cleanup_metadata_match_for_test;
 
 void notify_workspace_test_hook(
         LocalSourceWorkspaceTestEvent event,
@@ -486,16 +489,78 @@ std::vector<std::string> enumerate_cleanup_directory(
     return names;
 }
 
+// Unlike dev/inode and timestamps, the filesystem's opaque FID distinguishes
+// an inode-number reuse and is stable across cleanup-owned fchmod/unlink
+// metadata changes. It replaces the generation evidence formerly supplied by
+// retaining one O_PATH descriptor per descendant.
+struct CleanupFileHandleIdentity {
+    int                        mount_id = 0;
+    int                        handle_type = 0;
+    std::vector<unsigned char> bytes;
+
+    bool operator==(const CleanupFileHandleIdentity&) const = default;
+};
+
 struct OwnedCleanupNode {
-    std::string name;
-    struct stat status {};
+    std::string               name;
+    struct stat               status {};
+    CleanupFileHandleIdentity file_handle;
     std::vector<OwnedCleanupNode> children;
 };
 
 struct OpenedOwnedCleanupNode {
-    OwnedDescriptor descriptor;
-    struct stat     status {};
+    OwnedDescriptor           descriptor;
+    struct stat               status {};
+    CleanupFileHandleIdentity file_handle;
 };
+
+CleanupFileHandleIdentity observe_cleanup_file_handle(
+        int descriptor, const fs::path& relative_path) {
+    struct file_handle required {};
+    int                mount_id = 0;
+    errno = 0;
+    const int size_probe = ::name_to_handle_at(
+            descriptor, "", &required, &mount_id,
+            AT_EMPTY_PATH | AT_HANDLE_FID);
+    if(size_probe == 0 || errno != EOVERFLOW ||
+       required.handle_bytes == 0) {
+        const int handle_error = errno;
+        if(handle_error != 0) {
+            throw_workspace_system_failure(
+                    LocalSourceWorkspaceStage::Cleanup,
+                    LocalSourceWorkspaceErrorCode::CleanupFailure,
+                    relative_path, handle_error);
+        }
+        throw_workspace_failure(
+                LocalSourceWorkspaceStage::Cleanup,
+                LocalSourceWorkspaceErrorCode::CleanupFailure,
+                relative_path);
+    }
+
+    const std::size_t storage_bytes =
+            sizeof(struct file_handle) + required.handle_bytes;
+    std::vector<std::max_align_t> storage(
+            (storage_bytes + sizeof(std::max_align_t) - 1) /
+            sizeof(std::max_align_t));
+    // name_to_handle_at() owns this variable-sized C API boundary. The
+    // resulting bytes are copied into a typed value before storage expires.
+    auto* handle = reinterpret_cast<struct file_handle*>(storage.data());
+    handle->handle_bytes = required.handle_bytes;
+    if(::name_to_handle_at(
+               descriptor, "", handle, &mount_id,
+               AT_EMPTY_PATH | AT_HANDLE_FID) != 0) {
+        const int handle_error = errno;
+        throw_workspace_system_failure(
+                LocalSourceWorkspaceStage::Cleanup,
+                LocalSourceWorkspaceErrorCode::CleanupFailure,
+                relative_path, handle_error);
+    }
+    return CleanupFileHandleIdentity{
+            mount_id, handle->handle_type,
+            std::vector<unsigned char>(
+                    handle->f_handle,
+                    handle->f_handle + handle->handle_bytes)};
+}
 
 bool same_cleanup_identity_and_type(
         const struct stat& left, const struct stat& right) noexcept {
@@ -503,14 +568,30 @@ bool same_cleanup_identity_and_type(
            left.st_dev == right.st_dev && left.st_ino == right.st_ino;
 }
 
+bool cleanup_metadata_matches_plan(
+        const struct stat& observed, const struct stat& expected,
+        const fs::path& relative_path) {
+    if(same_cleanup_identity_and_type(observed, expected)) return true;
+#ifdef MOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS
+    return g_cleanup_metadata_match_for_test &&
+           g_cleanup_metadata_match_for_test(relative_path);
+#else
+    static_cast<void>(relative_path);
+    return false;
+#endif
+}
+
 void require_owned_cleanup_identity(
         const struct stat& named, const struct stat& opened,
+        const CleanupFileHandleIdentity& opened_file_handle,
         const OwnedCleanupNode* expected,
         std::uintmax_t expected_device, std::uintmax_t expected_owner,
         const fs::path& relative_path) {
     if(!same_cleanup_identity_and_type(named, opened) ||
        (expected != nullptr &&
-        !same_cleanup_identity_and_type(opened, expected->status)) ||
+        (!cleanup_metadata_matches_plan(
+                 opened, expected->status, relative_path) ||
+         opened_file_handle != expected->file_handle)) ||
        static_cast<std::uintmax_t>(opened.st_dev) != expected_device ||
        static_cast<std::uintmax_t>(opened.st_uid) != expected_owner ||
        static_cast<std::uintmax_t>(named.st_uid) != expected_owner) {
@@ -554,10 +635,13 @@ OpenedOwnedCleanupNode open_owned_cleanup_node(
     const struct stat opened = descriptor_status(
             retained.get(), LocalSourceWorkspaceStage::Cleanup,
             relative_path);
+    CleanupFileHandleIdentity opened_file_handle =
+            observe_cleanup_file_handle(retained.get(), relative_path);
     require_owned_cleanup_identity(
-            named, opened, expected, expected_device, expected_owner,
-            relative_path);
-    return OpenedOwnedCleanupNode{std::move(retained), opened};
+            named, opened, opened_file_handle, expected, expected_device,
+            expected_owner, relative_path);
+    return OpenedOwnedCleanupNode{
+            std::move(retained), opened, std::move(opened_file_handle)};
 }
 
 void require_owned_cleanup_node_unchanged(
@@ -580,8 +664,9 @@ void require_owned_cleanup_node_unchanged(
                 relative_path, status_error);
     }
     require_owned_cleanup_identity(
-            named, opened, &expected, expected_device, expected_owner,
-            relative_path);
+            named, opened,
+            observe_cleanup_file_handle(opened_descriptor, relative_path),
+            &expected, expected_device, expected_owner, relative_path);
 }
 
 OwnedDescriptor open_owned_cleanup_directory(
@@ -607,8 +692,10 @@ OwnedDescriptor open_owned_cleanup_directory(
             opened.get(), LocalSourceWorkspaceStage::Cleanup,
             relative_path);
     if(!S_ISDIR(status.st_mode) ||
-       status.st_dev != expected.status.st_dev ||
-       status.st_ino != expected.status.st_ino ||
+       !cleanup_metadata_matches_plan(
+               status, expected.status, relative_path) ||
+       observe_cleanup_file_handle(opened.get(), relative_path) !=
+               expected.file_handle ||
        static_cast<std::uintmax_t>(status.st_dev) != expected_device ||
        static_cast<std::uintmax_t>(status.st_uid) != expected_owner) {
         throw_workspace_failure(
@@ -737,6 +824,7 @@ OwnedCleanupNode preflight_owned_workspace_node(
                 parent.get(), name, nullptr, authority.device,
                 authority.owner, relative_path);
         node.status = opened.status;
+        node.file_handle = std::move(opened.file_handle);
         if(S_ISDIR(node.status.st_mode)) {
             make_owned_cleanup_directory_accessible(
                     opened.descriptor.get(), node, relative_path);
@@ -2173,6 +2261,11 @@ LocalSourceWorkspace materialize_local_source_workspace(
 void set_local_source_workspace_test_hook(
         LocalSourceWorkspaceTestHook hook) {
     g_workspace_test_hook = std::move(hook);
+}
+
+void set_local_source_workspace_cleanup_metadata_match_for_test(
+        LocalSourceWorkspaceCleanupMetadataMatchForTest match) {
+    g_cleanup_metadata_match_for_test = std::move(match);
 }
 
 void require_cache_identity_outside_source_tree_for_test(

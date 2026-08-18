@@ -138,8 +138,17 @@ using LocalSourceWorkspaceTestHook = std::function<void(
         LocalSourceWorkspaceTestEvent event,
         const std::filesystem::path& relative_path)>;
 
+// Simulates an inode-reuse ABA where the replacement presents the plan's
+// original type/device/inode metadata. The opaque filesystem handle remains
+// outside this override and must still reject the replacement.
+using LocalSourceWorkspaceCleanupMetadataMatchForTest =
+        std::function<bool(const std::filesystem::path& relative_path)>;
+
 void set_local_source_workspace_test_hook(
         LocalSourceWorkspaceTestHook hook);
+
+void set_local_source_workspace_cleanup_metadata_match_for_test(
+        LocalSourceWorkspaceCleanupMetadataMatchForTest match);
 
 void require_cache_identity_outside_source_tree_for_test(
         const LocalSourceRoot& source_root,

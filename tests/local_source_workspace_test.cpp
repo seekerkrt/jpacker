@@ -344,6 +344,24 @@ public:
     }
 };
 
+class ScopedCleanupMetadataMatchForTest final {
+public:
+    explicit ScopedCleanupMetadataMatchForTest(
+            LocalSourceWorkspaceCleanupMetadataMatchForTest match) {
+        set_local_source_workspace_cleanup_metadata_match_for_test(
+                std::move(match));
+    }
+
+    ScopedCleanupMetadataMatchForTest(
+            const ScopedCleanupMetadataMatchForTest&) = delete;
+    ScopedCleanupMetadataMatchForTest& operator=(
+            const ScopedCleanupMetadataMatchForTest&) = delete;
+
+    ~ScopedCleanupMetadataMatchForTest() noexcept {
+        set_local_source_workspace_cleanup_metadata_match_for_test({});
+    }
+};
+
 LocalSourceWorkspaceFailure require_workspace_failure(
         const LocalSourceRoot& source_root,
         const ValidatedCacheRoot& cache_root,
@@ -1047,6 +1065,99 @@ void test_cleanup_rebuilds_named_lineage_before_removal() {
             "Cleanup changed the displaced replacement directory");
 }
 
+void test_cleanup_rejects_inode_reuse_aba_replacement() {
+    WorkspaceFixture fixture;
+    const std::vector<NodeSnapshot> original =
+            snapshot_tree(fixture.source_path());
+    LocalSourceRoot source_root = fixture.open_source_root();
+    ValidatedCacheRoot cache_root = fixture.prepare_cache_root();
+    const auto initial_cache_entries =
+            direct_child_names(cache_root.canonical_path());
+    LocalSourceWorkspace workspace = materialize_local_source_workspace(
+            source_root, cache_root);
+    const fs::path workspace_path = workspace.path();
+    const fs::path target = workspace_path / "PKGBUILD";
+    const struct stat original_status = node_status(target);
+    const std::vector<std::string> planned_entries =
+            relative_entry_names(workspace_path);
+    bool        hook_ran = false;
+    std::string hook_failure;
+    bool        cleanup_failed = false;
+    struct stat replacement_status {};
+
+    {
+        // The replacement normally has a different inode. Allow its primary
+        // stat tuple to match the plan so the test deterministically models
+        // allocator reuse; the opaque file handle is deliberately not
+        // overridden and remains the generation authority.
+        ScopedCleanupMetadataMatchForTest metadata_match(
+                [](const fs::path& relative_path) {
+                    return relative_path == "PKGBUILD";
+                });
+        ScopedWorkspaceTestHook hook(
+                [&](LocalSourceWorkspaceTestEvent event, const fs::path&) {
+                    if(event != LocalSourceWorkspaceTestEvent::
+                                        BeforeCleanupRemoval ||
+                       hook_ran) {
+                        return;
+                    }
+                    hook_ran = true;
+                    try {
+                        const fs::path replacement =
+                                workspace_path / "aba-replacement";
+                        write_file(replacement, "replacement\n");
+                        fs::rename(replacement, target);
+                        replacement_status = node_status(target);
+                    } catch(const std::exception& error) {
+                        hook_failure = error.what();
+                    }
+                });
+        try {
+            workspace.cleanup();
+        } catch(const LocalSourceWorkspaceError& error) {
+            cleanup_failed = true;
+            expect(
+                    error.failure().stage ==
+                                    LocalSourceWorkspaceStage::Cleanup &&
+                            error.failure().code ==
+                                    LocalSourceWorkspaceErrorCode::
+                                            CleanupFailure &&
+                            error.failure().relative_path == "PKGBUILD",
+                    "Inode-reuse ABA used the wrong typed failure");
+        }
+    }
+
+    expect(hook_ran, "Inode-reuse ABA hook did not run");
+    expect(
+            hook_failure.empty(),
+            "Inode-reuse ABA hook failed: " + hook_failure);
+    expect(cleanup_failed, "Inode-reuse ABA replacement was accepted");
+    expect(
+            (replacement_status.st_mode & S_IFMT) ==
+                            (original_status.st_mode & S_IFMT) &&
+                    replacement_status.st_dev == original_status.st_dev &&
+                    replacement_status.st_uid == original_status.st_uid,
+            "Inode-reuse ABA fixture changed a primary identity field");
+    expect(
+            relative_entry_names(workspace_path) == planned_entries,
+            "Inode-reuse ABA failure deleted a planned entry");
+    expect(
+            read_file(target) == "replacement\n",
+            "Cleanup deleted the inode-reuse ABA replacement");
+    expect(
+            snapshot_tree(fixture.source_path()) == original,
+            "Inode-reuse ABA cleanup changed the original source tree");
+
+    workspace.cleanup();
+    expect(
+            !fs::exists(workspace_path),
+            "Restored cleanup authority left the ABA workspace");
+    expect(
+            direct_child_names(cache_root.canonical_path()) ==
+                    initial_cache_entries,
+            "ABA recovery cleanup left cache entries");
+}
+
 void test_large_tree_cleanup_succeeds_with_bounded_fd_usage() {
     WorkspaceFixture fixture;
     populate_large_cleanup_source_tree(fixture.source_path());
@@ -1147,6 +1258,9 @@ int main() {
         run_case(
                 "cleanup named lineage reconstruction",
                 test_cleanup_rebuilds_named_lineage_before_removal);
+        run_case(
+                "cleanup inode-reuse ABA replacement",
+                test_cleanup_rejects_inode_reuse_aba_replacement);
         run_case(
                 "Issue #448 large-tree cleanup under bounded FD limit",
                 test_large_tree_cleanup_succeeds_with_bounded_fd_usage);
