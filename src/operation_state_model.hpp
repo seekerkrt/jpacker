@@ -47,6 +47,14 @@ struct PackageStateObservationValue {
     bool operator==(const PackageStateObservationValue&) const = default;
 };
 
+struct UpgradeAllPhasePackageStateObservations {
+    PackageStateObservationValue system_source;
+    PackageStateObservationValue aur;
+
+    bool operator==(
+            const UpgradeAllPhasePackageStateObservations&) const = default;
+};
+
 struct OperationStateProjectionInput {
     bool               is_success = false;
     std::optional<NoOpBasis> no_op_basis;
@@ -75,4 +83,8 @@ OperationStateProjection project_operation_state(
         const OperationStateProjectionInput& input) noexcept;
 
 OperationStateProjection project_upgrade_all_operation_state(
+        const UpgradeAllOperationResult& result) noexcept;
+
+UpgradeAllPhasePackageStateObservations
+project_upgrade_all_phase_package_state_observations(
         const UpgradeAllOperationResult& result) noexcept;
