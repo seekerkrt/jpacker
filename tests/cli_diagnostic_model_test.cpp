@@ -968,6 +968,193 @@ PresentationProjection project_upgrade_all_fixture(
             result, OperationStateProjection{});
 }
 
+AurUpdateOperationTargetResult issue_449_split_up_to_date_target() {
+    constexpr std::string_view REQUESTED_PACKAGE =
+            "ttf-noto-sans-mono-cjk-vf";
+    constexpr std::string_view PACKAGE_BASE = "ttf-noto-sans-cjk-vf";
+    constexpr std::string_view CURRENT_VERSION = "2.004-1";
+
+    AurUpdateOperationTargetResult target;
+    target.update.installed_name = REQUESTED_PACKAGE;
+    target.update.installed_version = CURRENT_VERSION;
+    target.update.install_reason = InstalledPackageReason::Explicit;
+    target.update.aur_package = AurUpdateRemotePackage{
+            std::string(REQUESTED_PACKAGE), std::string(PACKAGE_BASE),
+            std::string(CURRENT_VERSION),
+            AurVersionRelation::SameAsInstalled};
+    target.update.classification = AurUpdateClassification::UpToDate;
+    target.package_base = PACKAGE_BASE;
+    target.status = AurUpdateOperationTargetStatus::Skipped;
+    target.preflight_issues.emplace_back(
+            AurUpdateExecutionReason::UpToDate,
+            std::string(REQUESTED_PACKAGE), std::string(PACKAGE_BASE),
+            std::nullopt,
+            "fixture wording is not the UpToDate classification authority");
+    return target;
+}
+
+AurUpdateOperationTargetResult issue_449_non_aur_foreign_target() {
+    AurUpdateOperationTargetResult target;
+    target.update.installed_name = "non-aur-foreign";
+    target.update.installed_version = "1.0-1";
+    target.update.install_reason = InstalledPackageReason::Explicit;
+    target.update.classification = AurUpdateClassification::NonAurForeign;
+    target.status = AurUpdateOperationTargetStatus::Skipped;
+    target.preflight_issues.emplace_back(
+            AurUpdateExecutionReason::NonAurForeign,
+            target.update.installed_name, std::nullopt, std::nullopt,
+            "fixture wording is not the NonAurForeign authority");
+    return target;
+}
+
+void test_issue_449_non_up_to_date_controls() {
+    const AurUpdateOperationTargetResult non_aur =
+            issue_449_non_aur_foreign_target();
+    expect(
+            non_aur.preflight_issues.size() == 1 &&
+                    non_aur.preflight_issues.front().reason ==
+                            AurUpdateExecutionReason::NonAurForeign,
+            "Issue #449 NonAurForeign control lost its typed skip reason");
+
+    UpgradeAllOperationResult aggregate;
+    aggregate.aur.operation_result.emplace();
+    aggregate.aur.operation_result->reduced_operation_result.targets = {
+            non_aur};
+    const PresentationProjection non_aur_projection =
+            project_upgrade_all_fixture(aggregate);
+    expect(
+            non_aur_projection.summary_counts.total == 1 &&
+                    non_aur_projection.summary_counts.normal == 1 &&
+                    non_aur_projection.summary_counts.attention_required ==
+                            0 &&
+                    non_aur_projection.summary_counts.not_observed == 1 &&
+                    non_aur_projection.attention_items.empty() &&
+                    non_aur_projection.full_items.size() == 1 &&
+                    non_aur_projection.full_items.front()
+                                    .package_state.has_value() &&
+                    non_aur_projection.full_items.front()
+                                    .package_state->state ==
+                            PackageStateObservation::NotObserved &&
+                    non_aur_projection.full_items.front()
+                                    .package_state->reason ==
+                            ObservationReason::ObservationNotPrepared &&
+                    non_aur_projection.full_items.front()
+                                    .package_state->state !=
+                            PackageStateObservation::VerifiedUnchanged,
+            "Issue #449 NonAurForeign control was treated as UpToDate");
+
+    constexpr std::array FAILURE_FAMILY = {
+            std::pair{AurUpdateOperationTargetStatus::Unsupported,
+                      DiagnosticClass::Unsupported},
+            std::pair{AurUpdateOperationTargetStatus::Incomplete,
+                      DiagnosticClass::RequiresCheck},
+            std::pair{AurUpdateOperationTargetStatus::Failed,
+                      DiagnosticClass::ExecutionFailure}};
+    for(const auto& [status, diagnostic_class] : FAILURE_FAMILY) {
+        const PresentationItem item = project_aur_update_presentation_item(
+                aur_target(
+                        "failure-family", "failure-family",
+                        AurUpdateClassification::UpdateAvailable, status));
+        expect(
+                item.package_state.has_value() &&
+                        item.package_state->state ==
+                                PackageStateObservation::Unverified &&
+                        item.package_state->reason ==
+                                ObservationReason::OperationFailed &&
+                        item.diagnostic_class == diagnostic_class &&
+                        is_attention_required(item),
+                "Issue #449 changed Unsupported/Incomplete/Failed semantics");
+    }
+}
+
+void test_issue_449_split_up_to_date_presentation_contract() {
+    const AurUpdateOperationTargetResult target =
+            issue_449_split_up_to_date_target();
+    expect(
+            target.update.installed_name ==
+                            "ttf-noto-sans-mono-cjk-vf" &&
+                    target.update.installed_version == "2.004-1" &&
+                    target.update.install_reason ==
+                            InstalledPackageReason::Explicit &&
+                    target.update.classification ==
+                            AurUpdateClassification::UpToDate &&
+                    target.update.aur_package.has_value() &&
+                    target.update.aur_package->aur_name ==
+                            "ttf-noto-sans-mono-cjk-vf" &&
+                    target.update.aur_package->package_base ==
+                            "ttf-noto-sans-cjk-vf" &&
+                    target.update.aur_package->version == "2.004-1" &&
+                    target.update.aur_package->version_relation ==
+                            AurVersionRelation::SameAsInstalled &&
+                    target.package_base == "ttf-noto-sans-cjk-vf" &&
+                    target.status ==
+                            AurUpdateOperationTargetStatus::Skipped &&
+                    target.preflight_issues.size() == 1 &&
+                    target.preflight_issues.front().reason ==
+                            AurUpdateExecutionReason::UpToDate &&
+                    target.preflight_issues.front().package_name ==
+                            "ttf-noto-sans-mono-cjk-vf" &&
+                    target.preflight_issues.front().package_base ==
+                            "ttf-noto-sans-cjk-vf",
+            "Issue #449 reproducer lacks authoritative UpToDate evidence");
+
+    UpgradeAllOperationResult aggregate;
+    aggregate.aur.operation_result.emplace();
+    aggregate.aur.operation_result->reduced_operation_result.targets = {
+            target};
+    const PresentationProjection projection =
+            project_upgrade_all_fixture(aggregate);
+    expect(
+            projection.summary_counts.total == 1 &&
+                    projection.summary_counts.split_identities == 1 &&
+                    projection.full_items.size() == 1 &&
+                    projection.full_items.front().requested_package ==
+                            "ttf-noto-sans-mono-cjk-vf" &&
+                    projection.full_items.front().package_base ==
+                            "ttf-noto-sans-cjk-vf" &&
+                    projection.full_items.front()
+                                    .canonical_source_identity ==
+                            "aur:ttf-noto-sans-cjk-vf",
+            "Issue #449 presentation flattened split AUR identity");
+
+    const PresentationItem& item = projection.full_items.front();
+    std::vector<std::string> contract_violations;
+    if(!item.package_state.has_value()) {
+        contract_violations.emplace_back(
+                "observation bug: package_state is absent");
+    } else {
+        if(item.package_state->state !=
+           PackageStateObservation::VerifiedUnchanged) {
+            contract_violations.emplace_back(
+                    "observation bug: Skipped + UpToDate is not "
+                    "VerifiedUnchanged");
+        }
+        if(item.package_state->reason ==
+           ObservationReason::ObservationNotPrepared) {
+            contract_violations.emplace_back(
+                    "observation bug: authoritative UpToDate remains "
+                    "ObservationNotPrepared");
+        }
+    }
+    if(projection.summary_counts.not_observed != 0) {
+        contract_violations.emplace_back(
+                "observation bug: summary not_observed is not zero");
+    }
+    if(projection.summary_counts.normal != 1 ||
+       projection.summary_counts.attention_required != 0 ||
+       !projection.attention_items.empty()) {
+        contract_violations.emplace_back(
+                "split attention policy: authoritative UpToDate remains in "
+                "attention-required detail");
+    }
+
+    std::string message = "Issue #449 desired presentation contract differs:";
+    for(const std::string& violation : contract_violations) {
+        message += "\n  - " + violation;
+    }
+    expect(contract_violations.empty(), message);
+}
+
 void test_presentation_partition_preserves_identity() {
     const AurUpdateOperationTargetResult ordinary = aur_target(
             "ordinary", "ordinary", AurUpdateClassification::UpToDate,
@@ -1990,6 +2177,9 @@ int main() {
         run_case("presentation partition/identity",
                  test_presentation_partition_preserves_identity);
         run_case(
+                "Issue #449 NonAurForeign/failure controls",
+                test_issue_449_non_up_to_date_controls);
+        run_case(
                 "BuildPlan presentation shared readiness equivalence",
                 test_build_plan_presentation_uses_shared_install_readiness);
         run_case(
@@ -2001,6 +2191,9 @@ int main() {
         run_case(
                 "upgrade-all item-safe failure correlation",
                 test_upgrade_all_failure_correlation_is_item_safe);
+        run_case(
+                "Issue #449 split UpToDate presentation contract",
+                test_issue_449_split_up_to_date_presentation_contract);
     } catch(const std::exception& error) {
         std::cerr << "cli_diagnostic_model_test: " << error.what() << '\n';
         return 1;
