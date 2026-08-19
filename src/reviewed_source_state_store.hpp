@@ -18,9 +18,19 @@
 // Lookup never creates directories or files. Unsafe, malformed, future, and
 // mismatched records are never flattened into Missing.
 //
-// CAS authority is the observed raw destination bytes plus filesystem
-// identity. Re-encoded canonical TOML is not a content guard.
-// Unsupported future schema is never overwritten.
+// Existing records are immutable generation files. Publication never replaces,
+// exchanges, or unlinks an authoritative name. The kernel commit point is
+// RENAME_NOREPLACE of a durable temporary inode onto a successor leaf derived
+// from the observed generation and filesystem identity. Lock is cooperative
+// only and is not CAS authority.
+//
+// Crash artifacts:
+// - unpublished temps and chain orphans are ignored by lookup
+// - they are never unlinked by name
+// - authority is only the successor-chain tip starting at 1.toml
+
+inline constexpr std::size_t reviewed_source_state_store_max_record_bytes =
+        65536;
 
 struct ReviewedSourceStateRecordIdentity {
     std::uintmax_t device = 0;
@@ -37,6 +47,8 @@ struct ReviewedSourceStateRecordIdentity {
 };
 
 struct ReviewedSourceStateObservedRecord {
+    std::uint64_t                     generation = 0;
+    std::string                       leaf_name;
     ReviewedSourceStateRecordIdentity identity;
     std::string                       raw_contents;
 
@@ -44,7 +56,7 @@ struct ReviewedSourceStateObservedRecord {
 };
 
 struct ReviewedSourceStateStoreRead {
-    ReviewedSourceStateObservation                 observation;
+    ReviewedSourceStateObservation                   observation;
     std::optional<ReviewedSourceStateObservedRecord> observed;
 
     bool operator==(const ReviewedSourceStateStoreRead&) const = default;
@@ -74,15 +86,37 @@ enum class ReviewedSourceStateStoreFailureKind {
     CloseFailed,
     ConcurrentReplacement,
     FutureSchemaOverwriteRefused,
+    RecordTooLarge,
 };
 
 struct ReviewedSourceStateStoreFailure {
-    ReviewedSourceStateStoreFailureKind        kind;
-    std::filesystem::path                      entry_path;
-    std::optional<std::error_code>             system_error;
-    std::optional<std::filesystem::file_type>  observed_file_type;
+    ReviewedSourceStateStoreFailureKind       kind;
+    std::filesystem::path                     entry_path;
+    std::optional<std::error_code>            system_error;
+    std::optional<std::filesystem::file_type> observed_file_type;
+    std::optional<std::filesystem::path>      leftover_artifact;
 
     bool operator==(const ReviewedSourceStateStoreFailure&) const = default;
+};
+
+enum class ReviewedSourceStatePostPublicationIssue {
+    DirectorySyncUncertain,
+    PublishedIdentityUncertain,
+    DirectoryCloseFailed,
+    LineageRevalidationFailed,
+};
+
+struct ReviewedSourceStateStorePublishedUncertain {
+    ReviewedSourceState                          state;
+    std::optional<ReviewedSourceStateObservedRecord> observed;
+    ReviewedSourceStatePostPublicationIssue      issue;
+    ReviewedSourceStateStoreFailureKind          failure_kind;
+    std::filesystem::path                        entry_path;
+    std::optional<std::filesystem::path>         leftover_artifact;
+    std::optional<std::error_code>               system_error;
+
+    bool operator==(const ReviewedSourceStateStorePublishedUncertain&) const =
+            default;
 };
 
 using ReviewedSourceStateStoreReadResult = std::variant<
@@ -91,18 +125,28 @@ using ReviewedSourceStateStoreReadResult = std::variant<
 
 using ReviewedSourceStateStorePublishResult = std::variant<
         ReviewedSourceStateStorePublished,
+        ReviewedSourceStateStorePublishedUncertain,
         ReviewedSourceStateStoreFailure>;
 
 // Process XDG_STATE_HOME / HOME only. The resolver itself does not touch
 // the filesystem.
 xdg_paths::ReviewedSourceStatePaths reviewed_source_state_store_paths();
 std::filesystem::path reviewed_source_state_store_directory();
+
+// PackageBase directory under the AUR store. Generation files live inside.
 std::filesystem::path reviewed_source_state_store_entry_path(
         const PackageBaseIdentity& package_base);
 
-// Read-no-create lookup. Missing is returned only when the destination name
-// is absent after a safe directory open, or when the managed directory tree
-// itself is absent.
+// Origin generation is always 1.toml. Later generations bind the predecessor
+// inode so a replacement of that inode cannot be displaced by this writer.
+std::string reviewed_source_state_store_origin_leaf();
+std::string reviewed_source_state_store_successor_leaf(
+        std::uint64_t next_generation,
+        const ReviewedSourceStateRecordIdentity& predecessor);
+
+// Read-no-create lookup. Missing is returned only when the package directory
+// or origin generation is absent after a safe directory open, or when the
+// managed directory tree itself is absent.
 ReviewedSourceStateStoreReadResult read_reviewed_source_state(
         const PackageBaseIdentity& expected_package_base);
 
@@ -120,17 +164,29 @@ enum class ReviewedSourceStateStoreTestFailurePoint {
     Read,
     Write,
     Sync,
+    DirectorySync,
     Rename,
     Lock,
+    PostCommitVerify,
 };
 
 enum class ReviewedSourceStateStoreTestRacePoint {
     BeforePublication,
     AtPublicationBoundary,
+    BeforeCleanup,
+};
+
+struct ReviewedSourceStateStoreTestRaceContext {
+    std::filesystem::path package_directory;
+    std::filesystem::path publication_path;
+    std::string           publication_leaf;
+    std::optional<std::filesystem::path> current_path;
+    std::string           temporary_leaf;
+    std::uint64_t         next_generation = 0;
 };
 
 using ReviewedSourceStateStoreTestRaceHandler = void (*)(
-        const std::filesystem::path& entry_path);
+        const ReviewedSourceStateStoreTestRaceContext& context);
 
 void fail_next_reviewed_source_state_store_operation_for_test(
         ReviewedSourceStateStoreTestFailurePoint failure_point);

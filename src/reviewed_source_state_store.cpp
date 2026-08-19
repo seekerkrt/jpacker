@@ -4,13 +4,17 @@
 
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <cerrno>
 #include <cstring>
+#include <dirent.h>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -35,8 +39,11 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr mode_t REVIEWED_SOURCE_STATE_FILE_MODE = 0600;
+constexpr mode_t REVIEWED_SOURCE_STATE_DIRECTORY_MODE = 0700;
 constexpr std::string_view ENTRY_SUFFIX = ".toml";
 constexpr std::string_view ATOMIC_TEMP_PREFIX = "-.moguet-reviewed-source-";
+constexpr std::string_view ORIGIN_LEAF = "1.toml";
+constexpr std::size_t MAX_PACKAGE_DIRECTORY_ENTRIES = 4096;
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
 std::optional<ReviewedSourceStateStoreTestFailurePoint> g_injected_failure;
@@ -54,13 +61,14 @@ bool consume_injected_failure(
     return true;
 }
 
-void invoke_race(ReviewedSourceStateStoreTestRacePoint point,
-        const fs::path& entry_path) {
+void invoke_race(
+        ReviewedSourceStateStoreTestRacePoint point,
+        const ReviewedSourceStateStoreTestRaceContext& context) {
     if(!g_race_pending || g_race_handler == nullptr || g_race_point != point) {
         return;
     }
     g_race_pending = false;
-    g_race_handler(entry_path);
+    g_race_handler(context);
 }
 #endif
 
@@ -99,6 +107,14 @@ public:
     }
 };
 
+template<typename Fn>
+auto retry_interruptible(Fn&& fn) -> decltype(fn()) {
+    while(true) {
+        const auto result = fn();
+        if(result >= 0 || errno != EINTR) return result;
+    }
+}
+
 void require_aur_known_package_base(const PackageBaseIdentity& package_base) {
     const PackageSourceIdentity& source = package_base.source();
     if(source.kind() != PackageSourceKind::Aur) {
@@ -114,8 +130,8 @@ void require_aur_known_package_base(const PackageBaseIdentity& package_base) {
     }
 }
 
-std::string entry_leaf_name(const PackageBaseIdentity& package_base) {
-    return package_base.package_base() + std::string(ENTRY_SUFFIX);
+std::string package_directory_leaf(const PackageBaseIdentity& package_base) {
+    return package_base.package_base();
 }
 
 std::string atomic_temp_leaf() {
@@ -123,6 +139,73 @@ std::string atomic_temp_leaf() {
             g_atomic_temp_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
     return std::string(ATOMIC_TEMP_PREFIX) + std::to_string(::getpid()) +
            "-" + std::to_string(sequence);
+}
+
+bool parse_unsigned_decimal(
+        std::string_view text, bool allow_zero, std::uintmax_t& value) {
+    if(text.empty() || (!allow_zero && text[0] == '0') ||
+       (text.size() > 1 && text[0] == '0')) {
+        return false;
+    }
+    std::uintmax_t parsed = 0;
+    const auto* first = text.data();
+    const auto* last = first + text.size();
+    const auto [pointer, error] =
+            std::from_chars(first, last, parsed, 10);
+    if(error != std::errc{} || pointer != last) return false;
+    value = parsed;
+    return true;
+}
+
+struct GenerationLeaf {
+    std::uint64_t generation = 0;
+    bool          has_predecessor = false;
+    std::uintmax_t predecessor_device = 0;
+    std::uintmax_t predecessor_inode = 0;
+    std::string   leaf;
+};
+
+std::optional<GenerationLeaf> parse_generation_leaf(std::string_view name) {
+    constexpr std::string_view suffix = ENTRY_SUFFIX;
+    if(name.size() <= suffix.size() ||
+       name.substr(name.size() - suffix.size()) != suffix) {
+        return std::nullopt;
+    }
+    const std::string_view stem = name.substr(0, name.size() - suffix.size());
+    if(stem == "1") {
+        return GenerationLeaf{1, false, 0, 0, std::string(name)};
+    }
+    const auto dot = stem.find('.');
+    if(dot == std::string_view::npos || dot == 0 ||
+       dot + 1 >= stem.size()) {
+        return std::nullopt;
+    }
+    std::uintmax_t generation_value = 0;
+    if(!parse_unsigned_decimal(stem.substr(0, dot), false, generation_value) ||
+       generation_value < 2 ||
+       generation_value > std::numeric_limits<std::uint64_t>::max()) {
+        return std::nullopt;
+    }
+    const std::string_view identity = stem.substr(dot + 1);
+    const auto dash = identity.find('-');
+    if(dash == std::string_view::npos || dash == 0 ||
+       dash + 1 >= identity.size()) {
+        return std::nullopt;
+    }
+    std::uintmax_t device = 0;
+    std::uintmax_t inode = 0;
+    if(!parse_unsigned_decimal(identity.substr(0, dash), true, device) ||
+       !parse_unsigned_decimal(identity.substr(dash + 1), true, inode)) {
+        return std::nullopt;
+    }
+    return GenerationLeaf{
+            static_cast<std::uint64_t>(generation_value), true, device, inode,
+            std::string(name)};
+}
+
+bool is_internal_temp_leaf(std::string_view name) {
+    return name.size() >= ATOMIC_TEMP_PREFIX.size() &&
+           name.substr(0, ATOMIC_TEMP_PREFIX.size()) == ATOMIC_TEMP_PREFIX;
 }
 
 fs::file_type file_type_from_mode(mode_t mode) {
@@ -144,10 +227,11 @@ ReviewedSourceStateStoreFailure store_failure(
         ReviewedSourceStateStoreFailureKind kind,
         const fs::path& entry_path,
         std::optional<std::error_code> system_error = std::nullopt,
-        std::optional<fs::file_type> observed_file_type = std::nullopt) {
+        std::optional<fs::file_type> observed_file_type = std::nullopt,
+        std::optional<fs::path> leftover_artifact = std::nullopt) {
     return ReviewedSourceStateStoreFailure{
             kind, entry_path, std::move(system_error),
-            std::move(observed_file_type)};
+            std::move(observed_file_type), std::move(leftover_artifact)};
 }
 
 ReviewedSourceStateRecordIdentity record_identity_from_status(
@@ -201,6 +285,15 @@ bool matches_record_identity(
     return record_identity_from_status(status) == identity;
 }
 
+bool matches_predecessor_identity(
+        const GenerationLeaf& leaf, const struct stat& predecessor) {
+    return leaf.has_predecessor &&
+           leaf.predecessor_device ==
+                   static_cast<std::uintmax_t>(predecessor.st_dev) &&
+           leaf.predecessor_inode ==
+                   static_cast<std::uintmax_t>(predecessor.st_ino);
+}
+
 std::optional<ReviewedSourceStateStoreFailure> validate_entry_status(
         const struct stat& status,
         const fs::path& entry_path,
@@ -224,6 +317,29 @@ std::optional<ReviewedSourceStateStoreFailure> validate_entry_status(
     if(status.st_nlink != 1) {
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::MultipleHardLinks,
+                entry_path);
+    }
+    return std::nullopt;
+}
+
+std::optional<ReviewedSourceStateStoreFailure> validate_package_directory_status(
+        const struct stat& status,
+        const fs::path& entry_path,
+        std::uintmax_t expected_owner) {
+    const fs::file_type file_type = file_type_from_mode(status.st_mode);
+    if(file_type != fs::file_type::directory) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::UnsupportedFileType,
+                entry_path, std::nullopt, file_type);
+    }
+    if(static_cast<std::uintmax_t>(status.st_uid) != expected_owner) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::OwnershipMismatch,
+                entry_path);
+    }
+    if((status.st_mode & 07777) != REVIEWED_SOURCE_STATE_DIRECTORY_MODE) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::UnsafePermissions,
                 entry_path);
     }
     return std::nullopt;
@@ -295,12 +411,11 @@ std::optional<struct stat> inspect_named_entry(
     }
 #endif
     struct stat status {};
-    int status_result = -1;
-    do {
-        status_result = ::fstatat(
+    const int status_result = retry_interruptible([&] {
+        return ::fstatat(
                 directory_descriptor, leaf_name.c_str(), &status,
                 AT_SYMLINK_NOFOLLOW);
-    } while(status_result != 0 && errno == EINTR);
+    });
     if(status_result != 0) {
         const int status_error = errno;
         if(status_error == ENOENT) return std::nullopt;
@@ -319,13 +434,11 @@ int renameat2_checked(
         const char* new_leaf,
         unsigned int flags) {
 #ifdef SYS_renameat2
-    int rename_result = -1;
-    do {
-        rename_result = static_cast<int>(::syscall(
+    return retry_interruptible([&] {
+        return static_cast<int>(::syscall(
                 SYS_renameat2, old_directory_descriptor, old_leaf,
                 new_directory_descriptor, new_leaf, flags));
-    } while(rename_result != 0 && errno == EINTR);
-    return rename_result;
+    });
 #else
     static_cast<void>(old_directory_descriptor);
     static_cast<void>(old_leaf);
@@ -341,9 +454,21 @@ std::optional<ReviewedSourceStateStoreFailure> close_descriptor_checked(
         OwnedDescriptor& descriptor, const fs::path& entry_path) {
     const int raw_descriptor = descriptor.release();
     if(raw_descriptor < 0) return std::nullopt;
+    // LANDMINE: Linux close(2) releases the fd even when it returns EINTR.
+    // Retrying can close a reused descriptor.
     if(::close(raw_descriptor) != 0) {
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::CloseFailed, entry_path,
+                current_system_error());
+    }
+    return std::nullopt;
+}
+
+std::optional<ReviewedSourceStateStoreFailure> fsync_descriptor(
+        int descriptor, const fs::path& entry_path) {
+    if(retry_interruptible([&] { return ::fsync(descriptor); }) != 0) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::SyncFailed, entry_path,
                 current_system_error());
     }
     return std::nullopt;
@@ -367,23 +492,20 @@ lock_store_directory(
                 std::make_error_code(std::errc::resource_unavailable_try_again));
     }
 #endif
-    int lock_descriptor = -1;
-    do {
-        lock_descriptor = ::openat(
+    const int lock_descriptor = retry_interruptible([&] {
+        return ::openat(
                 directory_descriptor, ".",
                 O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
-    } while(lock_descriptor < 0 && errno == EINTR);
+    });
     if(lock_descriptor < 0) {
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::OpenFailed,
                 directory.path(), current_system_error());
     }
     OwnedDescriptor descriptor(lock_descriptor);
-    int lock_result = -1;
-    do {
-        lock_result = ::flock(descriptor.get(), lock_operation);
-    } while(lock_result != 0 && errno == EINTR);
-    if(lock_result != 0) {
+    if(retry_interruptible([&] {
+           return ::flock(descriptor.get(), lock_operation);
+       }) != 0) {
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::LockFailed,
                 directory.path(), current_system_error());
@@ -400,11 +522,7 @@ std::optional<ReviewedSourceStateStoreFailure> fstat_descriptor(
         int descriptor,
         struct stat& status,
         const fs::path& entry_path) {
-    int status_result = -1;
-    do {
-        status_result = ::fstat(descriptor, &status);
-    } while(status_result != 0 && errno == EINTR);
-    if(status_result != 0) {
+    if(retry_interruptible([&] { return ::fstat(descriptor, &status); }) != 0) {
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::OpenFailed, entry_path,
                 current_system_error());
@@ -427,12 +545,11 @@ open_existing_entry(
                 std::make_error_code(std::errc::permission_denied));
     }
 #endif
-    int raw_descriptor = -1;
-    do {
-        raw_descriptor = ::openat(
+    const int raw_descriptor = retry_interruptible([&] {
+        return ::openat(
                 directory_descriptor, leaf_name.c_str(),
                 O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
-    } while(raw_descriptor < 0 && errno == EINTR);
+    });
     if(raw_descriptor < 0) {
         const int open_error = errno;
         if(open_error == ENOENT || open_error == ELOOP ||
@@ -475,23 +592,38 @@ std::variant<std::string, ReviewedSourceStateStoreFailure> read_all_bytes(
                 std::make_error_code(std::errc::io_error));
     }
 #endif
+    if(expected_status.st_size < 0 ||
+       static_cast<std::uintmax_t>(expected_status.st_size) >
+               reviewed_source_state_store_max_record_bytes) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::RecordTooLarge,
+                entry_path);
+    }
     std::string contents;
     if(expected_status.st_size > 0) {
         contents.reserve(static_cast<std::size_t>(expected_status.st_size));
     }
     std::array<char, 4096> buffer {};
+    std::size_t total = 0;
     while(true) {
-        ssize_t count = -1;
-        do {
-            count = ::read(descriptor, buffer.data(), buffer.size());
-        } while(count < 0 && errno == EINTR);
+        const ssize_t count = retry_interruptible([&] {
+            return ::read(descriptor, buffer.data(), buffer.size());
+        });
         if(count < 0) {
             return store_failure(
                     ReviewedSourceStateStoreFailureKind::ReadFailed,
                     entry_path, current_system_error());
         }
         if(count == 0) break;
-        contents.append(buffer.data(), static_cast<std::size_t>(count));
+        const std::size_t chunk = static_cast<std::size_t>(count);
+        if(total > reviewed_source_state_store_max_record_bytes ||
+           chunk > reviewed_source_state_store_max_record_bytes - total) {
+            return store_failure(
+                    ReviewedSourceStateStoreFailureKind::RecordTooLarge,
+                    entry_path);
+        }
+        contents.append(buffer.data(), chunk);
+        total += chunk;
     }
 
     struct stat after_status {};
@@ -499,6 +631,11 @@ std::variant<std::string, ReviewedSourceStateStoreFailure> read_all_bytes(
         return *failure;
     }
     if(!same_record_state(expected_status, after_status)) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                entry_path);
+    }
+    if(contents.size() != static_cast<std::size_t>(expected_status.st_size)) {
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
                 entry_path);
@@ -520,11 +657,14 @@ ReviewedSourceStateObservation interpret_observed_contents(
 
 ReviewedSourceStateStoreRead make_present_read(
         ReviewedSourceStateObservation observation,
+        std::uint64_t generation,
+        std::string leaf_name,
         const struct stat& status,
         std::string raw_contents) {
     return ReviewedSourceStateStoreRead{
             std::move(observation),
             ReviewedSourceStateObservedRecord{
+                    generation, std::move(leaf_name),
                     record_identity_from_status(status),
                     std::move(raw_contents)}};
 }
@@ -542,11 +682,9 @@ std::optional<ReviewedSourceStateStoreFailure> write_all_bytes(
     }
 #endif
     while(!contents.empty()) {
-        ssize_t count = -1;
-        do {
-            count = ::write(
-                    descriptor, contents.data(), contents.size());
-        } while(count < 0 && errno == EINTR);
+        const ssize_t count = retry_interruptible([&] {
+            return ::write(descriptor, contents.data(), contents.size());
+        });
         if(count <= 0) {
             return store_failure(
                     ReviewedSourceStateStoreFailureKind::WriteFailed,
@@ -559,52 +697,257 @@ std::optional<ReviewedSourceStateStoreFailure> write_all_bytes(
     return std::nullopt;
 }
 
-bool remove_named_if_descriptor_matches(
-        int directory_descriptor,
-        const std::string& leaf_name,
-        int owned_descriptor,
-        const fs::path& entry_path,
-        const std::optional<struct stat>& expected_status,
-        std::optional<ReviewedSourceStateStoreFailure>& failure) {
-    struct stat descriptor_status {};
-    if(auto status_failure =
-               fstat_descriptor(owned_descriptor, descriptor_status, entry_path)) {
-        failure = *status_failure;
-        return false;
-    }
-    if(expected_status.has_value() &&
-       !same_record_state(*expected_status, descriptor_status)) {
-        return false;
-    }
-    struct stat named_status {};
-    int status_result = -1;
-    do {
-        status_result = ::fstatat(
-                directory_descriptor, leaf_name.c_str(), &named_status,
-                AT_SYMLINK_NOFOLLOW);
-    } while(status_result != 0 && errno == EINTR);
-    if(status_result != 0) {
-        if(errno == ENOENT) return false;
-        failure = store_failure(
-                ReviewedSourceStateStoreFailureKind::OpenFailed, entry_path,
+// POLICY: named unlink is never identity-atomic. Leave unpublished temps and
+// orphans in place rather than deleting a replacement we cannot prove.
+
+struct ScannedGeneration {
+    GenerationLeaf leaf;
+    struct stat    status {};
+};
+
+std::variant<std::vector<ScannedGeneration>, ReviewedSourceStateStoreFailure>
+scan_generation_files(
+        int package_directory_descriptor, const fs::path& package_path) {
+    const int scan_descriptor = retry_interruptible(
+            [&] { return ::dup(package_directory_descriptor); });
+    if(scan_descriptor < 0) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::OpenFailed, package_path,
                 current_system_error());
-        return false;
     }
-    if((expected_status.has_value() &&
-        !same_record_state(*expected_status, named_status)) ||
-       !same_record_state(descriptor_status, named_status)) {
-        return false;
+    DIR* stream = ::fdopendir(scan_descriptor);
+    if(stream == nullptr) {
+        const int open_error = errno;
+        static_cast<void>(::close(scan_descriptor));
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::OpenFailed, package_path,
+                std::error_code(open_error, std::generic_category()));
     }
-    if(::unlinkat(directory_descriptor, leaf_name.c_str(), 0) == 0) return true;
-    const int remove_error = errno;
-    if(remove_error == ENOENT || remove_error == ENOTDIR ||
-       remove_error == ELOOP) {
-        return false;
+    std::unique_ptr<DIR, int (*)(DIR*)> directory(stream, &::closedir);
+
+    std::vector<ScannedGeneration> generations;
+    std::size_t inspected = 0;
+    while(true) {
+        errno = 0;
+        const struct dirent* entry = ::readdir(directory.get());
+        if(entry == nullptr) {
+            if(errno != 0) {
+                return store_failure(
+                        ReviewedSourceStateStoreFailureKind::ReadFailed,
+                        package_path, current_system_error());
+            }
+            break;
+        }
+        const std::string_view name(entry->d_name);
+        if(name == "." || name == "..") continue;
+        ++inspected;
+        if(inspected > MAX_PACKAGE_DIRECTORY_ENTRIES) {
+            return store_failure(
+                    ReviewedSourceStateStoreFailureKind::RecordTooLarge,
+                    package_path);
+        }
+        if(is_internal_temp_leaf(name)) continue;
+        const std::optional<GenerationLeaf> parsed = parse_generation_leaf(name);
+        if(!parsed.has_value()) continue;
+
+        std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
+        const std::optional<struct stat> status = inspect_named_entry(
+                package_directory_descriptor, parsed->leaf, package_path,
+                inspect_failure);
+        if(inspect_failure.has_value()) return *inspect_failure;
+        if(!status.has_value()) continue;
+        generations.push_back(ScannedGeneration{*parsed, *status});
     }
-    failure = store_failure(
-            ReviewedSourceStateStoreFailureKind::RenameFailed, entry_path,
-            std::error_code(remove_error, std::generic_category()));
-    return false;
+    return generations;
+}
+
+std::optional<const ScannedGeneration*> find_origin(
+        const std::vector<ScannedGeneration>& generations) {
+    for(const ScannedGeneration& candidate : generations) {
+        if(candidate.leaf.generation == 1 && !candidate.leaf.has_predecessor) {
+            return &candidate;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<const ScannedGeneration*> find_successor(
+        const std::vector<ScannedGeneration>& generations,
+        const ScannedGeneration& predecessor) {
+    const std::uint64_t next = predecessor.leaf.generation + 1;
+    for(const ScannedGeneration& candidate : generations) {
+        if(candidate.leaf.generation == next &&
+           matches_predecessor_identity(candidate.leaf, predecessor.status)) {
+            return &candidate;
+        }
+    }
+    return std::nullopt;
+}
+
+std::variant<std::optional<ScannedGeneration>, ReviewedSourceStateStoreFailure>
+resolve_chain_tip(
+        const std::vector<ScannedGeneration>& generations,
+        const fs::path& package_path,
+        std::uintmax_t expected_owner) {
+    const auto origin = find_origin(generations);
+    if(!origin.has_value()) return std::optional<ScannedGeneration>{};
+    if(auto failure = validate_entry_status(
+               (*origin)->status, package_path / (*origin)->leaf.leaf,
+               expected_owner)) {
+        return *failure;
+    }
+    ScannedGeneration tip = **origin;
+    while(true) {
+        const auto successor = find_successor(generations, tip);
+        if(!successor.has_value()) break;
+        const fs::path successor_path =
+                package_path / (*successor)->leaf.leaf;
+        if(auto failure = validate_entry_status(
+                   (*successor)->status, successor_path, expected_owner)) {
+            return *failure;
+        }
+        tip = **successor;
+    }
+    return std::optional<ScannedGeneration>{tip};
+}
+
+std::variant<OwnedDescriptor, ReviewedSourceStateStoreFailure>
+open_package_directory(
+        int store_directory_descriptor,
+        const std::string& leaf_name,
+        const fs::path& package_path,
+        std::uintmax_t expected_owner,
+        bool create_if_missing,
+        bool& created) {
+    created = false;
+    std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
+    std::optional<struct stat> named_status = inspect_named_entry(
+            store_directory_descriptor, leaf_name, package_path,
+            inspect_failure);
+    if(inspect_failure.has_value()) return *inspect_failure;
+
+    if(!named_status.has_value()) {
+        if(!create_if_missing) {
+            return store_failure(
+                    ReviewedSourceStateStoreFailureKind::OpenFailed,
+                    package_path,
+                    std::make_error_code(std::errc::no_such_file_or_directory));
+        }
+        const int mkdir_result = retry_interruptible([&] {
+            return ::mkdirat(
+                    store_directory_descriptor, leaf_name.c_str(),
+                    REVIEWED_SOURCE_STATE_DIRECTORY_MODE);
+        });
+        if(mkdir_result != 0 && errno != EEXIST) {
+            return store_failure(
+                    ReviewedSourceStateStoreFailureKind::
+                            DirectoryPreparationFailed,
+                    package_path, current_system_error());
+        }
+        created = mkdir_result == 0;
+        inspect_failure.reset();
+        named_status = inspect_named_entry(
+                store_directory_descriptor, leaf_name, package_path,
+                inspect_failure);
+        if(inspect_failure.has_value()) return *inspect_failure;
+        if(!named_status.has_value()) {
+            return store_failure(
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                    package_path);
+        }
+    }
+
+    if(!created) {
+        if(auto failure = validate_package_directory_status(
+                   *named_status, package_path, expected_owner)) {
+            return *failure;
+        }
+    }
+
+    const int raw_descriptor = retry_interruptible([&] {
+        return ::openat(
+                store_directory_descriptor, leaf_name.c_str(),
+                O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    });
+    if(raw_descriptor < 0) {
+        const int open_error = errno;
+        if(open_error == ENOENT || open_error == ELOOP ||
+           open_error == ENOTDIR) {
+            return store_failure(
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                    package_path);
+        }
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::OpenFailed, package_path,
+                std::error_code(open_error, std::generic_category()));
+    }
+    OwnedDescriptor descriptor(raw_descriptor);
+    if(created) {
+        if(retry_interruptible([&] {
+               return ::fchmod(
+                       descriptor.get(), REVIEWED_SOURCE_STATE_DIRECTORY_MODE);
+           }) != 0) {
+            return store_failure(
+                    ReviewedSourceStateStoreFailureKind::
+                            DirectoryPreparationFailed,
+                    package_path, current_system_error());
+        }
+    }
+    struct stat opened_status {};
+    if(auto failure =
+               fstat_descriptor(descriptor.get(), opened_status, package_path)) {
+        return *failure;
+    }
+    if(auto failure = validate_package_directory_status(
+               opened_status, package_path, expected_owner)) {
+        return *failure;
+    }
+    if(!same_filesystem_identity(*named_status, opened_status) && !created) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                package_path);
+    }
+    return descriptor;
+}
+
+std::variant<OwnedDescriptor, ReviewedSourceStateStoreFailure>
+create_temporary_file(
+        int package_directory_descriptor,
+        const fs::path& package_path,
+        std::string& temporary_leaf) {
+    for(std::size_t attempt = 0; attempt < 128; ++attempt) {
+        temporary_leaf = atomic_temp_leaf();
+        const int temporary_descriptor = retry_interruptible([&] {
+            return ::openat(
+                    package_directory_descriptor, temporary_leaf.c_str(),
+                    O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
+                    REVIEWED_SOURCE_STATE_FILE_MODE);
+        });
+        if(temporary_descriptor >= 0) {
+            return OwnedDescriptor(temporary_descriptor);
+        }
+        if(errno != EEXIST) {
+            return store_failure(
+                    ReviewedSourceStateStoreFailureKind::OpenFailed,
+                    package_path, current_system_error());
+        }
+    }
+    return store_failure(
+            ReviewedSourceStateStoreFailureKind::OpenFailed, package_path,
+            std::make_error_code(std::errc::file_exists));
+}
+
+ReviewedSourceStateStorePublishedUncertain published_uncertain(
+        const ReviewedSourceState& state,
+        std::optional<ReviewedSourceStateObservedRecord> observed,
+        ReviewedSourceStatePostPublicationIssue issue,
+        ReviewedSourceStateStoreFailureKind failure_kind,
+        const fs::path& entry_path,
+        std::optional<fs::path> leftover_artifact = std::nullopt,
+        std::optional<std::error_code> system_error = std::nullopt) {
+    return ReviewedSourceStateStorePublishedUncertain{
+            state, std::move(observed), issue, failure_kind, entry_path,
+            std::move(leftover_artifact), std::move(system_error)};
 }
 
 } // namespace
@@ -642,19 +985,32 @@ std::filesystem::path reviewed_source_state_store_entry_path(
         const PackageBaseIdentity& package_base) {
     require_aur_known_package_base(package_base);
     return reviewed_source_state_store_directory() /
-           entry_leaf_name(package_base);
+           package_directory_leaf(package_base);
+}
+
+std::string reviewed_source_state_store_origin_leaf() {
+    return std::string(ORIGIN_LEAF);
+}
+
+std::string reviewed_source_state_store_successor_leaf(
+        std::uint64_t next_generation,
+        const ReviewedSourceStateRecordIdentity& predecessor) {
+    return std::to_string(next_generation) + "." +
+           std::to_string(predecessor.device) + "-" +
+           std::to_string(predecessor.inode) + std::string(ENTRY_SUFFIX);
 }
 
 ReviewedSourceStateStoreReadResult read_reviewed_source_state(
         const PackageBaseIdentity& expected_package_base) {
     require_aur_known_package_base(expected_package_base);
-    const fs::path diagnostic_path(entry_leaf_name(expected_package_base));
+    const std::string package_leaf =
+            package_directory_leaf(expected_package_base);
+    const fs::path diagnostic_path(package_leaf);
     std::optional<ReviewedSourceStateStoreFailure> resolve_failure;
     const xdg_paths::ReviewedSourceStatePaths paths =
             resolve_store_paths(resolve_failure, diagnostic_path);
     if(resolve_failure.has_value()) return *resolve_failure;
-    const fs::path entry_path =
-            paths.directory / entry_leaf_name(expected_package_base);
+    const fs::path package_path = paths.directory / package_leaf;
 
     std::unique_ptr<xdg_directory_safety::PreparedDirectory> directory;
     try {
@@ -667,14 +1023,14 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
         directory = std::make_unique<xdg_directory_safety::PreparedDirectory>(
                 std::move(*opened));
     } catch(const xdg_directory_safety::PreparationError& error) {
-        return map_preparation_error(error, entry_path);
+        return map_preparation_error(error, package_path);
     }
     if(!directory) {
         return ReviewedSourceStateStoreRead{
                 ReviewedSourceStateMissing{}, std::nullopt};
     }
 
-    auto lock = lock_store_directory(*directory, LOCK_SH, entry_path);
+    auto lock = lock_store_directory(*directory, LOCK_SH, package_path);
     if(const auto* failure =
                std::get_if<ReviewedSourceStateStoreFailure>(&lock)) {
         return *failure;
@@ -682,25 +1038,56 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
     OwnedDescriptor lock_descriptor =
             std::get<OwnedDescriptor>(std::move(lock));
 
-    const std::string leaf = entry_leaf_name(expected_package_base);
-    const int directory_descriptor =
+    const int store_directory_descriptor =
             ReviewedSourceStateDirectoryAccess::descriptor(*directory);
     std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
-    const std::optional<struct stat> named_status = inspect_named_entry(
-            directory_descriptor, leaf, entry_path, inspect_failure);
+    const std::optional<struct stat> package_status = inspect_named_entry(
+            store_directory_descriptor, package_leaf, package_path,
+            inspect_failure);
     if(inspect_failure.has_value()) return *inspect_failure;
-    if(!named_status.has_value()) {
+    if(!package_status.has_value()) {
         return ReviewedSourceStateStoreRead{
                 ReviewedSourceStateMissing{}, std::nullopt};
     }
-    if(auto failure = validate_entry_status(
-               *named_status, entry_path, directory->owner())) {
+    if(auto failure = validate_package_directory_status(
+               *package_status, package_path, directory->owner())) {
         return *failure;
     }
 
-    auto opened = open_existing_entry(
-            directory_descriptor, leaf, *named_status, entry_path,
+    bool created = false;
+    auto opened_package = open_package_directory(
+            store_directory_descriptor, package_leaf, package_path,
+            directory->owner(), false, created);
+    if(const auto* failure =
+               std::get_if<ReviewedSourceStateStoreFailure>(&opened_package)) {
+        return *failure;
+    }
+    OwnedDescriptor package_directory =
+            std::get<OwnedDescriptor>(std::move(opened_package));
+
+    auto scanned = scan_generation_files(package_directory.get(), package_path);
+    if(const auto* failure =
+               std::get_if<ReviewedSourceStateStoreFailure>(&scanned)) {
+        return *failure;
+    }
+    auto tip = resolve_chain_tip(
+            std::get<std::vector<ScannedGeneration>>(scanned), package_path,
             directory->owner());
+    if(const auto* failure =
+               std::get_if<ReviewedSourceStateStoreFailure>(&tip)) {
+        return *failure;
+    }
+    const std::optional<ScannedGeneration> current =
+            std::get<std::optional<ScannedGeneration>>(std::move(tip));
+    if(!current.has_value()) {
+        return ReviewedSourceStateStoreRead{
+                ReviewedSourceStateMissing{}, std::nullopt};
+    }
+
+    const fs::path tip_path = package_path / current->leaf.leaf;
+    auto opened = open_existing_entry(
+            package_directory.get(), current->leaf.leaf, current->status,
+            tip_path, directory->owner());
     if(const auto* failure =
                std::get_if<ReviewedSourceStateStoreFailure>(&opened)) {
         return *failure;
@@ -708,27 +1095,31 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
     OwnedDescriptor file_descriptor =
             std::get<OwnedDescriptor>(std::move(opened));
 
-    std::optional<struct stat> revalidated;
     inspect_failure.reset();
-    revalidated = inspect_named_entry(
-            directory_descriptor, leaf, entry_path, inspect_failure);
+    const std::optional<struct stat> revalidated = inspect_named_entry(
+            package_directory.get(), current->leaf.leaf, tip_path,
+            inspect_failure);
     if(inspect_failure.has_value()) return *inspect_failure;
     if(!revalidated.has_value() ||
-       !same_record_state(*named_status, *revalidated)) {
+       !same_record_state(current->status, *revalidated)) {
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                entry_path);
+                tip_path);
     }
 
     auto contents = read_all_bytes(
-            file_descriptor.get(), entry_path, *named_status);
+            file_descriptor.get(), tip_path, current->status);
     if(const auto* failure =
                std::get_if<ReviewedSourceStateStoreFailure>(&contents)) {
         return *failure;
     }
     std::string raw = std::get<std::string>(std::move(contents));
     if(auto close_failure =
-               close_descriptor_checked(file_descriptor, entry_path)) {
+               close_descriptor_checked(file_descriptor, tip_path)) {
+        return *close_failure;
+    }
+    if(auto close_failure =
+               close_descriptor_checked(package_directory, package_path)) {
         return *close_failure;
     }
     if(auto close_failure =
@@ -739,7 +1130,8 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
     const ReviewedSourceStateObservation observation =
             interpret_observed_contents(raw, expected_package_base);
     return make_present_read(
-            std::move(observation), *named_status, std::move(raw));
+            std::move(observation), current->leaf.generation,
+            current->leaf.leaf, current->status, std::move(raw));
 }
 
 ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
@@ -753,66 +1145,93 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
                 "Reviewed source state store cannot publish a non-current schema.");
     }
 
-    const fs::path diagnostic_path(entry_leaf_name(expected_package_base));
+    const std::string package_leaf =
+            package_directory_leaf(expected_package_base);
+    const fs::path diagnostic_path(package_leaf);
     std::optional<ReviewedSourceStateStoreFailure> resolve_failure;
     const xdg_paths::ReviewedSourceStatePaths paths =
             resolve_store_paths(resolve_failure, diagnostic_path);
     if(resolve_failure.has_value()) return *resolve_failure;
-    const fs::path entry_path =
-            paths.directory / entry_leaf_name(expected_package_base);
+    const fs::path package_path = paths.directory / package_leaf;
 
     std::unique_ptr<xdg_directory_safety::PreparedDirectory> directory;
     try {
         directory = std::make_unique<xdg_directory_safety::PreparedDirectory>(
                 xdg_directory_safety::prepare_directory(paths));
     } catch(const xdg_directory_safety::PreparationError& error) {
-        return map_preparation_error(error, entry_path);
+        return map_preparation_error(error, package_path);
     }
 
-    auto lock = lock_store_directory(*directory, LOCK_EX, entry_path);
+    auto lock = lock_store_directory(*directory, LOCK_EX, package_path);
     if(const auto* failure =
                std::get_if<ReviewedSourceStateStoreFailure>(&lock)) {
         return *failure;
     }
-    OwnedDescriptor directory_sync =
-            std::get<OwnedDescriptor>(std::move(lock));
+    OwnedDescriptor store_sync = std::get<OwnedDescriptor>(std::move(lock));
 
-    const std::string leaf = entry_leaf_name(expected_package_base);
-    const int directory_descriptor =
+    const int store_directory_descriptor =
             ReviewedSourceStateDirectoryAccess::descriptor(*directory);
-    std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
-    const std::optional<struct stat> named_status = inspect_named_entry(
-            directory_descriptor, leaf, entry_path, inspect_failure);
-    if(inspect_failure.has_value()) return *inspect_failure;
-
-    if(expected_observed.has_value() != named_status.has_value()) {
-        return store_failure(
-                ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                entry_path);
+    bool created_package_directory = false;
+    auto opened_package = open_package_directory(
+            store_directory_descriptor, package_leaf, package_path,
+            directory->owner(), true, created_package_directory);
+    if(const auto* failure =
+               std::get_if<ReviewedSourceStateStoreFailure>(&opened_package)) {
+        return *failure;
+    }
+    OwnedDescriptor package_directory =
+            std::get<OwnedDescriptor>(std::move(opened_package));
+    if(created_package_directory) {
+        if(auto sync_failure =
+                   fsync_descriptor(store_sync.get(), directory->path())) {
+            return *sync_failure;
+        }
     }
 
-    OwnedDescriptor retained_entry;
+    auto scanned = scan_generation_files(package_directory.get(), package_path);
+    if(const auto* failure =
+               std::get_if<ReviewedSourceStateStoreFailure>(&scanned)) {
+        return *failure;
+    }
+    const std::vector<ScannedGeneration> generations =
+            std::get<std::vector<ScannedGeneration>>(std::move(scanned));
+    auto tip = resolve_chain_tip(
+            generations, package_path, directory->owner());
+    if(const auto* failure =
+               std::get_if<ReviewedSourceStateStoreFailure>(&tip)) {
+        return *failure;
+    }
+    const std::optional<ScannedGeneration> current =
+            std::get<std::optional<ScannedGeneration>>(std::move(tip));
+
+    if(expected_observed.has_value() != current.has_value()) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                package_path);
+    }
+
+    OwnedDescriptor retained_current;
     std::string existing_raw;
-    if(named_status.has_value()) {
-        if(auto failure = validate_entry_status(
-                   *named_status, entry_path, directory->owner())) {
-            return *failure;
-        }
-        if(!matches_record_identity(*named_status, expected_observed->identity)) {
+    if(current.has_value()) {
+        const fs::path current_path = package_path / current->leaf.leaf;
+        if(current->leaf.generation != expected_observed->generation ||
+           current->leaf.leaf != expected_observed->leaf_name ||
+           !matches_record_identity(
+                   current->status, expected_observed->identity)) {
             return store_failure(
                     ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                    entry_path);
+                    current_path);
         }
         auto opened = open_existing_entry(
-                directory_descriptor, leaf, *named_status, entry_path,
-                directory->owner());
+                package_directory.get(), current->leaf.leaf, current->status,
+                current_path, directory->owner());
         if(const auto* failure =
                    std::get_if<ReviewedSourceStateStoreFailure>(&opened)) {
             return *failure;
         }
-        retained_entry = std::get<OwnedDescriptor>(std::move(opened));
+        retained_current = std::get<OwnedDescriptor>(std::move(opened));
         auto contents = read_all_bytes(
-                retained_entry.get(), entry_path, *named_status);
+                retained_current.get(), current_path, current->status);
         if(const auto* failure =
                    std::get_if<ReviewedSourceStateStoreFailure>(&contents)) {
             return *failure;
@@ -821,7 +1240,7 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
         if(existing_raw != expected_observed->raw_contents) {
             return store_failure(
                     ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                    entry_path);
+                    current_path);
         }
         const ReviewedSourceStateDocument decoded =
                 decode_reviewed_source_state(existing_raw);
@@ -830,263 +1249,315 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
             return store_failure(
                     ReviewedSourceStateStoreFailureKind::
                             FutureSchemaOverwriteRefused,
-                    entry_path);
+                    current_path);
         }
     }
 
+    const std::uint64_t next_generation =
+            current.has_value() ? current->leaf.generation + 1 : 1;
+    if(next_generation == 0) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::WriteFailed, package_path);
+    }
+    const std::string publication_leaf =
+            current.has_value()
+                    ? reviewed_source_state_store_successor_leaf(
+                              next_generation, expected_observed->identity)
+                    : reviewed_source_state_store_origin_leaf();
+    const fs::path publication_path = package_path / publication_leaf;
+    const std::optional<fs::path> current_path =
+            current.has_value()
+                    ? std::optional<fs::path>(package_path / current->leaf.leaf)
+                    : std::nullopt;
+
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+    ReviewedSourceStateStoreTestRaceContext race_context{
+            package_path, publication_path, publication_leaf, current_path,
+            {}, next_generation};
     invoke_race(
             ReviewedSourceStateStoreTestRacePoint::BeforePublication,
-            entry_path);
+            race_context);
 #endif
 
     const std::string publication = encode_reviewed_source_state(next_state);
-    OwnedDescriptor temporary;
     std::string temporary_leaf;
-    std::optional<struct stat> cleanup_temporary_status;
-    for(std::size_t attempt = 0; attempt < 128; ++attempt) {
-        temporary_leaf = atomic_temp_leaf();
-        const int temporary_descriptor = ::openat(
-                directory_descriptor, temporary_leaf.c_str(),
-                O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
-                REVIEWED_SOURCE_STATE_FILE_MODE);
-        if(temporary_descriptor >= 0) {
-            temporary = OwnedDescriptor(temporary_descriptor);
-            break;
-        }
-        if(errno != EEXIST) {
-            return store_failure(
-                    ReviewedSourceStateStoreFailureKind::OpenFailed,
-                    entry_path, current_system_error());
-        }
+    auto created_temporary = create_temporary_file(
+            package_directory.get(), package_path, temporary_leaf);
+    if(const auto* failure =
+               std::get_if<ReviewedSourceStateStoreFailure>(&created_temporary)) {
+        return *failure;
     }
-    if(temporary.get() < 0) {
-        return store_failure(
-                ReviewedSourceStateStoreFailureKind::OpenFailed, entry_path,
-                std::make_error_code(std::errc::file_exists));
-    }
+    OwnedDescriptor temporary =
+            std::get<OwnedDescriptor>(std::move(created_temporary));
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+    race_context.temporary_leaf = temporary_leaf;
+#endif
+    const fs::path temporary_path = package_path / temporary_leaf;
 
     bool was_published = false;
-    auto cleanup_temporary = [&]() {
-        if(was_published || temporary_leaf.empty() || temporary.get() < 0) {
-            return;
-        }
-        std::optional<ReviewedSourceStateStoreFailure> cleanup_failure;
-        static_cast<void>(remove_named_if_descriptor_matches(
-                directory_descriptor, temporary_leaf, temporary.get(),
-                entry_path, cleanup_temporary_status, cleanup_failure));
+    auto abandon_temporary = [&]() {
+        if(was_published || temporary_leaf.empty()) return;
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+        invoke_race(
+                ReviewedSourceStateStoreTestRacePoint::BeforeCleanup,
+                race_context);
+#endif
     };
 
-    if(::fchmod(temporary.get(), REVIEWED_SOURCE_STATE_FILE_MODE) != 0) {
-        cleanup_temporary();
+    if(retry_interruptible([&] {
+           return ::fchmod(temporary.get(), REVIEWED_SOURCE_STATE_FILE_MODE);
+       }) != 0) {
+        abandon_temporary();
         return store_failure(
-                ReviewedSourceStateStoreFailureKind::WriteFailed, entry_path,
-                current_system_error());
+                ReviewedSourceStateStoreFailureKind::WriteFailed, package_path,
+                current_system_error(), std::nullopt, temporary_path);
     }
     if(auto write_failure =
-               write_all_bytes(temporary.get(), publication, entry_path)) {
-        cleanup_temporary();
+               write_all_bytes(temporary.get(), publication, package_path)) {
+        abandon_temporary();
+        write_failure->leftover_artifact = temporary_path;
         return *write_failure;
     }
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
     if(consume_injected_failure(
                ReviewedSourceStateStoreTestFailurePoint::Sync)) {
-        cleanup_temporary();
+        abandon_temporary();
         return store_failure(
-                ReviewedSourceStateStoreFailureKind::SyncFailed, entry_path,
-                std::make_error_code(std::errc::io_error));
+                ReviewedSourceStateStoreFailureKind::SyncFailed, package_path,
+                std::make_error_code(std::errc::io_error), std::nullopt,
+                temporary_path);
     }
 #endif
-    if(::fsync(temporary.get()) != 0) {
-        cleanup_temporary();
-        return store_failure(
-                ReviewedSourceStateStoreFailureKind::SyncFailed, entry_path,
-                current_system_error());
+    if(auto sync_failure = fsync_descriptor(temporary.get(), package_path)) {
+        abandon_temporary();
+        sync_failure->leftover_artifact = temporary_path;
+        return *sync_failure;
     }
 
     struct stat temporary_status {};
     if(auto failure =
-               fstat_descriptor(temporary.get(), temporary_status, entry_path)) {
-        cleanup_temporary();
+               fstat_descriptor(temporary.get(), temporary_status, package_path)) {
+        abandon_temporary();
+        failure->leftover_artifact = temporary_path;
         return *failure;
     }
-    cleanup_temporary_status = temporary_status;
     if(auto failure = validate_entry_status(
-               temporary_status, entry_path, directory->owner())) {
-        cleanup_temporary();
+               temporary_status, package_path, directory->owner())) {
+        abandon_temporary();
+        failure->leftover_artifact = temporary_path;
         return *failure;
     }
 
-    inspect_failure.reset();
-    const std::optional<struct stat> pre_rename_status = inspect_named_entry(
-            directory_descriptor, leaf, entry_path, inspect_failure);
-    if(inspect_failure.has_value()) {
-        cleanup_temporary();
-        return *inspect_failure;
-    }
-    if(pre_rename_status.has_value() != named_status.has_value() ||
-       (named_status.has_value() &&
-        !same_record_state(*named_status, *pre_rename_status))) {
-        cleanup_temporary();
-        return store_failure(
-                ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                entry_path);
+    if(current.has_value()) {
+        std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
+        const std::optional<struct stat> pre_commit_status = inspect_named_entry(
+                package_directory.get(), current->leaf.leaf, *current_path,
+                inspect_failure);
+        if(inspect_failure.has_value()) {
+            abandon_temporary();
+            inspect_failure->leftover_artifact = temporary_path;
+            return *inspect_failure;
+        }
+        if(!pre_commit_status.has_value() ||
+           !same_filesystem_identity(current->status, *pre_commit_status)) {
+            abandon_temporary();
+            return store_failure(
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                    *current_path, std::nullopt, std::nullopt, temporary_path);
+        }
+    } else {
+        std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
+        const std::optional<struct stat> origin_status = inspect_named_entry(
+                package_directory.get(), publication_leaf, publication_path,
+                inspect_failure);
+        if(inspect_failure.has_value()) {
+            abandon_temporary();
+            inspect_failure->leftover_artifact = temporary_path;
+            return *inspect_failure;
+        }
+        if(origin_status.has_value()) {
+            abandon_temporary();
+            return store_failure(
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                    publication_path, std::nullopt, std::nullopt,
+                    temporary_path);
+        }
     }
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
     invoke_race(
             ReviewedSourceStateStoreTestRacePoint::AtPublicationBoundary,
-            entry_path);
+            race_context);
     if(consume_injected_failure(
                ReviewedSourceStateStoreTestFailurePoint::Rename)) {
-        cleanup_temporary();
+        abandon_temporary();
         return store_failure(
-                ReviewedSourceStateStoreFailureKind::RenameFailed, entry_path,
-                std::make_error_code(std::errc::io_error));
+                ReviewedSourceStateStoreFailureKind::RenameFailed,
+                publication_path, std::make_error_code(std::errc::io_error),
+                std::nullopt, temporary_path);
     }
 #endif
 
-    struct stat published_descriptor_status {};
-    if(named_status.has_value()) {
-        if(renameat2_checked(
-                   directory_descriptor, temporary_leaf.c_str(),
-                   directory_descriptor, leaf.c_str(),
-                   RENAME_EXCHANGE) != 0) {
-            const int rename_error = errno;
-            cleanup_temporary();
-            if(rename_error == ENOENT || rename_error == ENOTDIR ||
-               rename_error == ELOOP) {
-                return store_failure(
-                        ReviewedSourceStateStoreFailureKind::
-                                ConcurrentReplacement,
-                        entry_path);
-            }
-            return store_failure(
-                    ReviewedSourceStateStoreFailureKind::RenameFailed,
-                    entry_path,
-                    std::error_code(rename_error, std::generic_category()));
-        }
-        was_published = true;
-        if(auto failure = fstat_descriptor(
-                   temporary.get(), published_descriptor_status, entry_path)) {
-            return *failure;
-        }
-        struct stat displaced_status {};
-        if(auto failure = fstat_descriptor(
-                   retained_entry.get(), displaced_status, entry_path)) {
-            return *failure;
-        }
-        struct stat named_published {};
-        int named_result = -1;
-        do {
-            named_result = ::fstatat(
-                    directory_descriptor, leaf.c_str(), &named_published,
-                    AT_SYMLINK_NOFOLLOW);
-        } while(named_result != 0 && errno == EINTR);
-        struct stat named_displaced {};
-        int displaced_result = -1;
-        do {
-            displaced_result = ::fstatat(
-                    directory_descriptor, temporary_leaf.c_str(),
-                    &named_displaced, AT_SYMLINK_NOFOLLOW);
-        } while(displaced_result != 0 && errno == EINTR);
-        const bool publication_matches =
-                named_result == 0 && displaced_result == 0 &&
-                same_record_state(published_descriptor_status, named_published) &&
-                same_record_state(displaced_status, named_displaced) &&
-                same_relocated_record_state(
-                        temporary_status, published_descriptor_status) &&
-                same_relocated_record_state(*named_status, displaced_status);
-        if(!publication_matches) {
-            return store_failure(
-                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                    entry_path);
-        }
-        std::optional<ReviewedSourceStateStoreFailure> remove_failure;
-        if(!remove_named_if_descriptor_matches(
-                   directory_descriptor, temporary_leaf, retained_entry.get(),
-                   entry_path, displaced_status, remove_failure)) {
-            if(remove_failure.has_value()) return *remove_failure;
-            return store_failure(
-                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                    entry_path);
-        }
-        temporary_leaf.clear();
-    } else if(renameat2_checked(
-                      directory_descriptor, temporary_leaf.c_str(),
-                      directory_descriptor, leaf.c_str(),
-                      RENAME_NOREPLACE) != 0) {
+    if(renameat2_checked(
+               package_directory.get(), temporary_leaf.c_str(),
+               package_directory.get(), publication_leaf.c_str(),
+               RENAME_NOREPLACE) != 0) {
         const int rename_error = errno;
-        cleanup_temporary();
+        abandon_temporary();
         if(rename_error == EEXIST || rename_error == ENOTEMPTY ||
            rename_error == ENOENT || rename_error == ENOTDIR ||
            rename_error == ELOOP) {
             return store_failure(
                     ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                    entry_path);
+                    publication_path,
+                    std::error_code(rename_error, std::generic_category()),
+                    std::nullopt, temporary_path);
         }
         return store_failure(
-                ReviewedSourceStateStoreFailureKind::RenameFailed, entry_path,
-                std::error_code(rename_error, std::generic_category()));
-    } else {
-        was_published = true;
-        if(auto failure = fstat_descriptor(
-                   temporary.get(), published_descriptor_status, entry_path)) {
-            return *failure;
-        }
-        struct stat named_published {};
-        int named_result = -1;
-        do {
-            named_result = ::fstatat(
-                    directory_descriptor, leaf.c_str(), &named_published,
-                    AT_SYMLINK_NOFOLLOW);
-        } while(named_result != 0 && errno == EINTR);
-        if(named_result != 0 ||
-           !same_relocated_record_state(
-                   temporary_status, published_descriptor_status) ||
-           !same_record_state(published_descriptor_status, named_published)) {
-            return store_failure(
-                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                    entry_path);
-        }
-        temporary_leaf.clear();
+                ReviewedSourceStateStoreFailureKind::RenameFailed,
+                publication_path,
+                std::error_code(rename_error, std::generic_category()),
+                std::nullopt, temporary_path);
+    }
+    was_published = true;
+
+    struct stat published_descriptor_status {};
+    if(auto failure = fstat_descriptor(
+               temporary.get(), published_descriptor_status, publication_path)) {
+        return published_uncertain(
+                next_state, std::nullopt,
+                ReviewedSourceStatePostPublicationIssue::
+                        PublishedIdentityUncertain,
+                failure->kind, publication_path, std::nullopt,
+                failure->system_error);
     }
 
-    inspect_failure.reset();
-    const std::optional<struct stat> published_named = inspect_named_entry(
-            directory_descriptor, leaf, entry_path, inspect_failure);
-    if(inspect_failure.has_value()) return *inspect_failure;
-    if(!published_named.has_value() ||
-       !same_record_state(published_descriptor_status, *published_named)) {
-        return store_failure(
+    if(current.has_value()) {
+        std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
+        const std::optional<struct stat> predecessor_status =
+                inspect_named_entry(
+                        package_directory.get(), current->leaf.leaf,
+                        *current_path, inspect_failure);
+        if(inspect_failure.has_value() || !predecessor_status.has_value() ||
+           !same_filesystem_identity(current->status, *predecessor_status)) {
+            return store_failure(
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                    publication_path, std::nullopt, std::nullopt,
+                    publication_path);
+        }
+    }
+
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+    if(consume_injected_failure(
+               ReviewedSourceStateStoreTestFailurePoint::PostCommitVerify)) {
+        return published_uncertain(
+                next_state,
+                ReviewedSourceStateObservedRecord{
+                        next_generation, publication_leaf,
+                        record_identity_from_status(published_descriptor_status),
+                        publication},
+                ReviewedSourceStatePostPublicationIssue::
+                        PublishedIdentityUncertain,
                 ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                entry_path);
+                publication_path);
+    }
+#endif
+
+    struct stat named_published {};
+    const int named_result = retry_interruptible([&] {
+        return ::fstatat(
+                package_directory.get(), publication_leaf.c_str(),
+                &named_published, AT_SYMLINK_NOFOLLOW);
+    });
+    if(named_result != 0 ||
+       !same_relocated_record_state(
+               temporary_status, published_descriptor_status) ||
+       !same_record_state(published_descriptor_status, named_published)) {
+        return published_uncertain(
+                next_state,
+                ReviewedSourceStateObservedRecord{
+                        next_generation, publication_leaf,
+                        record_identity_from_status(published_descriptor_status),
+                        publication},
+                ReviewedSourceStatePostPublicationIssue::
+                        PublishedIdentityUncertain,
+                ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                publication_path);
     }
     if(auto failure = validate_entry_status(
-               *published_named, entry_path, directory->owner())) {
-        return *failure;
+               named_published, publication_path, directory->owner())) {
+        return published_uncertain(
+                next_state,
+                ReviewedSourceStateObservedRecord{
+                        next_generation, publication_leaf,
+                        record_identity_from_status(published_descriptor_status),
+                        publication},
+                ReviewedSourceStatePostPublicationIssue::
+                        PublishedIdentityUncertain,
+                failure->kind, publication_path);
     }
-    if(auto close_failure = close_descriptor_checked(temporary, entry_path)) {
-        return *close_failure;
+
+    ReviewedSourceStateObservedRecord published_observed{
+            next_generation, publication_leaf,
+            record_identity_from_status(published_descriptor_status),
+            publication};
+
+    if(auto close_failure =
+               close_descriptor_checked(temporary, publication_path)) {
+        return published_uncertain(
+                next_state, published_observed,
+                ReviewedSourceStatePostPublicationIssue::
+                        PublishedIdentityUncertain,
+                close_failure->kind, publication_path, std::nullopt,
+                close_failure->system_error);
     }
-    if(::fsync(directory_sync.get()) != 0) {
-        return store_failure(
-                ReviewedSourceStateStoreFailureKind::SyncFailed,
-                directory->path(), current_system_error());
+
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+    if(consume_injected_failure(
+               ReviewedSourceStateStoreTestFailurePoint::DirectorySync)) {
+        return published_uncertain(
+                next_state, published_observed,
+                ReviewedSourceStatePostPublicationIssue::DirectorySyncUncertain,
+                ReviewedSourceStateStoreFailureKind::SyncFailed, package_path,
+                std::nullopt, std::make_error_code(std::errc::io_error));
+    }
+#endif
+    if(auto sync_failure =
+               fsync_descriptor(package_directory.get(), package_path)) {
+        return published_uncertain(
+                next_state, published_observed,
+                ReviewedSourceStatePostPublicationIssue::DirectorySyncUncertain,
+                sync_failure->kind, package_path, std::nullopt,
+                sync_failure->system_error);
     }
     if(auto close_failure =
-               close_descriptor_checked(directory_sync, directory->path())) {
-        return *close_failure;
+               close_descriptor_checked(package_directory, package_path)) {
+        return published_uncertain(
+                next_state, published_observed,
+                ReviewedSourceStatePostPublicationIssue::DirectoryCloseFailed,
+                close_failure->kind, package_path, std::nullopt,
+                close_failure->system_error);
+    }
+    if(auto close_failure =
+               close_descriptor_checked(store_sync, directory->path())) {
+        return published_uncertain(
+                next_state, published_observed,
+                ReviewedSourceStatePostPublicationIssue::DirectoryCloseFailed,
+                close_failure->kind, directory->path(), std::nullopt,
+                close_failure->system_error);
     }
     try {
         directory->require_unchanged_identity();
     } catch(const xdg_directory_safety::PreparationError& error) {
-        return map_preparation_error(error, entry_path);
+        const ReviewedSourceStateStoreFailure mapped =
+                map_preparation_error(error, package_path);
+        return published_uncertain(
+                next_state, published_observed,
+                ReviewedSourceStatePostPublicationIssue::
+                        LineageRevalidationFailed,
+                mapped.kind, package_path, std::nullopt, mapped.system_error);
     }
 
     return ReviewedSourceStateStorePublished{
-            next_state,
-            ReviewedSourceStateObservedRecord{
-                    record_identity_from_status(published_descriptor_status),
-                    publication}};
+            next_state, std::move(published_observed)};
 }
