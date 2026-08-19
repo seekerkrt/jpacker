@@ -270,6 +270,28 @@ xdg_paths::SourcePreferencePaths resolve_source_preference_fallback(
             });
 }
 
+xdg_paths::ReviewedSourceStatePaths resolve_reviewed_source_state_explicit(
+        const fs::path& state_home) {
+    return xdg_paths::resolve_reviewed_source_state(
+            xdg_paths::EnvironmentSnapshot{
+                    .xdg_config_home = std::nullopt,
+                    .xdg_state_home = state_home.string(),
+                    .xdg_cache_home = std::nullopt,
+                    .home = std::nullopt,
+            });
+}
+
+xdg_paths::ReviewedSourceStatePaths resolve_reviewed_source_state_fallback(
+        const fs::path& home) {
+    return xdg_paths::resolve_reviewed_source_state(
+            xdg_paths::EnvironmentSnapshot{
+                    .xdg_config_home = std::nullopt,
+                    .xdg_state_home = std::nullopt,
+                    .xdg_cache_home = std::nullopt,
+                    .home = home.string(),
+            });
+}
+
 template <typename Callable>
 safety::PreparationFailure expect_preparation_error(
         Callable callable, xdg_paths::DirectoryKind expected_kind,
@@ -477,6 +499,73 @@ void test_source_preference_home_fallback_is_lazy() {
     expect_private_directory(
             paths.directory,
             "Source preference HOME directory");
+}
+
+void test_reviewed_source_state_explicit_preparation_and_existing_open() {
+    TemporaryDirectory temporary_directory;
+    const fs::path state_home = temporary_directory.path() / "state";
+    create_test_directory(state_home);
+    const xdg_paths::ReviewedSourceStatePaths paths =
+            resolve_reviewed_source_state_explicit(state_home);
+
+    expect(
+            !fs::exists(state_home / "moguet"),
+            "Reviewed-source resolver created the application directory.");
+    ScopedUmask permissive_umask(0000);
+    safety::PreparedDirectory prepared = safety::prepare_directory(paths);
+    expect(
+            prepared.directory_kind() == xdg_paths::DirectoryKind::State,
+            "Reviewed-source preparation returned the wrong directory kind.");
+    expect_path(
+            prepared.path(), paths.directory,
+            "Prepared reviewed-source directory");
+    expect(
+            prepared.created_component_count() == 3,
+            "Explicit reviewed-source creation count mismatch.");
+    expect_private_directory(
+            state_home / "moguet", "Reviewed-source application directory");
+    expect_private_directory(
+            state_home / "moguet" / "reviewed-sources",
+            "Reviewed-source parent directory");
+    expect_private_directory(paths.directory, "Reviewed-source AUR directory");
+
+    std::optional<safety::PreparedDirectory> opened =
+            safety::open_existing_directory(paths);
+    expect(
+            opened.has_value(),
+            "Existing reviewed-source directory was reported absent.");
+    expect(
+            opened->created_component_count() == 0,
+            "Read-only reviewed-source open reported created components.");
+}
+
+void test_reviewed_source_state_read_only_open_is_lazy() {
+    TemporaryDirectory temporary_directory;
+    const fs::path home = temporary_directory.path() / "home";
+    create_test_directory(home);
+    const xdg_paths::ReviewedSourceStatePaths paths =
+            resolve_reviewed_source_state_fallback(home);
+
+    std::optional<safety::PreparedDirectory> missing =
+            safety::open_existing_directory(paths);
+    expect(
+            !missing.has_value(),
+            "Missing reviewed-source directory was reported present.");
+    expect(
+            !fs::exists(home / ".local"),
+            "Read-only reviewed-source open created HOME state.");
+
+    const fs::path state_home = temporary_directory.path() / "state";
+    create_test_directory(state_home);
+    const xdg_paths::ReviewedSourceStatePaths explicit_paths =
+            resolve_reviewed_source_state_explicit(state_home);
+    create_test_directory(state_home / "moguet");
+    expect(
+            !safety::open_existing_directory(explicit_paths).has_value(),
+            "Partial reviewed-source tree was treated as present.");
+    expect(
+            !fs::exists(state_home / "moguet" / "reviewed-sources"),
+            "Read-only open completed a partial reviewed-source tree.");
 }
 
 void test_source_preference_read_only_open_does_not_complete_partial_tree() {
@@ -1610,6 +1699,12 @@ int main() {
         run_case(
                 "source preference explicit preparation and open",
                 test_source_preference_explicit_preparation_and_existing_open);
+        run_case(
+                "reviewed-source explicit preparation and open",
+                test_reviewed_source_state_explicit_preparation_and_existing_open);
+        run_case(
+                "reviewed-source read-only open is lazy",
+                test_reviewed_source_state_read_only_open_is_lazy);
         run_case(
                 "source preference HOME fallback is lazy",
                 test_source_preference_home_fallback_is_lazy);
