@@ -28,6 +28,27 @@
 // contents. Destination occupancy fails with EEXIST (no-replace). Lock is
 // cooperative only and is not CAS authority.
 //
+// Authority model:
+// - The authority is the PackageBase directory reached through a retained XDG
+//   lineage descriptor chain whose named links are reproven at every result
+//   boundary. No separate head, manifest, index, or current pointer exists.
+// - An accepted history is a single complete chain 1..N: exactly one record per
+//   generation, no gap, no extra parsed record, no unrecognized managed entry,
+//   and every successor leaf binding the predecessor record actually read.
+// - The binding is authoritative through the raw-content digest and the
+//   fail-closed single-chain proof. The predecessor device / inode /
+//   status-change time in the leaf are additional discriminators; correctness
+//   never depends on a filesystem giving every mutation a distinct ctime.
+// - A proof is not a momentary observation. Ordinary Loaded, Missing, and
+//   Published are returned only when the complete proof is re-derived and found
+//   identical at the result boundary. Any divergence is a typed unsafe history
+//   or a typed failure, never a flattened success.
+// - The kernel commit point splits the failure taxonomy. Before it, no record
+//   exists, so definite failures are ordinary failures. After it, the record is
+//   permanent, so a store operation never reports an ordinary definite failure;
+//   it reports PublishedUncertain. That is what keeps a record the caller was
+//   told did not happen from later becoming authority, on any filesystem.
+//
 // Crash artifacts:
 // - unpublished O_TMPFILE inodes are unnamed and discarded on close
 // - leftover names with the internal temp prefix are non-authoritative
@@ -112,6 +133,9 @@ enum class ReviewedSourceStatePostPublicationIssue {
     LineageRevalidationFailed,
     PredecessorObservationUncertain,
     PackageDirectoryIdentityUncertain,
+    // The successor was linked, but the complete chain could not be reproven
+    // afterwards. The record exists and may or may not be the authority.
+    AuthoritativeHistoryUncertain,
 };
 
 struct ReviewedSourceStateStorePublishedUncertain {
@@ -209,8 +233,14 @@ enum class ReviewedSourceStateStoreTestFailurePoint {
 enum class ReviewedSourceStateStoreTestRacePoint {
     BeforePublication,
     AtPublicationBoundary,
+    // Between the pre-commit authority reproof and linkat. Mutations injected
+    // here are only observable to the post-commit reproof.
+    AfterAuthorityProof,
     AfterPublication,
     BeforeCleanup,
+    // Lookup: after the chain proof read and closed every ancestor, before the
+    // boundary reproof and the final lineage revalidation.
+    AfterReadAuthorityProof,
 };
 
 struct ReviewedSourceStateStoreTestRaceContext {

@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -159,6 +160,40 @@ FileIdentity file_identity(const fs::path& path) {
     return FileIdentity{
             static_cast<std::uintmax_t>(status.st_dev),
             static_cast<std::uintmax_t>(status.st_ino)};
+}
+
+struct StatusChangeTime {
+    std::intmax_t seconds = 0;
+    std::intmax_t nanoseconds = 0;
+
+    bool operator==(const StatusChangeTime&) const = default;
+};
+
+StatusChangeTime status_change_time(const fs::path& path) {
+    struct stat status {};
+    if(::lstat(path.c_str(), &status) != 0) {
+        throw std::runtime_error("lstat failed for " + path.string());
+    }
+    return StatusChangeTime{
+            static_cast<std::intmax_t>(status.st_ctim.tv_sec),
+            static_cast<std::intmax_t>(status.st_ctim.tv_nsec)};
+}
+
+ReviewedSourceStateRecordIdentity record_identity_of(const fs::path& path) {
+    struct stat status {};
+    if(::lstat(path.c_str(), &status) != 0) {
+        throw std::runtime_error("lstat failed for " + path.string());
+    }
+    return ReviewedSourceStateRecordIdentity{
+            static_cast<std::uintmax_t>(status.st_dev),
+            static_cast<std::uintmax_t>(status.st_ino),
+            static_cast<std::uintmax_t>(status.st_uid),
+            static_cast<std::uintmax_t>(status.st_mode & 07777),
+            static_cast<std::intmax_t>(status.st_size),
+            static_cast<std::intmax_t>(status.st_mtim.tv_sec),
+            static_cast<std::intmax_t>(status.st_mtim.tv_nsec),
+            static_cast<std::intmax_t>(status.st_ctim.tv_sec),
+            static_cast<std::intmax_t>(status.st_ctim.tv_nsec)};
 }
 
 void write_bytes(const fs::path& path, std::string_view contents, mode_t mode) {
@@ -315,12 +350,16 @@ ReplacingCleanupTarget* ReplacingCleanupTarget::instance = nullptr;
 struct ReplacingTemporarySource {
     std::string contents;
     fs::path decoy_path;
+    std::uintmax_t observed_source_device = 0;
+    std::uintmax_t observed_source_inode = 0;
     static ReplacingTemporarySource* instance;
 
     static void handler(const ReviewedSourceStateStoreTestRaceContext& context) {
         require(instance != nullptr, "ReplacingTemporarySource was not armed.");
         require(context.temporary_leaf.empty(),
                 "Descriptor-bound publication still used a named temp source.");
+        instance->observed_source_device = context.source_device;
+        instance->observed_source_inode = context.source_inode;
         instance->decoy_path =
                 context.package_directory / "-.moguet-reviewed-source-foreign";
         write_bytes(instance->decoy_path, instance->contents, 0600);
@@ -333,6 +372,8 @@ ReplacingTemporarySource* ReplacingTemporarySource::instance = nullptr;
 struct RewritingTemporarySourceInPlace {
     std::string contents;
     fs::path decoy_path;
+    std::uintmax_t observed_source_device = 0;
+    std::uintmax_t observed_source_inode = 0;
     static RewritingTemporarySourceInPlace* instance;
 
     static void handler(const ReviewedSourceStateStoreTestRaceContext& context) {
@@ -340,6 +381,8 @@ struct RewritingTemporarySourceInPlace {
                 "RewritingTemporarySourceInPlace was not armed.");
         require(context.temporary_leaf.empty(),
                 "Descriptor-bound publication still used a named temp source.");
+        instance->observed_source_device = context.source_device;
+        instance->observed_source_inode = context.source_inode;
         instance->decoy_path =
                 context.package_directory / "-.moguet-reviewed-source-rewrite";
         write_bytes(instance->decoy_path, std::string(instance->contents.size(), 'x'), 0600);
@@ -361,6 +404,75 @@ struct ReplacingPackageDirectory {
     }
 };
 ReplacingPackageDirectory* ReplacingPackageDirectory::instance = nullptr;
+
+// Mutate an already-proven ancestor at an exact protocol boundary. The path is
+// captured before the operation starts, so no readdir order or timing is
+// involved.
+struct MutatingAncestor {
+    fs::path    target;
+    std::string contents;
+    bool        should_replace_inode = false;
+    static MutatingAncestor* instance;
+
+    static void handler(const ReviewedSourceStateStoreTestRaceContext&) {
+        require(instance != nullptr, "MutatingAncestor was not armed.");
+        if(instance->should_replace_inode) {
+            replace_path_with_new_inode(
+                    instance->target, instance->contents, 0600);
+        } else {
+            rewrite_path_in_place(
+                    instance->target, instance->contents, 0600);
+        }
+    }
+};
+MutatingAncestor* MutatingAncestor::instance = nullptr;
+
+// Add a managed entry to the PackageBase directory after its inventory was
+// already proven: a same-generation fork, a future-owned successor, or an
+// unrecognized managed name.
+struct PlantingManagedLeaf {
+    std::string leaf;
+    std::string contents;
+    static PlantingManagedLeaf* instance;
+
+    static void handler(const ReviewedSourceStateStoreTestRaceContext& context) {
+        require(instance != nullptr, "PlantingManagedLeaf was not armed.");
+        write_bytes(
+                context.package_directory / instance->leaf, instance->contents,
+                0600);
+    }
+};
+PlantingManagedLeaf* PlantingManagedLeaf::instance = nullptr;
+
+// Replace the named .../reviewed-sources/aur/ store directory itself and build
+// a fresh PackageBase directory underneath it, leaving the operation holding a
+// detached S-old / P-old pair.
+struct ReplacingStoreDirectory {
+    std::string package_leaf;
+    std::string marker;
+    fs::path    new_package_directory;
+    static ReplacingStoreDirectory* instance;
+
+    static void handler(const ReviewedSourceStateStoreTestRaceContext&) {
+        require(instance != nullptr, "ReplacingStoreDirectory was not armed.");
+        const fs::path store = reviewed_source_state_store_directory();
+        fs::rename(store, fs::path(store.string() + ".detached"));
+        fs::create_directory(store);
+        if(::chmod(store.c_str(), 0700) != 0) {
+            throw std::runtime_error("Failed to chmod replacement aur store.");
+        }
+        instance->new_package_directory = store / instance->package_leaf;
+        fs::create_directory(instance->new_package_directory);
+        if(::chmod(instance->new_package_directory.c_str(), 0700) != 0) {
+            throw std::runtime_error("Failed to chmod replacement PackageBase.");
+        }
+        write_bytes(
+                instance->new_package_directory /
+                        "-.moguet-reviewed-source-s-new-marker",
+                instance->marker, 0600);
+    }
+};
+ReplacingStoreDirectory* ReplacingStoreDirectory::instance = nullptr;
 #endif
 
 void test_missing_lookup_does_not_create() {
@@ -934,17 +1046,10 @@ void test_publication_boundary_inode_replacement_preserves_b() {
             "A displaced B's replacement bytes from the origin name.");
     require(file_identity(origin).inode != original_identity.inode,
             "Replacement fixture did not install a new inode.");
-    const auto current = read_reviewed_source_state(first.package_base());
-    require(is_unsafe_history(current),
-            "Origin replacement with leftover successor was flattened to Loaded.");
-    const auto& history = require_arm<ReviewedSourceStateStoreUnsafeHistory>(
-            current, "Origin replacement was not typed unsafe history.");
-    require(history.issue ==
-                    ReviewedSourceStateStoreHistoryIssue::
-                            HigherGenerationUnreachable ||
-                    history.issue ==
-                            ReviewedSourceStateStoreHistoryIssue::OrphanSuccessor,
-            "Origin replacement did not report leftover higher generation.");
+    // The pre-commit authority reproof observes the replaced origin before the
+    // kernel commit point, so no successor is linked at all. The store is left
+    // holding exactly B's replacement as a complete single-generation chain
+    // instead of A's orphan successor.
     const std::string successor_leaf =
             reviewed_source_state_store_successor_leaf(
                     2, published.observed.identity,
@@ -952,13 +1057,15 @@ void test_publication_boundary_inode_replacement_preserves_b() {
     const fs::path successor =
             reviewed_source_state_store_entry_path(first.package_base()) /
             successor_leaf;
-    if(fs::exists(successor)) {
-        require(!std::holds_alternative<ReviewedSourceStateStoreRead>(current) ||
-                        !std::holds_alternative<ReviewedSourceStateLoaded>(
-                                std::get<ReviewedSourceStateStoreRead>(current)
-                                        .observation),
-                "Orphan successor became the Loaded tip.");
-    }
+    require(!fs::exists(successor),
+            "Pre-commit refusal still linked an orphan successor.");
+    const auto current = require_arm<ReviewedSourceStateStoreRead>(
+            read_reviewed_source_state(first.package_base()),
+            "Post origin-replacement lookup failed.");
+    require(require_arm<ReviewedSourceStateLoaded>(
+                    current.observation, "B's replacement was not Loaded.")
+                    .state == replacement_state,
+            "A's refused publication displaced B's replacement authority.");
 }
 
 void test_future_schema_boundary_preserves_future_bytes() {
@@ -1154,22 +1261,20 @@ void test_publication_boundary_same_inode_rewrite_preserves_b() {
     require(file_identity(origin).device == original_identity.device &&
                     file_identity(origin).inode == original_identity.inode,
             "Same-inode rewrite fixture did not keep the origin inode.");
-    const auto current = read_reviewed_source_state(first.package_base());
-    require(is_unsafe_history(current),
-            "Same-inode rewrite with leftover successor was flattened to Loaded.");
-    require(require_arm<ReviewedSourceStateStoreUnsafeHistory>(
-                    current, "Same-inode rewrite was not typed unsafe history.")
-                    .highest_generation.has_value(),
-            "Same-inode rewrite hid the leftover higher generation.");
     const fs::path successor =
             reviewed_source_state_store_entry_path(first.package_base()) /
             reviewed_source_state_store_successor_leaf(
                     2, published.observed.identity,
                     published.observed.raw_contents);
-    if(fs::exists(successor)) {
-        require(!std::holds_alternative<ReviewedSourceStateStoreRead>(current),
-                "Orphan successor became the chain tip.");
-    }
+    require(!fs::exists(successor),
+            "Pre-commit refusal still linked an orphan successor.");
+    const auto current = require_arm<ReviewedSourceStateStoreRead>(
+            read_reviewed_source_state(first.package_base()),
+            "Post same-inode rewrite lookup failed.");
+    require(require_arm<ReviewedSourceStateLoaded>(
+                    current.observation, "B's rewrite was not Loaded.")
+                    .state == rewritten_state,
+            "A's refused publication displaced B's rewritten authority.");
 }
 
 void test_publication_boundary_same_inode_future_rewrite_is_not_downgraded() {
@@ -1203,18 +1308,21 @@ void test_publication_boundary_same_inode_future_rewrite_is_not_downgraded() {
     require(file_identity(origin).device == original_identity.device &&
                     file_identity(origin).inode == original_identity.inode,
             "Future in-place rewrite replaced the origin inode.");
-    const auto current = read_reviewed_source_state(first.package_base());
-    require(is_unsafe_history(current),
-            "Future in-place rewrite with leftover successor was flattened.");
     const fs::path successor =
             reviewed_source_state_store_entry_path(first.package_base()) /
             reviewed_source_state_store_successor_leaf(
                     2, published.observed.identity,
                     published.observed.raw_contents);
-    if(fs::exists(successor)) {
-        require(!std::holds_alternative<ReviewedSourceStateStoreRead>(current),
-                "Stale successor hid future-schema origin behind Loaded.");
-    }
+    require(!fs::exists(successor),
+            "Pre-commit refusal linked a successor over future-schema bytes.");
+    const auto current = require_arm<ReviewedSourceStateStoreRead>(
+            read_reviewed_source_state(first.package_base()),
+            "Post future in-place rewrite lookup failed.");
+    require(std::holds_alternative<ReviewedSourceStateUnsupportedFuture>(
+                    current.observation),
+            "Future-schema origin was downgraded after the refused publication.");
+    require(read_bytes(origin) == future,
+            "Refused publication mutated the future-schema origin bytes.");
 }
 
 void test_internal_temp_is_not_authoritative() {
@@ -1319,8 +1427,15 @@ void test_publication_boundary_temp_replacement_does_not_publish_foreign_bytes()
             "example-base",
             "https://aur.archlinux.org/example-base.git",
             std::string(SHA1_B));
-    const std::string foreign = encode_reviewed_source_state(second);
-    ReplacingTemporarySource replacer{foreign, {}};
+    const std::string publication = encode_reviewed_source_state(second);
+    // The decoy must not encode what A intends to publish, otherwise matching
+    // bytes on disk prove nothing about which inode the kernel linked.
+    const std::string foreign = encode_reviewed_source_state(aur_state(
+            "example-base",
+            "https://aur.archlinux.org/example-base.git",
+            std::string(SHA1_C)));
+    require(foreign != publication, "Decoy bytes matched A's publication.");
+    ReplacingTemporarySource replacer{foreign, {}, 0, 0};
     ReplacingTemporarySource::instance = &replacer;
     run_reviewed_source_state_store_race_once_for_test(
             ReviewedSourceStateStoreTestRacePoint::AtPublicationBoundary,
@@ -1333,11 +1448,24 @@ void test_publication_boundary_temp_replacement_does_not_publish_foreign_bytes()
     const fs::path successor =
             reviewed_source_state_store_entry_path(first.package_base()) /
             published_second.observed.leaf_name;
-    require(read_bytes(successor) == encode_reviewed_source_state(second),
+    require(read_bytes(successor) == publication,
             "Named temp replacement published foreign bytes.");
-    require(published_second.observed.identity.device != 0 &&
-                    published_second.observed.identity.inode != 0,
-            "Published token lost inode identity.");
+    require(read_bytes(successor) != foreign,
+            "Published record carried the decoy bytes.");
+    require(replacer.observed_source_inode != 0,
+            "Publication source inode was not exposed to the race hook.");
+    const FileIdentity successor_identity = file_identity(successor);
+    require(successor_identity.device == replacer.observed_source_device &&
+                    successor_identity.inode == replacer.observed_source_inode,
+            "Published name did not resolve to the retained O_TMPFILE inode.");
+    require(published_second.observed.identity.device ==
+                            successor_identity.device &&
+                    published_second.observed.identity.inode ==
+                            successor_identity.inode,
+            "Result token identity disagreed with the on-disk successor.");
+    const FileIdentity decoy_identity = file_identity(replacer.decoy_path);
+    require(decoy_identity.inode != successor_identity.inode,
+            "Publication tracked the replaced decoy inode.");
     require(read_bytes(replacer.decoy_path) == foreign,
             "Foreign decoy was consumed as the publication source.");
     const auto current = require_arm<ReviewedSourceStateStoreRead>(
@@ -1347,6 +1475,12 @@ void test_publication_boundary_temp_replacement_does_not_publish_foreign_bytes()
                     current.observation, "A publication was not Loaded.")
                     .state == second,
             "Descriptor-bound publication did not become authority.");
+    require(current.observed.has_value() &&
+                    current.observed->leaf_name ==
+                            published_second.observed.leaf_name &&
+                    current.observed->identity ==
+                            published_second.observed.identity,
+            "Authoritative lookup disagreed with the published token.");
 }
 
 void test_publication_boundary_temp_same_inode_rewrite_does_not_publish_foreign_bytes() {
@@ -1359,8 +1493,13 @@ void test_publication_boundary_temp_same_inode_rewrite_does_not_publish_foreign_
             "example-base",
             "https://aur.archlinux.org/example-base.git",
             std::string(SHA1_B));
-    const std::string foreign = encode_reviewed_source_state(second);
-    RewritingTemporarySourceInPlace rewriter{foreign, {}};
+    const std::string publication = encode_reviewed_source_state(second);
+    const std::string foreign = encode_reviewed_source_state(aur_state(
+            "example-base",
+            "https://aur.archlinux.org/example-base.git",
+            std::string(SHA1_C)));
+    require(foreign != publication, "Decoy bytes matched A's publication.");
+    RewritingTemporarySourceInPlace rewriter{foreign, {}, 0, 0};
     RewritingTemporarySourceInPlace::instance = &rewriter;
     run_reviewed_source_state_store_race_once_for_test(
             ReviewedSourceStateStoreTestRacePoint::AtPublicationBoundary,
@@ -1373,14 +1512,33 @@ void test_publication_boundary_temp_same_inode_rewrite_does_not_publish_foreign_
     const fs::path successor =
             reviewed_source_state_store_entry_path(first.package_base()) /
             published_second.observed.leaf_name;
-    require(read_bytes(successor) == encode_reviewed_source_state(second),
+    require(read_bytes(successor) == publication,
             "Same-inode temp rewrite published foreign bytes.");
+    require(read_bytes(successor) != foreign,
+            "Published record carried the rewritten decoy bytes.");
+    require(rewriter.observed_source_inode != 0,
+            "Publication source inode was not exposed to the race hook.");
+    const FileIdentity successor_identity = file_identity(successor);
+    require(successor_identity.device == rewriter.observed_source_device &&
+                    successor_identity.inode == rewriter.observed_source_inode,
+            "Published name did not resolve to the retained O_TMPFILE inode.");
+    require(published_second.observed.identity.device ==
+                            successor_identity.device &&
+                    published_second.observed.identity.inode ==
+                            successor_identity.inode,
+            "Result token identity disagreed with the on-disk successor.");
+    require(file_identity(rewriter.decoy_path).inode !=
+                    successor_identity.inode,
+            "Publication inode silently tracked the rewritten decoy.");
     require(read_bytes(rewriter.decoy_path) == foreign,
             "Rewritten decoy was consumed as the publication source.");
-    require(read_bytes(successor) != foreign ||
-                    file_identity(successor).inode !=
-                            file_identity(rewriter.decoy_path).inode,
-            "Publication inode silently tracked the rewritten decoy.");
+    const auto current = require_arm<ReviewedSourceStateStoreRead>(
+            read_reviewed_source_state(first.package_base()),
+            "Post same-inode temp rewrite lookup failed.");
+    require(current.observed.has_value() &&
+                    current.observed->identity ==
+                            published_second.observed.identity,
+            "Authoritative lookup disagreed with the published token.");
 }
 
 void test_ancestor_generation1_contents_rewrite_is_fail_closed() {
@@ -1435,11 +1593,21 @@ void test_ancestor_generation2_inode_replace_is_fail_closed() {
             "Generation 2 inode replacement rewound to ordinary Loaded.");
 }
 
+// LANDMINE: this test must not treat "the ctime changed" as closure evidence.
+// Linux only guarantees that userspace cannot move ctime backwards, not that
+// every mutation lands on a distinct representable value, and O_TMPFILE-capable
+// filesystems without FS_MGTIME can repeat a ctime inside one timestamp
+// quantum. The branch below states which capability the host filesystem
+// actually has. Correctness in the coarse branch comes from
+// test_post_commit_ancestor_mutation_never_disowns_committed_successor: a
+// restored predecessor can only re-match a successor that was committed, and a
+// committed successor is never reported as an ordinary definite failure.
 void test_stale_branch_restore_does_not_reactivate() {
     StoreTestHome home;
     ThreeGenerationFixture fixture = publish_three_generations();
     const std::string original = read_bytes(fixture.origin);
     const FileIdentity original_identity = file_identity(fixture.origin);
+    const StatusChangeTime observed_change = status_change_time(fixture.origin);
     const std::string rewritten = encode_reviewed_source_state(aur_state(
             "example-base",
             "https://aur.archlinux.org/example-base.git",
@@ -1450,12 +1618,73 @@ void test_stale_branch_restore_does_not_reactivate() {
     rewrite_path_in_place(fixture.origin, original, 0600);
     require(file_identity(fixture.origin).inode == original_identity.inode,
             "Restore fixture replaced the origin inode.");
+    require(read_bytes(fixture.origin) == original,
+            "Restore fixture did not restore the origin bytes.");
+    const StatusChangeTime restored_change = status_change_time(fixture.origin);
     const auto restored = read_reviewed_source_state(fixture.first.package_base());
-    require(is_unsafe_history(restored),
-            "Restoring ancestor bytes reactivated the stale branch.");
+    if(restored_change != observed_change) {
+        require(is_unsafe_history(restored),
+                "Distinguishable ctime did not separate the restored record.");
+    } else {
+        // Coarse-timestamp filesystem: the restored record is byte-for-byte and
+        // metadata-for-metadata the record generation 2 was bound to, so the
+        // chain is genuinely complete again and reporting it is honest.
+        const auto& read = require_arm<ReviewedSourceStateStoreRead>(
+                restored, "Restored complete chain was not a store read.");
+        require(read.observed.has_value() && read.observed->generation == 3,
+                "Restored complete chain did not resolve to generation 3.");
+    }
     require(read_bytes(fixture.generation3) ==
                     encode_reviewed_source_state(fixture.third),
             "Restore mutated generation 3.");
+}
+
+// The pure-protocol form of the coarse-ctime restore: a successor whose leaf
+// binds the predecessor's exact current device, inode, status-change time, and
+// content digest. This is byte-for-byte the directory a same-inode X -> Y -> X
+// restore leaves behind on a filesystem that cannot separate the two writes.
+// The store accepts it, which is safe precisely because such a record can only
+// exist if some writer committed it, and the commit taxonomy never disowns a
+// committed record.
+void test_matching_predecessor_binding_is_accepted_and_consistent() {
+    StoreTestHome home;
+    const ReviewedSourceState first = aur_state();
+    const auto published = require_arm<ReviewedSourceStateStorePublished>(
+            publish_reviewed_source_state(first, std::nullopt),
+            "Seed publication failed.");
+    const fs::path package_dir =
+            reviewed_source_state_store_entry_path(first.package_base());
+    const fs::path origin = origin_path(first.package_base());
+    const ReviewedSourceStateRecordIdentity live = record_identity_of(origin);
+    require(live.status_change_time_seconds ==
+                    published.observed.identity.status_change_time_seconds &&
+                    live.status_change_time_nanoseconds ==
+                            published.observed.identity
+                                    .status_change_time_nanoseconds,
+            "Origin status-change time drifted before the fixture was built.");
+    const ReviewedSourceState second = aur_state(
+            "example-base",
+            "https://aur.archlinux.org/example-base.git",
+            std::string(SHA1_B));
+    const std::string planted = encode_reviewed_source_state(second);
+    const std::string leaf = reviewed_source_state_store_successor_leaf(
+            2, live, published.observed.raw_contents);
+    write_bytes(package_dir / leaf, planted, 0600);
+
+    const auto result = require_arm<ReviewedSourceStateStoreRead>(
+            read_reviewed_source_state(first.package_base()),
+            "Matching predecessor binding was not a store read.");
+    require(require_arm<ReviewedSourceStateLoaded>(
+                    result.observation, "Matching binding was not Loaded.")
+                    .state == second,
+            "Matching binding did not resolve to the planted successor.");
+    require(result.observed.has_value() &&
+                    result.observed->generation == 2 &&
+                    result.observed->leaf_name == leaf &&
+                    result.observed->raw_contents == planted,
+            "Accepted tip disagreed with the planted record.");
+    require(read_bytes(origin) == published.observed.raw_contents,
+            "Accepting the matching binding mutated the origin.");
 }
 
 void test_same_generation_fork_is_fail_closed() {
@@ -1634,6 +1863,18 @@ void test_post_commit_predecessor_status_failure_is_published_uncertain() {
             uncertain.observed->leaf_name;
     require(read_bytes(successor) == encode_reviewed_source_state(second),
             "Predecessor status observation failure rolled back the successor.");
+    require(uncertain.observed->identity == record_identity_of(successor),
+            "Predecessor status observation failure token drifted from disk.");
+    const auto lookup = require_arm<ReviewedSourceStateStoreRead>(
+            read_reviewed_source_state(second.package_base()),
+            "Authoritative lookup after predecessor status failure failed.");
+    require(require_arm<ReviewedSourceStateLoaded>(
+                    lookup.observation, "Successor was not Loaded.")
+                    .state == second,
+            "Authoritative lookup disagreed with the uncertain publication.");
+    require(lookup.observed.has_value() &&
+                    lookup.observed->leaf_name == uncertain.observed->leaf_name,
+            "Authoritative lookup resolved a different leaf.");
 }
 
 void test_post_commit_predecessor_read_failure_is_published_uncertain() {
@@ -1665,6 +1906,495 @@ void test_post_commit_predecessor_read_failure_is_published_uncertain() {
             "Predecessor read observation failure removed the successor.");
     require(read_bytes(successor) == encode_reviewed_source_state(second),
             "Predecessor read observation failure mutated the successor bytes.");
+    require(uncertain.observed->identity == record_identity_of(successor),
+            "Predecessor read observation failure token drifted from disk.");
+    const auto lookup = require_arm<ReviewedSourceStateStoreRead>(
+            read_reviewed_source_state(second.package_base()),
+            "Authoritative lookup after predecessor read failure failed.");
+    require(require_arm<ReviewedSourceStateLoaded>(
+                    lookup.observation, "Successor was not Loaded.")
+                    .state == second,
+            "Authoritative lookup disagreed with the uncertain publication.");
+    require(lookup.observed.has_value() &&
+                    lookup.observed->leaf_name == uncertain.observed->leaf_name,
+            "Authoritative lookup resolved a different leaf.");
+}
+
+// M411-S2-008A publish side. A proves 1 -> 2 -> 3 and is publishing generation
+// 4. The mutation lands strictly after that proof, either before the kernel
+// commit point or between the pre-commit reproof and linkat. Neither ordinary
+// arm is allowed, and the result must not contradict the very next lookup.
+void require_publication_ancestor_mutation_is_fail_closed(
+        ReviewedSourceStateStoreTestRacePoint boundary,
+        bool should_mutate_origin,
+        bool should_replace_inode,
+        const std::string& label) {
+    StoreTestHome home;
+    ThreeGenerationFixture fixture = publish_three_generations();
+    const ReviewedSourceState fourth = aur_state(
+            "example-base",
+            "https://aur.archlinux.org/example-base.git",
+            std::string(SHA1_A));
+    const std::string publication = encode_reviewed_source_state(fourth);
+    const std::string successor_leaf =
+            reviewed_source_state_store_successor_leaf(
+                    4, fixture.published_third->observed.identity,
+                    fixture.published_third->observed.raw_contents);
+    const fs::path successor = fixture.package_dir / successor_leaf;
+    const fs::path target =
+            should_mutate_origin ? fixture.origin : fixture.generation2;
+    const std::string mutated = encode_reviewed_source_state(aur_state(
+            "example-base",
+            "https://aur.archlinux.org/example-base.git",
+            std::string(SHA1_C)));
+    const std::string generation3_bytes = read_bytes(fixture.generation3);
+
+    MutatingAncestor mutator{target, mutated, should_replace_inode};
+    MutatingAncestor::instance = &mutator;
+    run_reviewed_source_state_store_race_once_for_test(
+            boundary, &MutatingAncestor::handler);
+    const auto result = publish_reviewed_source_state(
+            fourth, fixture.published_third->observed);
+    MutatingAncestor::instance = nullptr;
+
+    require(!std::holds_alternative<ReviewedSourceStateStorePublished>(result),
+            label + ": ancestor mutation still returned ordinary Published.");
+    if(boundary ==
+       ReviewedSourceStateStoreTestRacePoint::AtPublicationBoundary) {
+        require(std::holds_alternative<ReviewedSourceStateStoreFailure>(
+                        result) ||
+                        std::holds_alternative<
+                                ReviewedSourceStateStoreUnsafeHistory>(result),
+                label + ": pre-commit mutation was not a definite refusal.");
+        require(!fs::exists(successor),
+                label + ": pre-commit refusal linked a successor.");
+    } else {
+        const auto& uncertain =
+                require_arm<ReviewedSourceStateStorePublishedUncertain>(
+                        result, label + ": post-commit mutation was not "
+                                        "PublishedUncertain.");
+        require(uncertain.issue ==
+                        ReviewedSourceStatePostPublicationIssue::
+                                AuthoritativeHistoryUncertain,
+                label + ": post-commit mutation issue drifted.");
+        require(uncertain.observed.has_value() &&
+                        uncertain.observed->leaf_name == successor_leaf,
+                label + ": uncertain publication lost the committed token.");
+        require(uncertain.leftover_artifact.has_value() &&
+                        *uncertain.leftover_artifact == successor,
+                label + ": uncertain publication hid the committed artifact.");
+        require(fs::exists(successor) && read_bytes(successor) == publication,
+                label + ": committed successor was rolled back.");
+        require(uncertain.observed->identity == record_identity_of(successor),
+                label + ": uncertain token drifted from the on-disk record.");
+    }
+
+    require(read_bytes(target) == mutated,
+            label + ": mutation fixture lost the injected bytes.");
+    require(read_bytes(fixture.generation3) == generation3_bytes,
+            label + ": publication mutated generation 3.");
+    require(fs::exists(fixture.generation2) && fs::exists(fixture.generation3),
+            label + ": higher generations were removed.");
+
+    const auto lookup = read_reviewed_source_state(fixture.first.package_base());
+    require(is_unsafe_history(lookup),
+            label + ": immediate lookup contradicted the publication result.");
+    const auto& history = require_arm<ReviewedSourceStateStoreUnsafeHistory>(
+            lookup, label + ": lookup was not typed unsafe history.");
+    require(history.highest_generation.has_value() &&
+                    *history.highest_generation >= 3,
+            label + ": lookup hid the leftover higher generations.");
+}
+
+void test_publication_proof_boundary_ancestor_mutations_are_fail_closed() {
+    struct Case {
+        ReviewedSourceStateStoreTestRacePoint boundary;
+        bool                                  should_mutate_origin;
+        bool                                  should_replace_inode;
+        const char*                           label;
+    };
+    static constexpr ReviewedSourceStateStoreTestRacePoint pre_commit =
+            ReviewedSourceStateStoreTestRacePoint::AtPublicationBoundary;
+    static constexpr ReviewedSourceStateStoreTestRacePoint post_commit =
+            ReviewedSourceStateStoreTestRacePoint::AfterAuthorityProof;
+    const Case cases[] = {
+            {pre_commit, true, false, "pre-commit generation 1 rewrite"},
+            {pre_commit, true, true, "pre-commit generation 1 inode replace"},
+            {pre_commit, false, false, "pre-commit generation 2 rewrite"},
+            {pre_commit, false, true, "pre-commit generation 2 inode replace"},
+            {post_commit, true, false, "post-commit generation 1 rewrite"},
+            {post_commit, true, true, "post-commit generation 1 inode replace"},
+            {post_commit, false, false, "post-commit generation 2 rewrite"},
+            {post_commit, false, true, "post-commit generation 2 inode replace"},
+    };
+    for(const Case& scenario : cases) {
+        require_publication_ancestor_mutation_is_fail_closed(
+                scenario.boundary, scenario.should_mutate_origin,
+                scenario.should_replace_inode, scenario.label);
+    }
+}
+
+// M411-S2-008A lookup side. The ancestors were already read and closed by the
+// chain proof, so only a boundary reproof can notice that generation 1 or 2
+// moved while the tip stayed still.
+void require_lookup_ancestor_mutation_is_fail_closed(
+        bool should_mutate_origin,
+        bool should_replace_inode,
+        const std::string& label) {
+    StoreTestHome home;
+    ThreeGenerationFixture fixture = publish_three_generations();
+    const fs::path target =
+            should_mutate_origin ? fixture.origin : fixture.generation2;
+    const std::string mutated = encode_reviewed_source_state(aur_state(
+            "example-base",
+            "https://aur.archlinux.org/example-base.git",
+            std::string(SHA1_C)));
+    const std::string generation3_bytes = read_bytes(fixture.generation3);
+
+    MutatingAncestor mutator{target, mutated, should_replace_inode};
+    MutatingAncestor::instance = &mutator;
+    run_reviewed_source_state_store_race_once_for_test(
+            ReviewedSourceStateStoreTestRacePoint::AfterReadAuthorityProof,
+            &MutatingAncestor::handler);
+    const auto result = read_reviewed_source_state(fixture.first.package_base());
+    MutatingAncestor::instance = nullptr;
+
+    require(is_unsafe_history(result) ||
+                    std::holds_alternative<ReviewedSourceStateStoreFailure>(
+                            result),
+            label + ": stale chain proof still returned ordinary Loaded.");
+    require(read_bytes(target) == mutated,
+            label + ": mutation fixture lost the injected bytes.");
+    require(read_bytes(fixture.generation3) == generation3_bytes,
+            label + ": lookup mutated generation 3.");
+}
+
+void test_lookup_proof_boundary_ancestor_mutations_are_fail_closed() {
+    require_lookup_ancestor_mutation_is_fail_closed(
+            true, false, "lookup generation 1 rewrite");
+    require_lookup_ancestor_mutation_is_fail_closed(
+            true, true, "lookup generation 1 inode replace");
+    require_lookup_ancestor_mutation_is_fail_closed(
+            false, false, "lookup generation 2 rewrite");
+    require_lookup_ancestor_mutation_is_fail_closed(
+            false, true, "lookup generation 2 inode replace");
+}
+
+// M411-S2-008A inventory side: a fork, a future-owned successor, or an
+// unrecognized managed name appearing after the inventory was proven.
+enum class PlantedEntryKind {
+    SameGenerationFork,
+    FutureSuccessor,
+    UnrecognizedManagedEntry,
+};
+
+struct PlantedEntry {
+    std::string leaf;
+    std::string contents;
+};
+
+PlantedEntry make_planted_entry(
+        PlantedEntryKind kind, const ThreeGenerationFixture& fixture) {
+    switch(kind) {
+    case PlantedEntryKind::SameGenerationFork: {
+        ReviewedSourceStateRecordIdentity other =
+                fixture.published_second->observed.identity;
+        other.inode += 1;
+        return PlantedEntry{
+                reviewed_source_state_store_successor_leaf(
+                        3, other,
+                        fixture.published_second->observed.raw_contents),
+                encode_reviewed_source_state(aur_state(
+                        "example-base",
+                        "https://aur.archlinux.org/example-base.git",
+                        std::string(SHA1_C)))};
+    }
+    case PlantedEntryKind::FutureSuccessor: {
+        ReviewedSourceStateRecordIdentity other =
+                fixture.published_third->observed.identity;
+        other.inode += 7;
+        return PlantedEntry{
+                reviewed_source_state_store_successor_leaf(
+                        4, other,
+                        fixture.published_third->observed.raw_contents),
+                "schema_version = 2\nnext_field = true\n"};
+    }
+    case PlantedEntryKind::UnrecognizedManagedEntry:
+        break;
+    }
+    return PlantedEntry{"unrecognized-managed.toml", "unrecognized = true\n"};
+}
+
+void require_publication_inventory_addition_is_fail_closed(
+        ReviewedSourceStateStoreTestRacePoint boundary,
+        PlantedEntryKind kind,
+        const std::string& label) {
+    StoreTestHome home;
+    ThreeGenerationFixture fixture = publish_three_generations();
+    const PlantedEntry planted = make_planted_entry(kind, fixture);
+    const ReviewedSourceState fourth = aur_state(
+            "example-base",
+            "https://aur.archlinux.org/example-base.git",
+            std::string(SHA1_A));
+    const std::string successor_leaf =
+            reviewed_source_state_store_successor_leaf(
+                    4, fixture.published_third->observed.identity,
+                    fixture.published_third->observed.raw_contents);
+    const fs::path successor = fixture.package_dir / successor_leaf;
+    require(planted.leaf != successor_leaf,
+            label + ": planted entry collided with A's successor leaf.");
+
+    PlantingManagedLeaf planter{planted.leaf, planted.contents};
+    PlantingManagedLeaf::instance = &planter;
+    run_reviewed_source_state_store_race_once_for_test(
+            boundary, &PlantingManagedLeaf::handler);
+    const auto result = publish_reviewed_source_state(
+            fourth, fixture.published_third->observed);
+    PlantingManagedLeaf::instance = nullptr;
+
+    require(!std::holds_alternative<ReviewedSourceStateStorePublished>(result),
+            label + ": inventory addition still returned ordinary Published.");
+    if(boundary ==
+       ReviewedSourceStateStoreTestRacePoint::AtPublicationBoundary) {
+        require(!fs::exists(successor),
+                label + ": pre-commit refusal linked a successor.");
+    } else {
+        const auto& uncertain =
+                require_arm<ReviewedSourceStateStorePublishedUncertain>(
+                        result, label + ": post-commit addition was not "
+                                        "PublishedUncertain.");
+        require(uncertain.issue ==
+                        ReviewedSourceStatePostPublicationIssue::
+                                AuthoritativeHistoryUncertain,
+                label + ": post-commit addition issue drifted.");
+    }
+    require(read_bytes(fixture.package_dir / planted.leaf) == planted.contents,
+            label + ": planted entry bytes were destroyed.");
+    require(read_bytes(fixture.generation3) ==
+                    encode_reviewed_source_state(fixture.third),
+            label + ": publication mutated generation 3.");
+
+    const auto lookup = read_reviewed_source_state(fixture.first.package_base());
+    require(is_unsafe_history(lookup),
+            label + ": lookup flattened the added managed entry.");
+}
+
+void test_publication_proof_boundary_inventory_additions_are_fail_closed() {
+    static constexpr ReviewedSourceStateStoreTestRacePoint pre_commit =
+            ReviewedSourceStateStoreTestRacePoint::AtPublicationBoundary;
+    static constexpr ReviewedSourceStateStoreTestRacePoint post_commit =
+            ReviewedSourceStateStoreTestRacePoint::AfterAuthorityProof;
+    for(const ReviewedSourceStateStoreTestRacePoint boundary :
+        {pre_commit, post_commit}) {
+        const std::string prefix =
+                boundary == pre_commit ? "pre-commit " : "post-commit ";
+        require_publication_inventory_addition_is_fail_closed(
+                boundary, PlantedEntryKind::SameGenerationFork,
+                prefix + "fork");
+        require_publication_inventory_addition_is_fail_closed(
+                boundary, PlantedEntryKind::FutureSuccessor,
+                prefix + "future successor");
+        require_publication_inventory_addition_is_fail_closed(
+                boundary, PlantedEntryKind::UnrecognizedManagedEntry,
+                prefix + "unrecognized managed entry");
+    }
+}
+
+void require_lookup_inventory_addition_is_fail_closed(
+        PlantedEntryKind kind, const std::string& label) {
+    StoreTestHome home;
+    ThreeGenerationFixture fixture = publish_three_generations();
+    const PlantedEntry planted = make_planted_entry(kind, fixture);
+    PlantingManagedLeaf planter{planted.leaf, planted.contents};
+    PlantingManagedLeaf::instance = &planter;
+    run_reviewed_source_state_store_race_once_for_test(
+            ReviewedSourceStateStoreTestRacePoint::AfterReadAuthorityProof,
+            &PlantingManagedLeaf::handler);
+    const auto result = read_reviewed_source_state(fixture.first.package_base());
+    PlantingManagedLeaf::instance = nullptr;
+
+    require(is_unsafe_history(result) ||
+                    std::holds_alternative<ReviewedSourceStateStoreFailure>(
+                            result),
+            label + ": added managed entry still returned ordinary Loaded.");
+    require(read_bytes(fixture.package_dir / planted.leaf) == planted.contents,
+            label + ": planted entry bytes were destroyed.");
+}
+
+void test_lookup_proof_boundary_inventory_additions_are_fail_closed() {
+    require_lookup_inventory_addition_is_fail_closed(
+            PlantedEntryKind::SameGenerationFork, "lookup fork");
+    require_lookup_inventory_addition_is_fail_closed(
+            PlantedEntryKind::FutureSuccessor, "lookup future successor");
+    require_lookup_inventory_addition_is_fail_closed(
+            PlantedEntryKind::UnrecognizedManagedEntry,
+            "lookup unrecognized managed entry");
+}
+
+// M411-S2-008B. The kernel commit point is the taxonomy boundary: once the
+// successor is named, the operation reports PublishedUncertain, never an
+// ordinary definite failure. That is what makes a later restore of the mutated
+// predecessor unable to resurrect a record the caller was told did not happen,
+// without assuming anything about timestamp granularity.
+void test_post_commit_ancestor_mutation_never_disowns_committed_successor() {
+    StoreTestHome home;
+    const ReviewedSourceState first = aur_state();
+    const auto published = require_arm<ReviewedSourceStateStorePublished>(
+            publish_reviewed_source_state(first, std::nullopt),
+            "Seed publication failed.");
+    const fs::path origin = origin_path(first.package_base());
+    const std::string original = read_bytes(origin);
+    const ReviewedSourceState second = aur_state(
+            "example-base",
+            "https://aur.archlinux.org/example-base.git",
+            std::string(SHA1_B));
+    const std::string publication = encode_reviewed_source_state(second);
+    const std::string mutated = encode_reviewed_source_state(aur_state(
+            "example-base",
+            "https://aur.archlinux.org/example-base.git",
+            std::string(SHA1_C)));
+
+    MutatingAncestor mutator{origin, mutated, false};
+    MutatingAncestor::instance = &mutator;
+    run_reviewed_source_state_store_race_once_for_test(
+            ReviewedSourceStateStoreTestRacePoint::AfterAuthorityProof,
+            &MutatingAncestor::handler);
+    const auto result =
+            publish_reviewed_source_state(second, published.observed);
+    MutatingAncestor::instance = nullptr;
+
+    require(!std::holds_alternative<ReviewedSourceStateStoreFailure>(result),
+            "A committed successor was reported as an ordinary definite failure.");
+    const auto& uncertain =
+            require_arm<ReviewedSourceStateStorePublishedUncertain>(
+                    result, "Post-commit predecessor mutation was not uncertain.");
+    require(uncertain.observed.has_value(),
+            "Uncertain publication lost the committed token.");
+    const fs::path successor =
+            reviewed_source_state_store_entry_path(first.package_base()) /
+            uncertain.observed->leaf_name;
+    require(read_bytes(successor) == publication,
+            "Committed successor bytes drifted.");
+    require(is_unsafe_history(read_reviewed_source_state(first.package_base())),
+            "Mutated predecessor was flattened to Loaded.");
+
+    // B restores the predecessor. The successor may become the chain tip again;
+    // that is consistent, because A never claimed the record did not exist.
+    rewrite_path_in_place(origin, original, 0600);
+    const auto restored = read_reviewed_source_state(first.package_base());
+    if(const auto* read =
+               std::get_if<ReviewedSourceStateStoreRead>(&restored)) {
+        require(read->observed.has_value() &&
+                        read->observed->leaf_name ==
+                                uncertain.observed->leaf_name &&
+                        read->observed->raw_contents == publication,
+                "A revived tip did not match the record A reported as uncertain.");
+    } else {
+        require(is_unsafe_history(restored),
+                "Restored store was neither a read nor typed unsafe history.");
+    }
+    require(read_bytes(successor) == publication,
+            "Restore mutated the committed successor.");
+}
+
+// M411-S2-009A. The lookup holds a detached S-old / P-old pair after the named
+// .../reviewed-sources/aur/ directory is replaced. Answering from it would hand
+// the caller a review baseline the current named store does not have.
+void test_lookup_store_directory_replacement_is_not_ordinary_loaded() {
+    StoreTestHome home;
+    const ReviewedSourceState first = aur_state();
+    const auto published = require_arm<ReviewedSourceStateStorePublished>(
+            publish_reviewed_source_state(first, std::nullopt),
+            "Seed publication failed.");
+    const fs::path store = reviewed_source_state_store_directory();
+    const std::string marker = "s-new-untouched\n";
+    ReplacingStoreDirectory replacer{"example-base", marker, {}};
+    ReplacingStoreDirectory::instance = &replacer;
+    run_reviewed_source_state_store_race_once_for_test(
+            ReviewedSourceStateStoreTestRacePoint::AfterReadAuthorityProof,
+            &ReplacingStoreDirectory::handler);
+    const auto result = read_reviewed_source_state(first.package_base());
+    ReplacingStoreDirectory::instance = nullptr;
+
+    const auto& failure = require_arm<ReviewedSourceStateStoreFailure>(
+            result, "Detached aur/ tree answered an ordinary lookup.");
+    require(failure.kind ==
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+            "Store lineage replacement was not ConcurrentReplacement.");
+
+    require(read_bytes(replacer.new_package_directory /
+                       "-.moguet-reviewed-source-s-new-marker") == marker,
+            "Lookup mutated P-new under the replacement store.");
+    require(!contains_leaf(
+                    regular_leaf_names(replacer.new_package_directory),
+                    "1.toml"),
+            "Lookup published the detached record into P-new.");
+    const fs::path detached = fs::path(store.string() + ".detached");
+    require(read_bytes(detached / "example-base" / "1.toml") ==
+                    published.observed.raw_contents,
+            "Detached S-old lost the original record.");
+
+    const auto next = require_arm<ReviewedSourceStateStoreRead>(
+            read_reviewed_source_state(first.package_base()),
+            "Lookup after store replacement failed.");
+    require(std::holds_alternative<ReviewedSourceStateMissing>(
+                    next.observation),
+            "Subsequent lookup did not use the replacement S-new/P-new.");
+}
+
+// M411-S2-010. Generation numbers are untrusted uint64 values from leaf names.
+// UINT64_MAX must not wrap an index and a large sparse value must not become an
+// allocation; both are typed unsafe history.
+void require_extreme_generation_is_typed_unsafe_history(
+        std::uint64_t generation, const std::string& label) {
+    StoreTestHome home;
+    const ReviewedSourceState first = aur_state();
+    const auto published = require_arm<ReviewedSourceStateStorePublished>(
+            publish_reviewed_source_state(first, std::nullopt),
+            "Seed publication failed.");
+    const fs::path package_dir =
+            reviewed_source_state_store_entry_path(first.package_base());
+    const std::string leaf = reviewed_source_state_store_successor_leaf(
+            generation, published.observed.identity,
+            published.observed.raw_contents);
+    const std::string planted = encode_reviewed_source_state(aur_state(
+            "example-base",
+            "https://aur.archlinux.org/example-base.git",
+            std::string(SHA1_B)));
+    write_bytes(package_dir / leaf, planted, 0600);
+
+    const auto lookup = read_reviewed_source_state(first.package_base());
+    const auto& history = require_arm<ReviewedSourceStateStoreUnsafeHistory>(
+            lookup, label + ": extreme generation was not typed unsafe history.");
+    require(history.highest_generation.has_value() &&
+                    *history.highest_generation == generation,
+            label + ": extreme generation was dropped from the report.");
+    require(history.issue == ReviewedSourceStateStoreHistoryIssue::ChainGap,
+            label + ": extreme generation classification drifted.");
+    require(read_bytes(package_dir / leaf) == planted,
+            label + ": extreme generation bytes were destroyed.");
+    require(read_bytes(origin_path(first.package_base())) ==
+                    published.observed.raw_contents,
+            label + ": extreme generation mutated the origin.");
+
+    const auto publish_result = publish_reviewed_source_state(
+            aur_state(
+                    "example-base",
+                    "https://aur.archlinux.org/example-base.git",
+                    std::string(SHA1_C)),
+            published.observed);
+    require(std::holds_alternative<ReviewedSourceStateStoreUnsafeHistory>(
+                    publish_result),
+            label + ": publication did not fail closed on the extreme generation.");
+}
+
+void test_extreme_generations_are_typed_unsafe_history() {
+    require_extreme_generation_is_typed_unsafe_history(
+            std::numeric_limits<std::uint64_t>::max(), "max generation");
+    require_extreme_generation_is_typed_unsafe_history(
+            9007199254740993ULL, "sparse generation");
+    require_extreme_generation_is_typed_unsafe_history(
+            std::numeric_limits<std::uint64_t>::max() - 1, "near-max generation");
 }
 #endif
 
@@ -1703,12 +2433,20 @@ int main() {
         test_ancestor_generation2_contents_rewrite_is_fail_closed();
         test_ancestor_generation2_inode_replace_is_fail_closed();
         test_stale_branch_restore_does_not_reactivate();
+        test_matching_predecessor_binding_is_accepted_and_consistent();
         test_same_generation_fork_is_fail_closed();
         test_future_orphan_successor_is_fail_closed();
         test_package_directory_replacement_before_commit_is_not_published();
         test_package_directory_replacement_after_commit_is_published_uncertain();
         test_post_commit_predecessor_status_failure_is_published_uncertain();
         test_post_commit_predecessor_read_failure_is_published_uncertain();
+        test_publication_proof_boundary_ancestor_mutations_are_fail_closed();
+        test_lookup_proof_boundary_ancestor_mutations_are_fail_closed();
+        test_publication_proof_boundary_inventory_additions_are_fail_closed();
+        test_lookup_proof_boundary_inventory_additions_are_fail_closed();
+        test_post_commit_ancestor_mutation_never_disowns_committed_successor();
+        test_lookup_store_directory_replacement_is_not_ordinary_loaded();
+        test_extreme_generations_are_typed_unsafe_history();
 #endif
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';

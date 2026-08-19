@@ -895,8 +895,35 @@ struct ScannedGeneration {
 
 struct DirectoryInventory {
     std::vector<std::string>     observed_leaves;
+    std::vector<std::string>     managed_leaves;
     std::vector<std::string>     unrecognized_leaves;
     std::vector<ScannedGeneration> parsed;
+};
+
+struct ChainProofRecord {
+    std::string                       leaf;
+    ReviewedSourceStateRecordIdentity identity;
+    std::string                       content_digest;
+
+    bool operator==(const ChainProofRecord&) const = default;
+};
+
+// POLICY(#411): the complete evidence an accepted history rests on. It holds
+// every managed (non-temp) leaf present in the PackageBase directory plus, for
+// each record on the proven chain, the filesystem identity observed and the
+// digest of the bytes actually read.
+//
+// LANDMINE: this must stay a value that can be re-derived and compared. It is
+// the difference between "the chain was single and complete when we started"
+// and "the chain is single and complete at the boundary where we answer". Do
+// not reduce it to the tip: an ancestor rewrite, an ancestor inode
+// replacement, a same-generation fork, or a new future-owned entry appearing
+// after the first proof are exactly the mutations a tip-only recheck misses.
+struct ChainProofToken {
+    std::vector<std::string>      managed_leaves;
+    std::vector<ChainProofRecord> records;
+
+    bool operator==(const ChainProofToken&) const = default;
 };
 
 ReviewedSourceStateStoreUnsafeHistory unsafe_history(
@@ -915,8 +942,16 @@ scan_package_directory(
         int package_directory_descriptor,
         const fs::path& package_path,
         std::uintmax_t expected_owner) {
-    const int scan_descriptor = retry_interruptible(
-            [&] { return ::dup(package_directory_descriptor); });
+    // LANDMINE: dup(2) shares the file description, so a duplicated directory
+    // descriptor also shares the readdir offset. Reusing it leaves the second
+    // sweep of the same operation at EOF and reports an empty PackageBase
+    // directory. Open a fresh description relative to the retained descriptor
+    // instead: same directory inode, independent offset, no path resolution.
+    const int scan_descriptor = retry_interruptible([&] {
+        return ::openat(
+                package_directory_descriptor, ".",
+                O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    });
     if(scan_descriptor < 0) {
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::OpenFailed, package_path,
@@ -958,7 +993,11 @@ scan_package_directory(
     std::sort(inventory.observed_leaves.begin(), inventory.observed_leaves.end());
 
     for(const std::string& name : inventory.observed_leaves) {
+        // POLICY: an operation-private crash temp is non-authoritative residue,
+        // so it stays out of the proof evidence. Everything else in the
+        // PackageBase directory is inventory a single-chain proof must explain.
         if(is_internal_temp_leaf(name)) continue;
+        inventory.managed_leaves.push_back(name);
         const std::optional<GenerationLeaf> parsed = parse_generation_leaf(name);
         if(!parsed.has_value()) {
             inventory.unrecognized_leaves.push_back(name);
@@ -1045,6 +1084,7 @@ bool is_future_schema_contents(const std::string& raw_contents) {
 struct ProvenChain {
     std::optional<ScannedGeneration> tip;
     std::string                      tip_contents;
+    ChainProofToken                  token;
 };
 
 using ChainProof = std::variant<
@@ -1071,7 +1111,9 @@ ChainProof prove_authoritative_chain(
                 package_path, inventory, std::nullopt, highest_generation);
     }
     if(inventory.parsed.empty()) {
-        return ProvenChain{};
+        return ProvenChain{
+                std::nullopt, {},
+                ChainProofToken{inventory.managed_leaves, {}}};
     }
 
     const ScannedGeneration* origin = nullptr;
@@ -1087,24 +1129,47 @@ ChainProof prove_authoritative_chain(
                 package_path, inventory, std::nullopt, highest_generation);
     }
 
-    std::vector<std::vector<const ScannedGeneration*>> by_generation;
-    if(highest_generation.has_value()) {
-        by_generation.resize(static_cast<std::size_t>(*highest_generation + 1));
-    }
+    // LANDMINE: generation numbers come from untrusted leaf names and span the
+    // whole uint64 range. Never size or index a container by a generation
+    // value: UINT64_MAX + 1 wraps to an empty vector and a large sparse value
+    // asks for an allocation the typed failure contract must not depend on.
+    // Order the records that actually exist instead, and answer membership by
+    // search over that ordering.
+    std::vector<const ScannedGeneration*> ordered;
+    ordered.reserve(inventory.parsed.size());
     for(const ScannedGeneration& candidate : inventory.parsed) {
-        by_generation[static_cast<std::size_t>(candidate.leaf.generation)]
-                .push_back(&candidate);
+        ordered.push_back(&candidate);
     }
-    for(std::uint64_t generation = 1;
-        highest_generation.has_value() && generation <= *highest_generation;
-        ++generation) {
-        if(by_generation[static_cast<std::size_t>(generation)].size() > 1) {
+    std::sort(
+            ordered.begin(), ordered.end(),
+            [](const ScannedGeneration* left, const ScannedGeneration* right) {
+                if(left->leaf.generation != right->leaf.generation) {
+                    return left->leaf.generation < right->leaf.generation;
+                }
+                return left->leaf.leaf < right->leaf.leaf;
+            });
+    for(std::size_t index = 1; index < ordered.size(); ++index) {
+        if(ordered[index]->leaf.generation ==
+           ordered[index - 1]->leaf.generation) {
             return unsafe_history(
                     ReviewedSourceStateStoreHistoryIssue::ForkDetected,
                     package_path, inventory, origin->leaf.generation,
                     highest_generation);
         }
     }
+    const auto find_generation =
+            [&ordered](std::uint64_t generation) -> const ScannedGeneration* {
+        const auto position = std::lower_bound(
+                ordered.begin(), ordered.end(), generation,
+                [](const ScannedGeneration* candidate, std::uint64_t value) {
+                    return candidate->leaf.generation < value;
+                });
+        if(position == ordered.end() ||
+           (*position)->leaf.generation != generation) {
+            return nullptr;
+        }
+        return *position;
+    };
 
     std::vector<const ScannedGeneration*> chain;
     std::vector<std::string> chain_contents;
@@ -1130,31 +1195,22 @@ ChainProof prove_authoritative_chain(
            next > *highest_generation) {
             break;
         }
-        const std::vector<const ScannedGeneration*>& next_generation =
-                by_generation[static_cast<std::size_t>(next)];
-        const ScannedGeneration* matched = nullptr;
-        for(const ScannedGeneration* candidate : next_generation) {
-            if(matches_predecessor_binding(
-                       candidate->leaf, current->status, digest)) {
-                matched = candidate;
-                break;
-            }
+        const ScannedGeneration* candidate = find_generation(next);
+        if(candidate == nullptr ||
+           !matches_predecessor_binding(
+                   candidate->leaf, current->status, digest)) {
+            break;
         }
-        if(matched == nullptr) break;
-        current = matched;
+        current = candidate;
     }
 
     std::optional<std::uint64_t> matching_generation = chain.back()->leaf.generation;
-    bool has_hole = false;
-    if(highest_generation.has_value()) {
-        for(std::uint64_t generation = 1; generation <= *highest_generation;
-            ++generation) {
-            if(by_generation[static_cast<std::size_t>(generation)].empty()) {
-                has_hole = true;
-                break;
-            }
-        }
-    }
+    // Forks are already rejected and generation 1 is present, so the parsed set
+    // covers exactly 1..highest when the count equals the highest value. A
+    // UINT64_MAX or otherwise sparse generation makes this a plain gap.
+    const bool has_hole =
+            !highest_generation.has_value() ||
+            *highest_generation != static_cast<std::uint64_t>(ordered.size());
 
     const bool has_extras = chain.size() != inventory.parsed.size();
     bool has_future_owned = false;
@@ -1211,8 +1267,68 @@ ChainProof prove_authoritative_chain(
                 highest_generation);
     }
 
+    ChainProofToken token{inventory.managed_leaves, {}};
+    token.records.reserve(chain.size());
+    for(std::size_t index = 0; index < chain.size(); ++index) {
+        token.records.push_back(ChainProofRecord{
+                chain[index]->leaf.leaf,
+                record_identity_from_status(chain[index]->status),
+                content_digest_hex(chain_contents[index])});
+    }
     return ProvenChain{
-            *chain.back(), std::move(chain_contents.back())};
+            *chain.back(), std::move(chain_contents.back()), std::move(token)};
+}
+
+// Re-derive the whole proof and require it to match the evidence the operation
+// already committed to. An ancestor rewrite, an ancestor inode replacement, a
+// same-generation fork, a gap, or a new managed entry appearing after the first
+// proof surfaces here either as a typed unsafe history or as a token mismatch.
+//
+// WHY a full rescan instead of retaining every proven descriptor: the retained
+// form would still have to re-read each record to detect a same-inode rewrite,
+// so it buys no additional authority while holding one descriptor per
+// generation for the whole operation. Chains here are a handful of records per
+// PackageBase, so reproving costs one extra readdir plus one read per record.
+ChainProof reprove_authoritative_chain(
+        int package_directory_descriptor,
+        const fs::path& package_path,
+        std::uintmax_t expected_owner,
+        const ChainProofToken& expected_token) {
+    auto scanned = scan_package_directory(
+            package_directory_descriptor, package_path, expected_owner);
+    if(const auto* failure =
+               std::get_if<ReviewedSourceStateStoreFailure>(&scanned)) {
+        return *failure;
+    }
+    const DirectoryInventory inventory =
+            std::get<DirectoryInventory>(std::move(scanned));
+    ChainProof proof = prove_authoritative_chain(
+            package_directory_descriptor, inventory, package_path,
+            expected_owner);
+    const ProvenChain* proven = std::get_if<ProvenChain>(&proof);
+    if(proven == nullptr) return proof;
+    if(proven->token != expected_token) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                package_path);
+    }
+    return proof;
+}
+
+// The proof a publication must satisfy after its own successor is linked: the
+// evidence it proved before the commit, plus exactly that one new record.
+ChainProofToken extend_proof_token(
+        const ChainProofToken& token,
+        const std::string& published_leaf,
+        const ReviewedSourceStateRecordIdentity& published_identity,
+        std::string_view published_contents) {
+    ChainProofToken extended = token;
+    extended.managed_leaves.push_back(published_leaf);
+    std::sort(extended.managed_leaves.begin(), extended.managed_leaves.end());
+    extended.records.push_back(ChainProofRecord{
+            published_leaf, published_identity,
+            content_digest_hex(published_contents)});
+    return extended;
 }
 
 std::variant<OwnedDescriptor, ReviewedSourceStateStoreFailure>
@@ -1513,6 +1629,22 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
                 ReviewedSourceStateMissing{}, std::nullopt};
     }
 
+    // POLICY(#411): a lookup answer is authoritative only if the retained XDG
+    // lineage still denotes the named store when we answer. Publication already
+    // reproves this after its commit; lookup must be symmetric, otherwise an
+    // aur/ tree renamed away mid-lookup is reported as the current baseline
+    // while the replacement tree holds the real state.
+    const auto final_lineage_failure =
+            [&directory, &package_path]()
+            -> std::optional<ReviewedSourceStateStoreFailure> {
+        try {
+            directory->require_unchanged_identity();
+        } catch(const xdg_directory_safety::PreparationError& error) {
+            return map_preparation_error(error, package_path);
+        }
+        return std::nullopt;
+    };
+
     auto lock = lock_store_directory(*directory, LOCK_SH, package_path);
     if(const auto* failure =
                std::get_if<ReviewedSourceStateStoreFailure>(&lock)) {
@@ -1529,6 +1661,7 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
             inspect_failure);
     if(inspect_failure.has_value()) return *inspect_failure;
     if(!package_status.has_value()) {
+        if(auto lineage = final_lineage_failure()) return *lineage;
         return ReviewedSourceStateStoreRead{
                 ReviewedSourceStateMissing{}, std::nullopt};
     }
@@ -1565,15 +1698,53 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
     }
     if(const auto* unsafe =
                std::get_if<ReviewedSourceStateStoreUnsafeHistory>(&proof)) {
+        if(auto lineage = final_lineage_failure()) return *lineage;
         return *unsafe;
     }
     const ProvenChain proven = std::get<ProvenChain>(std::move(proof));
+
+    // The boundary reproof for every present / Missing lookup arm. Ancestors
+    // were read and closed above, so nothing but this re-derivation can tell
+    // that generation 1 or 2 changed while the tip stayed still. On success it
+    // hands back the freshly proven chain, which is the observation the answer
+    // is built from.
+    std::optional<ProvenChain> boundary_proven;
+    const auto boundary_reproof =
+            [&]() -> std::optional<ReviewedSourceStateStoreReadResult> {
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+        ReviewedSourceStateStoreTestRaceContext read_context;
+        read_context.package_directory = package_path;
+        invoke_race(
+                ReviewedSourceStateStoreTestRacePoint::AfterReadAuthorityProof,
+                read_context);
+#endif
+        ChainProof reproof = reprove_authoritative_chain(
+                package_directory.get(), package_path, directory->owner(),
+                proven.token);
+        if(const auto* failure =
+                   std::get_if<ReviewedSourceStateStoreFailure>(&reproof)) {
+            return ReviewedSourceStateStoreReadResult{*failure};
+        }
+        if(const auto* unsafe =
+                   std::get_if<ReviewedSourceStateStoreUnsafeHistory>(
+                           &reproof)) {
+            if(auto lineage = final_lineage_failure()) {
+                return ReviewedSourceStateStoreReadResult{*lineage};
+            }
+            return ReviewedSourceStateStoreReadResult{*unsafe};
+        }
+        boundary_proven = std::get<ProvenChain>(std::move(reproof));
+        return std::nullopt;
+    };
+
     if(!proven.tip.has_value()) {
+        if(auto diverged = boundary_reproof()) return *diverged;
         if(auto revalidate = revalidate_named_package_directory(
                    store_directory_descriptor, package_directory.get(),
                    package_leaf, package_path, directory->owner())) {
             return *revalidate;
         }
+        if(auto lineage = final_lineage_failure()) return *lineage;
         return ReviewedSourceStateStoreRead{
                 ReviewedSourceStateMissing{}, std::nullopt};
     }
@@ -1613,6 +1784,15 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
                close_descriptor_checked(file_descriptor, tip_path)) {
         return *close_failure;
     }
+    if(auto diverged = boundary_reproof()) return *diverged;
+    // The token matched, so the tip record and its digest are unchanged.
+    // Comparing the bytes we are about to return against the bytes the boundary
+    // proof actually read states that implication instead of inferring it.
+    if(!boundary_proven.has_value() || raw != boundary_proven->tip_contents) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                tip_path);
+    }
     if(auto revalidate = revalidate_named_package_directory(
                store_directory_descriptor, package_directory.get(),
                package_leaf, package_path, directory->owner())) {
@@ -1626,6 +1806,7 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
                close_descriptor_checked(lock_descriptor, directory->path())) {
         return *close_failure;
     }
+    if(auto lineage = final_lineage_failure()) return *lineage;
 
     const ReviewedSourceStateObservation observation =
             interpret_observed_contents(raw, expected_package_base);
@@ -1913,7 +2094,35 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
         abandon_unpublished();
         return *revalidate;
     }
+
+    // POLICY(#411): the authority proof must still hold at the commit point,
+    // not merely when the operation started. Rechecking only the current tip
+    // lets an ancestor rewrite, an ancestor inode replacement, a fork, or a new
+    // future-owned entry slip between the proof and linkat, which would make
+    // this call return ordinary Published for a state the very next lookup
+    // reports as unsafe history. Failing here is still pre-commit: the
+    // successor inode is unnamed, so no artifact survives the refusal.
+    {
+        ChainProof reproof = reprove_authoritative_chain(
+                package_directory.get(), package_path, directory->owner(),
+                proven.token);
+        if(const auto* failure =
+                   std::get_if<ReviewedSourceStateStoreFailure>(&reproof)) {
+            abandon_unpublished();
+            return *failure;
+        }
+        if(const auto* unsafe =
+                   std::get_if<ReviewedSourceStateStoreUnsafeHistory>(
+                           &reproof)) {
+            abandon_unpublished();
+            return *unsafe;
+        }
+    }
+
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+    invoke_race(
+            ReviewedSourceStateStoreTestRacePoint::AfterAuthorityProof,
+            race_context);
     if(consume_injected_failure(
                ReviewedSourceStateStoreTestFailurePoint::Rename)) {
         abandon_unpublished();
@@ -1964,6 +2173,29 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
                 failure->system_error);
     }
 
+    // LANDMINE: past this point the record is named and permanent. The store
+    // cannot unlink it, so it must never report an ordinary definite failure
+    // here. Disowning a committed successor is exactly how a record the caller
+    // was told did not happen can later be picked up as the chain tip once the
+    // predecessor is restored, and no filesystem timestamp granularity makes
+    // that observable. Every post-commit divergence is PublishedUncertain,
+    // which says "the record exists and its authority is unproven".
+    const ReviewedSourceStateObservedRecord committed_observed{
+            next_generation, publication_leaf,
+            record_identity_from_status(published_descriptor_status),
+            publication};
+    const auto history_uncertain =
+            [&](ReviewedSourceStateStoreFailureKind failure_kind,
+                std::optional<std::error_code> system_error)
+            -> ReviewedSourceStateStorePublishedUncertain {
+        return published_uncertain(
+                next_state, committed_observed,
+                ReviewedSourceStatePostPublicationIssue::
+                        AuthoritativeHistoryUncertain,
+                failure_kind, publication_path, publication_path,
+                std::move(system_error));
+    };
+
     if(current.has_value()) {
         std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
@@ -1995,10 +2227,9 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
         if(!predecessor_status.has_value() ||
            !matches_predecessor_identity(
                    *predecessor_status, expected_observed->identity)) {
-            return store_failure(
+            return history_uncertain(
                     ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                    publication_path, std::nullopt, std::nullopt,
-                    publication_path);
+                    std::nullopt);
         }
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
         auto post_commit_contents = reread_descriptor_contents(
@@ -2012,12 +2243,7 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
         if(const auto* failure = std::get_if<ReviewedSourceStateStoreFailure>(
                    &post_commit_contents)) {
             return published_uncertain(
-                    next_state,
-                    ReviewedSourceStateObservedRecord{
-                            next_generation, publication_leaf,
-                            record_identity_from_status(
-                                    published_descriptor_status),
-                            publication},
+                    next_state, committed_observed,
                     ReviewedSourceStatePostPublicationIssue::
                             PredecessorObservationUncertain,
                     failure->kind, publication_path, publication_path,
@@ -2025,10 +2251,9 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
         }
         if(std::get<std::string>(post_commit_contents) !=
            expected_observed->raw_contents) {
-            return store_failure(
+            return history_uncertain(
                     ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                    publication_path, std::nullopt, std::nullopt,
-                    publication_path);
+                    std::nullopt);
         }
     }
 
@@ -2036,11 +2261,7 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
     if(consume_injected_failure(
                ReviewedSourceStateStoreTestFailurePoint::PostCommitVerify)) {
         return published_uncertain(
-                next_state,
-                ReviewedSourceStateObservedRecord{
-                        next_generation, publication_leaf,
-                        record_identity_from_status(published_descriptor_status),
-                        publication},
+                next_state, committed_observed,
                 ReviewedSourceStatePostPublicationIssue::
                         PublishedIdentityUncertain,
                 ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
@@ -2059,11 +2280,7 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
                temporary_status, published_descriptor_status) ||
        !same_record_state(published_descriptor_status, named_published)) {
         return published_uncertain(
-                next_state,
-                ReviewedSourceStateObservedRecord{
-                        next_generation, publication_leaf,
-                        record_identity_from_status(published_descriptor_status),
-                        publication},
+                next_state, committed_observed,
                 ReviewedSourceStatePostPublicationIssue::
                         PublishedIdentityUncertain,
                 ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
@@ -2072,20 +2289,38 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
     if(auto failure = validate_entry_status(
                named_published, publication_path, directory->owner())) {
         return published_uncertain(
-                next_state,
-                ReviewedSourceStateObservedRecord{
-                        next_generation, publication_leaf,
-                        record_identity_from_status(published_descriptor_status),
-                        publication},
+                next_state, committed_observed,
                 ReviewedSourceStatePostPublicationIssue::
                         PublishedIdentityUncertain,
                 failure->kind, publication_path);
     }
 
-    ReviewedSourceStateObservedRecord published_observed{
-            next_generation, publication_leaf,
-            record_identity_from_status(published_descriptor_status),
-            publication};
+    // The named successor matches the retained inode, so the proof the caller
+    // is about to be handed is "the chain proved before the commit, plus
+    // exactly this record". Anything else on disk now - a mutated ancestor, a
+    // fork, a higher generation, a new managed entry - means ordinary Published
+    // would contradict the very next lookup.
+    {
+        ChainProof reproof = reprove_authoritative_chain(
+                package_directory.get(), package_path, directory->owner(),
+                extend_proof_token(
+                        proven.token, publication_leaf,
+                        record_identity_from_status(
+                                published_descriptor_status),
+                        publication));
+        if(const auto* failure =
+                   std::get_if<ReviewedSourceStateStoreFailure>(&reproof)) {
+            return history_uncertain(failure->kind, failure->system_error);
+        }
+        if(std::holds_alternative<ReviewedSourceStateStoreUnsafeHistory>(
+                   reproof)) {
+            return history_uncertain(
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                    std::nullopt);
+        }
+    }
+
+    ReviewedSourceStateObservedRecord published_observed = committed_observed;
 
     if(auto close_failure =
                close_descriptor_checked(temporary, publication_path)) {
