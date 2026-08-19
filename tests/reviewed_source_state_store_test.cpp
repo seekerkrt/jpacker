@@ -187,6 +187,17 @@ void replace_path_with_new_inode(
     fs::rename(sibling, destination);
 }
 
+// Rewrite destination through the same directory entry. The test requires the
+// inode to stay put so the fixture is a contents-only mutation.
+void rewrite_path_in_place(
+        const fs::path& destination, std::string_view contents, mode_t mode) {
+    const FileIdentity before = file_identity(destination);
+    write_bytes(destination, contents, mode);
+    const FileIdentity after = file_identity(destination);
+    require(before.device == after.device && before.inode == after.inode,
+            "In-place rewrite fixture replaced the inode.");
+}
+
 std::string read_bytes(const fs::path& path) {
     std::ifstream input(path, std::ios::binary);
     return std::string(
@@ -241,6 +252,20 @@ struct ReplacingCurrent {
     }
 };
 ReplacingCurrent* ReplacingCurrent::instance = nullptr;
+
+struct RewritingCurrentInPlace {
+    std::string contents;
+    static RewritingCurrentInPlace* instance;
+
+    static void handler(const ReviewedSourceStateStoreTestRaceContext& context) {
+        require(instance != nullptr, "RewritingCurrentInPlace was not armed.");
+        require(context.current_path.has_value(),
+                "Same-inode rewrite race had no current generation.");
+        rewrite_path_in_place(
+                *context.current_path, instance->contents, 0600);
+    }
+};
+RewritingCurrentInPlace* RewritingCurrentInPlace::instance = nullptr;
 
 struct ReplacingCleanupTarget {
     std::string contents;
@@ -311,6 +336,24 @@ void test_first_create_is_0600_and_round_trips() {
                     read_back.observed->raw_contents ==
                             published.observed.raw_contents,
             "Read-back lost observed raw bytes.");
+}
+
+void test_successor_leaf_binds_inode_and_content_digest() {
+    ReviewedSourceStateRecordIdentity identity;
+    identity.device = 8;
+    identity.inode = 16;
+    const std::string empty_leaf = reviewed_source_state_store_successor_leaf(
+            2, identity, "");
+    require(empty_leaf ==
+                    "2.8-16.e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.toml",
+            "Successor leaf did not bind SHA-256 of empty predecessor contents.");
+    const std::string abc_leaf = reviewed_source_state_store_successor_leaf(
+            3, identity, "abc");
+    require(abc_leaf ==
+                    "3.8-16.ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad.toml",
+            "Successor leaf did not bind SHA-256 of predecessor contents.");
+    require(empty_leaf != abc_leaf,
+            "Content digest was omitted from generation identity.");
 }
 
 void test_cas_replacement_and_stale_writer() {
@@ -736,7 +779,8 @@ void test_publication_boundary_occupancy_preserves_replacement() {
     const fs::path successor =
             package_dir /
             reviewed_source_state_store_successor_leaf(
-                    2, published.observed.identity);
+                    2, published.observed.identity,
+                    published.observed.raw_contents);
     require(read_bytes(successor) == replacement,
             "A displaced B from the successor name.");
     require(read_bytes(origin_path(first.package_base())) ==
@@ -797,7 +841,8 @@ void test_publication_boundary_inode_replacement_preserves_b() {
             "Destination replacement did not remain authoritative.");
     const std::string successor_leaf =
             reviewed_source_state_store_successor_leaf(
-                    2, published.observed.identity);
+                    2, published.observed.identity,
+                    published.observed.raw_contents);
     const fs::path successor =
             reviewed_source_state_store_entry_path(first.package_base()) /
             successor_leaf;
@@ -840,7 +885,8 @@ void test_future_schema_boundary_preserves_future_bytes() {
     const fs::path successor =
             reviewed_source_state_store_entry_path(first.package_base()) /
             reviewed_source_state_store_successor_leaf(
-                    2, published.observed.identity);
+                    2, published.observed.identity,
+                    published.observed.raw_contents);
     require(read_bytes(successor) == future,
             "Future schema bytes were displaced from the successor name.");
     const auto current = require_arm<ReviewedSourceStateStoreRead>(
@@ -952,7 +998,8 @@ void test_loaded_loaded_boundary_preserves_newer_writer() {
     const fs::path successor =
             reviewed_source_state_store_entry_path(first.package_base()) /
             reviewed_source_state_store_successor_leaf(
-                    2, published.observed.identity);
+                    2, published.observed.identity,
+                    published.observed.raw_contents);
     require(read_bytes(successor) == newer_bytes,
             "Stale writer displaced the newer successor.");
     const auto current = require_arm<ReviewedSourceStateStoreRead>(
@@ -962,6 +1009,117 @@ void test_loaded_loaded_boundary_preserves_newer_writer() {
                     current.observation, "Newer writer was not Loaded.")
                     .state == newer,
             "Stale writer rolled back the newer reviewed state.");
+}
+
+void test_publication_boundary_same_inode_rewrite_preserves_b() {
+    StoreTestHome home;
+    const ReviewedSourceState first = aur_state();
+    const auto published = require_arm<ReviewedSourceStateStorePublished>(
+            publish_reviewed_source_state(first, std::nullopt),
+            "Seed publication failed.");
+    const fs::path origin = origin_path(first.package_base());
+    const FileIdentity original_identity = file_identity(origin);
+    const ReviewedSourceState rewritten_state = aur_state(
+            "example-base",
+            "https://aur.archlinux.org/example-base.git",
+            std::string(SHA1_B));
+    const std::string rewritten = encode_reviewed_source_state(rewritten_state);
+    RewritingCurrentInPlace rewriter{rewritten};
+    RewritingCurrentInPlace::instance = &rewriter;
+    run_reviewed_source_state_store_race_once_for_test(
+            ReviewedSourceStateStoreTestRacePoint::AtPublicationBoundary,
+            &RewritingCurrentInPlace::handler);
+    const auto conflict = require_arm<ReviewedSourceStateStoreFailure>(
+            publish_reviewed_source_state(
+                    aur_state(
+                            "example-base",
+                            "https://aur.archlinux.org/example-base.git",
+                            std::string(SHA1_C)),
+                    published.observed),
+            "Same-inode rewrite was not a conflict.");
+    RewritingCurrentInPlace::instance = nullptr;
+    require(conflict.kind ==
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+            "Same-inode rewrite was not ConcurrentReplacement.");
+    require(read_bytes(origin) == rewritten,
+            "A displaced B's rewritten bytes from the origin name.");
+    require(file_identity(origin).device == original_identity.device &&
+                    file_identity(origin).inode == original_identity.inode,
+            "Same-inode rewrite fixture did not keep the origin inode.");
+    const auto current = require_arm<ReviewedSourceStateStoreRead>(
+            read_reviewed_source_state(first.package_base()),
+            "Post same-inode rewrite read failed.");
+    require(require_arm<ReviewedSourceStateLoaded>(
+                    current.observation, "Rewritten contents were not Loaded.")
+                    .state == rewritten_state,
+            "A's stale successor became authoritative.");
+    require(current.observed.has_value() &&
+                    current.observed->raw_contents == rewritten,
+            "Lookup lost B's rewritten raw bytes.");
+    const fs::path successor =
+            reviewed_source_state_store_entry_path(first.package_base()) /
+            reviewed_source_state_store_successor_leaf(
+                    2, published.observed.identity,
+                    published.observed.raw_contents);
+    if(fs::exists(successor)) {
+        require(require_arm<ReviewedSourceStateLoaded>(
+                        current.observation,
+                        "Orphan successor after same-inode rewrite.")
+                        .state == rewritten_state,
+                "Orphan successor became the chain tip.");
+    }
+}
+
+void test_publication_boundary_same_inode_future_rewrite_is_not_downgraded() {
+    StoreTestHome home;
+    const ReviewedSourceState first = aur_state();
+    const auto published = require_arm<ReviewedSourceStateStorePublished>(
+            publish_reviewed_source_state(first, std::nullopt),
+            "Seed publication failed.");
+    const fs::path origin = origin_path(first.package_base());
+    const FileIdentity original_identity = file_identity(origin);
+    const std::string future = "schema_version = 2\nnext_field = true\n";
+    RewritingCurrentInPlace rewriter{future};
+    RewritingCurrentInPlace::instance = &rewriter;
+    run_reviewed_source_state_store_race_once_for_test(
+            ReviewedSourceStateStoreTestRacePoint::AtPublicationBoundary,
+            &RewritingCurrentInPlace::handler);
+    const auto conflict = require_arm<ReviewedSourceStateStoreFailure>(
+            publish_reviewed_source_state(
+                    aur_state(
+                            "example-base",
+                            "https://aur.archlinux.org/example-base.git",
+                            std::string(SHA1_B)),
+                    published.observed),
+            "Same-inode future rewrite was not a conflict.");
+    RewritingCurrentInPlace::instance = nullptr;
+    require(conflict.kind ==
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+            "Same-inode future rewrite was not ConcurrentReplacement.");
+    require(read_bytes(origin) == future,
+            "A displaced future-schema bytes from the origin name.");
+    require(file_identity(origin).device == original_identity.device &&
+                    file_identity(origin).inode == original_identity.inode,
+            "Future in-place rewrite replaced the origin inode.");
+    const auto current = require_arm<ReviewedSourceStateStoreRead>(
+            read_reviewed_source_state(first.package_base()),
+            "Post same-inode future rewrite read failed.");
+    require(std::holds_alternative<ReviewedSourceStateUnsupportedFuture>(
+                    current.observation),
+            "Future in-place rewrite was downgraded by a stale successor.");
+    require(current.observed.has_value() &&
+                    current.observed->raw_contents == future,
+            "Future in-place rewrite lost raw bytes.");
+    const fs::path successor =
+            reviewed_source_state_store_entry_path(first.package_base()) /
+            reviewed_source_state_store_successor_leaf(
+                    2, published.observed.identity,
+                    published.observed.raw_contents);
+    if(fs::exists(successor)) {
+        require(std::holds_alternative<ReviewedSourceStateUnsupportedFuture>(
+                        current.observation),
+                "Stale successor downgraded future-schema origin.");
+    }
 }
 
 void test_internal_temp_is_not_authoritative() {
@@ -995,6 +1153,7 @@ int main() {
     try {
         test_missing_lookup_does_not_create();
         test_first_create_is_0600_and_round_trips();
+        test_successor_leaf_binds_inode_and_content_digest();
         test_cas_replacement_and_stale_writer();
         test_missing_create_is_no_replace();
         test_raw_byte_guard_is_not_reencoded();
@@ -1013,6 +1172,8 @@ int main() {
         test_cleanup_replacement_is_not_deleted();
         test_missing_missing_boundary_preserves_first_writer();
         test_loaded_loaded_boundary_preserves_newer_writer();
+        test_publication_boundary_same_inode_rewrite_preserves_b();
+        test_publication_boundary_same_inode_future_rewrite_is_not_downgraded();
         test_internal_temp_is_not_authoritative();
 #endif
     } catch(const std::exception& error) {

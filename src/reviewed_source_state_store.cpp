@@ -6,7 +6,7 @@
 #include <atomic>
 #include <charconv>
 #include <cerrno>
-#include <cstring>
+#include <cstdint>
 #include <dirent.h>
 #include <exception>
 #include <limits>
@@ -157,11 +157,151 @@ bool parse_unsigned_decimal(
     return true;
 }
 
+constexpr std::size_t CONTENT_DIGEST_HEX_SIZE = 64;
+
+bool is_lowercase_hex(std::string_view text) {
+    for(const char ch : text) {
+        if((ch < '0' || ch > '9') && (ch < 'a' || ch > 'f')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::uint32_t sha256_rotr(std::uint32_t value, unsigned bits) {
+    return (value >> bits) | (value << (32U - bits));
+}
+
+void sha256_process_block(
+        std::array<std::uint32_t, 8>& hash, const std::uint8_t* block) {
+    static constexpr std::array<std::uint32_t, 64> round_constants = {
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b,
+            0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01,
+            0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7,
+            0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+            0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152,
+            0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+            0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+            0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819,
+            0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08,
+            0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f,
+            0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+            0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+    std::array<std::uint32_t, 64> schedule {};
+    for(std::size_t i = 0; i < 16; ++i) {
+        schedule[i] =
+                (static_cast<std::uint32_t>(block[i * 4]) << 24) |
+                (static_cast<std::uint32_t>(block[i * 4 + 1]) << 16) |
+                (static_cast<std::uint32_t>(block[i * 4 + 2]) << 8) |
+                static_cast<std::uint32_t>(block[i * 4 + 3]);
+    }
+    for(std::size_t i = 16; i < 64; ++i) {
+        const std::uint32_t s0 = sha256_rotr(schedule[i - 15], 7) ^
+                                 sha256_rotr(schedule[i - 15], 18) ^
+                                 (schedule[i - 15] >> 3);
+        const std::uint32_t s1 = sha256_rotr(schedule[i - 2], 17) ^
+                                 sha256_rotr(schedule[i - 2], 19) ^
+                                 (schedule[i - 2] >> 10);
+        schedule[i] = schedule[i - 16] + s0 + schedule[i - 7] + s1;
+    }
+    std::uint32_t a = hash[0];
+    std::uint32_t b = hash[1];
+    std::uint32_t c = hash[2];
+    std::uint32_t d = hash[3];
+    std::uint32_t e = hash[4];
+    std::uint32_t f = hash[5];
+    std::uint32_t g = hash[6];
+    std::uint32_t h = hash[7];
+    for(std::size_t i = 0; i < 64; ++i) {
+        const std::uint32_t s1 = sha256_rotr(e, 6) ^ sha256_rotr(e, 11) ^
+                                 sha256_rotr(e, 25);
+        const std::uint32_t ch =
+                (e & f) ^ (static_cast<std::uint32_t>(~e) & g);
+        const std::uint32_t temp1 =
+                h + s1 + ch + round_constants[i] + schedule[i];
+        const std::uint32_t s0 = sha256_rotr(a, 2) ^ sha256_rotr(a, 13) ^
+                                 sha256_rotr(a, 22);
+        const std::uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+        const std::uint32_t temp2 = s0 + maj;
+        h = g;
+        g = f;
+        f = e;
+        e = d + temp1;
+        d = c;
+        c = b;
+        b = a;
+        a = temp1 + temp2;
+    }
+    hash[0] += a;
+    hash[1] += b;
+    hash[2] += c;
+    hash[3] += d;
+    hash[4] += e;
+    hash[5] += f;
+    hash[6] += g;
+    hash[7] += h;
+}
+
+// POLICY: generation identity must bind observed raw contents, not only
+// predecessor dev/ino. Linux has no rename-if-contents-match primitive, so
+// the digest lives in the successor leaf and lookup refuses a stale
+// successor after a same-inode rewrite.
+std::string content_digest_hex(std::string_view data) {
+    std::array<std::uint32_t, 8> hash = {
+            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+            0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    std::array<std::uint8_t, 64> block {};
+    std::size_t block_used = 0;
+    const auto consume_byte = [&](std::uint8_t byte) {
+        block[block_used] = byte;
+        ++block_used;
+        if(block_used == block.size()) {
+            sha256_process_block(hash, block.data());
+            block_used = 0;
+        }
+    };
+    for(const char ch : data) {
+        consume_byte(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
+    }
+    const std::uint64_t bit_length =
+            static_cast<std::uint64_t>(data.size()) * 8U;
+    consume_byte(0x80);
+    if(block_used > 56) {
+        while(block_used != 0) {
+            consume_byte(0);
+        }
+    }
+    while(block_used < 56) {
+        consume_byte(0);
+    }
+    for(std::size_t i = 0; i < 8; ++i) {
+        consume_byte(static_cast<std::uint8_t>(
+                bit_length >> (8U * (7U - i))));
+    }
+
+    std::string hex(CONTENT_DIGEST_HEX_SIZE, '0');
+    constexpr char digits[] = "0123456789abcdef";
+    for(std::size_t i = 0; i < hash.size(); ++i) {
+        const std::uint32_t word = hash[i];
+        hex[i * 8] = digits[(word >> 28) & 0x0fU];
+        hex[i * 8 + 1] = digits[(word >> 24) & 0x0fU];
+        hex[i * 8 + 2] = digits[(word >> 20) & 0x0fU];
+        hex[i * 8 + 3] = digits[(word >> 16) & 0x0fU];
+        hex[i * 8 + 4] = digits[(word >> 12) & 0x0fU];
+        hex[i * 8 + 5] = digits[(word >> 8) & 0x0fU];
+        hex[i * 8 + 6] = digits[(word >> 4) & 0x0fU];
+        hex[i * 8 + 7] = digits[word & 0x0fU];
+    }
+    return hex;
+}
+
 struct GenerationLeaf {
     std::uint64_t generation = 0;
     bool          has_predecessor = false;
     std::uintmax_t predecessor_device = 0;
     std::uintmax_t predecessor_inode = 0;
+    std::string   predecessor_digest;
     std::string   leaf;
 };
 
@@ -173,20 +313,33 @@ std::optional<GenerationLeaf> parse_generation_leaf(std::string_view name) {
     }
     const std::string_view stem = name.substr(0, name.size() - suffix.size());
     if(stem == "1") {
-        return GenerationLeaf{1, false, 0, 0, std::string(name)};
+        return GenerationLeaf{1, false, 0, 0, {}, std::string(name)};
     }
-    const auto dot = stem.find('.');
-    if(dot == std::string_view::npos || dot == 0 ||
-       dot + 1 >= stem.size()) {
+    const auto first_dot = stem.find('.');
+    if(first_dot == std::string_view::npos || first_dot == 0 ||
+       first_dot + 1 >= stem.size()) {
+        return std::nullopt;
+    }
+    const auto second_dot = stem.find('.', first_dot + 1);
+    if(second_dot == std::string_view::npos ||
+       second_dot + 1 >= stem.size() ||
+       stem.find('.', second_dot + 1) != std::string_view::npos) {
         return std::nullopt;
     }
     std::uintmax_t generation_value = 0;
-    if(!parse_unsigned_decimal(stem.substr(0, dot), false, generation_value) ||
+    if(!parse_unsigned_decimal(
+               stem.substr(0, first_dot), false, generation_value) ||
        generation_value < 2 ||
        generation_value > std::numeric_limits<std::uint64_t>::max()) {
         return std::nullopt;
     }
-    const std::string_view identity = stem.substr(dot + 1);
+    const std::string_view identity =
+            stem.substr(first_dot + 1, second_dot - first_dot - 1);
+    const std::string_view digest = stem.substr(second_dot + 1);
+    if(digest.size() != CONTENT_DIGEST_HEX_SIZE ||
+       !is_lowercase_hex(digest)) {
+        return std::nullopt;
+    }
     const auto dash = identity.find('-');
     if(dash == std::string_view::npos || dash == 0 ||
        dash + 1 >= identity.size()) {
@@ -200,7 +353,7 @@ std::optional<GenerationLeaf> parse_generation_leaf(std::string_view name) {
     }
     return GenerationLeaf{
             static_cast<std::uint64_t>(generation_value), true, device, inode,
-            std::string(name)};
+            std::string(digest), std::string(name)};
 }
 
 bool is_internal_temp_leaf(std::string_view name) {
@@ -285,13 +438,16 @@ bool matches_record_identity(
     return record_identity_from_status(status) == identity;
 }
 
-bool matches_predecessor_identity(
-        const GenerationLeaf& leaf, const struct stat& predecessor) {
+bool matches_predecessor_binding(
+        const GenerationLeaf& leaf,
+        const struct stat& predecessor,
+        std::string_view predecessor_digest) {
     return leaf.has_predecessor &&
            leaf.predecessor_device ==
                    static_cast<std::uintmax_t>(predecessor.st_dev) &&
            leaf.predecessor_inode ==
-                   static_cast<std::uintmax_t>(predecessor.st_ino);
+                   static_cast<std::uintmax_t>(predecessor.st_ino) &&
+           leaf.predecessor_digest == predecessor_digest;
 }
 
 std::optional<ReviewedSourceStateStoreFailure> validate_entry_status(
@@ -773,19 +929,64 @@ std::optional<const ScannedGeneration*> find_origin(
 
 std::optional<const ScannedGeneration*> find_successor(
         const std::vector<ScannedGeneration>& generations,
-        const ScannedGeneration& predecessor) {
+        const ScannedGeneration& predecessor,
+        std::string_view predecessor_digest) {
     const std::uint64_t next = predecessor.leaf.generation + 1;
     for(const ScannedGeneration& candidate : generations) {
         if(candidate.leaf.generation == next &&
-           matches_predecessor_identity(candidate.leaf, predecessor.status)) {
+           matches_predecessor_binding(
+                   candidate.leaf, predecessor.status, predecessor_digest)) {
             return &candidate;
         }
     }
     return std::nullopt;
 }
 
+std::variant<std::string, ReviewedSourceStateStoreFailure>
+read_generation_contents(
+        int package_directory_descriptor,
+        const ScannedGeneration& generation,
+        const fs::path& package_path,
+        std::uintmax_t expected_owner) {
+    const fs::path path = package_path / generation.leaf.leaf;
+    auto opened = open_existing_entry(
+            package_directory_descriptor, generation.leaf.leaf,
+            generation.status, path, expected_owner);
+    if(const auto* failure =
+               std::get_if<ReviewedSourceStateStoreFailure>(&opened)) {
+        return *failure;
+    }
+    OwnedDescriptor descriptor = std::get<OwnedDescriptor>(std::move(opened));
+    auto contents = read_all_bytes(descriptor.get(), path, generation.status);
+    if(const auto* failure =
+               std::get_if<ReviewedSourceStateStoreFailure>(&contents)) {
+        return *failure;
+    }
+    if(auto close_failure = close_descriptor_checked(descriptor, path)) {
+        return *close_failure;
+    }
+    return std::get<std::string>(std::move(contents));
+}
+
+std::variant<std::string, ReviewedSourceStateStoreFailure>
+reread_descriptor_contents(int descriptor, const fs::path& entry_path) {
+    if(retry_interruptible([&] {
+           return ::lseek(descriptor, 0, SEEK_SET);
+       }) < 0) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::ReadFailed, entry_path,
+                current_system_error());
+    }
+    struct stat status {};
+    if(auto failure = fstat_descriptor(descriptor, status, entry_path)) {
+        return *failure;
+    }
+    return read_all_bytes(descriptor, entry_path, status);
+}
+
 std::variant<std::optional<ScannedGeneration>, ReviewedSourceStateStoreFailure>
 resolve_chain_tip(
+        int package_directory_descriptor,
         const std::vector<ScannedGeneration>& generations,
         const fs::path& package_path,
         std::uintmax_t expected_owner) {
@@ -798,7 +999,17 @@ resolve_chain_tip(
     }
     ScannedGeneration tip = **origin;
     while(true) {
-        const auto successor = find_successor(generations, tip);
+        auto contents = read_generation_contents(
+                package_directory_descriptor, tip, package_path,
+                expected_owner);
+        if(const auto* failure =
+                   std::get_if<ReviewedSourceStateStoreFailure>(&contents)) {
+            return *failure;
+        }
+        const std::string digest =
+                content_digest_hex(std::get<std::string>(contents));
+        const auto successor =
+                find_successor(generations, tip, digest);
         if(!successor.has_value()) break;
         const fs::path successor_path =
                 package_path / (*successor)->leaf.leaf;
@@ -994,10 +1205,13 @@ std::string reviewed_source_state_store_origin_leaf() {
 
 std::string reviewed_source_state_store_successor_leaf(
         std::uint64_t next_generation,
-        const ReviewedSourceStateRecordIdentity& predecessor) {
+        const ReviewedSourceStateRecordIdentity& predecessor,
+        std::string_view predecessor_raw_contents) {
     return std::to_string(next_generation) + "." +
            std::to_string(predecessor.device) + "-" +
-           std::to_string(predecessor.inode) + std::string(ENTRY_SUFFIX);
+           std::to_string(predecessor.inode) + "." +
+           content_digest_hex(predecessor_raw_contents) +
+           std::string(ENTRY_SUFFIX);
 }
 
 ReviewedSourceStateStoreReadResult read_reviewed_source_state(
@@ -1071,6 +1285,7 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
         return *failure;
     }
     auto tip = resolve_chain_tip(
+            package_directory.get(),
             std::get<std::vector<ScannedGeneration>>(scanned), package_path,
             directory->owner());
     if(const auto* failure =
@@ -1196,7 +1411,8 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
     const std::vector<ScannedGeneration> generations =
             std::get<std::vector<ScannedGeneration>>(std::move(scanned));
     auto tip = resolve_chain_tip(
-            generations, package_path, directory->owner());
+            package_directory.get(), generations, package_path,
+            directory->owner());
     if(const auto* failure =
                std::get_if<ReviewedSourceStateStoreFailure>(&tip)) {
         return *failure;
@@ -1262,7 +1478,8 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
     const std::string publication_leaf =
             current.has_value()
                     ? reviewed_source_state_store_successor_leaf(
-                              next_generation, expected_observed->identity)
+                              next_generation, expected_observed->identity,
+                              expected_observed->raw_contents)
                     : reviewed_source_state_store_origin_leaf();
     const fs::path publication_path = package_path / publication_leaf;
     const std::optional<fs::path> current_path =
@@ -1365,6 +1582,22 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
                     ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
                     *current_path, std::nullopt, std::nullopt, temporary_path);
         }
+        auto pre_commit_contents = reread_descriptor_contents(
+                retained_current.get(), *current_path);
+        if(const auto* failure = std::get_if<ReviewedSourceStateStoreFailure>(
+                   &pre_commit_contents)) {
+            abandon_temporary();
+            ReviewedSourceStateStoreFailure reported = *failure;
+            reported.leftover_artifact = temporary_path;
+            return reported;
+        }
+        if(std::get<std::string>(pre_commit_contents) !=
+           expected_observed->raw_contents) {
+            abandon_temporary();
+            return store_failure(
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                    *current_path, std::nullopt, std::nullopt, temporary_path);
+        }
     } else {
         std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
         const std::optional<struct stat> origin_status = inspect_named_entry(
@@ -1385,6 +1618,9 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
     }
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+    // LANDMINE: this window can same-inode rewrite predecessor contents after
+    // the last recheck. Authority is the digest-bound successor name, not the
+    // exclusive create alone.
     invoke_race(
             ReviewedSourceStateStoreTestRacePoint::AtPublicationBoundary,
             race_context);
@@ -1440,6 +1676,17 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
                         *current_path, inspect_failure);
         if(inspect_failure.has_value() || !predecessor_status.has_value() ||
            !same_filesystem_identity(current->status, *predecessor_status)) {
+            return store_failure(
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                    publication_path, std::nullopt, std::nullopt,
+                    publication_path);
+        }
+        auto post_commit_contents = reread_descriptor_contents(
+                retained_current.get(), *current_path);
+        if(std::holds_alternative<ReviewedSourceStateStoreFailure>(
+                   post_commit_contents) ||
+           std::get<std::string>(post_commit_contents) !=
+                   expected_observed->raw_contents) {
             return store_failure(
                     ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
                     publication_path, std::nullopt, std::nullopt,

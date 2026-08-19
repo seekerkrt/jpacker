@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <variant>
 
@@ -21,8 +22,8 @@
 // Existing records are immutable generation files. Publication never replaces,
 // exchanges, or unlinks an authoritative name. The kernel commit point is
 // RENAME_NOREPLACE of a durable temporary inode onto a successor leaf derived
-// from the observed generation and filesystem identity. Lock is cooperative
-// only and is not CAS authority.
+// from the observed generation, filesystem identity, and raw contents. Lock is
+// cooperative only and is not CAS authority.
 //
 // Crash artifacts:
 // - unpublished temps and chain orphans are ignored by lookup
@@ -138,11 +139,13 @@ std::filesystem::path reviewed_source_state_store_entry_path(
         const PackageBaseIdentity& package_base);
 
 // Origin generation is always 1.toml. Later generations bind the predecessor
-// inode so a replacement of that inode cannot be displaced by this writer.
+// inode and raw-content digest so a replacement or same-inode rewrite of that
+// record cannot make this writer's successor the chain tip.
 std::string reviewed_source_state_store_origin_leaf();
 std::string reviewed_source_state_store_successor_leaf(
         std::uint64_t next_generation,
-        const ReviewedSourceStateRecordIdentity& predecessor);
+        const ReviewedSourceStateRecordIdentity& predecessor,
+        std::string_view predecessor_raw_contents);
 
 // Read-no-create lookup. Missing is returned only when the package directory
 // or origin generation is absent after a safe directory open, or when the
