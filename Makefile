@@ -66,6 +66,7 @@ PACKAGE_IDENTIFIER_TEST_TARGET := build/tests/package-identifier-test
 SOURCE_PACKAGE_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/source-package-identity-test
 SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/source-package-identity-projection-test
 SOURCE_PACKAGE_COMPATIBILITY_TEST_TARGET := $(BUILD_DIR)/tests/source-package-compatibility-test
+REVIEWED_SOURCE_STATE_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-state-test
 SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
 SOURCE_ENVIRONMENT_TEST_TARGET := build/tests/source-environment-test
 ARTIFACT_WORKSPACE_TEST_TARGET := build/tests/artifact-workspace-test
@@ -1420,6 +1421,11 @@ SOURCE_PACKAGE_IDENTITY_TEST_SRCS := \
 	tests/source_package_identity_test.cpp \
 	$(SRC_DIR)/source_package_identity.cpp \
 	$(SRC_DIR)/package_identifier.cpp
+REVIEWED_SOURCE_STATE_TEST_SRCS := \
+	tests/reviewed_source_state_test.cpp \
+	$(SRC_DIR)/reviewed_source_state.cpp \
+	$(SRC_DIR)/source_package_identity.cpp \
+	$(SRC_DIR)/package_identifier.cpp
 SOURCE_PACKAGE_COMPATIBILITY_TEST_SRCS := \
 	tests/source_package_compatibility_test.cpp \
 	$(SRC_DIR)/source_package_compatibility.cpp \
@@ -1628,6 +1634,7 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: check-source-package-identity-projection-link-firewall test-source-package-identity-projection
 .PHONY: test-source-package-compatibility
+.PHONY: test-reviewed-source-state
 .PHONY: check-makepkg-assignment-precedence-link-firewall test-makepkg-assignment-precedence
 .PHONY: check-unified-plan-observation-link-firewall test-unified-plan-observation test-observation-contract-gate
 .PHONY: check-unified-plan-projection-link-firewall test-unified-plan-projection test-projection-fixture-gate
@@ -1836,6 +1843,7 @@ NON_HEAVY_TARGETS := \
 	$(SOURCE_PACKAGE_IDENTITY_TEST_TARGET) \
 	$(SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_TARGET) \
 	$(SOURCE_PACKAGE_COMPATIBILITY_TEST_TARGET) \
+	$(REVIEWED_SOURCE_STATE_TEST_TARGET) \
 	$(SHELL_WORDS_TEST_TARGET) \
 	$(SOURCE_ENVIRONMENT_TEST_TARGET) \
 	$(ARTIFACT_WORKSPACE_TEST_TARGET) \
@@ -1982,6 +1990,7 @@ $(eval $(call define_non_heavy_test_profile,PACKAGE_IDENTIFIER,$(DIRECT_COMPILE_
 $(eval $(call define_non_heavy_test_profile,SOURCE_PACKAGE_IDENTITY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(SOURCE_PACKAGE_IDENTITY_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,SOURCE_PACKAGE_IDENTITY_PROJECTION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests,$(SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
 $(eval $(call define_non_heavy_test_profile,SOURCE_PACKAGE_COMPATIBILITY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(SOURCE_PACKAGE_COMPATIBILITY_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_STATE,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_STATE_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,SHELL_WORDS,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(SHELL_WORDS_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,SOURCE_ENVIRONMENT,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS -I$(SRC_DIR),$(SOURCE_ENVIRONMENT_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,ARTIFACT_WORKSPACE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS -DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS -I$(SRC_DIR),$(ARTIFACT_WORKSPACE_TEST_SRCS)))
@@ -2341,6 +2350,11 @@ $(SOURCE_PACKAGE_COMPATIBILITY_TEST_TARGET): $(SOURCE_PACKAGE_COMPATIBILITY_TEST
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling source package compatibility test binary"
 	$(call compile_non_heavy_test,SOURCE_PACKAGE_COMPATIBILITY)
+
+$(REVIEWED_SOURCE_STATE_TEST_TARGET): $(REVIEWED_SOURCE_STATE_TEST_SRCS) $(SRC_DIR)/reviewed_source_state.hpp $(SRC_DIR)/source_package_identity.hpp $(SRC_DIR)/package_identifier.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling reviewed source state test binary"
+	$(call compile_non_heavy_test,REVIEWED_SOURCE_STATE)
 
 $(SHELL_WORDS_TEST_TARGET): $(SHELL_WORDS_TEST_SRCS) $(SRC_DIR)/shell_words.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -3121,6 +3135,9 @@ test-package-identifier: $(PACKAGE_IDENTIFIER_TEST_TARGET)
 
 test-source-package-identity: $(SOURCE_PACKAGE_IDENTITY_TEST_TARGET)
 	$(abspath $(SOURCE_PACKAGE_IDENTITY_TEST_TARGET))
+
+test-reviewed-source-state: $(REVIEWED_SOURCE_STATE_TEST_TARGET)
+	$(abspath $(REVIEWED_SOURCE_STATE_TEST_TARGET))
 
 test-package-metadata: $(PACKAGE_METADATA_TEST_TARGET)
 	$(abspath $(PACKAGE_METADATA_TEST_TARGET))
@@ -3971,6 +3988,7 @@ test: \
 	test-user-config \
 	test-package-identifier \
 	test-source-package-identity \
+	test-reviewed-source-state \
 	test-source-package-identity-projection \
 	test-source-package-compatibility \
 	test-package-metadata \
