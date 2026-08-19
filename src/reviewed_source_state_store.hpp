@@ -10,25 +10,30 @@
 #include <string_view>
 #include <system_error>
 #include <variant>
+#include <vector>
 
 
 // POLICY(#411): this module owns XDG snapshot lookup and CAS publication for
 // reviewed AUR source state. It does not own Git projection, acceptance, or
 // production lifecycle.
 //
-// Lookup never creates directories or files. Unsafe, malformed, future, and
-// mismatched records are never flattened into Missing.
+// Lookup never creates directories or files. Unsafe, malformed, future,
+// mismatched, forked, gapped, and orphaned records are never flattened into
+// Missing or ordinary Loaded.
 //
 // Existing records are immutable generation files. Publication never replaces,
 // exchanges, or unlinks an authoritative name. The kernel commit point is
-// RENAME_NOREPLACE of a durable temporary inode onto a successor leaf derived
-// from the observed generation, filesystem identity, and raw contents. Lock is
+// linkat of a retained O_TMPFILE inode onto a successor leaf derived from the
+// observed generation, filesystem identity, status-change time, and raw
+// contents. Destination occupancy fails with EEXIST (no-replace). Lock is
 // cooperative only and is not CAS authority.
 //
 // Crash artifacts:
-// - unpublished temps and chain orphans are ignored by lookup
-// - they are never unlinked by name
-// - authority is only the successor-chain tip starting at 1.toml
+// - unpublished O_TMPFILE inodes are unnamed and discarded on close
+// - leftover names with the internal temp prefix are non-authoritative
+// - published-looking orphans, forks, gaps, unrecognized managed names,
+//   and future-owned artifacts are typed unsafe history, never ignored
+// - named unlink is never used as cleanup
 
 inline constexpr std::size_t reviewed_source_state_store_max_record_bytes =
         65536;
@@ -105,6 +110,8 @@ enum class ReviewedSourceStatePostPublicationIssue {
     PublishedIdentityUncertain,
     DirectoryCloseFailed,
     LineageRevalidationFailed,
+    PredecessorObservationUncertain,
+    PackageDirectoryIdentityUncertain,
 };
 
 struct ReviewedSourceStateStorePublishedUncertain {
@@ -120,13 +127,36 @@ struct ReviewedSourceStateStorePublishedUncertain {
             default;
 };
 
+enum class ReviewedSourceStateStoreHistoryIssue {
+    ForkDetected,
+    OrphanSuccessor,
+    ChainGap,
+    MissingOriginWithArtifacts,
+    UnrecognizedManagedEntry,
+    FutureOwnedArtifact,
+    HigherGenerationUnreachable,
+};
+
+struct ReviewedSourceStateStoreUnsafeHistory {
+    ReviewedSourceStateStoreHistoryIssue issue;
+    std::filesystem::path                package_path;
+    std::vector<std::string>             observed_leaves;
+    std::optional<std::uint64_t>         matching_generation;
+    std::optional<std::uint64_t>         highest_generation;
+
+    bool operator==(const ReviewedSourceStateStoreUnsafeHistory&) const =
+            default;
+};
+
 using ReviewedSourceStateStoreReadResult = std::variant<
         ReviewedSourceStateStoreRead,
+        ReviewedSourceStateStoreUnsafeHistory,
         ReviewedSourceStateStoreFailure>;
 
 using ReviewedSourceStateStorePublishResult = std::variant<
         ReviewedSourceStateStorePublished,
         ReviewedSourceStateStorePublishedUncertain,
+        ReviewedSourceStateStoreUnsafeHistory,
         ReviewedSourceStateStoreFailure>;
 
 // Process XDG_STATE_HOME / HOME only. The resolver itself does not touch
@@ -139,8 +169,9 @@ std::filesystem::path reviewed_source_state_store_entry_path(
         const PackageBaseIdentity& package_base);
 
 // Origin generation is always 1.toml. Later generations bind the predecessor
-// inode and raw-content digest so a replacement or same-inode rewrite of that
-// record cannot make this writer's successor the chain tip.
+// inode, status-change time, and raw-content digest so a replacement,
+// same-inode rewrite, or later restore of that record cannot silently become
+// the chain tip.
 std::string reviewed_source_state_store_origin_leaf();
 std::string reviewed_source_state_store_successor_leaf(
         std::uint64_t next_generation,
@@ -148,8 +179,8 @@ std::string reviewed_source_state_store_successor_leaf(
         std::string_view predecessor_raw_contents);
 
 // Read-no-create lookup. Missing is returned only when the package directory
-// or origin generation is absent after a safe directory open, or when the
-// managed directory tree itself is absent.
+// is absent after a safe directory open, the managed directory tree itself is
+// absent, or the package directory contains only internal temp residue.
 ReviewedSourceStateStoreReadResult read_reviewed_source_state(
         const PackageBaseIdentity& expected_package_base);
 
@@ -171,11 +202,14 @@ enum class ReviewedSourceStateStoreTestFailurePoint {
     Rename,
     Lock,
     PostCommitVerify,
+    PostCommitPredecessorStatus,
+    PostCommitPredecessorRead,
 };
 
 enum class ReviewedSourceStateStoreTestRacePoint {
     BeforePublication,
     AtPublicationBoundary,
+    AfterPublication,
     BeforeCleanup,
 };
 
@@ -186,6 +220,8 @@ struct ReviewedSourceStateStoreTestRaceContext {
     std::optional<std::filesystem::path> current_path;
     std::string           temporary_leaf;
     std::uint64_t         next_generation = 0;
+    std::uintmax_t        source_device = 0;
+    std::uintmax_t        source_inode = 0;
 };
 
 using ReviewedSourceStateStoreTestRaceHandler = void (*)(

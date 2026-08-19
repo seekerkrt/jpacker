@@ -2,8 +2,8 @@
 
 #include "xdg_directory_safety.hpp"
 
+#include <algorithm>
 #include <array>
-#include <atomic>
 #include <charconv>
 #include <cerrno>
 #include <cstdint>
@@ -13,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -72,8 +73,6 @@ void invoke_race(
 }
 #endif
 
-std::atomic<std::uint64_t> g_atomic_temp_sequence{0};
-
 class OwnedDescriptor final {
     int descriptor_ = -1;
 
@@ -132,13 +131,6 @@ void require_aur_known_package_base(const PackageBaseIdentity& package_base) {
 
 std::string package_directory_leaf(const PackageBaseIdentity& package_base) {
     return package_base.package_base();
-}
-
-std::string atomic_temp_leaf() {
-    const std::uint64_t sequence =
-            g_atomic_temp_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
-    return std::string(ATOMIC_TEMP_PREFIX) + std::to_string(::getpid()) +
-           "-" + std::to_string(sequence);
 }
 
 bool parse_unsigned_decimal(
@@ -301,6 +293,8 @@ struct GenerationLeaf {
     bool          has_predecessor = false;
     std::uintmax_t predecessor_device = 0;
     std::uintmax_t predecessor_inode = 0;
+    std::uintmax_t predecessor_ctime_seconds = 0;
+    std::uintmax_t predecessor_ctime_nanoseconds = 0;
     std::string   predecessor_digest;
     std::string   leaf;
 };
@@ -313,7 +307,7 @@ std::optional<GenerationLeaf> parse_generation_leaf(std::string_view name) {
     }
     const std::string_view stem = name.substr(0, name.size() - suffix.size());
     if(stem == "1") {
-        return GenerationLeaf{1, false, 0, 0, {}, std::string(name)};
+        return GenerationLeaf{1, false, 0, 0, 0, 0, {}, std::string(name)};
     }
     const auto first_dot = stem.find('.');
     if(first_dot == std::string_view::npos || first_dot == 0 ||
@@ -340,20 +334,41 @@ std::optional<GenerationLeaf> parse_generation_leaf(std::string_view name) {
        !is_lowercase_hex(digest)) {
         return std::nullopt;
     }
-    const auto dash = identity.find('-');
-    if(dash == std::string_view::npos || dash == 0 ||
-       dash + 1 >= identity.size()) {
+    const auto first_dash = identity.find('-');
+    if(first_dash == std::string_view::npos || first_dash == 0 ||
+       first_dash + 1 >= identity.size()) {
+        return std::nullopt;
+    }
+    const auto second_dash = identity.find('-', first_dash + 1);
+    if(second_dash == std::string_view::npos ||
+       second_dash == first_dash + 1 || second_dash + 1 >= identity.size()) {
+        return std::nullopt;
+    }
+    const auto third_dash = identity.find('-', second_dash + 1);
+    if(third_dash == std::string_view::npos ||
+       third_dash == second_dash + 1 || third_dash + 1 >= identity.size() ||
+       identity.find('-', third_dash + 1) != std::string_view::npos) {
         return std::nullopt;
     }
     std::uintmax_t device = 0;
     std::uintmax_t inode = 0;
-    if(!parse_unsigned_decimal(identity.substr(0, dash), true, device) ||
-       !parse_unsigned_decimal(identity.substr(dash + 1), true, inode)) {
+    std::uintmax_t ctime_seconds = 0;
+    std::uintmax_t ctime_nanoseconds = 0;
+    if(!parse_unsigned_decimal(identity.substr(0, first_dash), true, device) ||
+       !parse_unsigned_decimal(
+               identity.substr(first_dash + 1, second_dash - first_dash - 1),
+               true, inode) ||
+       !parse_unsigned_decimal(
+               identity.substr(second_dash + 1, third_dash - second_dash - 1),
+               true, ctime_seconds) ||
+       !parse_unsigned_decimal(
+               identity.substr(third_dash + 1), true, ctime_nanoseconds)) {
         return std::nullopt;
     }
     return GenerationLeaf{
             static_cast<std::uint64_t>(generation_value), true, device, inode,
-            std::string(digest), std::string(name)};
+            ctime_seconds, ctime_nanoseconds, std::string(digest),
+            std::string(name)};
 }
 
 bool is_internal_temp_leaf(std::string_view name) {
@@ -447,7 +462,22 @@ bool matches_predecessor_binding(
                    static_cast<std::uintmax_t>(predecessor.st_dev) &&
            leaf.predecessor_inode ==
                    static_cast<std::uintmax_t>(predecessor.st_ino) &&
+           leaf.predecessor_ctime_seconds ==
+                   static_cast<std::uintmax_t>(predecessor.st_ctim.tv_sec) &&
+           leaf.predecessor_ctime_nanoseconds ==
+                   static_cast<std::uintmax_t>(predecessor.st_ctim.tv_nsec) &&
            leaf.predecessor_digest == predecessor_digest;
+}
+
+bool matches_predecessor_identity(
+        const struct stat& status,
+        const ReviewedSourceStateRecordIdentity& identity) {
+    return static_cast<std::uintmax_t>(status.st_dev) == identity.device &&
+           static_cast<std::uintmax_t>(status.st_ino) == identity.inode &&
+           static_cast<std::intmax_t>(status.st_ctim.tv_sec) ==
+                   identity.status_change_time_seconds &&
+           static_cast<std::intmax_t>(status.st_ctim.tv_nsec) ==
+                   identity.status_change_time_nanoseconds;
 }
 
 std::optional<ReviewedSourceStateStoreFailure> validate_entry_status(
@@ -556,10 +586,15 @@ std::optional<struct stat> inspect_named_entry(
         int directory_descriptor,
         const std::string& leaf_name,
         const fs::path& entry_path,
-        std::optional<ReviewedSourceStateStoreFailure>& failure) {
+        std::optional<ReviewedSourceStateStoreFailure>& failure
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
-    if(consume_injected_failure(
-               ReviewedSourceStateStoreTestFailurePoint::Status)) {
+        ,
+        ReviewedSourceStateStoreTestFailurePoint failure_point =
+                ReviewedSourceStateStoreTestFailurePoint::Status
+#endif
+        ) {
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+    if(consume_injected_failure(failure_point)) {
         failure = store_failure(
                 ReviewedSourceStateStoreFailureKind::OpenFailed, entry_path,
                 std::make_error_code(std::errc::permission_denied));
@@ -583,27 +618,17 @@ std::optional<struct stat> inspect_named_entry(
     return status;
 }
 
-int renameat2_checked(
-        int old_directory_descriptor,
-        const char* old_leaf,
-        int new_directory_descriptor,
-        const char* new_leaf,
-        unsigned int flags) {
-#ifdef SYS_renameat2
+int linkat_retained_inode(
+        int source_descriptor,
+        int destination_directory_descriptor,
+        const char* destination_leaf) {
+    const std::string proc_path =
+            std::string("/proc/self/fd/") + std::to_string(source_descriptor);
     return retry_interruptible([&] {
-        return static_cast<int>(::syscall(
-                SYS_renameat2, old_directory_descriptor, old_leaf,
-                new_directory_descriptor, new_leaf, flags));
+        return ::linkat(
+                AT_FDCWD, proc_path.c_str(), destination_directory_descriptor,
+                destination_leaf, AT_SYMLINK_FOLLOW);
     });
-#else
-    static_cast<void>(old_directory_descriptor);
-    static_cast<void>(old_leaf);
-    static_cast<void>(new_directory_descriptor);
-    static_cast<void>(new_leaf);
-    static_cast<void>(flags);
-    errno = ENOSYS;
-    return -1;
-#endif
 }
 
 std::optional<ReviewedSourceStateStoreFailure> close_descriptor_checked(
@@ -739,10 +764,15 @@ open_existing_entry(
 std::variant<std::string, ReviewedSourceStateStoreFailure> read_all_bytes(
         int descriptor,
         const fs::path& entry_path,
-        const struct stat& expected_status) {
+        const struct stat& expected_status
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
-    if(consume_injected_failure(
-               ReviewedSourceStateStoreTestFailurePoint::Read)) {
+        ,
+        ReviewedSourceStateStoreTestFailurePoint failure_point =
+                ReviewedSourceStateStoreTestFailurePoint::Read
+#endif
+        ) {
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+    if(consume_injected_failure(failure_point)) {
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::ReadFailed, entry_path,
                 std::make_error_code(std::errc::io_error));
@@ -854,16 +884,37 @@ std::optional<ReviewedSourceStateStoreFailure> write_all_bytes(
 }
 
 // POLICY: named unlink is never identity-atomic. Leave unpublished temps and
-// orphans in place rather than deleting a replacement we cannot prove.
+// published-looking artifacts in place rather than deleting a replacement
+// we cannot prove. Temps are non-authoritative residue; everything else in
+// the PackageBase directory is inventory for a single-chain proof.
 
 struct ScannedGeneration {
     GenerationLeaf leaf;
     struct stat    status {};
 };
 
-std::variant<std::vector<ScannedGeneration>, ReviewedSourceStateStoreFailure>
-scan_generation_files(
-        int package_directory_descriptor, const fs::path& package_path) {
+struct DirectoryInventory {
+    std::vector<std::string>     observed_leaves;
+    std::vector<std::string>     unrecognized_leaves;
+    std::vector<ScannedGeneration> parsed;
+};
+
+ReviewedSourceStateStoreUnsafeHistory unsafe_history(
+        ReviewedSourceStateStoreHistoryIssue issue,
+        const fs::path& package_path,
+        const DirectoryInventory& inventory,
+        std::optional<std::uint64_t> matching_generation = std::nullopt,
+        std::optional<std::uint64_t> highest_generation = std::nullopt) {
+    return ReviewedSourceStateStoreUnsafeHistory{
+            issue, package_path, inventory.observed_leaves, matching_generation,
+            highest_generation};
+}
+
+std::variant<DirectoryInventory, ReviewedSourceStateStoreFailure>
+scan_package_directory(
+        int package_directory_descriptor,
+        const fs::path& package_path,
+        std::uintmax_t expected_owner) {
     const int scan_descriptor = retry_interruptible(
             [&] { return ::dup(package_directory_descriptor); });
     if(scan_descriptor < 0) {
@@ -881,7 +932,7 @@ scan_generation_files(
     }
     std::unique_ptr<DIR, int (*)(DIR*)> directory(stream, &::closedir);
 
-    std::vector<ScannedGeneration> generations;
+    DirectoryInventory inventory;
     std::size_t inspected = 0;
     while(true) {
         errno = 0;
@@ -902,44 +953,34 @@ scan_generation_files(
                     ReviewedSourceStateStoreFailureKind::RecordTooLarge,
                     package_path);
         }
+        inventory.observed_leaves.emplace_back(name);
+    }
+    std::sort(inventory.observed_leaves.begin(), inventory.observed_leaves.end());
+
+    for(const std::string& name : inventory.observed_leaves) {
         if(is_internal_temp_leaf(name)) continue;
         const std::optional<GenerationLeaf> parsed = parse_generation_leaf(name);
-        if(!parsed.has_value()) continue;
-
+        if(!parsed.has_value()) {
+            inventory.unrecognized_leaves.push_back(name);
+            continue;
+        }
         std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
         const std::optional<struct stat> status = inspect_named_entry(
-                package_directory_descriptor, parsed->leaf, package_path,
-                inspect_failure);
+                package_directory_descriptor, parsed->leaf,
+                package_path / parsed->leaf, inspect_failure);
         if(inspect_failure.has_value()) return *inspect_failure;
-        if(!status.has_value()) continue;
-        generations.push_back(ScannedGeneration{*parsed, *status});
-    }
-    return generations;
-}
-
-std::optional<const ScannedGeneration*> find_origin(
-        const std::vector<ScannedGeneration>& generations) {
-    for(const ScannedGeneration& candidate : generations) {
-        if(candidate.leaf.generation == 1 && !candidate.leaf.has_predecessor) {
-            return &candidate;
+        if(!status.has_value()) {
+            return store_failure(
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                    package_path / parsed->leaf);
         }
-    }
-    return std::nullopt;
-}
-
-std::optional<const ScannedGeneration*> find_successor(
-        const std::vector<ScannedGeneration>& generations,
-        const ScannedGeneration& predecessor,
-        std::string_view predecessor_digest) {
-    const std::uint64_t next = predecessor.leaf.generation + 1;
-    for(const ScannedGeneration& candidate : generations) {
-        if(candidate.leaf.generation == next &&
-           matches_predecessor_binding(
-                   candidate.leaf, predecessor.status, predecessor_digest)) {
-            return &candidate;
+        if(auto failure = validate_entry_status(
+                   *status, package_path / parsed->leaf, expected_owner)) {
+            return *failure;
         }
+        inventory.parsed.push_back(ScannedGeneration{*parsed, *status});
     }
-    return std::nullopt;
+    return inventory;
 }
 
 std::variant<std::string, ReviewedSourceStateStoreFailure>
@@ -969,7 +1010,15 @@ read_generation_contents(
 }
 
 std::variant<std::string, ReviewedSourceStateStoreFailure>
-reread_descriptor_contents(int descriptor, const fs::path& entry_path) {
+reread_descriptor_contents(
+        int descriptor,
+        const fs::path& entry_path
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+        ,
+        ReviewedSourceStateStoreTestFailurePoint failure_point =
+                ReviewedSourceStateStoreTestFailurePoint::Read
+#endif
+        ) {
     if(retry_interruptible([&] {
            return ::lseek(descriptor, 0, SEEK_SET);
        }) < 0) {
@@ -981,45 +1030,189 @@ reread_descriptor_contents(int descriptor, const fs::path& entry_path) {
     if(auto failure = fstat_descriptor(descriptor, status, entry_path)) {
         return *failure;
     }
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+    return read_all_bytes(descriptor, entry_path, status, failure_point);
+#else
     return read_all_bytes(descriptor, entry_path, status);
+#endif
 }
 
-std::variant<std::optional<ScannedGeneration>, ReviewedSourceStateStoreFailure>
-resolve_chain_tip(
+bool is_future_schema_contents(const std::string& raw_contents) {
+    return std::holds_alternative<ReviewedSourceStateUnsupportedFuture>(
+            decode_reviewed_source_state(raw_contents));
+}
+
+struct ProvenChain {
+    std::optional<ScannedGeneration> tip;
+    std::string                      tip_contents;
+};
+
+using ChainProof = std::variant<
+        ProvenChain,
+        ReviewedSourceStateStoreUnsafeHistory,
+        ReviewedSourceStateStoreFailure>;
+
+ChainProof prove_authoritative_chain(
         int package_directory_descriptor,
-        const std::vector<ScannedGeneration>& generations,
+        const DirectoryInventory& inventory,
         const fs::path& package_path,
         std::uintmax_t expected_owner) {
-    const auto origin = find_origin(generations);
-    if(!origin.has_value()) return std::optional<ScannedGeneration>{};
-    if(auto failure = validate_entry_status(
-               (*origin)->status, package_path / (*origin)->leaf.leaf,
-               expected_owner)) {
-        return *failure;
+    std::optional<std::uint64_t> highest_generation;
+    for(const ScannedGeneration& candidate : inventory.parsed) {
+        if(!highest_generation.has_value() ||
+           candidate.leaf.generation > *highest_generation) {
+            highest_generation = candidate.leaf.generation;
+        }
     }
-    ScannedGeneration tip = **origin;
+
+    if(!inventory.unrecognized_leaves.empty()) {
+        return unsafe_history(
+                ReviewedSourceStateStoreHistoryIssue::UnrecognizedManagedEntry,
+                package_path, inventory, std::nullopt, highest_generation);
+    }
+    if(inventory.parsed.empty()) {
+        return ProvenChain{};
+    }
+
+    const ScannedGeneration* origin = nullptr;
+    for(const ScannedGeneration& candidate : inventory.parsed) {
+        if(candidate.leaf.generation == 1 && !candidate.leaf.has_predecessor) {
+            origin = &candidate;
+            break;
+        }
+    }
+    if(origin == nullptr) {
+        return unsafe_history(
+                ReviewedSourceStateStoreHistoryIssue::MissingOriginWithArtifacts,
+                package_path, inventory, std::nullopt, highest_generation);
+    }
+
+    std::vector<std::vector<const ScannedGeneration*>> by_generation;
+    if(highest_generation.has_value()) {
+        by_generation.resize(static_cast<std::size_t>(*highest_generation + 1));
+    }
+    for(const ScannedGeneration& candidate : inventory.parsed) {
+        by_generation[static_cast<std::size_t>(candidate.leaf.generation)]
+                .push_back(&candidate);
+    }
+    for(std::uint64_t generation = 1;
+        highest_generation.has_value() && generation <= *highest_generation;
+        ++generation) {
+        if(by_generation[static_cast<std::size_t>(generation)].size() > 1) {
+            return unsafe_history(
+                    ReviewedSourceStateStoreHistoryIssue::ForkDetected,
+                    package_path, inventory, origin->leaf.generation,
+                    highest_generation);
+        }
+    }
+
+    std::vector<const ScannedGeneration*> chain;
+    std::vector<std::string> chain_contents;
+    const ScannedGeneration* current = origin;
     while(true) {
+        const fs::path current_path = package_path / current->leaf.leaf;
+        if(auto failure = validate_entry_status(
+                   current->status, current_path, expected_owner)) {
+            return *failure;
+        }
         auto contents = read_generation_contents(
-                package_directory_descriptor, tip, package_path,
+                package_directory_descriptor, *current, package_path,
                 expected_owner);
         if(const auto* failure =
                    std::get_if<ReviewedSourceStateStoreFailure>(&contents)) {
             return *failure;
         }
-        const std::string digest =
-                content_digest_hex(std::get<std::string>(contents));
-        const auto successor =
-                find_successor(generations, tip, digest);
-        if(!successor.has_value()) break;
-        const fs::path successor_path =
-                package_path / (*successor)->leaf.leaf;
-        if(auto failure = validate_entry_status(
-                   (*successor)->status, successor_path, expected_owner)) {
-            return *failure;
+        chain.push_back(current);
+        chain_contents.push_back(std::get<std::string>(std::move(contents)));
+        const std::string digest = content_digest_hex(chain_contents.back());
+        const std::uint64_t next = current->leaf.generation + 1;
+        if(next == 0 || !highest_generation.has_value() ||
+           next > *highest_generation) {
+            break;
         }
-        tip = **successor;
+        const std::vector<const ScannedGeneration*>& next_generation =
+                by_generation[static_cast<std::size_t>(next)];
+        const ScannedGeneration* matched = nullptr;
+        for(const ScannedGeneration* candidate : next_generation) {
+            if(matches_predecessor_binding(
+                       candidate->leaf, current->status, digest)) {
+                matched = candidate;
+                break;
+            }
+        }
+        if(matched == nullptr) break;
+        current = matched;
     }
-    return std::optional<ScannedGeneration>{tip};
+
+    std::optional<std::uint64_t> matching_generation = chain.back()->leaf.generation;
+    bool has_hole = false;
+    if(highest_generation.has_value()) {
+        for(std::uint64_t generation = 1; generation <= *highest_generation;
+            ++generation) {
+            if(by_generation[static_cast<std::size_t>(generation)].empty()) {
+                has_hole = true;
+                break;
+            }
+        }
+    }
+
+    const bool has_extras = chain.size() != inventory.parsed.size();
+    bool has_future_owned = false;
+    for(std::size_t index = 0; index + 1 < chain_contents.size(); ++index) {
+        if(is_future_schema_contents(chain_contents[index])) {
+            has_future_owned = true;
+            break;
+        }
+    }
+    if(has_extras) {
+        for(const ScannedGeneration& candidate : inventory.parsed) {
+            bool on_chain = false;
+            for(const ScannedGeneration* member : chain) {
+                if(member->leaf.leaf == candidate.leaf.leaf) {
+                    on_chain = true;
+                    break;
+                }
+            }
+            if(on_chain) continue;
+            auto extra_contents = read_generation_contents(
+                    package_directory_descriptor, candidate, package_path,
+                    expected_owner);
+            if(const auto* failure = std::get_if<ReviewedSourceStateStoreFailure>(
+                       &extra_contents)) {
+                return *failure;
+            }
+            if(is_future_schema_contents(
+                       std::get<std::string>(extra_contents))) {
+                has_future_owned = true;
+                break;
+            }
+        }
+    }
+
+    if(has_future_owned) {
+        return unsafe_history(
+                ReviewedSourceStateStoreHistoryIssue::FutureOwnedArtifact,
+                package_path, inventory, matching_generation, highest_generation);
+    }
+    if(has_hole) {
+        return unsafe_history(
+                ReviewedSourceStateStoreHistoryIssue::ChainGap, package_path,
+                inventory, matching_generation, highest_generation);
+    }
+    if(has_extras) {
+        const ReviewedSourceStateStoreHistoryIssue issue =
+                (highest_generation.has_value() &&
+                 *highest_generation > *matching_generation)
+                        ? ReviewedSourceStateStoreHistoryIssue::
+                                  HigherGenerationUnreachable
+                        : ReviewedSourceStateStoreHistoryIssue::OrphanSuccessor;
+        return unsafe_history(
+                issue, package_path, inventory, matching_generation,
+                highest_generation);
+    }
+
+    return ProvenChain{
+            *chain.back(), std::move(chain_contents.back())};
 }
 
 std::variant<OwnedDescriptor, ReviewedSourceStateStoreFailure>
@@ -1068,11 +1261,9 @@ open_package_directory(
         }
     }
 
-    if(!created) {
-        if(auto failure = validate_package_directory_status(
-                   *named_status, package_path, expected_owner)) {
-            return *failure;
-        }
+    if(auto failure = validate_package_directory_status(
+               *named_status, package_path, expected_owner)) {
+        return *failure;
     }
 
     const int raw_descriptor = retry_interruptible([&] {
@@ -1113,39 +1304,105 @@ open_package_directory(
                opened_status, package_path, expected_owner)) {
         return *failure;
     }
-    if(!same_filesystem_identity(*named_status, opened_status) && !created) {
+    inspect_failure.reset();
+    const std::optional<struct stat> named_after_open = inspect_named_entry(
+            store_directory_descriptor, leaf_name, package_path, inspect_failure);
+    if(inspect_failure.has_value()) return *inspect_failure;
+    if(!named_after_open.has_value() ||
+       !same_filesystem_identity(*named_after_open, opened_status)) {
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
                 package_path);
     }
+    if(auto failure = validate_package_directory_status(
+               *named_after_open, package_path, expected_owner)) {
+        return *failure;
+    }
     return descriptor;
 }
 
-std::variant<OwnedDescriptor, ReviewedSourceStateStoreFailure>
-create_temporary_file(
+std::optional<ReviewedSourceStateStoreFailure>
+revalidate_named_package_directory(
+        int store_directory_descriptor,
         int package_directory_descriptor,
+        const std::string& leaf_name,
         const fs::path& package_path,
-        std::string& temporary_leaf) {
-    for(std::size_t attempt = 0; attempt < 128; ++attempt) {
-        temporary_leaf = atomic_temp_leaf();
-        const int temporary_descriptor = retry_interruptible([&] {
-            return ::openat(
-                    package_directory_descriptor, temporary_leaf.c_str(),
-                    O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
-                    REVIEWED_SOURCE_STATE_FILE_MODE);
-        });
-        if(temporary_descriptor >= 0) {
-            return OwnedDescriptor(temporary_descriptor);
-        }
-        if(errno != EEXIST) {
-            return store_failure(
-                    ReviewedSourceStateStoreFailureKind::OpenFailed,
-                    package_path, current_system_error());
-        }
+        std::uintmax_t expected_owner) {
+    struct stat opened_status {};
+    if(auto failure = fstat_descriptor(
+               package_directory_descriptor, opened_status, package_path)) {
+        return failure;
     }
+    if(auto failure = validate_package_directory_status(
+               opened_status, package_path, expected_owner)) {
+        return failure;
+    }
+    std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
+    const std::optional<struct stat> named_status = inspect_named_entry(
+            store_directory_descriptor, leaf_name, package_path, inspect_failure);
+    if(inspect_failure.has_value()) return inspect_failure;
+    if(!named_status.has_value() ||
+       !same_filesystem_identity(*named_status, opened_status)) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                package_path);
+    }
+    if(auto failure = validate_package_directory_status(
+               *named_status, package_path, expected_owner)) {
+        return failure;
+    }
+    return std::nullopt;
+}
+
+std::optional<ReviewedSourceStateStoreFailure> validate_anonymous_record_status(
+        const struct stat& status,
+        const fs::path& entry_path,
+        std::uintmax_t expected_owner) {
+    const fs::file_type file_type = file_type_from_mode(status.st_mode);
+    if(file_type != fs::file_type::regular) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::UnsupportedFileType,
+                entry_path, std::nullopt, file_type);
+    }
+    if(static_cast<std::uintmax_t>(status.st_uid) != expected_owner) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::OwnershipMismatch,
+                entry_path);
+    }
+    if((status.st_mode & 07777) != REVIEWED_SOURCE_STATE_FILE_MODE) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::UnsafePermissions,
+                entry_path);
+    }
+    if(status.st_nlink != 0) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::MultipleHardLinks,
+                entry_path);
+    }
+    return std::nullopt;
+}
+
+std::variant<OwnedDescriptor, ReviewedSourceStateStoreFailure>
+create_anonymous_record(
+        int package_directory_descriptor, const fs::path& package_path) {
+#ifndef O_TMPFILE
+    static_cast<void>(package_directory_descriptor);
     return store_failure(
             ReviewedSourceStateStoreFailureKind::OpenFailed, package_path,
-            std::make_error_code(std::errc::file_exists));
+            std::make_error_code(std::errc::function_not_supported));
+#else
+    const int temporary_descriptor = retry_interruptible([&] {
+        return ::openat(
+                package_directory_descriptor, ".",
+                O_TMPFILE | O_RDWR | O_CLOEXEC, REVIEWED_SOURCE_STATE_FILE_MODE);
+    });
+    if(temporary_descriptor < 0) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::OpenFailed, package_path,
+                current_system_error());
+    }
+    return OwnedDescriptor(temporary_descriptor);
+#endif
 }
 
 ReviewedSourceStateStorePublishedUncertain published_uncertain(
@@ -1207,9 +1464,21 @@ std::string reviewed_source_state_store_successor_leaf(
         std::uint64_t next_generation,
         const ReviewedSourceStateRecordIdentity& predecessor,
         std::string_view predecessor_raw_contents) {
+    const std::uintmax_t ctime_seconds =
+            predecessor.status_change_time_seconds < 0
+                    ? 0
+                    : static_cast<std::uintmax_t>(
+                              predecessor.status_change_time_seconds);
+    const std::uintmax_t ctime_nanoseconds =
+            predecessor.status_change_time_nanoseconds < 0
+                    ? 0
+                    : static_cast<std::uintmax_t>(
+                              predecessor.status_change_time_nanoseconds);
     return std::to_string(next_generation) + "." +
            std::to_string(predecessor.device) + "-" +
-           std::to_string(predecessor.inode) + "." +
+           std::to_string(predecessor.inode) + "-" +
+           std::to_string(ctime_seconds) + "-" +
+           std::to_string(ctime_nanoseconds) + "." +
            content_digest_hex(predecessor_raw_contents) +
            std::string(ENTRY_SUFFIX);
 }
@@ -1279,29 +1548,40 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
     OwnedDescriptor package_directory =
             std::get<OwnedDescriptor>(std::move(opened_package));
 
-    auto scanned = scan_generation_files(package_directory.get(), package_path);
+    auto scanned = scan_package_directory(
+            package_directory.get(), package_path, directory->owner());
     if(const auto* failure =
                std::get_if<ReviewedSourceStateStoreFailure>(&scanned)) {
         return *failure;
     }
-    auto tip = resolve_chain_tip(
-            package_directory.get(),
-            std::get<std::vector<ScannedGeneration>>(scanned), package_path,
+    const DirectoryInventory inventory =
+            std::get<DirectoryInventory>(std::move(scanned));
+    auto proof = prove_authoritative_chain(
+            package_directory.get(), inventory, package_path,
             directory->owner());
     if(const auto* failure =
-               std::get_if<ReviewedSourceStateStoreFailure>(&tip)) {
+               std::get_if<ReviewedSourceStateStoreFailure>(&proof)) {
         return *failure;
     }
-    const std::optional<ScannedGeneration> current =
-            std::get<std::optional<ScannedGeneration>>(std::move(tip));
-    if(!current.has_value()) {
+    if(const auto* unsafe =
+               std::get_if<ReviewedSourceStateStoreUnsafeHistory>(&proof)) {
+        return *unsafe;
+    }
+    const ProvenChain proven = std::get<ProvenChain>(std::move(proof));
+    if(!proven.tip.has_value()) {
+        if(auto revalidate = revalidate_named_package_directory(
+                   store_directory_descriptor, package_directory.get(),
+                   package_leaf, package_path, directory->owner())) {
+            return *revalidate;
+        }
         return ReviewedSourceStateStoreRead{
                 ReviewedSourceStateMissing{}, std::nullopt};
     }
+    const ScannedGeneration current = *proven.tip;
 
-    const fs::path tip_path = package_path / current->leaf.leaf;
+    const fs::path tip_path = package_path / current.leaf.leaf;
     auto opened = open_existing_entry(
-            package_directory.get(), current->leaf.leaf, current->status,
+            package_directory.get(), current.leaf.leaf, current.status,
             tip_path, directory->owner());
     if(const auto* failure =
                std::get_if<ReviewedSourceStateStoreFailure>(&opened)) {
@@ -1312,18 +1592,18 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
 
     inspect_failure.reset();
     const std::optional<struct stat> revalidated = inspect_named_entry(
-            package_directory.get(), current->leaf.leaf, tip_path,
+            package_directory.get(), current.leaf.leaf, tip_path,
             inspect_failure);
     if(inspect_failure.has_value()) return *inspect_failure;
     if(!revalidated.has_value() ||
-       !same_record_state(current->status, *revalidated)) {
+       !same_record_state(current.status, *revalidated)) {
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
                 tip_path);
     }
 
     auto contents = read_all_bytes(
-            file_descriptor.get(), tip_path, current->status);
+            file_descriptor.get(), tip_path, current.status);
     if(const auto* failure =
                std::get_if<ReviewedSourceStateStoreFailure>(&contents)) {
         return *failure;
@@ -1332,6 +1612,11 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
     if(auto close_failure =
                close_descriptor_checked(file_descriptor, tip_path)) {
         return *close_failure;
+    }
+    if(auto revalidate = revalidate_named_package_directory(
+               store_directory_descriptor, package_directory.get(),
+               package_leaf, package_path, directory->owner())) {
+        return *revalidate;
     }
     if(auto close_failure =
                close_descriptor_checked(package_directory, package_path)) {
@@ -1345,8 +1630,8 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
     const ReviewedSourceStateObservation observation =
             interpret_observed_contents(raw, expected_package_base);
     return make_present_read(
-            std::move(observation), current->leaf.generation,
-            current->leaf.leaf, current->status, std::move(raw));
+            std::move(observation), current.leaf.generation,
+            current.leaf.leaf, current.status, std::move(raw));
 }
 
 ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
@@ -1403,22 +1688,27 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
         }
     }
 
-    auto scanned = scan_generation_files(package_directory.get(), package_path);
+    auto scanned = scan_package_directory(
+            package_directory.get(), package_path, directory->owner());
     if(const auto* failure =
                std::get_if<ReviewedSourceStateStoreFailure>(&scanned)) {
         return *failure;
     }
-    const std::vector<ScannedGeneration> generations =
-            std::get<std::vector<ScannedGeneration>>(std::move(scanned));
-    auto tip = resolve_chain_tip(
-            package_directory.get(), generations, package_path,
+    const DirectoryInventory inventory =
+            std::get<DirectoryInventory>(std::move(scanned));
+    auto proof = prove_authoritative_chain(
+            package_directory.get(), inventory, package_path,
             directory->owner());
     if(const auto* failure =
-               std::get_if<ReviewedSourceStateStoreFailure>(&tip)) {
+               std::get_if<ReviewedSourceStateStoreFailure>(&proof)) {
         return *failure;
     }
-    const std::optional<ScannedGeneration> current =
-            std::get<std::optional<ScannedGeneration>>(std::move(tip));
+    if(const auto* unsafe =
+               std::get_if<ReviewedSourceStateStoreUnsafeHistory>(&proof)) {
+        return *unsafe;
+    }
+    const ProvenChain proven = std::get<ProvenChain>(std::move(proof));
+    const std::optional<ScannedGeneration> current = proven.tip;
 
     if(expected_observed.has_value() != current.has_value()) {
         return store_failure(
@@ -1497,23 +1787,18 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
 #endif
 
     const std::string publication = encode_reviewed_source_state(next_state);
-    std::string temporary_leaf;
-    auto created_temporary = create_temporary_file(
-            package_directory.get(), package_path, temporary_leaf);
+    auto created_anonymous = create_anonymous_record(
+            package_directory.get(), package_path);
     if(const auto* failure =
-               std::get_if<ReviewedSourceStateStoreFailure>(&created_temporary)) {
+               std::get_if<ReviewedSourceStateStoreFailure>(&created_anonymous)) {
         return *failure;
     }
     OwnedDescriptor temporary =
-            std::get<OwnedDescriptor>(std::move(created_temporary));
-#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
-    race_context.temporary_leaf = temporary_leaf;
-#endif
-    const fs::path temporary_path = package_path / temporary_leaf;
+            std::get<OwnedDescriptor>(std::move(created_anonymous));
 
     bool was_published = false;
-    auto abandon_temporary = [&]() {
-        if(was_published || temporary_leaf.empty()) return;
+    auto abandon_unpublished = [&]() {
+        if(was_published) return;
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
         invoke_race(
                 ReviewedSourceStateStoreTestRacePoint::BeforeCleanup,
@@ -1524,46 +1809,47 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
     if(retry_interruptible([&] {
            return ::fchmod(temporary.get(), REVIEWED_SOURCE_STATE_FILE_MODE);
        }) != 0) {
-        abandon_temporary();
+        abandon_unpublished();
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::WriteFailed, package_path,
-                current_system_error(), std::nullopt, temporary_path);
+                current_system_error());
     }
     if(auto write_failure =
                write_all_bytes(temporary.get(), publication, package_path)) {
-        abandon_temporary();
-        write_failure->leftover_artifact = temporary_path;
+        abandon_unpublished();
         return *write_failure;
     }
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
     if(consume_injected_failure(
                ReviewedSourceStateStoreTestFailurePoint::Sync)) {
-        abandon_temporary();
+        abandon_unpublished();
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::SyncFailed, package_path,
-                std::make_error_code(std::errc::io_error), std::nullopt,
-                temporary_path);
+                std::make_error_code(std::errc::io_error));
     }
 #endif
     if(auto sync_failure = fsync_descriptor(temporary.get(), package_path)) {
-        abandon_temporary();
-        sync_failure->leftover_artifact = temporary_path;
+        abandon_unpublished();
         return *sync_failure;
     }
 
     struct stat temporary_status {};
     if(auto failure =
                fstat_descriptor(temporary.get(), temporary_status, package_path)) {
-        abandon_temporary();
-        failure->leftover_artifact = temporary_path;
+        abandon_unpublished();
         return *failure;
     }
-    if(auto failure = validate_entry_status(
+    if(auto failure = validate_anonymous_record_status(
                temporary_status, package_path, directory->owner())) {
-        abandon_temporary();
-        failure->leftover_artifact = temporary_path;
+        abandon_unpublished();
         return *failure;
     }
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+    race_context.source_device =
+            static_cast<std::uintmax_t>(temporary_status.st_dev);
+    race_context.source_inode =
+            static_cast<std::uintmax_t>(temporary_status.st_ino);
+#endif
 
     if(current.has_value()) {
         std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
@@ -1571,32 +1857,30 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
                 package_directory.get(), current->leaf.leaf, *current_path,
                 inspect_failure);
         if(inspect_failure.has_value()) {
-            abandon_temporary();
-            inspect_failure->leftover_artifact = temporary_path;
+            abandon_unpublished();
             return *inspect_failure;
         }
         if(!pre_commit_status.has_value() ||
-           !same_filesystem_identity(current->status, *pre_commit_status)) {
-            abandon_temporary();
+           !matches_predecessor_identity(
+                   *pre_commit_status, expected_observed->identity)) {
+            abandon_unpublished();
             return store_failure(
                     ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                    *current_path, std::nullopt, std::nullopt, temporary_path);
+                    *current_path);
         }
         auto pre_commit_contents = reread_descriptor_contents(
                 retained_current.get(), *current_path);
         if(const auto* failure = std::get_if<ReviewedSourceStateStoreFailure>(
                    &pre_commit_contents)) {
-            abandon_temporary();
-            ReviewedSourceStateStoreFailure reported = *failure;
-            reported.leftover_artifact = temporary_path;
-            return reported;
+            abandon_unpublished();
+            return *failure;
         }
         if(std::get<std::string>(pre_commit_contents) !=
            expected_observed->raw_contents) {
-            abandon_temporary();
+            abandon_unpublished();
             return store_failure(
                     ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                    *current_path, std::nullopt, std::nullopt, temporary_path);
+                    *current_path);
         }
     } else {
         std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
@@ -1604,58 +1888,70 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
                 package_directory.get(), publication_leaf, publication_path,
                 inspect_failure);
         if(inspect_failure.has_value()) {
-            abandon_temporary();
-            inspect_failure->leftover_artifact = temporary_path;
+            abandon_unpublished();
             return *inspect_failure;
         }
         if(origin_status.has_value()) {
-            abandon_temporary();
+            abandon_unpublished();
             return store_failure(
                     ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
-                    publication_path, std::nullopt, std::nullopt,
-                    temporary_path);
+                    publication_path);
         }
     }
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
-    // LANDMINE: this window can same-inode rewrite predecessor contents after
-    // the last recheck. Authority is the digest-bound successor name, not the
-    // exclusive create alone.
+    // LANDMINE: predecessor identity/bytes can still change after this
+    // recheck. The successor leaf binds inode+ctime+digest, so a rewritten
+    // predecessor cannot make this publication the chain tip.
     invoke_race(
             ReviewedSourceStateStoreTestRacePoint::AtPublicationBoundary,
             race_context);
+#endif
+    if(auto revalidate = revalidate_named_package_directory(
+               store_directory_descriptor, package_directory.get(),
+               package_leaf, package_path, directory->owner())) {
+        abandon_unpublished();
+        return *revalidate;
+    }
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
     if(consume_injected_failure(
                ReviewedSourceStateStoreTestFailurePoint::Rename)) {
-        abandon_temporary();
+        abandon_unpublished();
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::RenameFailed,
-                publication_path, std::make_error_code(std::errc::io_error),
-                std::nullopt, temporary_path);
+                publication_path, std::make_error_code(std::errc::io_error));
     }
 #endif
 
-    if(renameat2_checked(
-               package_directory.get(), temporary_leaf.c_str(),
-               package_directory.get(), publication_leaf.c_str(),
-               RENAME_NOREPLACE) != 0) {
-        const int rename_error = errno;
-        abandon_temporary();
-        if(rename_error == EEXIST || rename_error == ENOTEMPTY ||
-           rename_error == ENOENT || rename_error == ENOTDIR ||
-           rename_error == ELOOP) {
+    // POLICY: linkat of /proc/self/fd/<retained> follows the descriptor's
+    // inode. The source capability is the unnamed O_TMPFILE inode, not a
+    // replaceable pathname in the PackageBase directory. EEXIST is the
+    // destination no-replace equivalent of RENAME_NOREPLACE.
+    if(linkat_retained_inode(
+               temporary.get(), package_directory.get(),
+               publication_leaf.c_str()) != 0) {
+        const int link_error = errno;
+        abandon_unpublished();
+        if(link_error == EEXIST || link_error == ENOTEMPTY ||
+           link_error == ENOENT || link_error == ENOTDIR ||
+           link_error == ELOOP) {
             return store_failure(
                     ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
                     publication_path,
-                    std::error_code(rename_error, std::generic_category()),
-                    std::nullopt, temporary_path);
+                    std::error_code(link_error, std::generic_category()));
         }
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::RenameFailed,
                 publication_path,
-                std::error_code(rename_error, std::generic_category()),
-                std::nullopt, temporary_path);
+                std::error_code(link_error, std::generic_category()));
     }
     was_published = true;
+
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+    invoke_race(
+            ReviewedSourceStateStoreTestRacePoint::AfterPublication,
+            race_context);
+#endif
 
     struct stat published_descriptor_status {};
     if(auto failure = fstat_descriptor(
@@ -1670,23 +1966,65 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
 
     if(current.has_value()) {
         std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+        const std::optional<struct stat> predecessor_status =
+                inspect_named_entry(
+                        package_directory.get(), current->leaf.leaf,
+                        *current_path, inspect_failure,
+                        ReviewedSourceStateStoreTestFailurePoint::
+                                PostCommitPredecessorStatus);
+#else
         const std::optional<struct stat> predecessor_status =
                 inspect_named_entry(
                         package_directory.get(), current->leaf.leaf,
                         *current_path, inspect_failure);
-        if(inspect_failure.has_value() || !predecessor_status.has_value() ||
-           !same_filesystem_identity(current->status, *predecessor_status)) {
+#endif
+        if(inspect_failure.has_value()) {
+            return published_uncertain(
+                    next_state,
+                    ReviewedSourceStateObservedRecord{
+                            next_generation, publication_leaf,
+                            record_identity_from_status(
+                                    published_descriptor_status),
+                            publication},
+                    ReviewedSourceStatePostPublicationIssue::
+                            PredecessorObservationUncertain,
+                    inspect_failure->kind, publication_path, publication_path,
+                    inspect_failure->system_error);
+        }
+        if(!predecessor_status.has_value() ||
+           !matches_predecessor_identity(
+                   *predecessor_status, expected_observed->identity)) {
             return store_failure(
                     ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
                     publication_path, std::nullopt, std::nullopt,
                     publication_path);
         }
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+        auto post_commit_contents = reread_descriptor_contents(
+                retained_current.get(), *current_path,
+                ReviewedSourceStateStoreTestFailurePoint::
+                        PostCommitPredecessorRead);
+#else
         auto post_commit_contents = reread_descriptor_contents(
                 retained_current.get(), *current_path);
-        if(std::holds_alternative<ReviewedSourceStateStoreFailure>(
-                   post_commit_contents) ||
-           std::get<std::string>(post_commit_contents) !=
-                   expected_observed->raw_contents) {
+#endif
+        if(const auto* failure = std::get_if<ReviewedSourceStateStoreFailure>(
+                   &post_commit_contents)) {
+            return published_uncertain(
+                    next_state,
+                    ReviewedSourceStateObservedRecord{
+                            next_generation, publication_leaf,
+                            record_identity_from_status(
+                                    published_descriptor_status),
+                            publication},
+                    ReviewedSourceStatePostPublicationIssue::
+                            PredecessorObservationUncertain,
+                    failure->kind, publication_path, publication_path,
+                    failure->system_error);
+        }
+        if(std::get<std::string>(post_commit_contents) !=
+           expected_observed->raw_contents) {
             return store_failure(
                     ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
                     publication_path, std::nullopt, std::nullopt,
@@ -1776,6 +2114,16 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
                 ReviewedSourceStatePostPublicationIssue::DirectorySyncUncertain,
                 sync_failure->kind, package_path, std::nullopt,
                 sync_failure->system_error);
+    }
+    if(auto revalidate = revalidate_named_package_directory(
+               store_directory_descriptor, package_directory.get(),
+               package_leaf, package_path, directory->owner())) {
+        return published_uncertain(
+                next_state, published_observed,
+                ReviewedSourceStatePostPublicationIssue::
+                        PackageDirectoryIdentityUncertain,
+                revalidate->kind, package_path, publication_path,
+                revalidate->system_error);
     }
     if(auto close_failure =
                close_descriptor_checked(package_directory, package_path)) {
