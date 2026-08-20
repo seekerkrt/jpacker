@@ -10,6 +10,16 @@
 // Missingはfalse、unsafe descendantは例外としてconsumerの既存判断へ返す。
 bool has_safe_persistent_checkout_git_directory(const ValidatedCachePath& checkout);
 
+// Pinned-tree review does not inspect worktree artifacts. Keep the retained
+// checkout identity and recursive .git safety proof as its narrow boundary.
+void require_safe_persistent_checkout_git_metadata(
+        const ValidatedCachePath& checkout);
+
+// A missing-object result is authoritative only while every regular .git
+// metadata file remains readable through the same descriptor-safe traversal.
+void require_readable_persistent_checkout_git_metadata(
+        const ValidatedCachePath& checkout);
+
 // .git / PKGBUILD / root直下の*.installをnofollow検証する。
 // 戻り値はsort済みのrelative install-script filenameで、review開始時のsnapshotとして使う。
 std::vector<std::filesystem::path> require_safe_persistent_checkout_descendants(

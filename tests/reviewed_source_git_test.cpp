@@ -480,6 +480,33 @@ void test_sha1_projection_and_pinned_ref() {
                     history.first,
             "Read-only projection changed the moved remote ref");
 
+    const std::string expected_pkgbuild_object =
+            std::get<ReviewedSourceModified>(*pkgbuild_change)
+                    .new_version.object_id().value();
+    fixture.remove_path("PKGBUILD");
+    const auto deleted_worktree_result = trusted_git_project_reviewed_source(
+            checkout, fixture.remote_url(), target, baseline);
+    const auto& deleted_worktree_update =
+            require_arm<ReviewedSourceUpdateReview>(
+                    deleted_worktree_result,
+                    "Deleted worktree PKGBUILD changed pinned projection");
+    const auto* deleted_worktree_pkgbuild = find_new_path(
+            deleted_worktree_update.changes, "PKGBUILD");
+    require(deleted_worktree_pkgbuild != nullptr &&
+                    std::holds_alternative<ReviewedSourceModified>(
+                            *deleted_worktree_pkgbuild) &&
+                    std::get<ReviewedSourceModified>(
+                            *deleted_worktree_pkgbuild)
+                                    .new_version.object_id().value() ==
+                            expected_pkgbuild_object,
+            "Deleted worktree PKGBUILD replaced target-tree authority");
+    require(!fs::exists(fixture.repository() / "PKGBUILD"),
+            "Pinned projection recreated the deleted worktree PKGBUILD");
+    require(fixture.read_file(".git/index") == index_before,
+            "Pinned projection changed the index after worktree deletion");
+    require(fixture.output_git({"rev-parse", "HEAD"}) == head_before,
+            "Pinned projection changed HEAD after worktree deletion");
+
     const auto initial_result = trusted_git_project_reviewed_source(
             checkout, fixture.remote_url(), target, std::nullopt);
     const auto& initial = require_arm<ReviewedSourceInitialFullReview>(
@@ -536,6 +563,20 @@ void test_sha1_projection_and_pinned_ref() {
                             checkout, fixture.remote_url(), target,
                             SourceRevisionIdentity::git_commit(blob))),
             "Non-commit baseline did not produce RebaselineFullReview");
+    require(std::holds_alternative<ReviewedSourceRebaselineFullReview>(
+                    trusted_git_project_reviewed_source(
+                            checkout, fixture.remote_url(), target,
+                            SourceRevisionIdentity::git_commit(first_tree))),
+            "Tree baseline did not produce RebaselineFullReview");
+    fixture.run_git({"tag", "-a", "baseline-tag", history.first,
+                     "-m", "baseline tag"});
+    const std::string tag = fixture.output_git(
+            {"rev-parse", "baseline-tag^{tag}"});
+    require(std::holds_alternative<ReviewedSourceRebaselineFullReview>(
+                    trusted_git_project_reviewed_source(
+                            checkout, fixture.remote_url(), target,
+                            SourceRevisionIdentity::git_commit(tag))),
+            "Tag baseline did not produce RebaselineFullReview");
 
     fixture.run_git({"replace", "-f", history.target, dangling});
     const auto replacement_result = trusted_git_project_reviewed_source(
@@ -599,6 +640,199 @@ void test_sha1_projection_and_pinned_ref() {
             "Missing target ref failure reason drifted");
 }
 
+void test_baseline_object_access_failures() {
+    {
+        GitFixture fixture(GitObjectFormat::Sha1);
+        fixture.write_file(
+                "PKGBUILD", "pkgname=fixture\npkgver=1\npkgrel=1\n");
+        const std::string baseline_oid = fixture.commit("baseline");
+        fixture.write_file(
+                "PKGBUILD", "pkgname=fixture\npkgver=2\npkgrel=1\n");
+        const std::string target_oid = fixture.commit("target");
+        fixture.update_remote(target_oid);
+        const auto resolved = trusted_git_resolve_remote_commit(
+                fixture.checkout(), fixture.remote_url(), "main");
+        const SourceRevisionIdentity& target =
+                require_arm<SourceRevisionIdentity>(
+                        resolved,
+                        "Baseline failure fixture target resolution failed");
+
+        const fs::path baseline_object =
+                fixture.repository() / ".git" / "objects" /
+                baseline_oid.substr(0, 2) / baseline_oid.substr(2);
+        require(chmod(baseline_object.c_str(), 0000) == 0,
+                "Failed to make baseline commit unreadable");
+        const auto unreadable_result = trusted_git_project_reviewed_source(
+                fixture.checkout(), fixture.remote_url(), target,
+                SourceRevisionIdentity::git_commit(baseline_oid));
+        const auto& unreadable_failure = require_arm<TrustedGitReviewFailure>(
+                unreadable_result,
+                "Unreadable baseline commit was flattened to rebaseline");
+        require(unreadable_failure.reason ==
+                            TrustedGitReviewFailureReason::CommandFailed &&
+                        unreadable_failure.stage ==
+                            TrustedGitReviewStage::BaselineValidation,
+                "Unreadable baseline failure taxonomy drifted");
+
+        require(chmod(baseline_object.c_str(), 0644) == 0,
+                "Failed to restore baseline object permissions");
+        std::ofstream corrupt(
+                baseline_object, std::ios::binary | std::ios::trunc);
+        corrupt << "corrupt";
+        corrupt.close();
+        require(static_cast<bool>(corrupt),
+                "Failed to corrupt baseline commit fixture");
+        const auto corrupt_result = trusted_git_project_reviewed_source(
+                fixture.checkout(), fixture.remote_url(), target,
+                SourceRevisionIdentity::git_commit(baseline_oid));
+        const auto& corrupt_failure = require_arm<TrustedGitReviewFailure>(
+                corrupt_result,
+                "Corrupt baseline commit was flattened to rebaseline");
+        require(corrupt_failure.reason ==
+                            TrustedGitReviewFailureReason::CommandFailed &&
+                        corrupt_failure.stage ==
+                            TrustedGitReviewStage::BaselineValidation,
+                "Corrupt baseline failure taxonomy drifted");
+    }
+
+    {
+        GitFixture fixture(GitObjectFormat::Sha1);
+        fixture.write_file(
+                "PKGBUILD", "pkgname=packed\npkgver=1\npkgrel=1\n");
+        const std::string baseline_oid = fixture.commit("packed baseline");
+        fixture.run_git({"repack", "-ad"});
+        fixture.run_git({"prune-packed"});
+        fixture.write_file(
+                "PKGBUILD", "pkgname=packed\npkgver=2\npkgrel=1\n");
+        const std::string target_oid = fixture.commit("loose target");
+        fixture.update_remote(target_oid);
+        const auto resolved = trusted_git_resolve_remote_commit(
+                fixture.checkout(), fixture.remote_url(), "main");
+        const SourceRevisionIdentity& target =
+                require_arm<SourceRevisionIdentity>(
+                        resolved,
+                        "Packed baseline fixture target resolution failed");
+
+        fs::path pack_file;
+        fs::path pack_index;
+        for(const auto& entry : fs::directory_iterator(
+                    fixture.repository() / ".git" / "objects" / "pack")) {
+            if(entry.path().extension() == ".pack") {
+                require(pack_file.empty(),
+                        "Packed baseline fixture created multiple pack files");
+                pack_file = entry.path();
+            } else if(entry.path().extension() == ".idx") {
+                require(pack_index.empty(),
+                        "Packed baseline fixture created multiple pack indexes");
+                pack_index = entry.path();
+            }
+        }
+        require(!pack_file.empty() && !pack_index.empty(),
+                "Packed baseline fixture did not create a pack pair");
+        require(chmod(pack_file.c_str(), 0000) == 0,
+                "Failed to make baseline pack unreadable");
+        const auto unreadable_pack_result =
+                trusted_git_project_reviewed_source(
+                        fixture.checkout(), fixture.remote_url(), target,
+                        SourceRevisionIdentity::git_commit(baseline_oid));
+        require(chmod(pack_file.c_str(), 0444) == 0,
+                "Failed to restore baseline pack permissions");
+        const auto& unreadable_pack_failure =
+                require_arm<TrustedGitReviewFailure>(
+                        unreadable_pack_result,
+                        "Unreadable packed baseline was flattened to rebaseline");
+        require(unreadable_pack_failure.reason ==
+                            TrustedGitReviewFailureReason::CommandFailed &&
+                        unreadable_pack_failure.stage ==
+                            TrustedGitReviewStage::BaselineValidation,
+                "Unreadable packed baseline failure taxonomy drifted");
+
+        require(chmod(pack_index.c_str(), 0000) == 0,
+                "Failed to make baseline pack index unreadable");
+        const auto unreadable_index_result =
+                trusted_git_project_reviewed_source(
+                        fixture.checkout(), fixture.remote_url(), target,
+                        SourceRevisionIdentity::git_commit(baseline_oid));
+        require(chmod(pack_index.c_str(), 0444) == 0,
+                "Failed to restore baseline pack index permissions");
+        const auto& unreadable_index_failure =
+                require_arm<TrustedGitReviewFailure>(
+                        unreadable_index_result,
+                        "Unreadable pack index was flattened to rebaseline");
+        require(unreadable_index_failure.reason ==
+                            TrustedGitReviewFailureReason::CommandFailed &&
+                        unreadable_index_failure.stage ==
+                            TrustedGitReviewStage::BaselineValidation,
+                "Unreadable pack index failure taxonomy drifted");
+
+        require(chmod(pack_index.c_str(), 0600) == 0,
+                "Failed to make baseline pack index writable");
+        std::ofstream corrupt_index(
+                pack_index, std::ios::binary | std::ios::trunc);
+        corrupt_index << "corrupt";
+        corrupt_index.close();
+        require(static_cast<bool>(corrupt_index),
+                "Failed to corrupt baseline pack index");
+        const auto corrupt_index_result =
+                trusted_git_project_reviewed_source(
+                        fixture.checkout(), fixture.remote_url(), target,
+                        SourceRevisionIdentity::git_commit(baseline_oid));
+        const auto& corrupt_index_failure =
+                require_arm<TrustedGitReviewFailure>(
+                        corrupt_index_result,
+                        "Corrupt pack index was flattened to rebaseline");
+        require(corrupt_index_failure.reason ==
+                            TrustedGitReviewFailureReason::CommandFailed &&
+                        corrupt_index_failure.stage ==
+                            TrustedGitReviewStage::BaselineValidation,
+                "Corrupt pack index failure taxonomy drifted: reason=" +
+                        std::to_string(static_cast<int>(
+                                corrupt_index_failure.reason)) +
+                        " stage=" + std::to_string(static_cast<int>(
+                                corrupt_index_failure.stage)) +
+                        " exit=" +
+                        (corrupt_index_failure.exit_code.has_value()
+                                 ? std::to_string(
+                                           *corrupt_index_failure.exit_code)
+                                 : std::string("none")));
+    }
+}
+
+void test_missing_gitlink_object_remains_supported() {
+    GitFixture fixture(GitObjectFormat::Sha1);
+    fixture.write_file("PKGBUILD", "pkgname=gitlink\npkgver=1\npkgrel=1\n");
+    fixture.stage_all();
+    const std::string missing_commit(40, '1');
+    fixture.set_gitlink("missing-submodule", missing_commit);
+    const std::string target_oid = fixture.commit_index("missing gitlink target");
+    fixture.update_remote(target_oid);
+    const auto resolved = trusted_git_resolve_remote_commit(
+            fixture.checkout(), fixture.remote_url(), "main");
+    const SourceRevisionIdentity& target = require_arm<SourceRevisionIdentity>(
+            resolved,
+            "Missing-gitlink target resolution failed");
+    const auto projection = trusted_git_project_reviewed_source(
+            fixture.checkout(), fixture.remote_url(), target, std::nullopt);
+    const auto& initial = require_arm<ReviewedSourceInitialFullReview>(
+            projection, "Missing-gitlink initial projection failed");
+    const auto* change = find_new_path(initial.changes, "missing-submodule");
+    const auto* added = change == nullptr
+            ? nullptr
+            : std::get_if<ReviewedSourceAdded>(change);
+    require(added != nullptr &&
+                    added->new_version.mode() ==
+                            ReviewedSourceFileMode::Gitlink &&
+                    !added->new_version.blob_size().has_value() &&
+                    added->new_version.object_id().value() == missing_commit,
+            "Missing gitlink object became a projection requirement");
+    require(std::holds_alternative<ReviewedSourceRebaselineFullReview>(
+                    trusted_git_project_reviewed_source(
+                            fixture.checkout(), fixture.remote_url(), target,
+                            SourceRevisionIdentity::git_commit(
+                                    std::string(40, 'f')))),
+            "Missing gitlink object made missing-baseline integrity fail");
+}
+
 void test_sha256_projection_and_strict_config() {
     {
         GitFixture fixture(GitObjectFormat::Sha256);
@@ -630,6 +864,20 @@ void test_sha256_projection_and_strict_config() {
                             GitObjectFormat::Sha256,
                     "SHA-256 tree object ID format was lost");
         }
+        require(std::holds_alternative<ReviewedSourceRebaselineFullReview>(
+                        trusted_git_project_reviewed_source(
+                                fixture.checkout(), fixture.remote_url(),
+                                target,
+                                SourceRevisionIdentity::git_commit(
+                                        std::string(64, 'f')))),
+                "Missing SHA-256 baseline did not rebaseline");
+        require(std::holds_alternative<ReviewedSourceRebaselineFullReview>(
+                        trusted_git_project_reviewed_source(
+                                fixture.checkout(), fixture.remote_url(),
+                                target,
+                                SourceRevisionIdentity::git_commit(
+                                        std::string(40, 'f')))),
+                "Mismatched baseline object format did not rebaseline");
     }
 
     {
@@ -659,6 +907,8 @@ void test_sha256_projection_and_strict_config() {
 
 void run_tests() {
     test_sha1_projection_and_pinned_ref();
+    test_baseline_object_access_failures();
+    test_missing_gitlink_object_remains_supported();
     test_sha256_projection_and_strict_config();
 }
 
