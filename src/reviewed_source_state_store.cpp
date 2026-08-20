@@ -409,6 +409,7 @@ ReviewedSourceStateRecordIdentity record_identity_from_status(
             static_cast<std::uintmax_t>(status.st_ino),
             static_cast<std::uintmax_t>(status.st_uid),
             static_cast<std::uintmax_t>(status.st_mode & 07777),
+            static_cast<std::uintmax_t>(status.st_nlink),
             static_cast<std::intmax_t>(status.st_size),
             static_cast<std::intmax_t>(status.st_mtim.tv_sec),
             static_cast<std::intmax_t>(status.st_mtim.tv_nsec),
@@ -423,11 +424,18 @@ bool same_filesystem_identity(
            (expected.st_mode & S_IFMT) == (actual.st_mode & S_IFMT);
 }
 
+// LANDMINE: st_nlink belongs here, and it has to be compared directly. A
+// hardlink added outside the PackageBase directory leaves dev, ino, type, uid,
+// mode, size, mtime and the bytes identical and never touches the directory
+// inventory, so every other comparison in this function stays true. Inferring
+// it from ctime is not a substitute: a coarse-granularity filesystem may
+// represent the observation before and after the link with the same ctime.
 bool same_record_state(
         const struct stat& expected, const struct stat& actual) {
     return same_filesystem_identity(expected, actual) &&
            expected.st_uid == actual.st_uid &&
            (expected.st_mode & 07777) == (actual.st_mode & 07777) &&
+           expected.st_nlink == actual.st_nlink &&
            expected.st_size == actual.st_size &&
            expected.st_mtim.tv_sec == actual.st_mtim.tv_sec &&
            expected.st_mtim.tv_nsec == actual.st_mtim.tv_nsec &&
@@ -437,6 +445,11 @@ bool same_record_state(
 
 // rename(2) may update ctime. Post-publication compares the stable
 // security/content fields and allows only that relocation timestamp to differ.
+//
+// NOTE: st_nlink is deliberately absent. This compares the retained O_TMPFILE
+// inode before and after linkat, and that transition is exactly 0 -> 1. The
+// absolute single-link contract for the committed record is proven separately
+// against the named entry.
 bool same_relocated_record_state(
         const struct stat& expected, const struct stat& actual) {
     return same_filesystem_identity(expected, actual) &&
@@ -764,7 +777,8 @@ open_existing_entry(
 std::variant<std::string, ReviewedSourceStateStoreFailure> read_all_bytes(
         int descriptor,
         const fs::path& entry_path,
-        const struct stat& expected_status
+        const struct stat& expected_status,
+        std::uintmax_t expected_owner
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
         ,
         ReviewedSourceStateStoreTestFailurePoint failure_point =
@@ -812,8 +826,28 @@ std::variant<std::string, ReviewedSourceStateStoreFailure> read_all_bytes(
         total += chunk;
     }
 
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+    ReviewedSourceStateStoreTestRaceContext record_context;
+    record_context.package_directory = entry_path.parent_path();
+    record_context.record_path = entry_path;
+    invoke_race(
+            ReviewedSourceStateStoreTestRacePoint::AfterRecordContentsRead,
+            record_context);
+#endif
+
     struct stat after_status {};
     if(auto failure = fstat_descriptor(descriptor, after_status, entry_path)) {
+        return *failure;
+    }
+    // POLICY(#411): the security status is proven where the bytes are handed
+    // back, not only where the descriptor was opened. Between the two, a record
+    // can gain a hardlink, and the alias may live outside the PackageBase
+    // directory, so no rescan of that directory can explain it. Re-asserting
+    // the absolute contract here - regular, same owner, 0600, single link - is
+    // what keeps ordinary Loaded and ordinary Published from being returned for
+    // a record the very next lookup rejects as MultipleHardLinks.
+    if(auto failure =
+               validate_entry_status(after_status, entry_path, expected_owner)) {
         return *failure;
     }
     if(!same_record_state(expected_status, after_status)) {
@@ -910,8 +944,9 @@ struct ChainProofRecord {
 
 // POLICY(#411): the complete evidence an accepted history rests on. It holds
 // every managed (non-temp) leaf present in the PackageBase directory plus, for
-// each record on the proven chain, the filesystem identity observed and the
-// digest of the bytes actually read.
+// each record on the proven chain, the filesystem identity observed - including
+// its security status and link count - and the digest of the bytes actually
+// read.
 //
 // LANDMINE: this must stay a value that can be re-derived and compared. It is
 // the difference between "the chain was single and complete when we started"
@@ -919,6 +954,9 @@ struct ChainProofRecord {
 // not reduce it to the tip: an ancestor rewrite, an ancestor inode
 // replacement, a same-generation fork, or a new future-owned entry appearing
 // after the first proof are exactly the mutations a tip-only recheck misses.
+// Do not reduce the record identity either: a mutation that only changes a
+// record's security status - a hardlink added outside this directory is the
+// concrete case - leaves the leaf names and every content digest intact.
 struct ChainProofToken {
     std::vector<std::string>      managed_leaves;
     std::vector<ChainProofRecord> records;
@@ -1037,7 +1075,8 @@ read_generation_contents(
         return *failure;
     }
     OwnedDescriptor descriptor = std::get<OwnedDescriptor>(std::move(opened));
-    auto contents = read_all_bytes(descriptor.get(), path, generation.status);
+    auto contents = read_all_bytes(
+            descriptor.get(), path, generation.status, expected_owner);
     if(const auto* failure =
                std::get_if<ReviewedSourceStateStoreFailure>(&contents)) {
         return *failure;
@@ -1051,7 +1090,8 @@ read_generation_contents(
 std::variant<std::string, ReviewedSourceStateStoreFailure>
 reread_descriptor_contents(
         int descriptor,
-        const fs::path& entry_path
+        const fs::path& entry_path,
+        std::uintmax_t expected_owner
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
         ,
         ReviewedSourceStateStoreTestFailurePoint failure_point =
@@ -1070,9 +1110,10 @@ reread_descriptor_contents(
         return *failure;
     }
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
-    return read_all_bytes(descriptor, entry_path, status, failure_point);
+    return read_all_bytes(
+            descriptor, entry_path, status, expected_owner, failure_point);
 #else
-    return read_all_bytes(descriptor, entry_path, status);
+    return read_all_bytes(descriptor, entry_path, status, expected_owner);
 #endif
 }
 
@@ -1774,7 +1815,7 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
     }
 
     auto contents = read_all_bytes(
-            file_descriptor.get(), tip_path, current.status);
+            file_descriptor.get(), tip_path, current.status, directory->owner());
     if(const auto* failure =
                std::get_if<ReviewedSourceStateStoreFailure>(&contents)) {
         return *failure;
@@ -1918,7 +1959,8 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
         }
         retained_current = std::get<OwnedDescriptor>(std::move(opened));
         auto contents = read_all_bytes(
-                retained_current.get(), current_path, current->status);
+                retained_current.get(), current_path, current->status,
+                directory->owner());
         if(const auto* failure =
                    std::get_if<ReviewedSourceStateStoreFailure>(&contents)) {
             return *failure;
@@ -2050,7 +2092,7 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
                     *current_path);
         }
         auto pre_commit_contents = reread_descriptor_contents(
-                retained_current.get(), *current_path);
+                retained_current.get(), *current_path, directory->owner());
         if(const auto* failure = std::get_if<ReviewedSourceStateStoreFailure>(
                    &pre_commit_contents)) {
             abandon_unpublished();
@@ -2233,12 +2275,12 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
         }
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
         auto post_commit_contents = reread_descriptor_contents(
-                retained_current.get(), *current_path,
+                retained_current.get(), *current_path, directory->owner(),
                 ReviewedSourceStateStoreTestFailurePoint::
                         PostCommitPredecessorRead);
 #else
         auto post_commit_contents = reread_descriptor_contents(
-                retained_current.get(), *current_path);
+                retained_current.get(), *current_path, directory->owner());
 #endif
         if(const auto* failure = std::get_if<ReviewedSourceStateStoreFailure>(
                    &post_commit_contents)) {

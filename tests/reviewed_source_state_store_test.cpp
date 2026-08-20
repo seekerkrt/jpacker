@@ -1,5 +1,6 @@
 #include "reviewed_source_state_store.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -189,11 +190,20 @@ ReviewedSourceStateRecordIdentity record_identity_of(const fs::path& path) {
             static_cast<std::uintmax_t>(status.st_ino),
             static_cast<std::uintmax_t>(status.st_uid),
             static_cast<std::uintmax_t>(status.st_mode & 07777),
+            static_cast<std::uintmax_t>(status.st_nlink),
             static_cast<std::intmax_t>(status.st_size),
             static_cast<std::intmax_t>(status.st_mtim.tv_sec),
             static_cast<std::intmax_t>(status.st_mtim.tv_nsec),
             static_cast<std::intmax_t>(status.st_ctim.tv_sec),
             static_cast<std::intmax_t>(status.st_ctim.tv_nsec)};
+}
+
+std::uintmax_t link_count(const fs::path& path) {
+    struct stat status {};
+    if(::lstat(path.c_str(), &status) != 0) {
+        throw std::runtime_error("lstat failed for " + path.string());
+    }
+    return static_cast<std::uintmax_t>(status.st_nlink);
 }
 
 void write_bytes(const fs::path& path, std::string_view contents, mode_t mode) {
@@ -473,6 +483,54 @@ struct ReplacingStoreDirectory {
     }
 };
 ReplacingStoreDirectory* ReplacingStoreDirectory::instance = nullptr;
+
+// M411-S2-011. Add a second name for one chain record while the operation is
+// inside that record's read: the bytes are already in hand, the post-read
+// status proof has not run. The alias is created outside the PackageBase
+// directory on the same filesystem, so the PackageBase inventory, the leaf
+// names, the inode, the size, and the content digest are all unchanged. Only
+// the record's own st_nlink reports the mutation.
+struct LinkingRecordOutsidePackage {
+    std::string target_leaf;
+    fs::path    alias_path;
+    fs::path    linked_record;
+    bool        did_link = false;
+    static LinkingRecordOutsidePackage* instance;
+
+    // Armed from an outer boundary race point so the inner window belongs to
+    // the final reproof rather than to the operation's first chain proof.
+    static void arm(const ReviewedSourceStateStoreTestRaceContext&) {
+        require(instance != nullptr,
+                "LinkingRecordOutsidePackage was not armed.");
+        run_reviewed_source_state_store_race_once_for_test(
+                ReviewedSourceStateStoreTestRacePoint::AfterRecordContentsRead,
+                &LinkingRecordOutsidePackage::handler);
+    }
+
+    static void handler(const ReviewedSourceStateStoreTestRaceContext& context) {
+        require(instance != nullptr,
+                "LinkingRecordOutsidePackage was not armed.");
+        require(context.record_path.has_value(),
+                "Record read race carried no record path.");
+        if(context.record_path->filename().string() != instance->target_leaf) {
+            // Not the record under test. The hook is one-shot, so re-arm it for
+            // the next record the same reproof reads.
+            run_reviewed_source_state_store_race_once_for_test(
+                    ReviewedSourceStateStoreTestRacePoint::
+                            AfterRecordContentsRead,
+                    &LinkingRecordOutsidePackage::handler);
+            return;
+        }
+        if(::link(context.record_path->c_str(),
+                  instance->alias_path.c_str()) != 0) {
+            throw std::runtime_error(
+                    "Failed to create the external hardlink alias.");
+        }
+        instance->linked_record = *context.record_path;
+        instance->did_link = true;
+    }
+};
+LinkingRecordOutsidePackage* LinkingRecordOutsidePackage::instance = nullptr;
 #endif
 
 void test_missing_lookup_does_not_create() {
@@ -2396,6 +2454,210 @@ void test_extreme_generations_are_typed_unsafe_history() {
     require_extreme_generation_is_typed_unsafe_history(
             std::numeric_limits<std::uint64_t>::max() - 1, "near-max generation");
 }
+
+// M411-S2-011 shared fixture assertions. What makes the counterexample real is
+// that nothing a directory rescan can see has changed: the alias lives outside
+// the PackageBase directory, the record keeps its inode and its bytes, and the
+// leaf inventory is untouched apart from the operation's own successor.
+//
+// The refusal is closed by comparing st_nlink directly. It does not depend on
+// the filesystem giving the link a fresh ctime: on a coarse-granularity
+// filesystem the ctime before and after the link may be represented by the same
+// value, and the assertions below never mention ctime.
+void require_external_alias_is_invisible_to_the_directory(
+        const LinkingRecordOutsidePackage& linker,
+        const fs::path& package_dir,
+        const fs::path& record,
+        const std::string& record_bytes,
+        std::vector<std::string> expected_inventory,
+        const std::string& label) {
+    require(linker.did_link,
+            label + ": the record-read hardlink race never fired.");
+    require(linker.linked_record == record,
+            label + ": the race aliased a different record.");
+    require(fs::exists(linker.alias_path),
+            label + ": the external alias is gone.");
+    require(linker.alias_path.parent_path() != package_dir,
+            label + ": the alias was placed inside the PackageBase directory, "
+                    "so a directory rescan alone could have caught it.");
+    const FileIdentity aliased = file_identity(linker.alias_path);
+    const FileIdentity original = file_identity(record);
+    require(aliased.device == original.device && aliased.inode == original.inode,
+            label + ": the alias is not the same inode on the same filesystem.");
+    require(link_count(record) == 2,
+            label + ": the record did not end up with two links.");
+    require(read_bytes(record) == record_bytes,
+            label + ": the aliased record's bytes changed.");
+
+    std::vector<std::string> observed = regular_leaf_names(package_dir);
+    std::sort(observed.begin(), observed.end());
+    std::sort(expected_inventory.begin(), expected_inventory.end());
+    require(observed == expected_inventory,
+            label + ": the PackageBase inventory changed, so this fixture no "
+                    "longer isolates the single-link mutation.");
+}
+
+// M411-S2-011 read side. A is inside the final boundary reproof and has just
+// read an ancestor's bytes when B gives that record a second name outside the
+// PackageBase directory. Every field the proof compared before this fix - dev,
+// ino, type, uid, mode, size, mtime, leaf inventory, content digest - is still
+// equal, so ordinary Loaded was reachable for a state the next lookup rejects.
+void require_lookup_record_read_hardlink_race_is_fail_closed(
+        bool should_target_origin, const std::string& label) {
+    StoreTestHome home;
+    ThreeGenerationFixture fixture = publish_three_generations();
+    // Successor leaves bind the predecessor inode and ctime, so the target leaf
+    // only exists once this fixture has been published.
+    const std::string target_leaf =
+            should_target_origin
+                    ? reviewed_source_state_store_origin_leaf()
+                    : fixture.published_second->observed.leaf_name;
+    const fs::path record = fixture.package_dir / target_leaf;
+    const std::string record_bytes = read_bytes(record);
+    const std::string tip_bytes = read_bytes(fixture.generation3);
+    const std::vector<std::string> inventory_before =
+            regular_leaf_names(fixture.package_dir);
+    require(link_count(record) == 1,
+            label + ": the fixture record was not single-link to begin with.");
+
+    LinkingRecordOutsidePackage linker{
+            target_leaf, home.root() / "outside-alias", {}, false};
+    LinkingRecordOutsidePackage::instance = &linker;
+    run_reviewed_source_state_store_race_once_for_test(
+            ReviewedSourceStateStoreTestRacePoint::AfterReadAuthorityProof,
+            &LinkingRecordOutsidePackage::arm);
+    const auto result = read_reviewed_source_state(fixture.first.package_base());
+    LinkingRecordOutsidePackage::instance = nullptr;
+    reset_reviewed_source_state_store_test_hooks();
+
+    require(!std::holds_alternative<ReviewedSourceStateStoreRead>(result),
+            label + ": a record that gained a second link still produced an "
+                    "ordinary read.");
+    const auto& failure = require_arm<ReviewedSourceStateStoreFailure>(
+            result, label + ": the refusal was not a typed failure.");
+    // LANDMINE: MultipleHardLinks, not ConcurrentReplacement. The post-read
+    // proof asserts the absolute security contract before it compares the
+    // status fields, so the kind names the contract that was actually broken.
+    // A run that reports ConcurrentReplacement here means the record was
+    // refused because some other field moved - in practice ctime - and the
+    // single-link proof this test exists for did not fire.
+    require(failure.kind ==
+                    ReviewedSourceStateStoreFailureKind::MultipleHardLinks,
+            label + ": the refusal did not come from the single-link proof.");
+
+    require_external_alias_is_invisible_to_the_directory(
+            linker, fixture.package_dir, record, record_bytes, inventory_before,
+            label);
+    require(read_bytes(fixture.generation3) == tip_bytes,
+            label + ": the lookup mutated the chain tip.");
+
+    const auto next = read_reviewed_source_state(fixture.first.package_base());
+    require(!std::holds_alternative<ReviewedSourceStateStoreRead>(next),
+            label + ": the immediate next lookup contradicted the refusal.");
+    const auto& next_failure = require_arm<ReviewedSourceStateStoreFailure>(
+            next, label + ": the subsequent lookup was not a typed failure.");
+    require(next_failure.kind ==
+                    ReviewedSourceStateStoreFailureKind::MultipleHardLinks,
+            label + ": the subsequent lookup did not report the alias.");
+}
+
+void test_lookup_record_read_hardlink_race_is_fail_closed() {
+    require_lookup_record_read_hardlink_race_is_fail_closed(
+            true, "lookup generation 1 external hardlink");
+    require_lookup_record_read_hardlink_race_is_fail_closed(
+            false, "lookup generation 2 external hardlink");
+}
+
+// M411-S2-011 publish side. A has already linked generation 4, so the record is
+// permanent and no ordinary definite failure is allowed. B aliases an ancestor
+// during the post-commit reproof's read of it. The answer must be a commit-aware
+// PublishedUncertain, never ordinary Published and never a rollback.
+void require_publication_record_read_hardlink_race_is_published_uncertain(
+        bool should_target_origin, const std::string& label) {
+    StoreTestHome home;
+    ThreeGenerationFixture fixture = publish_three_generations();
+    const std::string target_leaf =
+            should_target_origin
+                    ? reviewed_source_state_store_origin_leaf()
+                    : fixture.published_second->observed.leaf_name;
+    const ReviewedSourceState fourth = aur_state(
+            "example-base",
+            "https://aur.archlinux.org/example-base.git",
+            std::string(SHA1_A));
+    const std::string publication = encode_reviewed_source_state(fourth);
+    const std::string successor_leaf =
+            reviewed_source_state_store_successor_leaf(
+                    4, fixture.published_third->observed.identity,
+                    fixture.published_third->observed.raw_contents);
+    const fs::path successor = fixture.package_dir / successor_leaf;
+    const fs::path record = fixture.package_dir / target_leaf;
+    const std::string record_bytes = read_bytes(record);
+    std::vector<std::string> expected_inventory =
+            regular_leaf_names(fixture.package_dir);
+    expected_inventory.push_back(successor_leaf);
+    require(link_count(record) == 1,
+            label + ": the fixture record was not single-link to begin with.");
+
+    LinkingRecordOutsidePackage linker{
+            target_leaf, home.root() / "outside-alias", {}, false};
+    LinkingRecordOutsidePackage::instance = &linker;
+    run_reviewed_source_state_store_race_once_for_test(
+            ReviewedSourceStateStoreTestRacePoint::AfterAuthorityProof,
+            &LinkingRecordOutsidePackage::arm);
+    const auto result = publish_reviewed_source_state(
+            fourth, fixture.published_third->observed);
+    LinkingRecordOutsidePackage::instance = nullptr;
+    reset_reviewed_source_state_store_test_hooks();
+
+    require(!std::holds_alternative<ReviewedSourceStateStorePublished>(result),
+            label + ": an ancestor that gained a second link still returned "
+                    "ordinary Published.");
+    const auto& uncertain =
+            require_arm<ReviewedSourceStateStorePublishedUncertain>(
+                    result, label + ": a post-commit refusal was reported as an "
+                                    "ordinary definite failure.");
+    require(uncertain.issue ==
+                    ReviewedSourceStatePostPublicationIssue::
+                            AuthoritativeHistoryUncertain,
+            label + ": the post-commit issue left the commit-aware taxonomy.");
+    // The same discriminator as the read side: only the single-link proof
+    // produces MultipleHardLinks here, so this assertion fails if the refusal
+    // actually came from a ctime change rather than from the link count.
+    require(uncertain.failure_kind ==
+                    ReviewedSourceStateStoreFailureKind::MultipleHardLinks,
+            label + ": the refusal did not come from the single-link proof.");
+    require(uncertain.observed.has_value() &&
+                    uncertain.observed->leaf_name == successor_leaf,
+            label + ": the uncertain publication lost the committed token.");
+    require(uncertain.leftover_artifact.has_value() &&
+                    *uncertain.leftover_artifact == successor,
+            label + ": the uncertain publication hid the committed artifact.");
+    require(fs::exists(successor) && read_bytes(successor) == publication,
+            label + ": the committed successor was rolled back.");
+    require(uncertain.observed->identity == record_identity_of(successor),
+            label + ": the returned token drifted from the on-disk record.");
+
+    require_external_alias_is_invisible_to_the_directory(
+            linker, fixture.package_dir, record, record_bytes,
+            expected_inventory, label);
+
+    const auto next = read_reviewed_source_state(fixture.first.package_base());
+    require(!std::holds_alternative<ReviewedSourceStateStoreRead>(next),
+            label + ": the immediate next lookup contradicted the uncertain "
+                    "publication.");
+    const auto& next_failure = require_arm<ReviewedSourceStateStoreFailure>(
+            next, label + ": the subsequent lookup was not a typed failure.");
+    require(next_failure.kind ==
+                    ReviewedSourceStateStoreFailureKind::MultipleHardLinks,
+            label + ": the subsequent lookup did not report the alias.");
+}
+
+void test_publication_record_read_hardlink_race_is_published_uncertain() {
+    require_publication_record_read_hardlink_race_is_published_uncertain(
+            true, "publish generation 1 external hardlink");
+    require_publication_record_read_hardlink_race_is_published_uncertain(
+            false, "publish generation 2 external hardlink");
+}
 #endif
 
 } // namespace
@@ -2447,6 +2709,8 @@ int main() {
         test_post_commit_ancestor_mutation_never_disowns_committed_successor();
         test_lookup_store_directory_replacement_is_not_ordinary_loaded();
         test_extreme_generations_are_typed_unsafe_history();
+        test_lookup_record_read_hardlink_race_is_fail_closed();
+        test_publication_record_read_hardlink_race_is_published_uncertain();
 #endif
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';

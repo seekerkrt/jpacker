@@ -39,6 +39,13 @@
 //   fail-closed single-chain proof. The predecessor device / inode /
 //   status-change time in the leaf are additional discriminators; correctness
 //   never depends on a filesystem giving every mutation a distinct ctime.
+// - A record's security status - regular, same owner, 0600, single link - is
+//   part of that proof, not an admission check performed once at open time. It
+//   is re-proven after the bytes of every record are read, and the link count
+//   travels inside the record identity the proof token and the CAS guard
+//   compare. A hardlink added outside the PackageBase directory changes no
+//   other field and never appears in a directory rescan, so nothing but a
+//   direct link-count comparison can report it.
 // - A proof is not a momentary observation. Ordinary Loaded, Missing, and
 //   Published are returned only when the complete proof is re-derived and found
 //   identical at the result boundary. Any divergence is a typed unsafe history
@@ -64,6 +71,11 @@ struct ReviewedSourceStateRecordIdentity {
     std::uintmax_t inode = 0;
     std::uintmax_t owner = 0;
     std::uintmax_t mode = 0;
+    // POLICY(#411): an authoritative record is reachable through exactly one
+    // name. Keeping the observed link count in the identity is what lets a
+    // proof token and a CAS guard state that, instead of leaving it to a ctime
+    // side effect no filesystem is required to make distinguishable.
+    std::uintmax_t link_count = 0;
     std::intmax_t  size = 0;
     std::intmax_t  modification_time_seconds = 0;
     std::intmax_t  modification_time_nanoseconds = 0;
@@ -193,9 +205,16 @@ std::filesystem::path reviewed_source_state_store_entry_path(
         const PackageBaseIdentity& package_base);
 
 // Origin generation is always 1.toml. Later generations bind the predecessor
-// inode, status-change time, and raw-content digest so a replacement,
-// same-inode rewrite, or later restore of that record cannot silently become
-// the chain tip.
+// inode, status-change time, and raw-content digest, so a replacement or a
+// same-inode rewrite of the predecessor takes the successor off the proven
+// chain instead of letting it stay the tip over a predecessor it never saw.
+//
+// NOTE: restoring the exact predecessor inode and bytes can put that successor
+// back on the chain. That is consistent, not a hole: the successor was
+// committed, so the operation reported PublishedUncertain rather than disowning
+// a record that exists, and a later reader answers from the chain it can prove
+// at that moment. The binding does not rely on the filesystem giving the
+// rewrite and the restore distinguishable ctimes.
 std::string reviewed_source_state_store_origin_leaf();
 std::string reviewed_source_state_store_successor_leaf(
         std::uint64_t next_generation,
@@ -241,6 +260,13 @@ enum class ReviewedSourceStateStoreTestRacePoint {
     // Lookup: after the chain proof read and closed every ancestor, before the
     // boundary reproof and the final lineage revalidation.
     AfterReadAuthorityProof,
+    // Inside a record read: the bytes are already in hand and the post-read
+    // status proof has not run yet. This is the only window in which a security
+    // status change can hide behind an unchanged inode, size, and content
+    // digest. record_path names the record being read, and a handler that is
+    // not interested in it can re-arm this point for the next record the same
+    // reproof reads.
+    AfterRecordContentsRead,
 };
 
 struct ReviewedSourceStateStoreTestRaceContext {
@@ -252,6 +278,8 @@ struct ReviewedSourceStateStoreTestRaceContext {
     std::uint64_t         next_generation = 0;
     std::uintmax_t        source_device = 0;
     std::uintmax_t        source_inode = 0;
+    // Only AfterRecordContentsRead fills this in.
+    std::optional<std::filesystem::path> record_path = std::nullopt;
 };
 
 using ReviewedSourceStateStoreTestRaceHandler = void (*)(
