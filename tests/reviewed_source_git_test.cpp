@@ -297,6 +297,53 @@ const ReviewedSourceFileChange* find_old_path(
     return nullptr;
 }
 
+const ReviewedSourceReviewEntry* find_materialized_new_path(
+        const std::vector<ReviewedSourceReviewEntry>& entries,
+        std::string_view path) {
+    for(const ReviewedSourceReviewEntry& entry : entries) {
+        const bool matches = std::visit(
+                [path](const auto& value) {
+                    using Change = std::decay_t<decltype(value)>;
+                    if constexpr(std::is_same_v<Change, ReviewedSourceDeleted>) {
+                        return false;
+                    } else {
+                        return value.new_version.path().raw_bytes() == path;
+                    }
+                },
+                entry.change);
+        if(matches) return &entry;
+    }
+    return nullptr;
+}
+
+const ReviewedSourceReviewEntry* find_materialized_old_path(
+        const std::vector<ReviewedSourceReviewEntry>& entries,
+        std::string_view path) {
+    for(const ReviewedSourceReviewEntry& entry : entries) {
+        const bool matches = std::visit(
+                [path](const auto& value) {
+                    using Change = std::decay_t<decltype(value)>;
+                    if constexpr(std::is_same_v<Change, ReviewedSourceAdded>) {
+                        return false;
+                    } else {
+                        return value.old_version.path().raw_bytes() == path;
+                    }
+                },
+                entry.change);
+        if(matches) return &entry;
+    }
+    return nullptr;
+}
+
+bool git_marker_is_binary(const ReviewedSourceFileChange& change) {
+    return std::visit(
+            [](const auto& value) {
+                return std::holds_alternative<ReviewedSourceBinaryChange>(
+                        value.content);
+            },
+            change);
+}
+
 std::string repeated_lines(char prefix, int count) {
     std::string result;
     for(int i = 0; i < count; ++i) {
@@ -640,6 +687,239 @@ void test_sha1_projection_and_pinned_ref() {
             "Missing target ref failure reason drifted");
 }
 
+void test_sha1_content_materialization() {
+    GitFixture fixture(GitObjectFormat::Sha1);
+    std::string weird_path = "nested/content-";
+    weird_path.push_back('\t');
+    weird_path.push_back('\n');
+    weird_path.push_back('\x1b');
+    weird_path.push_back(static_cast<char>(0xff));
+
+    fixture.write_file("PKGBUILD", "pkgname=material\npkgver=1\npkgrel=1\n");
+    fixture.write_file("material.install", "post_install() { :; }\n");
+    fixture.write_file("forced.bin", std::string("old\0payload", 11));
+    fixture.write_file("binary.dat", std::string("binary\0old", 10));
+    fixture.write_file("generic.txt", "before\n");
+    fixture.write_file("deleted", "deleted content\n");
+    fixture.write_file("mode-only", "same mode content\n");
+    fixture.write_file("type", "regular target\n");
+    fixture.write_file("rename-old", repeated_lines('r', 30));
+    fixture.write_file(weird_path, "weird before\n");
+    const std::string baseline_oid = fixture.commit("material baseline");
+
+    fixture.write_file(
+            ".gitattributes",
+            "PKGBUILD -diff\n*.install -diff\nforced.bin diff\n");
+    fixture.write_file("PKGBUILD", "pkgname=material\npkgver=2\npkgrel=1\n");
+    fixture.write_file(
+            "material.install", "post_install() { echo changed; }\n");
+    fixture.write_file("forced.bin", std::string("new\0payload", 11));
+    fixture.write_file("binary.dat", std::string("binary\0new", 10));
+    fixture.write_file("generic.txt", "after\n");
+    fixture.remove_path("deleted");
+    fixture.write_file("mode-only", "same mode content\n", true);
+    fixture.remove_path("type");
+    fixture.make_symlink("PKGBUILD", "type");
+    fixture.rename_path("rename-old", "rename-new");
+    fixture.write_file(
+            "rename-new", repeated_lines('r', 30) + "rename change\n");
+    fixture.write_file(".SRCINFO", "pkgbase = material\npkgver = 2\n");
+    fixture.write_file(weird_path, "weird after\n");
+    fixture.stage_all();
+    const std::string missing_gitlink_oid(40, '9');
+    fixture.set_gitlink("missing-submodule", missing_gitlink_oid);
+    const std::string target_oid = fixture.commit_index("material target");
+    fixture.update_remote(target_oid);
+
+    const SourceRevisionIdentity target =
+            SourceRevisionIdentity::git_commit(target_oid);
+    const SourceRevisionIdentity baseline =
+            SourceRevisionIdentity::git_commit(baseline_oid);
+    const auto projected = trusted_git_project_reviewed_source(
+            fixture.checkout(), fixture.remote_url(), target, baseline);
+    const auto& update = require_arm<ReviewedSourceUpdateReview>(
+            projected, "Materialization fixture projection failed");
+
+    const std::string target_pkgbuild_blob = fixture.output_git(
+            {"rev-parse", target_oid + ":PKGBUILD"});
+    const std::string replacement_blob = fixture.output_git(
+            {"rev-parse", target_oid + ":generic.txt"});
+    fixture.run_git({"replace", "-f", target_pkgbuild_blob, replacement_blob});
+
+    fixture.write_file(".gitattributes", "PKGBUILD diff\n");
+    fixture.write_file("PKGBUILD", "dirty worktree\n");
+    const std::string dirty_pkgbuild = fixture.read_file("PKGBUILD");
+    const std::string index_before = fixture.read_file(".git/index");
+    const std::string head_before = fixture.output_git({"rev-parse", "HEAD"});
+
+    const auto materialized = trusted_git_materialize_reviewed_source_review(
+            fixture.checkout(), fixture.remote_url(),
+            ReviewedSourceProjection(update));
+    if(const auto* failure = std::get_if<TrustedGitReviewFailure>(
+               &materialized)) {
+        throw std::runtime_error(
+                "SHA-1 materialization trusted Git failure: reason=" +
+                std::to_string(static_cast<int>(failure->reason)) +
+                " stage=" +
+                std::to_string(static_cast<int>(failure->stage)) +
+                " exit=" +
+                (failure->exit_code.has_value()
+                         ? std::to_string(*failure->exit_code)
+                         : std::string("none")));
+    }
+    if(const auto* failure = std::get_if<ReviewedSourceReviewFailure>(
+               &materialized)) {
+        std::string path = "unavailable";
+        if(failure->entry_index < update.changes.size()) {
+            const ReviewedSourceFileChange& failed_change =
+                    update.changes[failure->entry_index];
+            path = std::visit(
+                    [](const auto& value) {
+                        using Change = std::decay_t<decltype(value)>;
+                        if constexpr(std::is_same_v<Change, ReviewedSourceDeleted>) {
+                            return value.old_version.path().escaped_display();
+                        } else {
+                            return value.new_version.path().escaped_display();
+                        }
+                    },
+                    failed_change);
+        }
+        throw std::runtime_error(
+                "SHA-1 materialization model failure: reason=" +
+                std::to_string(static_cast<int>(failure->reason)) +
+                " entry=" + std::to_string(failure->entry_index) +
+                " path=" + path +
+                " record=" + std::to_string(failure->record_index) +
+                " hunk=" + std::to_string(failure->hunk_index));
+    }
+    const auto& materialized_update =
+            require_arm<ReviewedSourceMaterializedUpdateReview>(
+                    materialized,
+                    "SHA-1 reviewed content materialization failed");
+    const auto& entries = materialized_update.review.entries;
+    require(materialized_update.review.readiness ==
+                    ReviewedSourceReviewReadiness::ManualInspectionRequired,
+            "Generic binary/gitlink readiness was flattened to Complete");
+
+    const auto* pkgbuild = find_materialized_new_path(entries, "PKGBUILD");
+    require(pkgbuild != nullptr && git_marker_is_binary(pkgbuild->change) &&
+                    pkgbuild->representation ==
+                            ReviewedSourceReviewRepresentation::
+                                    CompleteTextPatch &&
+                    pkgbuild->readiness ==
+                            ReviewedSourceReviewReadiness::Complete &&
+                    pkgbuild->patch.has_value(),
+            "PKGBUILD -diff hid exact textual materialization");
+    bool pkgbuild_new_line_observed = false;
+    for(const ReviewedSourcePatchHunk& hunk : pkgbuild->patch->hunks) {
+        for(const ReviewedSourcePatchLine& line : hunk.lines) {
+            if(line.kind == ReviewedSourcePatchLineKind::Added &&
+               line.line.bytes == "pkgver=2") {
+                pkgbuild_new_line_observed = true;
+            }
+        }
+    }
+    require(pkgbuild_new_line_observed,
+            "Replacement ref or dirty worktree changed PKGBUILD patch bytes");
+
+    const auto* install = find_materialized_new_path(
+            entries, "material.install");
+    require(install != nullptr && git_marker_is_binary(install->change) &&
+                    install->representation ==
+                            ReviewedSourceReviewRepresentation::
+                                    CompleteTextPatch &&
+                    install->readiness ==
+                            ReviewedSourceReviewReadiness::Complete,
+            "Root install -diff hid exact textual materialization");
+
+    const auto* forced = find_materialized_new_path(entries, "forced.bin");
+    require(forced != nullptr && !git_marker_is_binary(forced->change) &&
+                    forced->representation ==
+                            ReviewedSourceReviewRepresentation::ContainsNul &&
+                    forced->readiness ==
+                            ReviewedSourceReviewReadiness::
+                                    ManualInspectionRequired &&
+                    !forced->patch.has_value(),
+            "NUL blob forced text became a textual patch");
+
+    const auto* binary = find_materialized_new_path(entries, "binary.dat");
+    require(binary != nullptr && git_marker_is_binary(binary->change) &&
+                    binary->representation ==
+                            ReviewedSourceReviewRepresentation::ContainsNul,
+            "Git-binary/NUL content lost independent classification");
+
+    const auto* generic = find_materialized_new_path(entries, "generic.txt");
+    require(generic != nullptr && !git_marker_is_binary(generic->change) &&
+                    generic->representation ==
+                            ReviewedSourceReviewRepresentation::
+                                    CompleteTextPatch &&
+                    generic->patch.has_value(),
+            "Git-text/text content was not materialized");
+
+    const auto* mode = find_materialized_new_path(entries, "mode-only");
+    require(mode != nullptr &&
+                    mode->representation ==
+                            ReviewedSourceReviewRepresentation::NoContentChange &&
+                    std::holds_alternative<ReviewedSourceModified>(mode->change),
+            "Mode-only change did not remain Modified + NoContentChange");
+
+    const auto* renamed = find_materialized_new_path(entries, "rename-new");
+    require(renamed != nullptr &&
+                    std::holds_alternative<ReviewedSourceRenamed>(
+                            renamed->change) &&
+                    renamed->representation ==
+                            ReviewedSourceReviewRepresentation::
+                                    CompleteTextPatch &&
+                    renamed->patch.has_value(),
+            "Rename with content change lost typed patch materialization");
+
+    const auto* type = find_materialized_new_path(entries, "type");
+    require(type != nullptr &&
+                    std::holds_alternative<ReviewedSourceTypeChanged>(
+                            type->change) &&
+                    type->representation ==
+                            ReviewedSourceReviewRepresentation::
+                                    CompleteTextPatch &&
+                    type->patch.has_value(),
+            "Regular-to-symlink TypeChanged lost blob patch");
+
+    const auto* deleted = find_materialized_old_path(entries, "deleted");
+    require(deleted != nullptr &&
+                    deleted->representation ==
+                            ReviewedSourceReviewRepresentation::CompleteFullText,
+            "Deleted text did not retain complete old content");
+
+    const auto* srcinfo = find_materialized_new_path(entries, ".SRCINFO");
+    require(srcinfo != nullptr &&
+                    srcinfo->representation ==
+                            ReviewedSourceReviewRepresentation::CompleteFullText &&
+                    std::get<ReviewedSourceAdded>(srcinfo->change)
+                                    .new_version.classification() ==
+                            ReviewedSourceFileClassification::GeneratedMetadata,
+            ".SRCINFO generated metadata materialization drifted");
+
+    const auto* gitlink = find_materialized_new_path(
+            entries, "missing-submodule");
+    require(gitlink != nullptr &&
+                    gitlink->representation ==
+                            ReviewedSourceReviewRepresentation::GitlinkMetadata &&
+                    gitlink->readiness ==
+                            ReviewedSourceReviewReadiness::
+                                    ManualInspectionRequired &&
+                    !gitlink->new_observation->text,
+            "Missing gitlink was read as a blob");
+
+    const auto* weird = find_materialized_new_path(entries, weird_path);
+    require(weird != nullptr && weird->patch.has_value(),
+            "Arbitrary filename bytes were lost during materialization");
+    require(fixture.read_file("PKGBUILD") == dirty_pkgbuild,
+            "Materialization changed dirty worktree content");
+    require(fixture.read_file(".git/index") == index_before,
+            "Materialization changed Git index");
+    require(fixture.output_git({"rev-parse", "HEAD"}) == head_before,
+            "Materialization changed HEAD");
+}
+
 void test_baseline_object_access_failures() {
     {
         GitFixture fixture(GitObjectFormat::Sha1);
@@ -864,6 +1144,26 @@ void test_sha256_projection_and_strict_config() {
                             GitObjectFormat::Sha256,
                     "SHA-256 tree object ID format was lost");
         }
+        const auto initial_materialized =
+                trusted_git_materialize_reviewed_source_review(
+                        fixture.checkout(), fixture.remote_url(),
+                        ReviewedSourceProjection(initial));
+        const auto& materialized_initial =
+                require_arm<ReviewedSourceMaterializedInitialFullReview>(
+                        initial_materialized,
+                        "SHA-256 initial content materialization failed");
+        const auto* initial_pkgbuild = find_materialized_new_path(
+                materialized_initial.review.entries, "PKGBUILD");
+        const auto* initial_binary = find_materialized_new_path(
+                materialized_initial.review.entries, "payload.unknown");
+        require(initial_pkgbuild != nullptr &&
+                        initial_pkgbuild->representation ==
+                                ReviewedSourceReviewRepresentation::
+                                        CompleteFullText &&
+                        initial_binary != nullptr &&
+                        initial_binary->representation ==
+                                ReviewedSourceReviewRepresentation::ContainsNul,
+                "SHA-256 cat-file content classification drifted");
         require(std::holds_alternative<ReviewedSourceRebaselineFullReview>(
                         trusted_git_project_reviewed_source(
                                 fixture.checkout(), fixture.remote_url(),
@@ -878,6 +1178,38 @@ void test_sha256_projection_and_strict_config() {
                                 SourceRevisionIdentity::git_commit(
                                         std::string(40, 'f')))),
                 "Mismatched baseline object format did not rebaseline");
+
+        fixture.write_file(".gitattributes", "PKGBUILD -diff\n");
+        fixture.write_file("PKGBUILD", "pkgname=sha256\npkgver=2\npkgrel=1\n");
+        const std::string updated_oid = fixture.commit("sha256 update");
+        fixture.update_remote(updated_oid);
+        const SourceRevisionIdentity updated =
+                SourceRevisionIdentity::git_commit(updated_oid);
+        const auto update_projection = trusted_git_project_reviewed_source(
+                fixture.checkout(), fixture.remote_url(), updated, target);
+        const auto& sha256_update = require_arm<ReviewedSourceUpdateReview>(
+                update_projection, "SHA-256 update projection failed");
+        const auto update_materialized =
+                trusted_git_materialize_reviewed_source_review(
+                        fixture.checkout(), fixture.remote_url(),
+                        ReviewedSourceProjection(sha256_update));
+        const auto& materialized_update =
+                require_arm<ReviewedSourceMaterializedUpdateReview>(
+                        update_materialized,
+                        "SHA-256 blob-to-blob patch materialization failed");
+        const auto* updated_pkgbuild = find_materialized_new_path(
+                materialized_update.review.entries, "PKGBUILD");
+        require(updated_pkgbuild != nullptr &&
+                        git_marker_is_binary(updated_pkgbuild->change) &&
+                        updated_pkgbuild->representation ==
+                                ReviewedSourceReviewRepresentation::
+                                        CompleteTextPatch &&
+                        updated_pkgbuild->patch.has_value() &&
+                        updated_pkgbuild->patch->old_object_id.format() ==
+                                GitObjectFormat::Sha256 &&
+                        updated_pkgbuild->patch->new_object_id.format() ==
+                                GitObjectFormat::Sha256,
+                "SHA-256 PKGBUILD -diff hid full-OID textual patch");
     }
 
     {
@@ -907,6 +1239,7 @@ void test_sha256_projection_and_strict_config() {
 
 void run_tests() {
     test_sha1_projection_and_pinned_ref();
+    test_sha1_content_materialization();
     test_baseline_object_access_failures();
     test_missing_gitlink_object_remains_supported();
     test_sha256_projection_and_strict_config();

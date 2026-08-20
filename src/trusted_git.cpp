@@ -8,15 +8,19 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <fcntl.h>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -30,10 +34,42 @@ constexpr std::size_t MAX_COMMIT_OID_OUTPUT = 65;
 constexpr std::size_t MAX_OBJECT_TYPE_OUTPUT = 7;
 constexpr std::size_t MAX_EMPTY_COMMAND_OUTPUT = 1;
 constexpr std::size_t MAX_SHALLOW_OUTPUT = 6;
+constexpr std::size_t REVIEW_BLOB_BATCH_INPUT_LIMIT = 4096;
+constexpr std::uintmax_t REVIEW_BLOB_BATCH_PAYLOAD_LIMIT =
+        REVIEWED_SOURCE_SINGLE_BLOB_LIMIT;
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_GIT_TEST_HOOKS
 std::optional<std::size_t> g_review_machine_stream_limit;
 #endif
+
+class OwnedFileDescriptor final {
+public:
+    explicit OwnedFileDescriptor(int descriptor = -1) noexcept
+        : descriptor_(descriptor) {}
+
+    OwnedFileDescriptor(const OwnedFileDescriptor&) = delete;
+    OwnedFileDescriptor& operator=(const OwnedFileDescriptor&) = delete;
+
+    OwnedFileDescriptor(OwnedFileDescriptor&& other) noexcept
+        : descriptor_(std::exchange(other.descriptor_, -1)) {}
+
+    OwnedFileDescriptor& operator=(OwnedFileDescriptor&& other) noexcept {
+        if(this == &other) return *this;
+        if(descriptor_ >= 0) static_cast<void>(close(descriptor_));
+        descriptor_ = std::exchange(other.descriptor_, -1);
+        return *this;
+    }
+
+    ~OwnedFileDescriptor() noexcept {
+        if(descriptor_ >= 0) static_cast<void>(close(descriptor_));
+    }
+
+    [[nodiscard]] int get() const noexcept { return descriptor_; }
+    [[nodiscard]] bool valid() const noexcept { return descriptor_ >= 0; }
+
+private:
+    int descriptor_ = -1;
+};
 
 constexpr std::array<const char*, 8> TRUSTED_PROXY_ENVIRONMENT_VARIABLES{
         "http_proxy",
@@ -577,7 +613,8 @@ CapturedCommandResult capture_review_git(
         std::vector<std::string> operation_arguments,
         const std::string& display_command,
         std::size_t stdout_limit,
-        const std::optional<std::string>& attribute_source = std::nullopt) {
+        const std::optional<std::string>& attribute_source = std::nullopt,
+        std::optional<int> standard_input_fd = std::nullopt) {
     require_expected_remote(
             inspect_review_checkout_configuration(checkout),
             expected_remote_url);
@@ -592,6 +629,7 @@ CapturedCommandResult capture_review_git(
                     std::move(operation_arguments), attribute_source),
             display_command, true);
     invocation.stdout_capture_limit = stdout_limit;
+    invocation.standard_input_fd = standard_input_fd;
     CapturedCommandResult result =
             capture_explicit_process_output_raw(invocation, true);
     retained.require_unchanged_identity();
@@ -957,6 +995,62 @@ std::vector<std::string> reviewed_source_diff_arguments(
             {"--diff-algorithm=myers", "--no-ext-diff", "--no-textconv",
              "--ignore-submodules=none", baseline, target, "--"});
     return arguments;
+}
+
+std::vector<std::string> reviewed_source_blob_patch_arguments(
+        const std::string& old_object_id,
+        const std::string& new_object_id) {
+    return {
+            "diff", "--patch", "--full-index", "--no-prefix",
+            "--no-color", "--no-color-moved", "--no-ext-diff",
+            "--no-textconv", "--no-renames", "--diff-algorithm=myers",
+            "--no-indent-heuristic", "--inter-hunk-context=0",
+            "--unified=3", "--text", old_object_id, new_object_id};
+}
+
+std::optional<OwnedFileDescriptor> make_standard_input_pipe(
+        std::string_view input) {
+    if(input.empty() || input.size() > REVIEW_BLOB_BATCH_INPUT_LIMIT) {
+        return std::nullopt;
+    }
+    int descriptors[2] = {-1, -1};
+    if(pipe2(descriptors, O_CLOEXEC) != 0) return std::nullopt;
+    OwnedFileDescriptor reader(descriptors[0]);
+    OwnedFileDescriptor writer(descriptors[1]);
+
+    std::size_t offset = 0;
+    while(offset < input.size()) {
+        const ssize_t written = write(
+                writer.get(), input.data() + offset, input.size() - offset);
+        if(written == -1 && errno == EINTR) continue;
+        if(written <= 0) return std::nullopt;
+        offset += static_cast<std::size_t>(written);
+    }
+    writer = OwnedFileDescriptor{};
+    return reader;
+}
+
+const SourceRevisionIdentity& materialization_target_revision(
+        const ReviewedSourceProjection& projection) {
+    return std::visit(
+            [](const auto& value) -> const SourceRevisionIdentity& {
+                using Value = std::decay_t<decltype(value)>;
+                if constexpr(std::is_same_v<Value, ReviewedSourceAlreadyReviewed>) {
+                    return value.revision;
+                } else {
+                    return value.target;
+                }
+            },
+            projection);
+}
+
+TrustedGitReviewedSourceMaterializationResult lift_materialized_review(
+        ReviewedSourceMaterializedReview review) {
+    return std::visit(
+            [](auto&& value) -> TrustedGitReviewedSourceMaterializationResult {
+                return std::move(value);
+            },
+            std::move(review));
 }
 
 std::string diff_range_for_branch(const std::string& branch) {
@@ -1382,6 +1476,229 @@ TrustedGitReviewedSourceProjectionResult trusted_git_project_reviewed_source(
     }
     return finish(ReviewedSourceUpdateReview{
             *baseline, target, *history_relation, std::move(changes)});
+}
+
+TrustedGitReviewedSourceMaterializationResult
+trusted_git_materialize_reviewed_source_review(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        const ReviewedSourceProjection& projection) {
+    ReviewedSourceBlobRequestPlanResult planned =
+            plan_reviewed_source_blob_requests(projection);
+    if(std::holds_alternative<ReviewedSourceReviewFailure>(planned)) {
+        return std::get<ReviewedSourceReviewFailure>(planned);
+    }
+    const auto& requests = std::get<std::vector<ReviewedSourceBlobRequest>>(
+            planned);
+
+    // AlreadyReviewed and a distinct same-tree update require no repository
+    // content observation. Preserve that no-command boundary.
+    if(requests.empty()) {
+        ReviewedSourceReviewPreparationResult prepared =
+                prepare_reviewed_source_review(projection, {});
+        if(std::holds_alternative<ReviewedSourceReviewFailure>(prepared)) {
+            return std::get<ReviewedSourceReviewFailure>(prepared);
+        }
+        ReviewedSourceReviewFinalizationResult finalized =
+                finalize_reviewed_source_review(
+                        std::get<ReviewedSourceReviewPreparation>(
+                                std::move(prepared)),
+                        {});
+        if(std::holds_alternative<ReviewedSourceReviewFailure>(finalized)) {
+            return std::get<ReviewedSourceReviewFailure>(finalized);
+        }
+        return lift_materialized_review(
+                std::get<ReviewedSourceMaterializedReview>(
+                        std::move(finalized)));
+    }
+
+    const LocalGitConfiguration configuration =
+            inspect_review_checkout_configuration(checkout);
+    require_expected_remote(configuration, expected_remote_url);
+    const SourceRevisionIdentity& target =
+            materialization_target_revision(projection);
+    static_cast<void>(require_known_commit(target));
+    if(target.git_object_format() == nullptr ||
+       *target.git_object_format() != configuration.object_format) {
+        return review_failure(
+                TrustedGitReviewFailureReason::ObjectFormatMismatch,
+                TrustedGitReviewStage::BlobRead);
+    }
+    for(const ReviewedSourceBlobRequest& request : requests) {
+        if(request.object_id.format() != configuration.object_format) {
+            return review_failure(
+                    TrustedGitReviewFailureReason::ObjectFormatMismatch,
+                    TrustedGitReviewStage::BlobRead);
+        }
+    }
+
+    ValidatedCachePath current = revalidate_trusted_cache_path(
+            checkout, CachePathRequirement::ExistingDirectory);
+    require_safe_persistent_checkout_git_metadata(current);
+    RetainedTrustedCacheDirectory outer =
+            retain_trusted_cache_directory(current);
+    outer.require_unchanged_identity();
+
+    const auto finish = [&outer, &current](
+                                TrustedGitReviewedSourceMaterializationResult
+                                        result) {
+        outer.require_unchanged_identity();
+        current = revalidate_trusted_cache_path(
+                current, CachePathRequirement::ExistingDirectory);
+        require_safe_persistent_checkout_git_metadata(current);
+        return result;
+    };
+
+    const PersistentCheckoutReviewOverrides initial_overrides =
+            observe_persistent_checkout_review_overrides(current);
+    if(initial_overrides.has_attributes) {
+        return finish(review_failure(
+                TrustedGitReviewFailureReason::LocalAttributeOverride,
+                TrustedGitReviewStage::AttributeGuard));
+    }
+    if(initial_overrides.has_grafts) {
+        return finish(review_failure(
+                TrustedGitReviewFailureReason::LocalHistoryOverride,
+                TrustedGitReviewStage::HistoryGuard));
+    }
+
+    std::vector<ReviewedSourceRawBlob> blobs;
+    blobs.reserve(requests.size());
+    std::size_t request_offset = 0;
+    while(request_offset < requests.size()) {
+        std::vector<ReviewedSourceBlobRequest> batch;
+        std::string input;
+        std::uintmax_t payload_size = 0;
+        while(request_offset < requests.size()) {
+            const ReviewedSourceBlobRequest& request = requests[request_offset];
+            const std::size_t input_record_size =
+                    request.object_id.value().size() + 1;
+            const bool input_would_exceed =
+                    input_record_size >
+                    REVIEW_BLOB_BATCH_INPUT_LIMIT - input.size();
+            const bool payload_would_exceed =
+                    request.expected_size >
+                    REVIEW_BLOB_BATCH_PAYLOAD_LIMIT - payload_size;
+            if(!batch.empty() &&
+               (input_would_exceed || payload_would_exceed)) {
+                break;
+            }
+            if(input_would_exceed || payload_would_exceed) {
+                TrustedGitReviewFailure failure = review_failure(
+                        TrustedGitReviewFailureReason::
+                                SingleBlobSizeLimitExceeded,
+                        TrustedGitReviewStage::BlobRead);
+                failure.observed = request.expected_size;
+                failure.limit = REVIEW_BLOB_BATCH_PAYLOAD_LIMIT;
+                return finish(failure);
+            }
+            batch.push_back(request);
+            input += request.object_id.value();
+            input.push_back('\0');
+            payload_size += request.expected_size;
+            ++request_offset;
+        }
+
+        ReviewedSourceBlobBatchSizeResult capture_size =
+                reviewed_source_blob_batch_capture_size(batch);
+        if(std::holds_alternative<ReviewedSourceReviewFailure>(capture_size)) {
+            return finish(std::get<ReviewedSourceReviewFailure>(capture_size));
+        }
+        std::optional<OwnedFileDescriptor> input_pipe =
+                make_standard_input_pipe(input);
+        if(!input_pipe.has_value() || !input_pipe->valid()) {
+            return finish(command_failure(
+                    TrustedGitReviewStage::BlobRead, 127));
+        }
+
+        const std::size_t output_limit = std::get<std::size_t>(capture_size);
+        CapturedCommandResult captured = capture_review_git(
+                current, expected_remote_url,
+                {"cat-file",
+                 "--batch=%(objectname) %(objecttype) %(objectsize)",
+                 "-Z"},
+                "git cat-file --batch=<review-blobs> -Z",
+                output_limit, std::nullopt, input_pipe->get());
+        if(captured.stdout_capture_limit_exceeded) {
+            return finish(capture_limit_failure(
+                    TrustedGitReviewStage::BlobRead, output_limit));
+        }
+        if(captured.exit_code != 0) {
+            return finish(command_failure(
+                    TrustedGitReviewStage::BlobRead, captured.exit_code));
+        }
+        ReviewedSourceBlobBatchParseResult parsed =
+                parse_reviewed_source_blob_batch_output(
+                        batch, captured.output);
+        if(std::holds_alternative<ReviewedSourceReviewFailure>(parsed)) {
+            return finish(std::get<ReviewedSourceReviewFailure>(parsed));
+        }
+        auto parsed_blobs = std::get<std::vector<ReviewedSourceRawBlob>>(
+                std::move(parsed));
+        blobs.insert(
+                blobs.end(),
+                std::make_move_iterator(parsed_blobs.begin()),
+                std::make_move_iterator(parsed_blobs.end()));
+    }
+
+    ReviewedSourceReviewPreparationResult prepared =
+            prepare_reviewed_source_review(projection, std::move(blobs));
+    if(std::holds_alternative<ReviewedSourceReviewFailure>(prepared)) {
+        return finish(std::get<ReviewedSourceReviewFailure>(prepared));
+    }
+    ReviewedSourceReviewPreparation preparation =
+            std::get<ReviewedSourceReviewPreparation>(std::move(prepared));
+
+    std::vector<ReviewedSourceRawPatch> patches;
+    patches.reserve(preparation.patch_requests.size());
+    std::uintmax_t aggregate_patch_size = 0;
+    for(const ReviewedSourcePatchRequest& request :
+        preparation.patch_requests) {
+        CapturedCommandResult captured = capture_review_git(
+                current, expected_remote_url,
+                reviewed_source_blob_patch_arguments(
+                        request.old_object_id.value(),
+                        request.new_object_id.value()),
+                "git diff <old-reviewed-blob> <new-reviewed-blob>",
+                REVIEWED_SOURCE_SINGLE_RAW_PATCH_LIMIT);
+        if(captured.stdout_capture_limit_exceeded) {
+            return finish(capture_limit_failure(
+                    TrustedGitReviewStage::PatchGeneration,
+                    REVIEWED_SOURCE_SINGLE_RAW_PATCH_LIMIT));
+        }
+        if(captured.exit_code != 0) {
+            return finish(command_failure(
+                    TrustedGitReviewStage::PatchGeneration,
+                    captured.exit_code));
+        }
+        if(captured.output.size() >
+           REVIEWED_SOURCE_AGGREGATE_RAW_PATCH_LIMIT -
+                   aggregate_patch_size) {
+            const std::uintmax_t observed = aggregate_patch_size +
+                    static_cast<std::uintmax_t>(captured.output.size());
+            ReviewedSourceReviewResourceResult resource =
+                    preflight_reviewed_source_review_resource(
+                            ReviewedSourceReviewResourceKind::
+                                    AggregateRawPatches,
+                            observed);
+            return finish(std::get<ReviewedSourceReviewFailure>(resource));
+        }
+        aggregate_patch_size += captured.output.size();
+        patches.push_back(ReviewedSourceRawPatch{
+                request.entry_index,
+                request.old_object_id, request.new_object_id,
+                std::move(captured.output)});
+    }
+
+    ReviewedSourceReviewFinalizationResult finalized =
+            finalize_reviewed_source_review(
+                    std::move(preparation), std::move(patches));
+    if(std::holds_alternative<ReviewedSourceReviewFailure>(finalized)) {
+        return finish(std::get<ReviewedSourceReviewFailure>(finalized));
+    }
+    return finish(lift_materialized_review(
+            std::get<ReviewedSourceMaterializedReview>(
+                    std::move(finalized))));
 }
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_GIT_TEST_HOOKS

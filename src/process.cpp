@@ -377,6 +377,24 @@ CapturedCommandResult execute_explicit_process(
             _exit(127);
         }
 
+        if(invocation.standard_input_fd.has_value()) {
+            const int source_fd = *invocation.standard_input_fd;
+            if(source_fd == STDIN_FILENO) {
+                // LANDMINE: dup2(0, 0) does not clear an inherited CLOEXEC bit.
+                const int descriptor_flags = fcntl(STDIN_FILENO, F_GETFD);
+                if(descriptor_flags == -1 ||
+                   fcntl(
+                           STDIN_FILENO, F_SETFD,
+                           descriptor_flags & ~FD_CLOEXEC) == -1) {
+                    _exit(127);
+                }
+            } else if(dup2(source_fd, STDIN_FILENO) == -1) {
+                _exit(127);
+            } else if(source_fd > STDERR_FILENO) {
+                static_cast<void>(close(source_fd));
+            }
+        }
+
         if(capture_standard_output) {
             static_cast<void>(close(output_pipe[0]));
             if(dup2(output_pipe[1], STDOUT_FILENO) == -1) _exit(127);

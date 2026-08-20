@@ -22,6 +22,9 @@ struct ExplicitProcessInvocation {
     // Borrowed directory descriptor. The child changes directory after fork
     // and before exec; the caller retains ownership for the whole call.
     std::optional<int> working_directory_fd = std::nullopt;
+    // Borrowed input descriptor. The child binds it to stdin after fork; the
+    // caller retains ownership for the whole call and current offset is used.
+    std::optional<int> standard_input_fd = std::nullopt;
 };
 
 CapturedCommandResult capture_command_output(const char* cmd);

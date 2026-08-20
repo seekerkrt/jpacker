@@ -1,5 +1,6 @@
 #pragma once
 
+#include "reviewed_source_review.hpp"
 #include "reviewed_source_projection.hpp"
 #include "trusted_cache.hpp"
 
@@ -55,6 +56,8 @@ enum class TrustedGitReviewStage {
     HistoryGuard,
     ResourcePreflight,
     CrossStream,
+    BlobRead,
+    PatchGeneration,
 };
 
 enum class TrustedGitReviewFailureReason {
@@ -93,6 +96,14 @@ using TrustedGitReviewedSourceProjectionResult = std::variant<
         ReviewedSourceRebaselineFullReview,
         TrustedGitReviewFailure>;
 
+using TrustedGitReviewedSourceMaterializationResult = std::variant<
+        ReviewedSourceMaterializedInitialFullReview,
+        ReviewedSourceMaterializedAlreadyReviewed,
+        ReviewedSourceMaterializedUpdateReview,
+        ReviewedSourceMaterializedRebaselineFullReview,
+        ReviewedSourceReviewFailure,
+        TrustedGitReviewFailure>;
+
 // Resolve the mutable remote-tracking ref once. Callers must retain and use
 // only the returned complete commit OID for later projection.
 TrustedGitCommitResolutionResult trusted_git_resolve_remote_commit(
@@ -107,6 +118,15 @@ TrustedGitReviewedSourceProjectionResult trusted_git_project_reviewed_source(
         const std::string& expected_remote_url,
         const SourceRevisionIdentity& target,
         const std::optional<SourceRevisionIdentity>& baseline);
+
+// Materialize exact blobs already named by a successful Slice 3A projection.
+// This API does not resolve refs, read worktree/index content, render human
+// output, publish reviewed state, or connect a production lifecycle.
+TrustedGitReviewedSourceMaterializationResult
+trusted_git_materialize_reviewed_source_review(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        const ReviewedSourceProjection& projection);
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_GIT_TEST_HOOKS
 void set_trusted_git_review_machine_stream_limit_for_test(
