@@ -46,6 +46,11 @@
 //   compare. A hardlink added outside the PackageBase directory changes no
 //   other field and never appears in a directory rescan, so nothing but a
 //   direct link-count comparison can report it.
+// - A named record read proves both sides of its authority after the bytes are
+//   in hand: the opened descriptor is still safe, and an exact nofollow lookup
+//   of the generation leaf still names that descriptor's filesystem object. A
+//   hardlink followed by a rename-over can return the detached opened inode to
+//   one link, so descriptor status alone cannot prove the leaf-to-inode binding.
 // - A proof is not a momentary observation. Ordinary Loaded, Missing, and
 //   Published are returned only when the complete proof is re-derived and found
 //   identical at the result boundary. Any divergence is a typed unsafe history
@@ -261,11 +266,11 @@ enum class ReviewedSourceStateStoreTestRacePoint {
     // boundary reproof and the final lineage revalidation.
     AfterReadAuthorityProof,
     // Inside a record read: the bytes are already in hand and the post-read
-    // status proof has not run yet. This is the only window in which a security
-    // status change can hide behind an unchanged inode, size, and content
-    // digest. record_path names the record being read, and a handler that is
-    // not interested in it can re-arm this point for the next record the same
-    // reproof reads.
+    // descriptor status and named-leaf proofs have not run yet. This is the
+    // only window in which a security status change or a leaf-to-inode rebind
+    // can hide behind the bytes already read. record_path names the record, and
+    // a handler that is not interested in it can re-arm this point for the next
+    // record the same reproof reads.
     AfterRecordContentsRead,
 };
 
@@ -290,5 +295,8 @@ void fail_next_reviewed_source_state_store_operation_for_test(
 void run_reviewed_source_state_store_race_once_for_test(
         ReviewedSourceStateStoreTestRacePoint race_point,
         ReviewedSourceStateStoreTestRaceHandler handler);
+// Treat record ctime comparison as equal so tests can prove that direct
+// status/identity fields, rather than timestamp side effects, close a race.
+void simulate_coarse_reviewed_source_state_store_timestamps_for_test();
 void reset_reviewed_source_state_store_test_hooks();
 #endif

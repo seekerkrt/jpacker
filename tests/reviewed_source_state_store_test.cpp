@@ -531,6 +531,51 @@ struct LinkingRecordOutsidePackage {
     }
 };
 LinkingRecordOutsidePackage* LinkingRecordOutsidePackage::instance = nullptr;
+
+// M411-S2-012. Preserve the opened inode through an alias outside the
+// PackageBase directory, then atomically replace the exact generation leaf
+// with a pre-created inode. The old inode returns to nlink == 1, the new named
+// inode also has nlink == 1, and the leaf inventory never changes.
+struct RebindingRecordOutsidePackage {
+    std::string target_leaf;
+    fs::path    alias_path;
+    fs::path    replacement_path;
+    fs::path    rebound_record;
+    bool        did_rebind = false;
+    static RebindingRecordOutsidePackage* instance;
+
+    static void arm(const ReviewedSourceStateStoreTestRaceContext&) {
+        require(instance != nullptr,
+                "RebindingRecordOutsidePackage was not armed.");
+        run_reviewed_source_state_store_race_once_for_test(
+                ReviewedSourceStateStoreTestRacePoint::AfterRecordContentsRead,
+                &RebindingRecordOutsidePackage::handler);
+    }
+
+    static void handler(const ReviewedSourceStateStoreTestRaceContext& context) {
+        require(instance != nullptr,
+                "RebindingRecordOutsidePackage was not armed.");
+        require(context.record_path.has_value(),
+                "Record rebind race carried no record path.");
+        if(context.record_path->filename().string() != instance->target_leaf) {
+            run_reviewed_source_state_store_race_once_for_test(
+                    ReviewedSourceStateStoreTestRacePoint::
+                            AfterRecordContentsRead,
+                    &RebindingRecordOutsidePackage::handler);
+            return;
+        }
+        if(::link(context.record_path->c_str(),
+                  instance->alias_path.c_str()) != 0) {
+            throw std::runtime_error(
+                    "Failed to preserve the opened inode through an external alias.");
+        }
+        fs::rename(instance->replacement_path, *context.record_path);
+        instance->rebound_record = *context.record_path;
+        instance->did_rebind = true;
+    }
+};
+RebindingRecordOutsidePackage* RebindingRecordOutsidePackage::instance =
+        nullptr;
 #endif
 
 void test_missing_lookup_does_not_create() {
@@ -2658,6 +2703,286 @@ void test_publication_record_read_hardlink_race_is_published_uncertain() {
     require_publication_record_read_hardlink_race_is_published_uncertain(
             false, "publish generation 2 external hardlink");
 }
+
+// M411-S2-012 shared evidence. Unlike the single-link race above, the alias no
+// longer names the current generation leaf: rename-over moves that leaf to a
+// different inode and leaves both the detached opened inode and the new named
+// inode at nlink == 1. The only authoritative discriminator is a post-read
+// nofollow lookup of the exact leaf and a direct filesystem-identity compare.
+void require_record_leaf_was_rebound(
+        const RebindingRecordOutsidePackage& rebinder,
+        const fs::path& package_dir,
+        const fs::path& record,
+        const FileIdentity& old_identity,
+        const FileIdentity& replacement_identity,
+        const std::string& old_bytes,
+        const std::string& replacement_bytes,
+        std::vector<std::string> expected_inventory,
+        const std::string& label) {
+    require(rebinder.did_rebind,
+            label + ": the record-read leaf rebind race never fired.");
+    require(rebinder.rebound_record == record,
+            label + ": the race rebound a different record.");
+    require(fs::exists(rebinder.alias_path),
+            label + ": the detached opened inode lost its external alias.");
+    require(!fs::exists(rebinder.replacement_path),
+            label + ": rename-over left the replacement source name behind.");
+    require(rebinder.alias_path.parent_path() != package_dir &&
+                    rebinder.replacement_path.parent_path() != package_dir,
+            label + ": an external race artifact was placed inside the "
+                    "PackageBase directory.");
+
+    const FileIdentity alias_identity = file_identity(rebinder.alias_path);
+    const FileIdentity named_identity = file_identity(record);
+    require(alias_identity.device == old_identity.device &&
+                    alias_identity.inode == old_identity.inode,
+            label + ": the external alias did not preserve the opened inode.");
+    require(named_identity.device == replacement_identity.device &&
+                    named_identity.inode == replacement_identity.inode,
+            label + ": the generation leaf did not receive the replacement inode.");
+    require(alias_identity.device == named_identity.device &&
+                    alias_identity.inode != named_identity.inode,
+            label + ": old alias and current leaf are not distinct inodes on "
+                    "the same filesystem.");
+    require(link_count(rebinder.alias_path) == 1,
+            label + ": the detached opened inode did not return to one link.");
+    require(link_count(record) == 1,
+            label + ": the replacement named inode is not single-link.");
+    require(read_bytes(rebinder.alias_path) == old_bytes,
+            label + ": the detached opened inode bytes changed.");
+    require(read_bytes(record) == replacement_bytes,
+            label + ": the replacement named bytes changed.");
+
+    std::vector<std::string> observed = regular_leaf_names(package_dir);
+    std::sort(observed.begin(), observed.end());
+    std::sort(expected_inventory.begin(), expected_inventory.end());
+    require(observed == expected_inventory,
+            label + ": the PackageBase inventory changed, so the fixture did "
+                    "not isolate the leaf-to-inode association.");
+}
+
+std::string replacement_record_bytes(bool should_target_origin) {
+    return encode_reviewed_source_state(aur_state(
+            "example-base", "https://aur.archlinux.org/example-base.git",
+            should_target_origin ? std::string(SHA1_B) : std::string(SHA1_A)));
+}
+
+void require_lookup_record_read_leaf_rebind_is_fail_closed(
+        bool should_target_origin, const std::string& label) {
+    StoreTestHome home;
+    ThreeGenerationFixture fixture = publish_three_generations();
+    const std::string target_leaf =
+            should_target_origin
+                    ? reviewed_source_state_store_origin_leaf()
+                    : fixture.published_second->observed.leaf_name;
+    const fs::path record = fixture.package_dir / target_leaf;
+    const std::string old_bytes = read_bytes(record);
+    const std::string replacement_bytes =
+            replacement_record_bytes(should_target_origin);
+    require(old_bytes != replacement_bytes,
+            label + ": replacement bytes did not differ from the opened record.");
+    const fs::path replacement_path = home.root() / "outside-replacement";
+    write_bytes(replacement_path, replacement_bytes, 0600);
+    const FileIdentity old_identity = file_identity(record);
+    const FileIdentity replacement_identity = file_identity(replacement_path);
+    require(old_identity.device == replacement_identity.device,
+            label + ": replacement was not pre-created on the same filesystem.");
+    const std::string tip_bytes = read_bytes(fixture.generation3);
+    const std::vector<std::string> inventory_before =
+            regular_leaf_names(fixture.package_dir);
+
+    RebindingRecordOutsidePackage rebinder{
+            target_leaf, home.root() / "outside-old-alias", replacement_path,
+            {}, false};
+    RebindingRecordOutsidePackage::instance = &rebinder;
+    simulate_coarse_reviewed_source_state_store_timestamps_for_test();
+    run_reviewed_source_state_store_race_once_for_test(
+            ReviewedSourceStateStoreTestRacePoint::AfterReadAuthorityProof,
+            &RebindingRecordOutsidePackage::arm);
+    const auto result = read_reviewed_source_state(fixture.first.package_base());
+    RebindingRecordOutsidePackage::instance = nullptr;
+    reset_reviewed_source_state_store_test_hooks();
+
+    const auto& failure = require_arm<ReviewedSourceStateStoreFailure>(
+            result, label + ": rebound leaf still produced ordinary Loaded.");
+    require(failure.kind ==
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+            label + ": leaf-to-inode mismatch was not ConcurrentReplacement.");
+    require_record_leaf_was_rebound(
+            rebinder, fixture.package_dir, record, old_identity,
+            replacement_identity, old_bytes, replacement_bytes,
+            inventory_before, label);
+    require(read_bytes(fixture.generation3) == tip_bytes,
+            label + ": lookup mutated the chain tip.");
+    require(is_unsafe_history(
+                    read_reviewed_source_state(fixture.first.package_base())),
+            label + ": subsequent lookup contradicted the boundary refusal.");
+}
+
+void test_lookup_record_read_leaf_rebind_is_fail_closed() {
+    require_lookup_record_read_leaf_rebind_is_fail_closed(
+            true, "lookup generation 1 external leaf rebind");
+    require_lookup_record_read_leaf_rebind_is_fail_closed(
+            false, "lookup generation 2 external leaf rebind");
+}
+
+void require_pre_commit_record_read_leaf_rebind_stops_publication(
+        bool should_target_origin, const std::string& label) {
+    StoreTestHome home;
+    ThreeGenerationFixture fixture = publish_three_generations();
+    const std::string target_leaf =
+            should_target_origin
+                    ? reviewed_source_state_store_origin_leaf()
+                    : fixture.published_second->observed.leaf_name;
+    const fs::path record = fixture.package_dir / target_leaf;
+    const std::string old_bytes = read_bytes(record);
+    const std::string replacement_bytes =
+            replacement_record_bytes(should_target_origin);
+    const fs::path replacement_path = home.root() / "outside-replacement";
+    write_bytes(replacement_path, replacement_bytes, 0600);
+    const FileIdentity old_identity = file_identity(record);
+    const FileIdentity replacement_identity = file_identity(replacement_path);
+    require(old_identity.device == replacement_identity.device,
+            label + ": replacement was not pre-created on the same filesystem.");
+    const ReviewedSourceState fourth = aur_state(
+            "example-base", "https://aur.archlinux.org/example-base.git",
+            std::string(SHA1_A));
+    const std::string successor_leaf =
+            reviewed_source_state_store_successor_leaf(
+                    4, fixture.published_third->observed.identity,
+                    fixture.published_third->observed.raw_contents);
+    const fs::path successor = fixture.package_dir / successor_leaf;
+    const std::vector<std::string> inventory_before =
+            regular_leaf_names(fixture.package_dir);
+
+    RebindingRecordOutsidePackage rebinder{
+            target_leaf, home.root() / "outside-old-alias", replacement_path,
+            {}, false};
+    RebindingRecordOutsidePackage::instance = &rebinder;
+    simulate_coarse_reviewed_source_state_store_timestamps_for_test();
+    run_reviewed_source_state_store_race_once_for_test(
+            ReviewedSourceStateStoreTestRacePoint::AtPublicationBoundary,
+            &RebindingRecordOutsidePackage::arm);
+    const auto result = publish_reviewed_source_state(
+            fourth, fixture.published_third->observed);
+    RebindingRecordOutsidePackage::instance = nullptr;
+    reset_reviewed_source_state_store_test_hooks();
+
+    const auto& failure = require_arm<ReviewedSourceStateStoreFailure>(
+            result, label + ": pre-commit leaf rebind was not a definite refusal.");
+    require(failure.kind ==
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+            label + ": pre-commit mismatch was not ConcurrentReplacement.");
+    require(!fs::exists(successor),
+            label + ": pre-commit refusal still linked generation 4.");
+    require_record_leaf_was_rebound(
+            rebinder, fixture.package_dir, record, old_identity,
+            replacement_identity, old_bytes, replacement_bytes,
+            inventory_before, label);
+    require(is_unsafe_history(
+                    read_reviewed_source_state(fixture.first.package_base())),
+            label + ": subsequent lookup contradicted the pre-commit refusal.");
+}
+
+void test_pre_commit_record_read_leaf_rebind_stops_publication() {
+    require_pre_commit_record_read_leaf_rebind_stops_publication(
+            true, "pre-commit generation 1 external leaf rebind");
+    require_pre_commit_record_read_leaf_rebind_stops_publication(
+            false, "pre-commit generation 2 external leaf rebind");
+}
+
+void require_post_commit_record_read_leaf_rebind_is_published_uncertain(
+        bool should_target_origin,
+        bool should_target_current,
+        const std::string& label) {
+    StoreTestHome home;
+    ThreeGenerationFixture fixture = publish_three_generations();
+    const std::string target_leaf =
+            should_target_current
+                    ? fixture.published_third->observed.leaf_name
+                    : should_target_origin
+                    ? reviewed_source_state_store_origin_leaf()
+                    : fixture.published_second->observed.leaf_name;
+    const fs::path record = fixture.package_dir / target_leaf;
+    const std::string old_bytes = read_bytes(record);
+    const std::string replacement_bytes =
+            should_target_current
+                    ? encode_reviewed_source_state(aur_state(
+                              "example-base",
+                              "https://aur.archlinux.org/example-base.git",
+                              std::string(SHA1_A)))
+                    : replacement_record_bytes(should_target_origin);
+    const fs::path replacement_path = home.root() / "outside-replacement";
+    write_bytes(replacement_path, replacement_bytes, 0600);
+    const FileIdentity old_identity = file_identity(record);
+    const FileIdentity replacement_identity = file_identity(replacement_path);
+    require(old_identity.device == replacement_identity.device,
+            label + ": replacement was not pre-created on the same filesystem.");
+    const ReviewedSourceState fourth = aur_state(
+            "example-base", "https://aur.archlinux.org/example-base.git",
+            std::string(SHA1_A));
+    const std::string publication = encode_reviewed_source_state(fourth);
+    const std::string successor_leaf =
+            reviewed_source_state_store_successor_leaf(
+                    4, fixture.published_third->observed.identity,
+                    fixture.published_third->observed.raw_contents);
+    const fs::path successor = fixture.package_dir / successor_leaf;
+    std::vector<std::string> expected_inventory =
+            regular_leaf_names(fixture.package_dir);
+    expected_inventory.push_back(successor_leaf);
+
+    RebindingRecordOutsidePackage rebinder{
+            target_leaf, home.root() / "outside-old-alias", replacement_path,
+            {}, false};
+    RebindingRecordOutsidePackage::instance = &rebinder;
+    simulate_coarse_reviewed_source_state_store_timestamps_for_test();
+    run_reviewed_source_state_store_race_once_for_test(
+            ReviewedSourceStateStoreTestRacePoint::AfterAuthorityProof,
+            &RebindingRecordOutsidePackage::arm);
+    const auto result = publish_reviewed_source_state(
+            fourth, fixture.published_third->observed);
+    RebindingRecordOutsidePackage::instance = nullptr;
+    reset_reviewed_source_state_store_test_hooks();
+
+    const auto& uncertain =
+            require_arm<ReviewedSourceStateStorePublishedUncertain>(
+                    result, label + ": post-commit leaf rebind returned ordinary "
+                                    "Published or a definite failure.");
+    require(uncertain.issue ==
+                    ReviewedSourceStatePostPublicationIssue::
+                            AuthoritativeHistoryUncertain,
+            label + ": post-commit issue left the authority taxonomy.");
+    require(uncertain.failure_kind ==
+                    ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+            label + ": post-commit mismatch was not ConcurrentReplacement.");
+    require(uncertain.observed.has_value() &&
+                    uncertain.observed->leaf_name == successor_leaf,
+            label + ": uncertain publication lost the committed token.");
+    require(uncertain.leftover_artifact.has_value() &&
+                    *uncertain.leftover_artifact == successor,
+            label + ": uncertain publication hid the committed artifact.");
+    require(fs::exists(successor) && read_bytes(successor) == publication,
+            label + ": post-commit refusal rolled back generation 4.");
+    require(uncertain.observed->identity == record_identity_of(successor),
+            label + ": committed token drifted from the on-disk successor.");
+    require_record_leaf_was_rebound(
+            rebinder, fixture.package_dir, record, old_identity,
+            replacement_identity, old_bytes, replacement_bytes,
+            expected_inventory, label);
+    require(is_unsafe_history(
+                    read_reviewed_source_state(fixture.first.package_base())),
+            label + ": subsequent lookup contradicted PublishedUncertain.");
+}
+
+void test_post_commit_record_read_leaf_rebind_is_published_uncertain() {
+    require_post_commit_record_read_leaf_rebind_is_published_uncertain(
+            true, false, "post-commit generation 1 external leaf rebind");
+    require_post_commit_record_read_leaf_rebind_is_published_uncertain(
+            false, false, "post-commit generation 2 external leaf rebind");
+    require_post_commit_record_read_leaf_rebind_is_published_uncertain(
+            false, true,
+            "post-commit current predecessor external leaf rebind");
+}
 #endif
 
 } // namespace
@@ -2711,6 +3036,9 @@ int main() {
         test_extreme_generations_are_typed_unsafe_history();
         test_lookup_record_read_hardlink_race_is_fail_closed();
         test_publication_record_read_hardlink_race_is_published_uncertain();
+        test_lookup_record_read_leaf_rebind_is_fail_closed();
+        test_pre_commit_record_read_leaf_rebind_stops_publication();
+        test_post_commit_record_read_leaf_rebind_is_published_uncertain();
 #endif
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';

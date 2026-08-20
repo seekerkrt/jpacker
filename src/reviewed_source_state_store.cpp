@@ -52,6 +52,7 @@ ReviewedSourceStateStoreTestRacePoint g_race_point =
         ReviewedSourceStateStoreTestRacePoint::BeforePublication;
 ReviewedSourceStateStoreTestRaceHandler g_race_handler = nullptr;
 bool g_race_pending = false;
+bool g_simulate_coarse_record_timestamps = false;
 
 bool consume_injected_failure(
         ReviewedSourceStateStoreTestFailurePoint point) {
@@ -432,6 +433,14 @@ bool same_filesystem_identity(
 // represent the observation before and after the link with the same ctime.
 bool same_record_state(
         const struct stat& expected, const struct stat& actual) {
+    bool same_status_change_time =
+            expected.st_ctim.tv_sec == actual.st_ctim.tv_sec &&
+            expected.st_ctim.tv_nsec == actual.st_ctim.tv_nsec;
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
+    if(g_simulate_coarse_record_timestamps) {
+        same_status_change_time = true;
+    }
+#endif
     return same_filesystem_identity(expected, actual) &&
            expected.st_uid == actual.st_uid &&
            (expected.st_mode & 07777) == (actual.st_mode & 07777) &&
@@ -439,8 +448,7 @@ bool same_record_state(
            expected.st_size == actual.st_size &&
            expected.st_mtim.tv_sec == actual.st_mtim.tv_sec &&
            expected.st_mtim.tv_nsec == actual.st_mtim.tv_nsec &&
-           expected.st_ctim.tv_sec == actual.st_ctim.tv_sec &&
-           expected.st_ctim.tv_nsec == actual.st_ctim.tv_nsec;
+           same_status_change_time;
 }
 
 // rename(2) may update ctime. Post-publication compares the stable
@@ -631,6 +639,41 @@ std::optional<struct stat> inspect_named_entry(
     return status;
 }
 
+// POLICY(#411): bytes read through a descriptor belong to the named authority
+// only while the exact generation leaf still names that descriptor's inode. A
+// second link followed by rename-over can leave the opened inode safe and back
+// at nlink == 1 under an alias outside the PackageBase directory. Re-reading the
+// leaf nofollow and comparing filesystem identity directly closes that window;
+// ctime is only an additional state discriminator, never the association proof.
+std::optional<ReviewedSourceStateStoreFailure>
+revalidate_named_record_after_read(
+        int package_directory_descriptor,
+        const std::string& leaf_name,
+        const fs::path& entry_path,
+        std::uintmax_t expected_owner,
+        const struct stat& opened_status) {
+    std::optional<ReviewedSourceStateStoreFailure> inspect_failure;
+    const std::optional<struct stat> named_status = inspect_named_entry(
+            package_directory_descriptor, leaf_name, entry_path,
+            inspect_failure);
+    if(inspect_failure.has_value()) return inspect_failure;
+    if(!named_status.has_value()) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                entry_path);
+    }
+    if(auto failure = validate_entry_status(
+               *named_status, entry_path, expected_owner)) {
+        return failure;
+    }
+    if(!same_record_state(opened_status, *named_status)) {
+        return store_failure(
+                ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
+                entry_path);
+    }
+    return std::nullopt;
+}
+
 int linkat_retained_inode(
         int source_descriptor,
         int destination_directory_descriptor,
@@ -776,6 +819,8 @@ open_existing_entry(
 
 std::variant<std::string, ReviewedSourceStateStoreFailure> read_all_bytes(
         int descriptor,
+        int package_directory_descriptor,
+        const std::string& leaf_name,
         const fs::path& entry_path,
         const struct stat& expected_status,
         std::uintmax_t expected_owner
@@ -854,6 +899,11 @@ std::variant<std::string, ReviewedSourceStateStoreFailure> read_all_bytes(
         return store_failure(
                 ReviewedSourceStateStoreFailureKind::ConcurrentReplacement,
                 entry_path);
+    }
+    if(auto failure = revalidate_named_record_after_read(
+               package_directory_descriptor, leaf_name, entry_path,
+               expected_owner, after_status)) {
+        return *failure;
     }
     if(contents.size() != static_cast<std::size_t>(expected_status.st_size)) {
         return store_failure(
@@ -1076,7 +1126,8 @@ read_generation_contents(
     }
     OwnedDescriptor descriptor = std::get<OwnedDescriptor>(std::move(opened));
     auto contents = read_all_bytes(
-            descriptor.get(), path, generation.status, expected_owner);
+            descriptor.get(), package_directory_descriptor,
+            generation.leaf.leaf, path, generation.status, expected_owner);
     if(const auto* failure =
                std::get_if<ReviewedSourceStateStoreFailure>(&contents)) {
         return *failure;
@@ -1090,6 +1141,8 @@ read_generation_contents(
 std::variant<std::string, ReviewedSourceStateStoreFailure>
 reread_descriptor_contents(
         int descriptor,
+        int package_directory_descriptor,
+        const std::string& leaf_name,
         const fs::path& entry_path,
         std::uintmax_t expected_owner
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
@@ -1111,9 +1164,12 @@ reread_descriptor_contents(
     }
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
     return read_all_bytes(
-            descriptor, entry_path, status, expected_owner, failure_point);
+            descriptor, package_directory_descriptor, leaf_name, entry_path,
+            status, expected_owner, failure_point);
 #else
-    return read_all_bytes(descriptor, entry_path, status, expected_owner);
+    return read_all_bytes(
+            descriptor, package_directory_descriptor, leaf_name, entry_path,
+            status, expected_owner);
 #endif
 }
 
@@ -1591,10 +1647,15 @@ void run_reviewed_source_state_store_race_once_for_test(
     g_race_pending = handler != nullptr;
 }
 
+void simulate_coarse_reviewed_source_state_store_timestamps_for_test() {
+    g_simulate_coarse_record_timestamps = true;
+}
+
 void reset_reviewed_source_state_store_test_hooks() {
     g_injected_failure.reset();
     g_race_handler = nullptr;
     g_race_pending = false;
+    g_simulate_coarse_record_timestamps = false;
 }
 #endif
 
@@ -1815,7 +1876,8 @@ ReviewedSourceStateStoreReadResult read_reviewed_source_state(
     }
 
     auto contents = read_all_bytes(
-            file_descriptor.get(), tip_path, current.status, directory->owner());
+            file_descriptor.get(), package_directory.get(), current.leaf.leaf,
+            tip_path, current.status, directory->owner());
     if(const auto* failure =
                std::get_if<ReviewedSourceStateStoreFailure>(&contents)) {
         return *failure;
@@ -1959,7 +2021,8 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
         }
         retained_current = std::get<OwnedDescriptor>(std::move(opened));
         auto contents = read_all_bytes(
-                retained_current.get(), current_path, current->status,
+                retained_current.get(), package_directory.get(),
+                current->leaf.leaf, current_path, current->status,
                 directory->owner());
         if(const auto* failure =
                    std::get_if<ReviewedSourceStateStoreFailure>(&contents)) {
@@ -2092,7 +2155,8 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
                     *current_path);
         }
         auto pre_commit_contents = reread_descriptor_contents(
-                retained_current.get(), *current_path, directory->owner());
+                retained_current.get(), package_directory.get(),
+                current->leaf.leaf, *current_path, directory->owner());
         if(const auto* failure = std::get_if<ReviewedSourceStateStoreFailure>(
                    &pre_commit_contents)) {
             abandon_unpublished();
@@ -2275,15 +2339,34 @@ ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
         }
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
         auto post_commit_contents = reread_descriptor_contents(
-                retained_current.get(), *current_path, directory->owner(),
+                retained_current.get(), package_directory.get(),
+                current->leaf.leaf, *current_path, directory->owner(),
                 ReviewedSourceStateStoreTestFailurePoint::
                         PostCommitPredecessorRead);
 #else
         auto post_commit_contents = reread_descriptor_contents(
-                retained_current.get(), *current_path, directory->owner());
+                retained_current.get(), package_directory.get(),
+                current->leaf.leaf, *current_path, directory->owner());
 #endif
         if(const auto* failure = std::get_if<ReviewedSourceStateStoreFailure>(
                    &post_commit_contents)) {
+            const bool is_definite_divergence =
+                    failure->kind == ReviewedSourceStateStoreFailureKind::
+                                             ConcurrentReplacement ||
+                    failure->kind == ReviewedSourceStateStoreFailureKind::
+                                             UnsupportedFileType ||
+                    failure->kind == ReviewedSourceStateStoreFailureKind::
+                                             OwnershipMismatch ||
+                    failure->kind == ReviewedSourceStateStoreFailureKind::
+                                             UnsafePermissions ||
+                    failure->kind == ReviewedSourceStateStoreFailureKind::
+                                             MultipleHardLinks ||
+                    failure->kind == ReviewedSourceStateStoreFailureKind::
+                                             RecordTooLarge;
+            if(is_definite_divergence) {
+                return history_uncertain(
+                        failure->kind, failure->system_error);
+            }
             return published_uncertain(
                     next_state, committed_observed,
                     ReviewedSourceStatePostPublicationIssue::
