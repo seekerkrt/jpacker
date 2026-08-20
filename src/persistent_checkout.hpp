@@ -15,6 +15,18 @@ bool has_safe_persistent_checkout_git_directory(const ValidatedCachePath& checko
 std::vector<std::filesystem::path> require_safe_persistent_checkout_descendants(
         const ValidatedCachePath& checkout);
 
+struct PersistentCheckoutReviewOverrides {
+    bool has_attributes = false;
+    bool has_grafts = false;
+
+    bool operator==(const PersistentCheckoutReviewOverrides&) const = default;
+};
+
+// Review projection must not inherit repository-local attribute or history
+// overrides that are outside the pinned commit trees.
+PersistentCheckoutReviewOverrides observe_persistent_checkout_review_overrides(
+        const ValidatedCachePath& checkout);
+
 // 現在のdescendantsに加え、review開始時に存在したinstall scriptも再検証する。
 void require_safe_persistent_checkout_review_targets(
         const ValidatedCachePath& checkout,

@@ -502,6 +502,40 @@ std::vector<std::filesystem::path> require_safe_persistent_checkout_descendants(
     return scripts;
 }
 
+PersistentCheckoutReviewOverrides observe_persistent_checkout_review_overrides(
+        const ValidatedCachePath& checkout) {
+    RetainedTrustedCacheDirectory directory =
+            retain_trusted_cache_directory(checkout);
+    const int descriptor =
+            PersistentCheckoutDirectoryAccess::descriptor(directory);
+    require_safe_git_directory(descriptor);
+
+    const auto exists = [descriptor](const char* relative_path) {
+        struct stat status {};
+        if(fstatat(
+                   descriptor, relative_path, &status,
+                   AT_SYMLINK_NOFOLLOW) == 0) {
+            return true;
+        }
+        const int metadata_error = errno;
+        if(metadata_error == ENOENT || metadata_error == ENOTDIR) return false;
+        throw_descendant_error(
+                is_permission_error(metadata_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
+    };
+
+    const bool attributes_before = exists(".git/info/attributes");
+    const bool grafts_before = exists(".git/info/grafts");
+    require_safe_git_directory(descriptor);
+    PersistentCheckoutReviewOverrides overrides{
+            attributes_before || exists(".git/info/attributes"),
+            grafts_before || exists(".git/info/grafts")};
+    directory.require_unchanged_identity();
+    return overrides;
+}
+
 void require_safe_persistent_checkout_review_targets(
         const ValidatedCachePath& checkout,
         const std::vector<std::filesystem::path>& install_scripts) {

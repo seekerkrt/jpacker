@@ -68,6 +68,8 @@ SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/source-pack
 SOURCE_PACKAGE_COMPATIBILITY_TEST_TARGET := $(BUILD_DIR)/tests/source-package-compatibility-test
 REVIEWED_SOURCE_STATE_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-state-test
 REVIEWED_SOURCE_STATE_STORE_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-state-store-test
+REVIEWED_SOURCE_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-projection-test
+REVIEWED_SOURCE_GIT_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-git-test
 SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
 SOURCE_ENVIRONMENT_TEST_TARGET := build/tests/source-environment-test
 ARTIFACT_WORKSPACE_TEST_TARGET := build/tests/artifact-workspace-test
@@ -1435,6 +1437,26 @@ REVIEWED_SOURCE_STATE_STORE_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/xdg_directory_safety.cpp \
 	$(SRC_DIR)/xdg_paths.cpp
+REVIEWED_SOURCE_PROJECTION_TEST_SRCS := \
+	tests/reviewed_source_projection_test.cpp \
+	$(SRC_DIR)/reviewed_source_projection.cpp \
+	$(SRC_DIR)/reviewed_source_git_parser.cpp \
+	$(SRC_DIR)/source_package_identity.cpp \
+	$(SRC_DIR)/package_identifier.cpp
+REVIEWED_SOURCE_GIT_TEST_SRCS := \
+	tests/reviewed_source_git_test.cpp \
+	$(SRC_DIR)/reviewed_source_projection.cpp \
+	$(SRC_DIR)/reviewed_source_git_parser.cpp \
+	$(SRC_DIR)/trusted_git.cpp \
+	$(SRC_DIR)/persistent_checkout.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp \
+	$(SRC_DIR)/source_package_identity.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/process.cpp \
+	$(SRC_DIR)/logging.cpp \
+	$(SRC_DIR)/localization.cpp
 SOURCE_PACKAGE_COMPATIBILITY_TEST_SRCS := \
 	tests/source_package_compatibility_test.cpp \
 	$(SRC_DIR)/source_package_compatibility.cpp \
@@ -1645,6 +1667,8 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: test-source-package-compatibility
 .PHONY: test-reviewed-source-state
 .PHONY: test-reviewed-source-state-store
+.PHONY: test-reviewed-source-projection
+.PHONY: test-reviewed-source-git
 .PHONY: check-makepkg-assignment-precedence-link-firewall test-makepkg-assignment-precedence
 .PHONY: check-unified-plan-observation-link-firewall test-unified-plan-observation test-observation-contract-gate
 .PHONY: check-unified-plan-projection-link-firewall test-unified-plan-projection test-projection-fixture-gate
@@ -1855,6 +1879,8 @@ NON_HEAVY_TARGETS := \
 	$(SOURCE_PACKAGE_COMPATIBILITY_TEST_TARGET) \
 	$(REVIEWED_SOURCE_STATE_TEST_TARGET) \
 	$(REVIEWED_SOURCE_STATE_STORE_TEST_TARGET) \
+	$(REVIEWED_SOURCE_PROJECTION_TEST_TARGET) \
+	$(REVIEWED_SOURCE_GIT_TEST_TARGET) \
 	$(SHELL_WORDS_TEST_TARGET) \
 	$(SOURCE_ENVIRONMENT_TEST_TARGET) \
 	$(ARTIFACT_WORKSPACE_TEST_TARGET) \
@@ -2003,6 +2029,8 @@ $(eval $(call define_non_heavy_test_profile,SOURCE_PACKAGE_IDENTITY_PROJECTION,$
 $(eval $(call define_non_heavy_test_profile,SOURCE_PACKAGE_COMPATIBILITY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(SOURCE_PACKAGE_COMPATIBILITY_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_STATE,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_STATE_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_STATE_STORE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS -I$(SRC_DIR),$(REVIEWED_SOURCE_STATE_STORE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_PROJECTION,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_PROJECTION_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_GIT,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_REVIEWED_SOURCE_GIT_TEST_HOOKS -I$(SRC_DIR) -Itests,$(REVIEWED_SOURCE_GIT_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,SHELL_WORDS,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(SHELL_WORDS_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,SOURCE_ENVIRONMENT,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS -I$(SRC_DIR),$(SOURCE_ENVIRONMENT_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,ARTIFACT_WORKSPACE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS -DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS -I$(SRC_DIR),$(ARTIFACT_WORKSPACE_TEST_SRCS)))
@@ -2372,6 +2400,16 @@ $(REVIEWED_SOURCE_STATE_STORE_TEST_TARGET): $(REVIEWED_SOURCE_STATE_STORE_TEST_S
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling reviewed source state store test binary"
 	$(call compile_non_heavy_test,REVIEWED_SOURCE_STATE_STORE)
+
+$(REVIEWED_SOURCE_PROJECTION_TEST_TARGET): $(REVIEWED_SOURCE_PROJECTION_TEST_SRCS) $(SRC_DIR)/reviewed_source_projection.hpp $(SRC_DIR)/reviewed_source_git_parser.hpp $(SRC_DIR)/source_package_identity.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling reviewed source projection test binary"
+	$(call compile_non_heavy_test,REVIEWED_SOURCE_PROJECTION)
+
+$(REVIEWED_SOURCE_GIT_TEST_TARGET): $(REVIEWED_SOURCE_GIT_TEST_SRCS) $(SRC_DIR)/reviewed_source_projection.hpp $(SRC_DIR)/reviewed_source_git_parser.hpp $(SRC_DIR)/trusted_git.hpp $(SRC_DIR)/persistent_checkout.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/process.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) $(LOCALIZATION_CONFIG_HEADER) $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling reviewed source Git test binary"
+	$(call compile_non_heavy_test,REVIEWED_SOURCE_GIT)
 
 $(SHELL_WORDS_TEST_TARGET): $(SHELL_WORDS_TEST_SRCS) $(SRC_DIR)/shell_words.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -3158,6 +3196,12 @@ test-reviewed-source-state: $(REVIEWED_SOURCE_STATE_TEST_TARGET)
 
 test-reviewed-source-state-store: $(REVIEWED_SOURCE_STATE_STORE_TEST_TARGET)
 	$(abspath $(REVIEWED_SOURCE_STATE_STORE_TEST_TARGET))
+
+test-reviewed-source-projection: $(REVIEWED_SOURCE_PROJECTION_TEST_TARGET)
+	$(abspath $(REVIEWED_SOURCE_PROJECTION_TEST_TARGET))
+
+test-reviewed-source-git: $(REVIEWED_SOURCE_GIT_TEST_TARGET)
+	$(abspath $(REVIEWED_SOURCE_GIT_TEST_TARGET))
 
 test-package-metadata: $(PACKAGE_METADATA_TEST_TARGET)
 	$(abspath $(PACKAGE_METADATA_TEST_TARGET))
@@ -4010,6 +4054,8 @@ test: \
 	test-source-package-identity \
 	test-reviewed-source-state \
 	test-reviewed-source-state-store \
+	test-reviewed-source-projection \
+	test-reviewed-source-git \
 	test-source-package-identity-projection \
 	test-source-package-compatibility \
 	test-package-metadata \

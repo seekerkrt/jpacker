@@ -4,6 +4,7 @@
 #include "logging.hpp"
 #include "persistent_checkout.hpp"
 #include "process.hpp"
+#include "reviewed_source_git_parser.hpp"
 
 #include <algorithm>
 #include <array>
@@ -25,6 +26,12 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr std::size_t MAX_LOCAL_CONFIG_OUTPUT = 1024 * 1024;
+constexpr std::size_t MAX_COMMIT_OID_OUTPUT = 65;
+constexpr std::size_t MAX_SHALLOW_OUTPUT = 6;
+
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_GIT_TEST_HOOKS
+std::optional<std::size_t> g_review_machine_stream_limit;
+#endif
 
 constexpr std::array<const char*, 8> TRUSTED_PROXY_ENVIRONMENT_VARIABLES{
         "http_proxy",
@@ -69,6 +76,7 @@ bool is_absolute_ssl_cert_directory_list(std::string_view value) {
 
 struct LocalGitConfiguration {
     std::string remote_origin_url;
+    GitObjectFormat object_format = GitObjectFormat::Sha1;
 };
 
 struct BranchConfigurationState {
@@ -160,6 +168,8 @@ LocalGitConfiguration parse_local_configuration(
     bool has_bare = false;
     bool has_log_all_ref_updates = false;
     bool has_origin_fetch = false;
+    std::optional<std::string> repository_format_version;
+    std::optional<std::string> extension_object_format;
 
     std::size_t offset = 0;
     while(offset < result.output.size()) {
@@ -182,7 +192,7 @@ LocalGitConfiguration parse_local_configuration(
 
         if(key == "core.repositoryformatversion") {
             require_unique_key(key_counts, key);
-            if(trim(value) != "0") throw_unsafe_local_configuration();
+            repository_format_version = trim(value);
             has_repository_format = true;
             continue;
         }
@@ -222,6 +232,11 @@ LocalGitConfiguration parse_local_configuration(
                 throw_unsafe_local_configuration();
             }
             has_origin_fetch = true;
+            continue;
+        }
+        if(key == "extensions.objectformat") {
+            require_unique_key(key_counts, key);
+            extension_object_format = trim(value);
             continue;
         }
 
@@ -270,11 +285,22 @@ LocalGitConfiguration parse_local_configuration(
             throw_unsafe_local_configuration();
         }
     }
+    if(repository_format_version == std::optional<std::string>("0") &&
+       !extension_object_format.has_value()) {
+        configuration.object_format = GitObjectFormat::Sha1;
+    } else if(
+            repository_format_version == std::optional<std::string>("1") &&
+            extension_object_format == std::optional<std::string>("sha256")) {
+        configuration.object_format = GitObjectFormat::Sha256;
+    } else {
+        throw_unsafe_local_configuration();
+    }
     return configuration;
 }
 
 std::vector<std::string> trusted_git_environment(
-        const std::optional<std::string>& test_display_command) {
+        const std::optional<std::string>& test_display_command,
+        bool read_only_projection = false) {
     std::vector<std::string> environment{
             "PATH=/usr/bin:/bin",
             "LC_ALL=C",
@@ -289,6 +315,9 @@ std::vector<std::string> trusted_git_environment(
             "PAGER=cat",
             "GIT_ATTR_NOSYSTEM=1",
     };
+    if(read_only_projection) {
+        environment.push_back("GIT_OPTIONAL_LOCKS=0");
+    }
 
     // Start from a complete allowlist. Proxy values stay opaque and retain
     // their exact variable spelling; no shell or Git-config routing is added.
@@ -401,10 +430,12 @@ std::vector<std::string> common_git_arguments() {
 
 ExplicitProcessInvocation isolated_invocation(
         std::vector<std::string> git_arguments,
-        const std::optional<std::string>& test_display_command) {
+        const std::optional<std::string>& test_display_command,
+        bool read_only_projection = false) {
     return ExplicitProcessInvocation{
             trusted_git_executable(), std::move(git_arguments),
-            trusted_git_environment(test_display_command)};
+            trusted_git_environment(
+                    test_display_command, read_only_projection)};
 }
 
 std::vector<std::string> bound_git_arguments(
@@ -418,6 +449,33 @@ std::vector<std::string> bound_git_arguments(
             std::make_move_iterator(operation_arguments.begin()),
             std::make_move_iterator(operation_arguments.end()));
     return arguments;
+}
+
+std::vector<std::string> bound_review_git_arguments(
+        const fs::path& checkout,
+        std::vector<std::string> operation_arguments,
+        const std::optional<std::string>& attribute_source = std::nullopt) {
+    std::vector<std::string> arguments = common_git_arguments();
+    arguments.push_back("--no-replace-objects");
+    if(attribute_source.has_value()) {
+        arguments.push_back("--attr-source=" + *attribute_source);
+    }
+    arguments.push_back("--git-dir=" + (checkout / ".git").string());
+    arguments.push_back("--work-tree=" + checkout.string());
+    arguments.insert(
+            arguments.end(),
+            std::make_move_iterator(operation_arguments.begin()),
+            std::make_move_iterator(operation_arguments.end()));
+    return arguments;
+}
+
+std::size_t review_machine_stream_limit() noexcept {
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_GIT_TEST_HOOKS
+    if(g_review_machine_stream_limit.has_value()) {
+        return *g_review_machine_stream_limit;
+    }
+#endif
+    return REVIEWED_SOURCE_MACHINE_STREAM_LIMIT;
 }
 
 CapturedCommandResult inspect_local_configuration_output(
@@ -491,6 +549,226 @@ CapturedCommandResult capture_managed_git(
     return result;
 }
 
+CapturedCommandResult capture_review_git(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        std::vector<std::string> operation_arguments,
+        const std::string& display_command,
+        std::size_t stdout_limit,
+        const std::optional<std::string>& attribute_source = std::nullopt) {
+    require_expected_remote(
+            inspect_managed_checkout_configuration(checkout),
+            expected_remote_url);
+    ValidatedCachePath current = revalidate_trusted_cache_path(
+            checkout, CachePathRequirement::ExistingDirectory);
+    RetainedTrustedCacheDirectory retained =
+            retain_trusted_cache_directory(current);
+    retained.require_unchanged_identity();
+    ExplicitProcessInvocation invocation = isolated_invocation(
+            bound_review_git_arguments(
+                    current.canonical_path(),
+                    std::move(operation_arguments), attribute_source),
+            display_command, true);
+    invocation.stdout_capture_limit = stdout_limit;
+    CapturedCommandResult result =
+            capture_explicit_process_output_raw(invocation, true);
+    retained.require_unchanged_identity();
+    current = revalidate_trusted_cache_path(
+            current, CachePathRequirement::ExistingDirectory);
+    require_safe_persistent_checkout_descendants(current);
+    return result;
+}
+
+TrustedGitReviewFailure review_failure(
+        TrustedGitReviewFailureReason reason,
+        TrustedGitReviewStage stage) {
+    return TrustedGitReviewFailure{reason, stage, std::nullopt};
+}
+
+TrustedGitReviewFailure command_failure(
+        TrustedGitReviewStage stage, int exit_code) {
+    TrustedGitReviewFailure failure = review_failure(
+            TrustedGitReviewFailureReason::CommandFailed, stage);
+    failure.exit_code = exit_code;
+    return failure;
+}
+
+TrustedGitReviewFailure capture_limit_failure(
+        TrustedGitReviewStage stage, std::size_t limit) {
+    TrustedGitReviewFailure failure = review_failure(
+            TrustedGitReviewFailureReason::CaptureLimitExceeded, stage);
+    failure.limit = limit;
+    return failure;
+}
+
+TrustedGitReviewStage review_stage_for_stream(
+        ReviewedSourceMachineStream stream) noexcept {
+    switch(stream) {
+    case ReviewedSourceMachineStream::CommitResolution:
+        return TrustedGitReviewStage::TargetValidation;
+    case ReviewedSourceMachineStream::BaselineTree:
+        return TrustedGitReviewStage::BaselineTree;
+    case ReviewedSourceMachineStream::TargetTree:
+        return TrustedGitReviewStage::TargetTree;
+    case ReviewedSourceMachineStream::NameStatus:
+        return TrustedGitReviewStage::NameStatus;
+    case ReviewedSourceMachineStream::Numstat:
+        return TrustedGitReviewStage::Numstat;
+    case ReviewedSourceMachineStream::CrossStream:
+        return TrustedGitReviewStage::CrossStream;
+    case ReviewedSourceMachineStream::ResourcePreflight:
+        return TrustedGitReviewStage::ResourcePreflight;
+    }
+    return TrustedGitReviewStage::CrossStream;
+}
+
+TrustedGitReviewFailure map_projection_failure(
+        const ReviewedSourceProjectionFailure& source) {
+    TrustedGitReviewFailureReason reason =
+            TrustedGitReviewFailureReason::MalformedMachineOutput;
+    switch(source.reason) {
+    case ReviewedSourceProjectionFailureReason::MalformedMachineOutput:
+        reason = TrustedGitReviewFailureReason::MalformedMachineOutput;
+        break;
+    case ReviewedSourceProjectionFailureReason::InconsistentMachineOutput:
+        reason = TrustedGitReviewFailureReason::InconsistentMachineOutput;
+        break;
+    case ReviewedSourceProjectionFailureReason::RenameCandidateLimitExceeded:
+        reason = TrustedGitReviewFailureReason::RenameCandidateLimitExceeded;
+        break;
+    case ReviewedSourceProjectionFailureReason::SingleBlobSizeLimitExceeded:
+        reason = TrustedGitReviewFailureReason::SingleBlobSizeLimitExceeded;
+        break;
+    case ReviewedSourceProjectionFailureReason::AggregateBlobSizeLimitExceeded:
+        reason = TrustedGitReviewFailureReason::AggregateBlobSizeLimitExceeded;
+        break;
+    }
+    TrustedGitReviewFailure failure = review_failure(
+            reason, review_stage_for_stream(source.stream));
+    failure.record_index = source.record_index;
+    failure.observed = source.observed;
+    failure.limit = source.limit;
+    return failure;
+}
+
+const std::string& require_known_commit(
+        const SourceRevisionIdentity& revision) {
+    if(revision.state() != SourceRevisionState::Known ||
+       revision.git_commit() == nullptr ||
+       revision.git_object_format() == nullptr) {
+        throw std::invalid_argument(
+                "Reviewed source Git operation requires a known complete commit.");
+    }
+    return *revision.git_commit();
+}
+
+struct ExactCommitUnavailable {};
+
+using ExactCommitValidationResult = std::variant<
+        SourceRevisionIdentity,
+        ExactCommitUnavailable,
+        TrustedGitReviewFailure>;
+
+ExactCommitValidationResult validate_exact_commit(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        const SourceRevisionIdentity& expected,
+        GitObjectFormat repository_format,
+        TrustedGitReviewStage stage,
+        bool unavailable_on_exit_one) {
+    const std::string& object_id = require_known_commit(expected);
+    CapturedCommandResult result = capture_review_git(
+            checkout, expected_remote_url,
+            {"rev-parse", "--verify", "--quiet",
+             "--output-object-format=storage", "--end-of-options",
+             object_id + "^{commit}"},
+            "git rev-parse --verify <pinned-commit>^{commit}",
+            MAX_COMMIT_OID_OUTPUT);
+    if(result.stdout_capture_limit_exceeded) {
+        return capture_limit_failure(stage, MAX_COMMIT_OID_OUTPUT);
+    }
+    if(result.exit_code != 0) {
+        if(unavailable_on_exit_one && result.exit_code == 1) {
+            return ExactCommitUnavailable{};
+        }
+        return command_failure(stage, result.exit_code);
+    }
+    ReviewedSourceCommitParseResult parsed =
+            parse_reviewed_source_commit_output(result.output);
+    if(std::holds_alternative<ReviewedSourceProjectionFailure>(parsed)) {
+        TrustedGitReviewFailure failure = map_projection_failure(
+                std::get<ReviewedSourceProjectionFailure>(parsed));
+        failure.stage = stage;
+        return failure;
+    }
+    SourceRevisionIdentity observed =
+            std::get<SourceRevisionIdentity>(std::move(parsed));
+    if(observed.git_object_format() == nullptr ||
+       *observed.git_object_format() != repository_format) {
+        return review_failure(
+                TrustedGitReviewFailureReason::ObjectFormatMismatch, stage);
+    }
+    if(observed != expected) {
+        return unavailable_on_exit_one
+                ? ExactCommitValidationResult(ExactCommitUnavailable{})
+                : ExactCommitValidationResult(review_failure(
+                          TrustedGitReviewFailureReason::ObjectFormatMismatch,
+                          stage));
+    }
+    return observed;
+}
+
+std::optional<TrustedGitReviewFailure> require_non_shallow_repository(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url) {
+    CapturedCommandResult result = capture_review_git(
+            checkout, expected_remote_url,
+            {"rev-parse", "--is-shallow-repository"},
+            "git rev-parse --is-shallow-repository", MAX_SHALLOW_OUTPUT);
+    if(result.stdout_capture_limit_exceeded) {
+        return capture_limit_failure(
+                TrustedGitReviewStage::ShallowRepositoryCheck,
+                MAX_SHALLOW_OUTPUT);
+    }
+    if(result.exit_code != 0) {
+        return command_failure(
+                TrustedGitReviewStage::ShallowRepositoryCheck,
+                result.exit_code);
+    }
+    if(result.output == "true\n") {
+        return review_failure(
+                TrustedGitReviewFailureReason::
+                        ShallowRepositoryUnsupported,
+                TrustedGitReviewStage::ShallowRepositoryCheck);
+    }
+    if(result.output != "false\n") {
+        return review_failure(
+                TrustedGitReviewFailureReason::MalformedMachineOutput,
+                TrustedGitReviewStage::ShallowRepositoryCheck);
+    }
+    return std::nullopt;
+}
+
+std::optional<TrustedGitReviewFailure> require_no_attribute_override(
+        const ValidatedCachePath& checkout) {
+    if(observe_persistent_checkout_review_overrides(checkout).has_attributes) {
+        return review_failure(
+                TrustedGitReviewFailureReason::LocalAttributeOverride,
+                TrustedGitReviewStage::AttributeGuard);
+    }
+    return std::nullopt;
+}
+
+std::optional<TrustedGitReviewFailure> require_no_history_override(
+        const ValidatedCachePath& checkout) {
+    if(observe_persistent_checkout_review_overrides(checkout).has_grafts) {
+        return review_failure(
+                TrustedGitReviewFailureReason::LocalHistoryOverride,
+                TrustedGitReviewStage::HistoryGuard);
+    }
+    return std::nullopt;
+}
+
 int run_managed_git(
         const ValidatedCachePath& checkout,
         const std::string& expected_remote_url,
@@ -524,6 +802,29 @@ std::string remote_ref_for_branch(const std::string& branch) {
     }
     // NO_TRANSLATE: Literal Git remote-ref identity.
     return "origin/" + branch;
+}
+
+std::string full_remote_ref_for_branch(const std::string& branch) {
+    return "refs/remotes/" + remote_ref_for_branch(branch);
+}
+
+std::vector<std::string> reviewed_source_diff_arguments(
+        const std::string& output_option,
+        const std::string& baseline,
+        const std::string& target,
+        bool detect_renames) {
+    std::vector<std::string> arguments{
+            "diff-tree", "--no-commit-id", "-r", "-z", output_option,
+            "--no-relative", "--no-renames"};
+    if(detect_renames) {
+        arguments.push_back("--find-renames=50%");
+        arguments.push_back("-l1000");
+    }
+    arguments.insert(
+            arguments.end(),
+            {"--diff-algorithm=myers", "--no-ext-diff", "--no-textconv",
+             "--ignore-submodules=none", baseline, target, "--"});
+    return arguments;
 }
 
 std::string diff_range_for_branch(const std::string& branch) {
@@ -635,6 +936,332 @@ int trusted_git_reset_hard(
             {"reset", "--hard", remote_ref, "--"},
             "git reset --hard " + remote_ref);
 }
+
+TrustedGitCommitResolutionResult trusted_git_resolve_remote_commit(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        const std::string& branch) {
+    const LocalGitConfiguration configuration =
+            inspect_managed_checkout_configuration(checkout);
+    require_expected_remote(configuration, expected_remote_url);
+    const std::string ref = full_remote_ref_for_branch(branch);
+    CapturedCommandResult result = capture_review_git(
+            checkout, expected_remote_url,
+            {"rev-parse", "--verify", "--output-object-format=storage",
+             "--end-of-options", ref + "^{commit}"},
+            "git rev-parse --verify " + ref + "^{commit}",
+            MAX_COMMIT_OID_OUTPUT);
+    if(result.stdout_capture_limit_exceeded) {
+        return capture_limit_failure(
+                TrustedGitReviewStage::TargetResolution,
+                MAX_COMMIT_OID_OUTPUT);
+    }
+    if(result.exit_code != 0) {
+        return command_failure(
+                TrustedGitReviewStage::TargetResolution,
+                result.exit_code);
+    }
+    ReviewedSourceCommitParseResult parsed =
+            parse_reviewed_source_commit_output(result.output);
+    if(std::holds_alternative<ReviewedSourceProjectionFailure>(parsed)) {
+        TrustedGitReviewFailure failure = map_projection_failure(
+                std::get<ReviewedSourceProjectionFailure>(parsed));
+        failure.stage = TrustedGitReviewStage::TargetResolution;
+        return failure;
+    }
+    SourceRevisionIdentity revision =
+            std::get<SourceRevisionIdentity>(std::move(parsed));
+    if(revision.git_object_format() == nullptr ||
+       *revision.git_object_format() != configuration.object_format) {
+        return review_failure(
+                TrustedGitReviewFailureReason::ObjectFormatMismatch,
+                TrustedGitReviewStage::TargetResolution);
+    }
+    return revision;
+}
+
+TrustedGitReviewedSourceProjectionResult trusted_git_project_reviewed_source(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        const SourceRevisionIdentity& target,
+        const std::optional<SourceRevisionIdentity>& baseline) {
+    const std::string& target_oid = require_known_commit(target);
+    const LocalGitConfiguration configuration =
+            inspect_managed_checkout_configuration(checkout);
+    require_expected_remote(configuration, expected_remote_url);
+
+    ValidatedCachePath current = revalidate_trusted_cache_path(
+            checkout, CachePathRequirement::ExistingDirectory);
+    require_safe_persistent_checkout_descendants(current);
+    RetainedTrustedCacheDirectory outer =
+            retain_trusted_cache_directory(current);
+    outer.require_unchanged_identity();
+
+    const auto finish = [&outer, &current](
+                                TrustedGitReviewedSourceProjectionResult result) {
+        outer.require_unchanged_identity();
+        current = revalidate_trusted_cache_path(
+                current, CachePathRequirement::ExistingDirectory);
+        require_safe_persistent_checkout_descendants(current);
+        return result;
+    };
+
+    const PersistentCheckoutReviewOverrides initial_overrides =
+            observe_persistent_checkout_review_overrides(current);
+    if(initial_overrides.has_attributes) {
+        return finish(review_failure(
+                TrustedGitReviewFailureReason::LocalAttributeOverride,
+                TrustedGitReviewStage::AttributeGuard));
+    }
+    if(initial_overrides.has_grafts) {
+        return finish(review_failure(
+                TrustedGitReviewFailureReason::LocalHistoryOverride,
+                TrustedGitReviewStage::HistoryGuard));
+    }
+    if(target.git_object_format() == nullptr ||
+       *target.git_object_format() != configuration.object_format) {
+        return finish(review_failure(
+                TrustedGitReviewFailureReason::ObjectFormatMismatch,
+                TrustedGitReviewStage::TargetValidation));
+    }
+
+    ExactCommitValidationResult target_validation = validate_exact_commit(
+            current, expected_remote_url, target, configuration.object_format,
+            TrustedGitReviewStage::TargetValidation, false);
+    if(std::holds_alternative<TrustedGitReviewFailure>(target_validation)) {
+        return finish(std::get<TrustedGitReviewFailure>(target_validation));
+    }
+    if(!std::holds_alternative<SourceRevisionIdentity>(target_validation)) {
+        return finish(review_failure(
+                TrustedGitReviewFailureReason::MalformedMachineOutput,
+                TrustedGitReviewStage::TargetValidation));
+    }
+
+    if(const auto shallow_failure = require_non_shallow_repository(
+               current, expected_remote_url)) {
+        return finish(*shallow_failure);
+    }
+
+    if(baseline.has_value() && *baseline == target) {
+        return finish(ReviewedSourceAlreadyReviewed{target});
+    }
+
+    bool is_rebaseline = false;
+    bool detect_renames = false;
+    std::optional<ReviewedSourceHistoryRelation> history_relation;
+    if(baseline.has_value()) {
+        ExactCommitValidationResult baseline_validation = validate_exact_commit(
+                current, expected_remote_url, *baseline,
+                configuration.object_format,
+                TrustedGitReviewStage::BaselineValidation, true);
+        if(std::holds_alternative<TrustedGitReviewFailure>(
+                   baseline_validation)) {
+            return finish(std::get<TrustedGitReviewFailure>(
+                    baseline_validation));
+        }
+        if(std::holds_alternative<ExactCommitUnavailable>(
+                   baseline_validation)) {
+            is_rebaseline = true;
+        } else {
+            detect_renames = true;
+            if(const auto history_override =
+                       require_no_history_override(current)) {
+                return finish(*history_override);
+            }
+            CapturedCommandResult ancestry = capture_review_git(
+                    current, expected_remote_url,
+                    {"merge-base", "--is-ancestor",
+                     require_known_commit(*baseline), target_oid},
+                    "git merge-base --is-ancestor <baseline> <target>", 1);
+            if(const auto history_override =
+                       require_no_history_override(current)) {
+                return finish(*history_override);
+            }
+            if(ancestry.stdout_capture_limit_exceeded) {
+                return finish(capture_limit_failure(
+                        TrustedGitReviewStage::AncestryCheck, 1));
+            }
+            if(!ancestry.output.empty()) {
+                return finish(review_failure(
+                        TrustedGitReviewFailureReason::MalformedMachineOutput,
+                        TrustedGitReviewStage::AncestryCheck));
+            }
+            if(ancestry.exit_code == 0) {
+                history_relation = ReviewedSourceHistoryRelation::Ancestor;
+            } else if(ancestry.exit_code == 1) {
+                history_relation = ReviewedSourceHistoryRelation::NonAncestor;
+            } else {
+                return finish(command_failure(
+                        TrustedGitReviewStage::AncestryCheck,
+                        ancestry.exit_code));
+            }
+        }
+    }
+
+    using InventoryReadResult = std::variant<
+            ReviewedSourceTreeInventory,
+            TrustedGitReviewFailure>;
+    const std::size_t stream_limit = review_machine_stream_limit();
+    const auto read_inventory = [&](
+                                        const std::string& object_id,
+                                        ReviewedSourceMachineStream stream,
+                                        TrustedGitReviewStage stage)
+            -> InventoryReadResult {
+        CapturedCommandResult captured = capture_review_git(
+                current, expected_remote_url,
+                {"ls-tree", "-r", "-z", "--full-tree", "--no-abbrev",
+                 "--format=%(objectmode)%x00%(objecttype)%x00%(objectname)%x00%(objectsize)",
+                 object_id, "--"},
+                "git ls-tree -r -z --full-tree <pinned-commit> metadata",
+                stream_limit);
+        if(captured.stdout_capture_limit_exceeded) {
+            return capture_limit_failure(stage, stream_limit);
+        }
+        if(captured.exit_code != 0) {
+            return command_failure(stage, captured.exit_code);
+        }
+        // LANDMINE(#411): Git 2.55 custom %(path) formatting C-quotes some
+        // non-UTF-8/control-byte names even with -z. Keep metadata path-free
+        // and bind it by record order to the separate raw --name-only -z stream.
+        CapturedCommandResult captured_paths = capture_review_git(
+                current, expected_remote_url,
+                {"ls-tree", "-r", "-z", "--full-tree", "--name-only",
+                 object_id, "--"},
+                "git ls-tree -r -z --full-tree <pinned-commit> paths",
+                stream_limit);
+        if(captured_paths.stdout_capture_limit_exceeded) {
+            return capture_limit_failure(stage, stream_limit);
+        }
+        if(captured_paths.exit_code != 0) {
+            return command_failure(stage, captured_paths.exit_code);
+        }
+        ReviewedSourceTreeParseResult parsed =
+                parse_reviewed_source_tree_output(
+                        captured.output, captured_paths.output,
+                        configuration.object_format, stream);
+        if(std::holds_alternative<ReviewedSourceProjectionFailure>(parsed)) {
+            return map_projection_failure(
+                    std::get<ReviewedSourceProjectionFailure>(parsed));
+        }
+        return std::get<ReviewedSourceTreeInventory>(std::move(parsed));
+    };
+
+    InventoryReadResult target_read = read_inventory(
+            target_oid, ReviewedSourceMachineStream::TargetTree,
+            TrustedGitReviewStage::TargetTree);
+    if(std::holds_alternative<TrustedGitReviewFailure>(target_read)) {
+        return finish(std::get<TrustedGitReviewFailure>(target_read));
+    }
+    ReviewedSourceTreeInventory target_inventory =
+            std::get<ReviewedSourceTreeInventory>(std::move(target_read));
+
+    ReviewedSourceTreeInventory baseline_inventory;
+    std::string diff_baseline = reviewed_source_empty_tree_object_id(
+                                        configuration.object_format)
+                                        .value();
+    if(baseline.has_value() && !is_rebaseline) {
+        diff_baseline = require_known_commit(*baseline);
+        InventoryReadResult baseline_read = read_inventory(
+                diff_baseline, ReviewedSourceMachineStream::BaselineTree,
+                TrustedGitReviewStage::BaselineTree);
+        if(std::holds_alternative<TrustedGitReviewFailure>(baseline_read)) {
+            return finish(std::get<TrustedGitReviewFailure>(baseline_read));
+        }
+        baseline_inventory =
+                std::get<ReviewedSourceTreeInventory>(
+                        std::move(baseline_read));
+    }
+
+    ReviewedSourceResourcePreflightResult resource_preflight =
+            preflight_reviewed_source_projection_resources(
+                    baseline_inventory, target_inventory, detect_renames);
+    if(std::holds_alternative<ReviewedSourceProjectionFailure>(
+               resource_preflight)) {
+        return finish(map_projection_failure(
+                std::get<ReviewedSourceProjectionFailure>(
+                        resource_preflight)));
+    }
+
+    using DiffReadResult = std::variant<std::string, TrustedGitReviewFailure>;
+    const auto read_diff = [&](
+                                   const std::string& output_option,
+                                   TrustedGitReviewStage stage)
+            -> DiffReadResult {
+        if(const auto attribute_override =
+                   require_no_attribute_override(current)) {
+            return *attribute_override;
+        }
+        CapturedCommandResult captured = capture_review_git(
+                current, expected_remote_url,
+                reviewed_source_diff_arguments(
+                        output_option, diff_baseline, target_oid,
+                        detect_renames),
+                output_option == "--name-status"
+                        ? "git diff-tree -z --name-status <baseline> <target>"
+                        : "git diff-tree -z --numstat <baseline> <target>",
+                stream_limit, target_oid);
+        if(const auto attribute_override =
+                   require_no_attribute_override(current)) {
+            return *attribute_override;
+        }
+        if(captured.stdout_capture_limit_exceeded) {
+            return capture_limit_failure(stage, stream_limit);
+        }
+        if(captured.exit_code != 0) {
+            return command_failure(stage, captured.exit_code);
+        }
+        return std::move(captured.output);
+    };
+
+    DiffReadResult name_status = read_diff(
+            "--name-status", TrustedGitReviewStage::NameStatus);
+    if(std::holds_alternative<TrustedGitReviewFailure>(name_status)) {
+        return finish(std::get<TrustedGitReviewFailure>(name_status));
+    }
+    DiffReadResult numstat = read_diff(
+            "--numstat", TrustedGitReviewStage::Numstat);
+    if(std::holds_alternative<TrustedGitReviewFailure>(numstat)) {
+        return finish(std::get<TrustedGitReviewFailure>(numstat));
+    }
+
+    ReviewedSourceChangeAssemblyResult assembled =
+            assemble_reviewed_source_changes(
+                    baseline_inventory, target_inventory,
+                    std::get<std::string>(name_status),
+                    std::get<std::string>(numstat), detect_renames);
+    if(std::holds_alternative<ReviewedSourceProjectionFailure>(assembled)) {
+        return finish(map_projection_failure(
+                std::get<ReviewedSourceProjectionFailure>(assembled)));
+    }
+    std::vector<ReviewedSourceFileChange> changes =
+            std::get<std::vector<ReviewedSourceFileChange>>(
+                    std::move(assembled));
+
+    if(!baseline.has_value()) {
+        return finish(ReviewedSourceInitialFullReview{
+                target, std::move(changes)});
+    }
+    if(is_rebaseline) {
+        return finish(ReviewedSourceRebaselineFullReview{
+                *baseline, target,
+                ReviewedSourceBaselineUnavailableReason::MissingOrNotCommit,
+                std::move(changes)});
+    }
+    if(!history_relation.has_value()) {
+        return finish(review_failure(
+                TrustedGitReviewFailureReason::InconsistentMachineOutput,
+                TrustedGitReviewStage::CrossStream));
+    }
+    return finish(ReviewedSourceUpdateReview{
+            *baseline, target, *history_relation, std::move(changes)});
+}
+
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_GIT_TEST_HOOKS
+void set_trusted_git_review_machine_stream_limit_for_test(
+        std::optional<std::size_t> limit) {
+    g_review_machine_stream_limit = limit;
+}
+#endif
 
 int trusted_git_clone_persistent_checkout(
         const ValidatedCachePath& destination,
