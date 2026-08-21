@@ -97,10 +97,7 @@ using TrustedGitReviewedSourceProjectionResult = std::variant<
         TrustedGitReviewFailure>;
 
 using TrustedGitReviewedSourceMaterializationResult = std::variant<
-        ReviewedSourceMaterializedInitialFullReview,
-        ReviewedSourceMaterializedAlreadyReviewed,
-        ReviewedSourceMaterializedUpdateReview,
-        ReviewedSourceMaterializedRebaselineFullReview,
+        ReviewedSourceVerifiedMaterializedReview,
         ReviewedSourceReviewFailure,
         TrustedGitReviewFailure>;
 

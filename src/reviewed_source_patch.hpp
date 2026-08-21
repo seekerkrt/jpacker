@@ -58,6 +58,14 @@ struct ReviewedSourceTextPatch {
     bool operator==(const ReviewedSourceTextPatch&) const = default;
 };
 
+// Reuses the strict parser's typed replay contract without accepting or
+// reparsing raw Git patch output. This is a defense-in-depth check for a
+// materialized review that has already crossed the trusted 3B1 finalizer.
+[[nodiscard]] bool reviewed_source_text_patch_replays(
+        const ReviewedSourceTextPatch& patch,
+        const ReviewedSourceTextContent& old_content,
+        const ReviewedSourceTextContent& new_content);
+
 enum class ReviewedSourcePatchFailureReason {
     RawPatchLimitExceeded,
     LogicalLineLimitExceeded,

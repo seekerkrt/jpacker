@@ -41,7 +41,7 @@ using ReviewedSourcePresentationResult = std::variant<
 // bytes or terminal control bytes from reviewed content.
 [[nodiscard]] ReviewedSourcePresentationResult
 render_reviewed_source_presentation(
-        const ReviewedSourceMaterializedReview& review);
+        const ReviewedSourceVerifiedMaterializedReview& review);
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_PRESENTATION_TEST_HOOKS
 using ReviewedSourcePresentationSizeCheckResult = std::variant<
@@ -56,6 +56,6 @@ checked_reviewed_source_presentation_size_for_test(
 
 [[nodiscard]] ReviewedSourcePresentationResult
 render_reviewed_source_presentation_with_limit_for_test(
-        const ReviewedSourceMaterializedReview& review,
+        const ReviewedSourceVerifiedMaterializedReview& review,
         std::uintmax_t limit);
 #endif

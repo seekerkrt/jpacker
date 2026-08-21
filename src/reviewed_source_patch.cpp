@@ -142,18 +142,13 @@ bool apply_no_newline_marker(
     return true;
 }
 
-bool replay_patch(
+bool replay_patch_lines(
         const std::vector<ReviewedSourcePatchHunk>& hunks,
-        std::string_view old_blob,
-        std::string_view new_blob) {
-    const std::vector<ReviewedSourceTextLine> old_lines =
-            split_blob_lines(old_blob);
-    const std::vector<ReviewedSourceTextLine> new_lines =
-            split_blob_lines(new_blob);
+        const std::vector<ReviewedSourceTextLine>& old_lines,
+        const std::vector<ReviewedSourceTextLine>& new_lines,
+        std::string* replayed) {
     std::size_t old_index = 0;
     std::size_t new_index = 0;
-    std::string replayed;
-    replayed.reserve(new_blob.size());
 
     for(const ReviewedSourcePatchHunk& hunk : hunks) {
         const auto old_position = hunk_position(hunk.old_start, hunk.old_count);
@@ -168,7 +163,10 @@ bool replay_patch(
                !line_matches(old_lines[old_index], new_lines[new_index])) {
                 return false;
             }
-            append_line(replayed, old_lines[old_index++]);
+            if(replayed != nullptr) {
+                append_line(*replayed, old_lines[old_index]);
+            }
+            ++old_index;
             ++new_index;
         }
         if(new_index != *new_position) return false;
@@ -184,7 +182,7 @@ bool replay_patch(
                    !line_matches(new_lines[new_index], patch_line.line)) {
                     return false;
                 }
-                append_line(replayed, patch_line.line);
+                if(replayed != nullptr) append_line(*replayed, patch_line.line);
                 ++old_index;
                 ++new_index;
                 ++observed_old_count;
@@ -203,7 +201,7 @@ bool replay_patch(
                    !line_matches(new_lines[new_index], patch_line.line)) {
                     return false;
                 }
-                append_line(replayed, patch_line.line);
+                if(replayed != nullptr) append_line(*replayed, patch_line.line);
                 ++new_index;
                 ++observed_new_count;
                 break;
@@ -220,13 +218,37 @@ bool replay_patch(
            !line_matches(old_lines[old_index], new_lines[new_index])) {
             return false;
         }
-        append_line(replayed, old_lines[old_index++]);
+        if(replayed != nullptr) append_line(*replayed, old_lines[old_index]);
+        ++old_index;
         ++new_index;
     }
-    return new_index == new_lines.size() && replayed == new_blob;
+    return new_index == new_lines.size();
+}
+
+bool replay_patch(
+        const std::vector<ReviewedSourcePatchHunk>& hunks,
+        std::string_view old_blob,
+        std::string_view new_blob) {
+    const std::vector<ReviewedSourceTextLine> old_lines =
+            split_blob_lines(old_blob);
+    const std::vector<ReviewedSourceTextLine> new_lines =
+            split_blob_lines(new_blob);
+    std::string replayed;
+    replayed.reserve(new_blob.size());
+    return replay_patch_lines(hunks, old_lines, new_lines, &replayed) &&
+           replayed == new_blob;
 }
 
 } // namespace
+
+bool reviewed_source_text_patch_replays(
+        const ReviewedSourceTextPatch& patch,
+        const ReviewedSourceTextContent& old_content,
+        const ReviewedSourceTextContent& new_content) {
+    return !patch.hunks.empty() &&
+           replay_patch_lines(
+                   patch.hunks, old_content.lines, new_content.lines, nullptr);
+}
 
 ReviewedSourcePatchParseResult parse_and_verify_reviewed_source_patch(
         std::string_view patch_output,

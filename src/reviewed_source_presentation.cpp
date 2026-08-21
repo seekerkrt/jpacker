@@ -483,13 +483,19 @@ void render_git_marker(
     state.append("\n", entry_index);
 }
 
-bool has_generated_metadata(const ChangeView& view) noexcept {
-    return (view.old_version != nullptr &&
-            view.old_version->classification() ==
-                    ReviewedSourceFileClassification::GeneratedMetadata) ||
-           (view.new_version != nullptr &&
-            view.new_version->classification() ==
-                    ReviewedSourceFileClassification::GeneratedMetadata);
+bool all_present_versions_are_generated_metadata(
+        const ChangeView& view) noexcept {
+    if(view.old_version != nullptr &&
+       view.old_version->classification() !=
+               ReviewedSourceFileClassification::GeneratedMetadata) {
+        return false;
+    }
+    if(view.new_version != nullptr &&
+       view.new_version->classification() !=
+               ReviewedSourceFileClassification::GeneratedMetadata) {
+        return false;
+    }
+    return view.old_version != nullptr || view.new_version != nullptr;
 }
 
 void render_status_summary(
@@ -794,7 +800,7 @@ void render_entry(
         state.append(
                 "  sensitive guidance: explicitly inspect root PKGBUILD/install source content\n",
                 entry_index);
-    } else if(has_generated_metadata(view)) {
+    } else if(all_present_versions_are_generated_metadata(view)) {
         state.append("LowerGeneratedMetadata\n", entry_index);
         state.append(
                 "  generated metadata guidance: lower emphasis; not source-review authority\n",
@@ -857,8 +863,14 @@ std::optional<std::string_view> baseline_reason_display(
 }
 
 ReviewedSourcePresentationResult render_with_limit(
-        const ReviewedSourceMaterializedReview& review,
+        const ReviewedSourceVerifiedMaterializedReview& verified_review,
         std::uintmax_t limit) {
+    const ReviewedSourceMaterializedReview& review = verified_review.review();
+    const auto inconsistent_entry =
+            reviewed_source_materialized_review_inconsistent_entry(review);
+    if(inconsistent_entry.has_value()) {
+        return inconsistent_failure(*inconsistent_entry);
+    }
     RenderState state(limit);
     std::visit(
             [&state](const auto& value) {
@@ -910,7 +922,7 @@ ReviewedSourcePresentationResult render_with_limit(
 } // namespace
 
 ReviewedSourcePresentationResult render_reviewed_source_presentation(
-        const ReviewedSourceMaterializedReview& review) {
+        const ReviewedSourceVerifiedMaterializedReview& review) {
     return render_with_limit(review, REVIEWED_SOURCE_RENDERED_OUTPUT_LIMIT);
 }
 
@@ -925,7 +937,7 @@ checked_reviewed_source_presentation_size_for_test(
 
 ReviewedSourcePresentationResult
 render_reviewed_source_presentation_with_limit_for_test(
-        const ReviewedSourceMaterializedReview& review,
+        const ReviewedSourceVerifiedMaterializedReview& review,
         std::uintmax_t limit) {
     return render_with_limit(review, limit);
 }

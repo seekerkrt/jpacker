@@ -25,6 +25,16 @@
 #include <utility>
 #include <vector>
 
+// This named friend must match the private capability declaration. Its
+// definition remains confined to the trusted Git materialization TU.
+class ReviewedSourceTrustedMaterializationAuthority final {
+public:
+    static ReviewedSourceVerifiedMaterializedReview seal(
+            ReviewedSourceMaterializedReview review) {
+        return ReviewedSourceVerifiedMaterializedReview(std::move(review));
+    }
+};
+
 namespace {
 
 namespace fs = std::filesystem;
@@ -1046,10 +1056,7 @@ const SourceRevisionIdentity& materialization_target_revision(
 
 TrustedGitReviewedSourceMaterializationResult lift_materialized_review(
         ReviewedSourceMaterializedReview review) {
-    return std::visit(
-            [](auto&& value) -> TrustedGitReviewedSourceMaterializationResult {
-                return std::move(value);
-            },
+    return ReviewedSourceTrustedMaterializationAuthority::seal(
             std::move(review));
 }
 

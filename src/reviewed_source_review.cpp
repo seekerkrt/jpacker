@@ -425,6 +425,249 @@ bool representation_requires_manual_inspection(
                    ReviewedSourceReviewRepresentation::MixedTextAndNonText;
 }
 
+bool revision_is_known_commit(
+        const SourceRevisionIdentity& revision) noexcept {
+    return revision.state() == SourceRevisionState::Known &&
+           revision.git_object_format() != nullptr &&
+           revision.git_commit() != nullptr;
+}
+
+bool text_content_matches_version(
+        const ReviewedSourceTextContent& content,
+        const ReviewedSourceFileVersion& version) noexcept {
+    if(!version.blob_size().has_value() ||
+       version.mode() == ReviewedSourceFileMode::Gitlink) {
+        return false;
+    }
+
+    std::uintmax_t observed_size = 0;
+    for(std::size_t index = 0; index < content.lines.size(); ++index) {
+        const ReviewedSourceTextLine& line = content.lines[index];
+        if(line.bytes.size() > REVIEWED_SOURCE_LOGICAL_LINE_LIMIT ||
+           line.bytes.find('\0') != std::string::npos ||
+           line.bytes.find('\n') != std::string::npos ||
+           (!line.has_newline &&
+            (index + 1 != content.lines.size() || line.bytes.empty()))) {
+            return false;
+        }
+        const std::uintmax_t line_size =
+                static_cast<std::uintmax_t>(line.bytes.size()) +
+                static_cast<std::uintmax_t>(line.has_newline);
+        if(line_size > std::numeric_limits<std::uintmax_t>::max() -
+                        observed_size) {
+            return false;
+        }
+        observed_size += line_size;
+    }
+    return observed_size == *version.blob_size();
+}
+
+bool observation_matches_version(
+        const ReviewedSourceFileVersion* version,
+        const std::optional<ReviewedSourceBlobObservation>& observation) {
+    if(version == nullptr) return !observation.has_value();
+    if(!observation.has_value()) return false;
+
+    switch(observation->kind) {
+    case ReviewedSourceBlobContentKind::LineReviewable:
+        return observation->text != nullptr &&
+               text_content_matches_version(*observation->text, *version);
+    case ReviewedSourceBlobContentKind::ContainsNul:
+        return version->mode() != ReviewedSourceFileMode::Gitlink &&
+               observation->text == nullptr;
+    case ReviewedSourceBlobContentKind::Gitlink:
+        return version->mode() == ReviewedSourceFileMode::Gitlink &&
+               observation->text == nullptr;
+    }
+    return false;
+}
+
+bool change_structure_is_consistent(
+        const ReviewedSourceFileChange& change) noexcept {
+    return std::visit(
+            [](const auto& value) {
+                using Change = std::decay_t<decltype(value)>;
+                if constexpr(std::is_same_v<Change, ReviewedSourceAdded> ||
+                             std::is_same_v<Change, ReviewedSourceDeleted>) {
+                    return true;
+                } else if constexpr(std::is_same_v<
+                                            Change,
+                                            ReviewedSourceModified>) {
+                    return value.old_version.path() == value.new_version.path() &&
+                           value.old_version != value.new_version &&
+                           reviewed_source_file_type(
+                                   value.old_version.mode()) ==
+                                   reviewed_source_file_type(
+                                           value.new_version.mode());
+                } else if constexpr(std::is_same_v<
+                                            Change,
+                                            ReviewedSourceTypeChanged>) {
+                    return value.old_version.path() == value.new_version.path() &&
+                           reviewed_source_file_type(
+                                   value.old_version.mode()) !=
+                                   reviewed_source_file_type(
+                                           value.new_version.mode());
+                } else {
+                    return value.old_version.path() != value.new_version.path() &&
+                           value.similarity <= 100;
+                }
+            },
+            change);
+}
+
+ReviewedSourceReviewEmphasis expected_emphasis(
+        const ReviewedSourceFileVersion* old_file,
+        const ReviewedSourceFileVersion* new_file) noexcept {
+    return (old_file != nullptr && path_is_sensitive(old_file->path())) ||
+                    (new_file != nullptr && path_is_sensitive(new_file->path()))
+            ? ReviewedSourceReviewEmphasis::Sensitive
+            : ReviewedSourceReviewEmphasis::Ordinary;
+}
+
+std::optional<ReviewedSourceReviewRepresentation> expected_representation(
+        const ReviewedSourceFileVersion* old_file,
+        const ReviewedSourceFileVersion* new_file,
+        const std::optional<ReviewedSourceBlobObservation>& old_observation,
+        const std::optional<ReviewedSourceBlobObservation>& new_observation) {
+    if(old_file == nullptr) {
+        return one_sided_representation(new_observation->kind);
+    }
+    if(new_file == nullptr) {
+        return one_sided_representation(old_observation->kind);
+    }
+    if(old_observation->kind ==
+               ReviewedSourceBlobContentKind::LineReviewable &&
+       new_observation->kind ==
+               ReviewedSourceBlobContentKind::LineReviewable) {
+        return old_file->object_id() == new_file->object_id()
+                ? ReviewedSourceReviewRepresentation::NoContentChange
+                : ReviewedSourceReviewRepresentation::CompleteTextPatch;
+    }
+    if(old_observation->kind == ReviewedSourceBlobContentKind::ContainsNul &&
+       new_observation->kind == ReviewedSourceBlobContentKind::ContainsNul) {
+        return ReviewedSourceReviewRepresentation::ContainsNul;
+    }
+    if(old_observation->kind == ReviewedSourceBlobContentKind::Gitlink &&
+       new_observation->kind == ReviewedSourceBlobContentKind::Gitlink) {
+        return ReviewedSourceReviewRepresentation::GitlinkMetadata;
+    }
+    return ReviewedSourceReviewRepresentation::MixedTextAndNonText;
+}
+
+ReviewedSourceReviewReadiness expected_readiness(
+        const ReviewedSourceFileVersion* old_file,
+        const ReviewedSourceFileVersion* new_file,
+        const std::optional<ReviewedSourceBlobObservation>& old_observation,
+        const std::optional<ReviewedSourceBlobObservation>& new_observation,
+        ReviewedSourceReviewRepresentation representation) {
+    if(version_is_sensitive_unrenderable(old_file, old_observation) ||
+       version_is_sensitive_unrenderable(new_file, new_observation)) {
+        return ReviewedSourceReviewReadiness::SensitiveSourceUnrenderable;
+    }
+    return representation_requires_manual_inspection(representation)
+            ? ReviewedSourceReviewReadiness::ManualInspectionRequired
+            : ReviewedSourceReviewReadiness::Complete;
+}
+
+bool patch_structure_is_consistent(
+        const ReviewedSourceTextPatch& patch) noexcept {
+    if(patch.hunks.empty()) return false;
+    for(const ReviewedSourcePatchHunk& hunk : patch.hunks) {
+        if(hunk.lines.empty()) return false;
+        std::size_t observed_old = 0;
+        std::size_t observed_new = 0;
+        bool has_change = false;
+        for(const ReviewedSourcePatchLine& line : hunk.lines) {
+            if(line.line.bytes.size() > REVIEWED_SOURCE_LOGICAL_LINE_LIMIT ||
+               line.line.bytes.find('\0') != std::string::npos ||
+               line.line.bytes.find('\n') != std::string::npos) {
+                return false;
+            }
+            switch(line.kind) {
+            case ReviewedSourcePatchLineKind::Context:
+                ++observed_old;
+                ++observed_new;
+                break;
+            case ReviewedSourcePatchLineKind::Removed:
+                ++observed_old;
+                has_change = true;
+                break;
+            case ReviewedSourcePatchLineKind::Added:
+                ++observed_new;
+                has_change = true;
+                break;
+            }
+        }
+        if(!has_change || observed_old != hunk.old_count ||
+           observed_new != hunk.new_count) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool review_entry_is_consistent(const ReviewedSourceReviewEntry& entry) {
+    if(!change_structure_is_consistent(entry.change)) return false;
+    const ReviewedSourceFileVersion* old_file = old_version(entry.change);
+    const ReviewedSourceFileVersion* new_file = new_version(entry.change);
+    if(!observation_matches_version(old_file, entry.old_observation) ||
+       !observation_matches_version(new_file, entry.new_observation)) {
+        return false;
+    }
+    if(old_file != nullptr && new_file != nullptr &&
+       old_file->object_id() == new_file->object_id() &&
+       (old_file->blob_size() != new_file->blob_size() ||
+        entry.old_observation != entry.new_observation)) {
+        return false;
+    }
+
+    const auto representation = expected_representation(
+            old_file, new_file, entry.old_observation, entry.new_observation);
+    if(!representation.has_value() ||
+       entry.representation != *representation ||
+       entry.emphasis != expected_emphasis(old_file, new_file) ||
+       entry.readiness != expected_readiness(
+                                  old_file, new_file,
+                                  entry.old_observation,
+                                  entry.new_observation,
+                                  *representation)) {
+        return false;
+    }
+
+    if(entry.representation !=
+       ReviewedSourceReviewRepresentation::CompleteTextPatch) {
+        if(entry.patch.has_value()) return false;
+        if(entry.representation ==
+                   ReviewedSourceReviewRepresentation::NoContentChange &&
+           entry.old_observation != entry.new_observation) {
+            return false;
+        }
+        return true;
+    }
+
+    if(!entry.patch.has_value() || old_file == nullptr || new_file == nullptr ||
+       entry.old_observation->text == nullptr ||
+       entry.new_observation->text == nullptr ||
+       entry.patch->old_object_id != old_file->object_id() ||
+       entry.patch->new_object_id != new_file->object_id() ||
+       !patch_structure_is_consistent(*entry.patch)) {
+        return false;
+    }
+    return reviewed_source_text_patch_replays(
+            *entry.patch, *entry.old_observation->text,
+            *entry.new_observation->text);
+}
+
+std::optional<std::size_t> review_body_inconsistent_entry(
+        const ReviewedSourceReviewBody& body) {
+    if(body.entries.size() > REVIEWED_SOURCE_REVIEW_ENTRY_LIMIT) return 0;
+    for(std::size_t index = 0; index < body.entries.size(); ++index) {
+        if(!review_entry_is_consistent(body.entries[index])) return index;
+    }
+    if(body.readiness != aggregate_readiness(body.entries)) return 0;
+    return std::nullopt;
+}
+
 ReviewedSourceReviewFailure map_patch_failure(
         const ReviewedSourcePatchFailure& failure,
         std::size_t entry_index) {
@@ -658,11 +901,81 @@ bool ReviewedSourceBlobObservation::operator==(
     return !text || *text == *other.text;
 }
 
+ReviewedSourceVerifiedMaterializedReview::
+        ReviewedSourceVerifiedMaterializedReview(
+                ReviewedSourceMaterializedReview review) noexcept
+    : review_(std::move(review)) {}
+
+const ReviewedSourceMaterializedReview&
+ReviewedSourceVerifiedMaterializedReview::review() const noexcept {
+    return review_;
+}
+
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_PRESENTATION_TEST_HOOKS
+ReviewedSourceVerifiedMaterializedReview
+seal_reviewed_source_materialized_review_for_test(
+        ReviewedSourceMaterializedReview review) {
+    return ReviewedSourceVerifiedMaterializedReview(std::move(review));
+}
+#endif
+
 ReviewedSourceReviewEmphasis reviewed_source_review_emphasis(
         const ReviewedSourcePath& path) noexcept {
     return path_is_sensitive(path)
             ? ReviewedSourceReviewEmphasis::Sensitive
             : ReviewedSourceReviewEmphasis::Ordinary;
+}
+
+std::optional<std::size_t>
+reviewed_source_materialized_review_inconsistent_entry(
+        const ReviewedSourceMaterializedReview& review) {
+    return std::visit(
+            [](const auto& value) -> std::optional<std::size_t> {
+                using Review = std::decay_t<decltype(value)>;
+                if constexpr(std::is_same_v<
+                                     Review,
+                                     ReviewedSourceMaterializedAlreadyReviewed>) {
+                    return revision_is_known_commit(value.revision)
+                            ? std::nullopt
+                            : std::optional<std::size_t>(0);
+                } else if constexpr(std::is_same_v<
+                                            Review,
+                                            ReviewedSourceMaterializedInitialFullReview>) {
+                    if(!revision_is_known_commit(value.target)) return 0;
+                    return review_body_inconsistent_entry(value.review);
+                } else if constexpr(std::is_same_v<
+                                            Review,
+                                            ReviewedSourceMaterializedUpdateReview>) {
+                    if(!revision_is_known_commit(value.baseline) ||
+                       !revision_is_known_commit(value.target) ||
+                       value.baseline == value.target) {
+                        return 0;
+                    }
+                    switch(value.relation) {
+                    case ReviewedSourceHistoryRelation::Ancestor:
+                    case ReviewedSourceHistoryRelation::NonAncestor:
+                        break;
+                    default:
+                        return 0;
+                    }
+                    return review_body_inconsistent_entry(value.review);
+                } else {
+                    if(!revision_is_known_commit(value.unavailable_baseline) ||
+                       !revision_is_known_commit(value.target) ||
+                       value.unavailable_baseline == value.target) {
+                        return 0;
+                    }
+                    switch(value.reason) {
+                    case ReviewedSourceBaselineUnavailableReason::
+                            MissingOrNotCommit:
+                        break;
+                    default:
+                        return 0;
+                    }
+                    return review_body_inconsistent_entry(value.review);
+                }
+            },
+            review);
 }
 
 ReviewedSourceReviewPreparationResult prepare_reviewed_source_review(

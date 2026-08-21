@@ -16,6 +16,15 @@
 
 namespace {
 
+static_assert(!std::is_aggregate_v<
+              ReviewedSourceVerifiedMaterializedReview>);
+static_assert(!std::is_constructible_v<
+              ReviewedSourceVerifiedMaterializedReview,
+              ReviewedSourceMaterializedReview>);
+static_assert(std::is_const_v<std::remove_reference_t<decltype(
+              std::declval<ReviewedSourceVerifiedMaterializedReview&>()
+                      .review())>>);
+
 constexpr const char* SHA1_A =
         "1111111111111111111111111111111111111111";
 constexpr const char* SHA1_B =
@@ -164,14 +173,43 @@ ReviewedSourceMaterializedReview update_review(
             ReviewedSourceReviewBody{readiness, std::move(entries)}};
 }
 
-std::string render_success(const ReviewedSourceMaterializedReview& review) {
+ReviewedSourceVerifiedMaterializedReview seal_for_render(
+        ReviewedSourceMaterializedReview review) {
+    return seal_reviewed_source_materialized_review_for_test(
+            std::move(review));
+}
+
+std::string render_success(ReviewedSourceMaterializedReview review) {
+    const ReviewedSourceVerifiedMaterializedReview verified =
+            seal_for_render(std::move(review));
     ReviewedSourcePresentationResult result =
-            render_reviewed_source_presentation(review);
+            render_reviewed_source_presentation(verified);
     auto* rendered = std::get_if<ReviewedSourceRenderedPresentation>(&result);
     if(rendered == nullptr) {
         throw std::runtime_error("Reviewed source presentation failed");
     }
     return std::move(rendered->text);
+}
+
+ReviewedSourcePresentationResult render_result(
+        ReviewedSourceMaterializedReview review) {
+    const ReviewedSourceVerifiedMaterializedReview verified =
+            seal_for_render(std::move(review));
+    return render_reviewed_source_presentation(verified);
+}
+
+void require_inconsistent(
+        ReviewedSourceMaterializedReview review,
+        std::string_view message) {
+    const ReviewedSourcePresentationResult result =
+            render_result(std::move(review));
+    const auto& failure = require_arm<ReviewedSourcePresentationFailure>(
+            result, message);
+    require(failure.reason ==
+                            ReviewedSourcePresentationFailureReason::
+                                    InconsistentMaterializedReview &&
+                    failure.observed == 0 && failure.limit == 0,
+            std::string(message));
 }
 
 std::string patch_header(
@@ -464,7 +502,7 @@ void test_terminal_safe_content_encoding() {
     const ReviewedSourceReviewEntry long_added = entry(
             ReviewedSourceAdded{
                     version("long", ReviewedSourceFileMode::Regular,
-                            SHA1_B, long_line.size()),
+                            SHA1_B, long_line.size() + 1),
                     ReviewedSourceTextChange{1, 0}},
             ReviewedSourceReviewRepresentation::CompleteFullText,
             ReviewedSourceReviewReadiness::Complete,
@@ -528,7 +566,7 @@ void test_representation_and_readiness_diagnostics() {
             ReviewedSourceTypeChanged{
                     version("mixed", ReviewedSourceFileMode::Regular,
                             SHA1_A, 5),
-                    version("mixed", ReviewedSourceFileMode::Regular,
+                    version("mixed", ReviewedSourceFileMode::SymbolicLink,
                             SHA1_D, 8),
                     ReviewedSourceBinaryChange{}},
             ReviewedSourceReviewRepresentation::MixedTextAndNonText,
@@ -651,6 +689,49 @@ void test_path_and_emphasis_policy() {
             "Raw invalid path byte reached terminal presentation");
 }
 
+std::string render_exact_rename(
+        std::string old_path, std::string new_path) {
+    const ReviewedSourceReviewEntry renamed = entry(
+            ReviewedSourceRenamed{
+                    version(std::move(old_path),
+                            ReviewedSourceFileMode::Regular, SHA1_A, 5),
+                    version(std::move(new_path),
+                            ReviewedSourceFileMode::Regular, SHA1_A, 5),
+                    100, ReviewedSourceTextChange{0, 0}},
+            ReviewedSourceReviewRepresentation::NoContentChange,
+            ReviewedSourceReviewReadiness::Complete,
+            one_line_observation("same"), one_line_observation("same"));
+    return render_success(update_review({renamed}));
+}
+
+void test_classification_crossing_priority() {
+    for(const auto& [old_path, new_path] : {
+                std::pair<std::string_view, std::string_view>{
+                        ".SRCINFO", "helper.sh"},
+                {"helper.sh", ".SRCINFO"}}) {
+        const std::string output = render_exact_rename(
+                std::string(old_path), std::string(new_path));
+        require_contains(
+                output, "presentation priority: Ordinary",
+                "TrackedSource side did not retain ordinary priority");
+        require_not_contains(
+                output, "presentation priority: LowerGeneratedMetadata",
+                "GeneratedMetadata side lowered a tracked-source rename");
+    }
+
+    const std::string generated_only = render_single_path(".SRCINFO");
+    require_contains(
+            generated_only,
+            "presentation priority: LowerGeneratedMetadata",
+            "GeneratedMetadata-only entry lost lower priority");
+
+    const std::string sensitive =
+            render_exact_rename(".SRCINFO", "PKGBUILD");
+    require_contains(
+            sensitive, "presentation priority: Sensitive",
+            "Sensitive side did not win classification-crossing priority");
+}
+
 void test_lifecycle_presentation() {
     const ReviewedSourceMaterializedReview initial =
             ReviewedSourceMaterializedInitialFullReview{
@@ -690,20 +771,178 @@ void test_lifecycle_presentation() {
             "Rebaseline reason was lost");
 }
 
+void test_verified_boundary_rejects_forged_models() {
+    const std::string actual_old = "actual-old";
+    const std::string actual_new = "DANGEROUS-ACTUAL-NEW";
+    ReviewedSourceTextPatch forged_patch{
+            ReviewedSourceObjectId::make(SHA1_A),
+            ReviewedSourceObjectId::make(SHA1_B),
+            {ReviewedSourcePatchHunk{
+                    1, 1, 1, 1,
+                    {
+                            ReviewedSourcePatchLine{
+                                    ReviewedSourcePatchLineKind::Removed,
+                                    ReviewedSourceTextLine{
+                                            "fabricated-old", true}},
+                            ReviewedSourcePatchLine{
+                                    ReviewedSourcePatchLineKind::Added,
+                                    ReviewedSourceTextLine{
+                                            "benign-reviewed", true}},
+                    }}}};
+    const ReviewedSourceReviewEntry forged_patch_entry = entry(
+            ReviewedSourceModified{
+                    version("helper.sh", ReviewedSourceFileMode::Regular,
+                            SHA1_A, actual_old.size() + 1),
+                    version("helper.sh", ReviewedSourceFileMode::Regular,
+                            SHA1_B, actual_new.size() + 1),
+                    ReviewedSourceTextChange{1, 1}},
+            ReviewedSourceReviewRepresentation::CompleteTextPatch,
+            ReviewedSourceReviewReadiness::Complete,
+            one_line_observation(actual_old),
+            one_line_observation(actual_new), std::move(forged_patch));
+    require_inconsistent(
+            update_review({forged_patch_entry}),
+            "Matching-OID forged patch bypassed strict replay provenance");
+
+    for(const std::string_view path : {"PKGBUILD", "pkg.install"}) {
+        ReviewedSourceReviewEntry sensitive = entry(
+                ReviewedSourceAdded{
+                        version(std::string(path),
+                                ReviewedSourceFileMode::Regular, SHA1_A, 8),
+                        ReviewedSourceBinaryChange{}},
+                ReviewedSourceReviewRepresentation::ContainsNul,
+                ReviewedSourceReviewReadiness::Complete,
+                std::nullopt,
+                non_text_observation(
+                        ReviewedSourceBlobContentKind::ContainsNul));
+        sensitive.emphasis = ReviewedSourceReviewEmphasis::Ordinary;
+        require_inconsistent(
+                update_review({std::move(sensitive)}),
+                "Sensitive NUL source accepted forged Ordinary/Complete state");
+    }
+
+    const ReviewedSourceReviewEntry false_unchanged = entry(
+            ReviewedSourceModified{
+                    version("changed", ReviewedSourceFileMode::Regular,
+                            SHA1_A, 4),
+                    version("changed", ReviewedSourceFileMode::Regular,
+                            SHA1_B, 4),
+                    ReviewedSourceTextChange{1, 1}},
+            ReviewedSourceReviewRepresentation::NoContentChange,
+            ReviewedSourceReviewReadiness::Complete,
+            one_line_observation("old"), one_line_observation("new"));
+    require_inconsistent(
+            update_review({false_unchanged}),
+            "Different-OID content was accepted as NoContentChange");
+
+    const ReviewedSourceReviewEntry wrong_side_full = entry(
+            ReviewedSourceAdded{
+                    version("wrong-side", ReviewedSourceFileMode::Regular,
+                            SHA1_A, 4),
+                    ReviewedSourceTextChange{1, 0}},
+            ReviewedSourceReviewRepresentation::CompleteFullText,
+            ReviewedSourceReviewReadiness::Complete,
+            one_line_observation("old"), std::nullopt);
+    require_inconsistent(
+            update_review({wrong_side_full}),
+            "Wrong-side CompleteFullText was accepted");
+
+    const ReviewedSourceReviewEntry invalid_mixed = entry(
+            ReviewedSourceModified{
+                    version("mixed-forge", ReviewedSourceFileMode::Regular,
+                            SHA1_A, 4),
+                    version("mixed-forge", ReviewedSourceFileMode::Regular,
+                            SHA1_B, 4),
+                    ReviewedSourceTextChange{1, 1}},
+            ReviewedSourceReviewRepresentation::MixedTextAndNonText,
+            ReviewedSourceReviewReadiness::ManualInspectionRequired,
+            one_line_observation("old"), one_line_observation("new"));
+    require_inconsistent(
+            update_review({invalid_mixed}),
+            "Line-reviewable pair was accepted as MixedTextAndNonText");
+
+    const ReviewedSourceReviewEntry invalid_nul_readiness = entry(
+            ReviewedSourceAdded{
+                    version("binary-forge", ReviewedSourceFileMode::Regular,
+                            SHA1_A, 8),
+                    ReviewedSourceBinaryChange{}},
+            ReviewedSourceReviewRepresentation::ContainsNul,
+            ReviewedSourceReviewReadiness::Complete,
+            std::nullopt,
+            non_text_observation(
+                    ReviewedSourceBlobContentKind::ContainsNul));
+    require_inconsistent(
+            update_review({invalid_nul_readiness}),
+            "ContainsNul accepted Complete readiness");
+
+    const ReviewedSourceReviewEntry invalid_gitlink_readiness = entry(
+            ReviewedSourceAdded{
+                    version("submodule-forge",
+                            ReviewedSourceFileMode::Gitlink, SHA1_A),
+                    ReviewedSourceBinaryChange{}},
+            ReviewedSourceReviewRepresentation::GitlinkMetadata,
+            ReviewedSourceReviewReadiness::Complete,
+            std::nullopt,
+            non_text_observation(ReviewedSourceBlobContentKind::Gitlink));
+    require_inconsistent(
+            update_review({invalid_gitlink_readiness}),
+            "GitlinkMetadata accepted Complete readiness");
+
+    const ReviewedSourceReviewEntry manual_entry = entry(
+            ReviewedSourceAdded{
+                    version("aggregate-forge",
+                            ReviewedSourceFileMode::Regular, SHA1_A, 8),
+                    ReviewedSourceBinaryChange{}},
+            ReviewedSourceReviewRepresentation::ContainsNul,
+            ReviewedSourceReviewReadiness::ManualInspectionRequired,
+            std::nullopt,
+            non_text_observation(
+                    ReviewedSourceBlobContentKind::ContainsNul));
+    require_inconsistent(
+            ReviewedSourceMaterializedUpdateReview{
+                    SourceRevisionIdentity::git_commit(SHA1_A),
+                    SourceRevisionIdentity::git_commit(SHA1_B),
+                    ReviewedSourceHistoryRelation::Ancestor,
+                    ReviewedSourceReviewBody{
+                            ReviewedSourceReviewReadiness::Complete,
+                            {manual_entry}}},
+            "Aggregate readiness was weakened below an entry");
+
+    ReviewedSourceReviewPreparationResult prepared =
+            prepare_reviewed_source_review(
+                    ReviewedSourceUpdateReview{
+                            SourceRevisionIdentity::git_commit(SHA1_A),
+                            SourceRevisionIdentity::git_commit(SHA1_B),
+                            ReviewedSourceHistoryRelation::Ancestor, {}},
+                    {});
+    auto* preparation =
+            std::get_if<ReviewedSourceReviewPreparation>(&prepared);
+    require(preparation != nullptr,
+            "Genuine 3B1 preparation fixture failed");
+    ReviewedSourceReviewFinalizationResult finalized =
+            finalize_reviewed_source_review(std::move(*preparation), {});
+    const auto* materialized =
+            std::get_if<ReviewedSourceMaterializedReview>(&finalized);
+    require(materialized != nullptr,
+            "Genuine 3B1 finalizer fixture failed");
+    require_contains(
+            render_success(*materialized), "overall readiness: Complete",
+            "Genuine 3B1 finalizer result did not render");
+}
+
 ReviewedSourceMaterializedReview large_render_review(
-        std::size_t final_line_size) {
-    constexpr std::size_t CHUNK_COUNT = 31;
+        std::string final_line) {
+    constexpr std::size_t CHUNK_COUNT = 7;
     std::vector<ReviewedSourceTextLine> lines;
     lines.reserve(CHUNK_COUNT + 1);
     std::uintmax_t blob_size = 0;
     for(std::size_t index = 0; index < CHUNK_COUNT; ++index) {
         lines.push_back(ReviewedSourceTextLine{
-                std::string(REVIEWED_SOURCE_LOGICAL_LINE_LIMIT, 'a'), true});
+                std::string(REVIEWED_SOURCE_LOGICAL_LINE_LIMIT, '\t'), true});
         blob_size += REVIEWED_SOURCE_LOGICAL_LINE_LIMIT + 1;
     }
-    lines.push_back(ReviewedSourceTextLine{
-            std::string(final_line_size, 'b'), true});
-    blob_size += final_line_size + 1;
+    blob_size += final_line.size() + 1;
+    lines.push_back(ReviewedSourceTextLine{std::move(final_line), true});
     const ReviewedSourceReviewEntry added = entry(
             ReviewedSourceAdded{
                     version("large", ReviewedSourceFileMode::Regular,
@@ -758,26 +997,29 @@ void test_rendered_output_resource_contract() {
                             std::numeric_limits<std::uintmax_t>::max(),
             "Rendered size overflow was not safely saturated");
 
-    std::size_t final_line_size = 0;
+    std::string final_line;
     {
         const std::string baseline =
-                render_success(large_render_review(0));
+                render_success(large_render_review({}));
         require(baseline.size() < REVIEWED_SOURCE_RENDERED_OUTPUT_LIMIT,
                 "Large exact-limit fixture baseline was already oversized");
-        final_line_size = static_cast<std::size_t>(
+        const std::size_t missing = static_cast<std::size_t>(
                 REVIEWED_SOURCE_RENDERED_OUTPUT_LIMIT - baseline.size());
+        final_line.assign(missing / 4, '\t');
+        final_line.append(missing % 4, 'b');
     }
-    require(final_line_size <= REVIEWED_SOURCE_LOGICAL_LINE_LIMIT,
+    require(final_line.size() <= REVIEWED_SOURCE_LOGICAL_LINE_LIMIT,
             "Exact rendered-limit fixture exceeded logical-line authority");
     {
         const std::string exact =
-                render_success(large_render_review(final_line_size));
+                render_success(large_render_review(final_line));
         require(exact.size() == REVIEWED_SOURCE_RENDERED_OUTPUT_LIMIT,
                 "Actual final rendered output did not pass at exact 32 MiB");
     }
+    std::string one_over_line = final_line;
+    one_over_line.push_back('b');
     const ReviewedSourcePresentationResult one_over =
-            render_reviewed_source_presentation(
-                    large_render_review(final_line_size + 1));
+            render_result(large_render_review(std::move(one_over_line)));
     const auto& render_failure =
             require_arm<ReviewedSourcePresentationFailure>(
                     one_over,
@@ -802,8 +1044,7 @@ void test_rendered_output_resource_contract() {
             ReviewedSourceReviewReadiness::Complete,
             one_line_observation("old"), one_line_observation("new"));
     const ReviewedSourcePresentationResult inconsistent_result =
-            render_reviewed_source_presentation(
-                    update_review({std::move(inconsistent)}));
+            render_result(update_review({std::move(inconsistent)}));
     const auto& inconsistent_failure =
             require_arm<ReviewedSourcePresentationFailure>(
                     inconsistent_result,
@@ -820,13 +1061,15 @@ void test_rendered_output_resource_contract() {
             ReviewedSourceMaterializedAlreadyReviewed{
                     SourceRevisionIdentity::git_commit(SHA1_A)};
     const std::string small_text = render_success(small);
+    const ReviewedSourceVerifiedMaterializedReview verified_small =
+            seal_for_render(small);
     require(std::holds_alternative<ReviewedSourceRenderedPresentation>(
                     render_reviewed_source_presentation_with_limit_for_test(
-                            small, small_text.size())),
+                            verified_small, small_text.size())),
             "Custom exact limit was rejected");
     require(std::holds_alternative<ReviewedSourcePresentationFailure>(
                     render_reviewed_source_presentation_with_limit_for_test(
-                            small, small_text.size() - 1)),
+                            verified_small, small_text.size() - 1)),
             "Custom one-over render published a truncated success");
 }
 
@@ -836,7 +1079,9 @@ void run_tests() {
     test_terminal_safe_content_encoding();
     test_representation_and_readiness_diagnostics();
     test_path_and_emphasis_policy();
+    test_classification_crossing_priority();
     test_lifecycle_presentation();
+    test_verified_boundary_rejects_forged_models();
     test_rendered_output_resource_contract();
 }
 

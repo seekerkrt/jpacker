@@ -1469,6 +1469,7 @@ REVIEWED_SOURCE_PRESENTATION_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp
 REVIEWED_SOURCE_GIT_TEST_SRCS := \
 	tests/reviewed_source_git_test.cpp \
+	$(SRC_DIR)/reviewed_source_presentation.cpp \
 	$(SRC_DIR)/reviewed_source_review.cpp \
 	$(SRC_DIR)/reviewed_source_patch.cpp \
 	$(SRC_DIR)/reviewed_source_projection.cpp \
@@ -2456,7 +2457,7 @@ $(REVIEWED_SOURCE_PRESENTATION_TEST_TARGET): $(REVIEWED_SOURCE_PRESENTATION_TEST
 	@echo ":: Compiling reviewed source presentation test binary"
 	$(call compile_non_heavy_test,REVIEWED_SOURCE_PRESENTATION)
 
-$(REVIEWED_SOURCE_GIT_TEST_TARGET): $(REVIEWED_SOURCE_GIT_TEST_SRCS) $(SRC_DIR)/reviewed_source_review.hpp $(SRC_DIR)/reviewed_source_patch.hpp $(SRC_DIR)/reviewed_source_projection.hpp $(SRC_DIR)/reviewed_source_git_parser.hpp $(SRC_DIR)/trusted_git.hpp $(SRC_DIR)/persistent_checkout.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/process.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) $(LOCALIZATION_CONFIG_HEADER) $(VERSION_FILE)
+$(REVIEWED_SOURCE_GIT_TEST_TARGET): $(REVIEWED_SOURCE_GIT_TEST_SRCS) $(SRC_DIR)/reviewed_source_presentation.hpp $(SRC_DIR)/reviewed_source_review.hpp $(SRC_DIR)/reviewed_source_patch.hpp $(SRC_DIR)/reviewed_source_projection.hpp $(SRC_DIR)/reviewed_source_git_parser.hpp $(SRC_DIR)/trusted_git.hpp $(SRC_DIR)/persistent_checkout.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/process.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) $(LOCALIZATION_CONFIG_HEADER) $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling reviewed source Git test binary"
 	$(call compile_non_heavy_test,REVIEWED_SOURCE_GIT)

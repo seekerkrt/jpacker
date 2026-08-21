@@ -1,5 +1,6 @@
 #include "persistent_checkout.hpp"
 #include "process.hpp"
+#include "reviewed_source_presentation.hpp"
 #include "reviewed_source_projection.hpp"
 #include "trusted_cache.hpp"
 #include "trusted_cache_test_support.hpp"
@@ -792,10 +793,14 @@ void test_sha1_content_materialization() {
                 " record=" + std::to_string(failure->record_index) +
                 " hunk=" + std::to_string(failure->hunk_index));
     }
-    const auto& materialized_update =
-            require_arm<ReviewedSourceMaterializedUpdateReview>(
+    const auto& verified_update =
+            require_arm<ReviewedSourceVerifiedMaterializedReview>(
                     materialized,
                     "SHA-1 reviewed content materialization failed");
+    const auto& materialized_update =
+            require_arm<ReviewedSourceMaterializedUpdateReview>(
+                    verified_update.review(),
+                    "SHA-1 verified materialization kind drifted");
     const auto& entries = materialized_update.review.entries;
     require(materialized_update.review.readiness ==
                     ReviewedSourceReviewReadiness::ManualInspectionRequired,
@@ -821,6 +826,14 @@ void test_sha1_content_materialization() {
     }
     require(pkgbuild_new_line_observed,
             "Replacement ref or dirty worktree changed PKGBUILD patch bytes");
+    const ReviewedSourcePresentationResult rendered =
+            render_reviewed_source_presentation(verified_update);
+    const auto& rendered_text =
+            require_arm<ReviewedSourceRenderedPresentation>(
+                    rendered,
+                    "Trusted SHA-1 materialization did not render");
+    require(rendered_text.text.find("+pkgver=2") != std::string::npos,
+            "Trusted SHA-1 verified patch was not presented");
 
     const auto* install = find_materialized_new_path(
             entries, "material.install");
@@ -1148,10 +1161,14 @@ void test_sha256_projection_and_strict_config() {
                 trusted_git_materialize_reviewed_source_review(
                         fixture.checkout(), fixture.remote_url(),
                         ReviewedSourceProjection(initial));
-        const auto& materialized_initial =
-                require_arm<ReviewedSourceMaterializedInitialFullReview>(
+        const auto& verified_initial =
+                require_arm<ReviewedSourceVerifiedMaterializedReview>(
                         initial_materialized,
                         "SHA-256 initial content materialization failed");
+        const auto& materialized_initial =
+                require_arm<ReviewedSourceMaterializedInitialFullReview>(
+                        verified_initial.review(),
+                        "SHA-256 verified initial kind drifted");
         const auto* initial_pkgbuild = find_materialized_new_path(
                 materialized_initial.review.entries, "PKGBUILD");
         const auto* initial_binary = find_materialized_new_path(
@@ -1193,10 +1210,14 @@ void test_sha256_projection_and_strict_config() {
                 trusted_git_materialize_reviewed_source_review(
                         fixture.checkout(), fixture.remote_url(),
                         ReviewedSourceProjection(sha256_update));
-        const auto& materialized_update =
-                require_arm<ReviewedSourceMaterializedUpdateReview>(
+        const auto& verified_update =
+                require_arm<ReviewedSourceVerifiedMaterializedReview>(
                         update_materialized,
                         "SHA-256 blob-to-blob patch materialization failed");
+        const auto& materialized_update =
+                require_arm<ReviewedSourceMaterializedUpdateReview>(
+                        verified_update.review(),
+                        "SHA-256 verified update kind drifted");
         const auto* updated_pkgbuild = find_materialized_new_path(
                 materialized_update.review.entries, "PKGBUILD");
         require(updated_pkgbuild != nullptr &&

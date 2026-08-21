@@ -240,6 +240,58 @@ using ReviewedSourceMaterializedReview = std::variant<
         ReviewedSourceMaterializedUpdateReview,
         ReviewedSourceMaterializedRebaselineFullReview>;
 
+class ReviewedSourceTrustedMaterializationAuthority;
+
+// Capability proving that the materialized model crossed the trusted Git 3B1
+// content-address, strict patch replay, and readiness finalization path. The
+// contained model is immutable through this interface and cannot be sealed by
+// ordinary production callers.
+class ReviewedSourceVerifiedMaterializedReview final {
+public:
+    ReviewedSourceVerifiedMaterializedReview(
+            const ReviewedSourceVerifiedMaterializedReview&) = default;
+    ReviewedSourceVerifiedMaterializedReview(
+            ReviewedSourceVerifiedMaterializedReview&&) noexcept = default;
+    ReviewedSourceVerifiedMaterializedReview& operator=(
+            const ReviewedSourceVerifiedMaterializedReview&) = default;
+    ReviewedSourceVerifiedMaterializedReview& operator=(
+            ReviewedSourceVerifiedMaterializedReview&&) noexcept = default;
+    ~ReviewedSourceVerifiedMaterializedReview() = default;
+
+    [[nodiscard]] const ReviewedSourceMaterializedReview& review()
+            const noexcept;
+
+    bool operator==(
+            const ReviewedSourceVerifiedMaterializedReview&) const = default;
+
+private:
+    friend class ReviewedSourceTrustedMaterializationAuthority;
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_PRESENTATION_TEST_HOOKS
+    friend ReviewedSourceVerifiedMaterializedReview
+    seal_reviewed_source_materialized_review_for_test(
+            ReviewedSourceMaterializedReview review);
+#endif
+
+    explicit ReviewedSourceVerifiedMaterializedReview(
+            ReviewedSourceMaterializedReview review) noexcept;
+
+    ReviewedSourceMaterializedReview review_;
+};
+
+// Returns the first inconsistent entry. A zero index is also used for a
+// lifecycle/body invariant that is not attributable to one existing entry.
+[[nodiscard]] std::optional<std::size_t>
+reviewed_source_materialized_review_inconsistent_entry(
+        const ReviewedSourceMaterializedReview& review);
+
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_PRESENTATION_TEST_HOOKS
+// Test-only seam for exercising the renderer's defense-in-depth rejection.
+// Production builds have no general sealing function.
+[[nodiscard]] ReviewedSourceVerifiedMaterializedReview
+seal_reviewed_source_materialized_review_for_test(
+        ReviewedSourceMaterializedReview review);
+#endif
+
 using ReviewedSourceReviewFinalizationResult = std::variant<
         ReviewedSourceMaterializedReview,
         ReviewedSourceReviewFailure>;
