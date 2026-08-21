@@ -70,6 +70,7 @@ REVIEWED_SOURCE_STATE_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-state-te
 REVIEWED_SOURCE_STATE_STORE_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-state-store-test
 REVIEWED_SOURCE_LIFECYCLE_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-lifecycle-test
 REVIEWED_SOURCE_ACCEPTANCE_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-acceptance-test
+REVIEWED_SOURCE_PINNED_BUILD_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-pinned-build-test
 REVIEWED_SOURCE_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-projection-test
 REVIEWED_SOURCE_REVIEW_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-review-test
 REVIEWED_SOURCE_PATCH_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-patch-test
@@ -1462,6 +1463,30 @@ REVIEWED_SOURCE_ACCEPTANCE_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/interactive_confirmation.cpp \
 	$(SRC_DIR)/logging.cpp
+REVIEWED_SOURCE_PINNED_BUILD_TEST_SRCS := \
+	tests/reviewed_source_pinned_build_test.cpp \
+	$(SRC_DIR)/reviewed_source_pinned_build.cpp \
+	$(SRC_DIR)/reviewed_source_acceptance.cpp \
+	$(SRC_DIR)/reviewed_source_lifecycle.cpp \
+	$(SRC_DIR)/reviewed_source_trusted_review.cpp \
+	$(SRC_DIR)/reviewed_source_presentation.cpp \
+	$(SRC_DIR)/reviewed_source_review.cpp \
+	$(SRC_DIR)/reviewed_source_patch.cpp \
+	$(SRC_DIR)/reviewed_source_projection.cpp \
+	$(SRC_DIR)/reviewed_source_git_parser.cpp \
+	$(SRC_DIR)/reviewed_source_state_store.cpp \
+	$(SRC_DIR)/reviewed_source_state.cpp \
+	$(SRC_DIR)/trusted_git.cpp \
+	$(SRC_DIR)/persistent_checkout.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp \
+	$(SRC_DIR)/source_package_identity.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/interactive_confirmation.cpp \
+	$(SRC_DIR)/process.cpp \
+	$(SRC_DIR)/logging.cpp \
+	$(SRC_DIR)/localization.cpp
 REVIEWED_SOURCE_PROJECTION_TEST_SRCS := \
 	tests/reviewed_source_projection_test.cpp \
 	$(SRC_DIR)/reviewed_source_projection.cpp \
@@ -1721,6 +1746,8 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: test-reviewed-source-state-store
 .PHONY: test-reviewed-source-lifecycle
 .PHONY: test-reviewed-source-acceptance
+.PHONY: check-reviewed-source-pinned-build-authority
+.PHONY: test-reviewed-source-pinned-build
 .PHONY: test-reviewed-source-projection
 .PHONY: test-reviewed-source-review
 .PHONY: test-reviewed-source-patch
@@ -1938,6 +1965,7 @@ NON_HEAVY_TARGETS := \
 	$(REVIEWED_SOURCE_STATE_STORE_TEST_TARGET) \
 	$(REVIEWED_SOURCE_LIFECYCLE_TEST_TARGET) \
 	$(REVIEWED_SOURCE_ACCEPTANCE_TEST_TARGET) \
+	$(REVIEWED_SOURCE_PINNED_BUILD_TEST_TARGET) \
 	$(REVIEWED_SOURCE_PROJECTION_TEST_TARGET) \
 	$(REVIEWED_SOURCE_REVIEW_TEST_TARGET) \
 	$(REVIEWED_SOURCE_PATCH_TEST_TARGET) \
@@ -2091,13 +2119,14 @@ $(eval $(call define_non_heavy_test_profile,SOURCE_PACKAGE_IDENTITY_PROJECTION,$
 $(eval $(call define_non_heavy_test_profile,SOURCE_PACKAGE_COMPATIBILITY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(SOURCE_PACKAGE_COMPATIBILITY_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_STATE,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_STATE_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_STATE_STORE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS -I$(SRC_DIR),$(REVIEWED_SOURCE_STATE_STORE_TEST_SRCS)))
-$(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_LIFECYCLE,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_LIFECYCLE_TEST_SRCS)))
-$(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_ACCEPTANCE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_REVIEWED_SOURCE_PRESENTATION_TEST_HOOKS -DMOGUET_ENABLE_REVIEWED_SOURCE_ACCEPTANCE_TEST_HOOKS -I$(SRC_DIR),$(REVIEWED_SOURCE_ACCEPTANCE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_LIFECYCLE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS -I$(SRC_DIR),$(REVIEWED_SOURCE_LIFECYCLE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_ACCEPTANCE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS -DMOGUET_ENABLE_REVIEWED_SOURCE_PRESENTATION_TEST_HOOKS -DMOGUET_ENABLE_REVIEWED_SOURCE_ACCEPTANCE_TEST_HOOKS -I$(SRC_DIR),$(REVIEWED_SOURCE_ACCEPTANCE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_PINNED_BUILD,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_REVIEWED_SOURCE_PRESENTATION_TEST_HOOKS -DMOGUET_ENABLE_REVIEWED_SOURCE_ACCEPTANCE_TEST_HOOKS -DMOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS -I$(SRC_DIR) -Itests,$(REVIEWED_SOURCE_PINNED_BUILD_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_PROJECTION,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_PROJECTION_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_REVIEW,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_REVIEW_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_PATCH,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_PATCH_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_PRESENTATION,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_REVIEWED_SOURCE_PRESENTATION_TEST_HOOKS -I$(SRC_DIR),$(REVIEWED_SOURCE_PRESENTATION_TEST_SRCS)))
-$(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_GIT,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_REVIEWED_SOURCE_GIT_TEST_HOOKS -I$(SRC_DIR) -Itests,$(REVIEWED_SOURCE_GIT_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_GIT,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS -DMOGUET_ENABLE_REVIEWED_SOURCE_GIT_TEST_HOOKS -I$(SRC_DIR) -Itests,$(REVIEWED_SOURCE_GIT_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,SHELL_WORDS,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(SHELL_WORDS_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,SOURCE_ENVIRONMENT,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS -I$(SRC_DIR),$(SOURCE_ENVIRONMENT_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,ARTIFACT_WORKSPACE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS -DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS -I$(SRC_DIR),$(ARTIFACT_WORKSPACE_TEST_SRCS)))
@@ -2477,6 +2506,11 @@ $(REVIEWED_SOURCE_ACCEPTANCE_TEST_TARGET): $(REVIEWED_SOURCE_ACCEPTANCE_TEST_SRC
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling reviewed source acceptance test binary"
 	$(call compile_non_heavy_test,REVIEWED_SOURCE_ACCEPTANCE)
+
+$(REVIEWED_SOURCE_PINNED_BUILD_TEST_TARGET): $(REVIEWED_SOURCE_PINNED_BUILD_TEST_SRCS) $(SRC_DIR)/reviewed_source_pinned_build.hpp $(SRC_DIR)/reviewed_source_acceptance.hpp $(SRC_DIR)/reviewed_source_lifecycle.hpp $(SRC_DIR)/reviewed_source_trusted_review.hpp $(SRC_DIR)/reviewed_source_presentation.hpp $(SRC_DIR)/reviewed_source_review.hpp $(SRC_DIR)/reviewed_source_patch.hpp $(SRC_DIR)/reviewed_source_projection.hpp $(SRC_DIR)/reviewed_source_git_parser.hpp $(SRC_DIR)/reviewed_source_state_store.hpp $(SRC_DIR)/reviewed_source_state.hpp $(SRC_DIR)/trusted_git.hpp $(SRC_DIR)/persistent_checkout.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_package_identity.hpp $(SRC_DIR)/interactive_confirmation.hpp $(SRC_DIR)/process.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) $(LOCALIZATION_CONFIG_HEADER) $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling reviewed source pinned build test binary"
+	$(call compile_non_heavy_test,REVIEWED_SOURCE_PINNED_BUILD)
 
 $(REVIEWED_SOURCE_PROJECTION_TEST_TARGET): $(REVIEWED_SOURCE_PROJECTION_TEST_SRCS) $(SRC_DIR)/reviewed_source_projection.hpp $(SRC_DIR)/reviewed_source_git_parser.hpp $(SRC_DIR)/source_package_identity.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -3294,6 +3328,34 @@ test-reviewed-source-lifecycle: $(REVIEWED_SOURCE_LIFECYCLE_TEST_TARGET)
 
 test-reviewed-source-acceptance: $(REVIEWED_SOURCE_ACCEPTANCE_TEST_TARGET)
 	$(abspath $(REVIEWED_SOURCE_ACCEPTANCE_TEST_TARGET))
+
+check-reviewed-source-pinned-build-authority: tests/reviewed_source_authority_negative_test.cpp $(SRC_DIR)/reviewed_source_lifecycle.hpp $(SRC_DIR)/reviewed_source_pinned_build.hpp $(SRC_DIR)/trusted_cache.hpp
+	@echo ":: Checking reviewed source construction authority"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) -fsyntax-only tests/reviewed_source_authority_negative_test.cpp
+	@for authority_case in \
+		LIFECYCLE_EXPECTED \
+		LIFECYCLE_ALREADY \
+		RETAINED_DESCRIPTOR \
+		ACCEPTED_CHECKOUT \
+		ALREADY_CHECKOUT \
+		PINNED_ACCEPTED \
+		PINNED_ALREADY; do \
+		diagnostic=$$($(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) -DMOGUET_FORGE_$$authority_case -fsyntax-only tests/reviewed_source_authority_negative_test.cpp 2>&1) && { \
+			echo "error: reviewed source authority forgery $$authority_case compiled successfully" >&2; \
+			exit 1; \
+		}; \
+		case "$$diagnostic" in \
+			*"is private within this context"*) ;; \
+			*) \
+				echo "error: reviewed source authority forgery $$authority_case failed for an unexpected reason" >&2; \
+				echo "$$diagnostic" >&2; \
+				exit 1; \
+				;; \
+		esac; \
+	done
+
+test-reviewed-source-pinned-build: check-reviewed-source-pinned-build-authority $(REVIEWED_SOURCE_PINNED_BUILD_TEST_TARGET)
+	$(abspath $(REVIEWED_SOURCE_PINNED_BUILD_TEST_TARGET))
 
 test-reviewed-source-projection: $(REVIEWED_SOURCE_PROJECTION_TEST_TARGET)
 	$(abspath $(REVIEWED_SOURCE_PROJECTION_TEST_TARGET))
@@ -4163,6 +4225,7 @@ test: \
 	test-reviewed-source-state-store \
 	test-reviewed-source-lifecycle \
 	test-reviewed-source-acceptance \
+	test-reviewed-source-pinned-build \
 	test-reviewed-source-projection \
 	test-reviewed-source-review \
 	test-reviewed-source-patch \

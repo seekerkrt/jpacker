@@ -6,6 +6,11 @@
 
 namespace {
 
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS
+std::optional<ReviewedSourceStateStoreReadResult>
+        g_reviewed_source_lifecycle_store_result;
+#endif
+
 bool store_read_is_coherent(
         const ReviewedSourceStateStoreRead& store_read,
         const PackageBaseIdentity& expected_package_base) {
@@ -53,33 +58,6 @@ ReviewedSourceOperationStopReason stop_reason(
 }
 
 } // namespace
-
-class ReviewedSourceLifecycleAuthority final {
-public:
-    static ReviewedSourceExpectedStateObservation expected(
-            ReviewedSourceStateStoreRead store_read) {
-        return ReviewedSourceExpectedStateObservation(
-                std::move(store_read));
-    }
-
-    static ReviewedSourceReviewRequirement requirement(
-            AurReviewedSourceReviewIdentity identity,
-            ReviewedSourceReviewRequirementKind kind,
-            std::optional<SourceRevisionIdentity> baseline,
-            std::optional<ReviewedSourceAbnormalStateReason> abnormal_reason,
-            ReviewedSourceExpectedStateObservation expected) {
-        return ReviewedSourceReviewRequirement(
-                std::move(identity), kind, std::move(baseline),
-                abnormal_reason, std::move(expected));
-    }
-
-    static ReviewedSourceAlreadyReviewedContinue already_reviewed(
-            AurReviewedSourceReviewIdentity identity,
-            ReviewedSourceExpectedStateObservation expected) {
-        return ReviewedSourceAlreadyReviewedContinue(
-                std::move(identity), std::move(expected));
-    }
-};
 
 AurReviewedSourceReviewIdentity::AurReviewedSourceReviewIdentity(
         PackageBaseIdentity package_base,
@@ -233,6 +211,18 @@ ReviewedSourceAlreadyReviewedContinue::
       lifecycle_(ReviewedSourceLifecycleAlreadyReviewed{}),
       expected_(std::move(expected)) {}
 
+ReviewedSourceAlreadyReviewedContinue::
+        ReviewedSourceAlreadyReviewedContinue(
+                ReviewedSourceAlreadyReviewedContinue&& other) noexcept
+    : identity_(std::move(other.identity_)),
+      lifecycle_(std::move(other.lifecycle_)),
+      expected_(std::move(other.expected_)),
+      valid_(std::exchange(other.valid_, false)) {}
+
+bool ReviewedSourceAlreadyReviewedContinue::valid() const noexcept {
+    return valid_;
+}
+
 const AurReviewedSourceReviewIdentity&
 ReviewedSourceAlreadyReviewedContinue::identity() const noexcept {
     return identity_;
@@ -250,8 +240,21 @@ ReviewedSourceAlreadyReviewedContinue::expected_state_observation()
 }
 
 ReviewedSourceLifecyclePlanResult plan_reviewed_source_lifecycle(
-        AurReviewedSourceReviewIdentity identity,
-        ReviewedSourceStateStoreReadResult store_result) {
+        AurReviewedSourceReviewIdentity identity) {
+    ReviewedSourceStateStoreReadResult store_result = [&identity] {
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS
+        if(g_reviewed_source_lifecycle_store_result.has_value()) {
+            ReviewedSourceStateStoreReadResult injected = std::move(
+                    *g_reviewed_source_lifecycle_store_result);
+            g_reviewed_source_lifecycle_store_result.reset();
+            return injected;
+        }
+        throw std::logic_error(
+                "A reviewed source lifecycle test observation is required.");
+#else
+        return read_reviewed_source_state(identity.package_base());
+#endif
+    }();
     if(std::holds_alternative<ReviewedSourceStateStoreUnsafeHistory>(
                store_result)) {
         return ReviewedSourceOperationStop::fatal(
@@ -276,14 +279,13 @@ ReviewedSourceLifecyclePlanResult plan_reviewed_source_lifecycle(
                 ReviewedSourceFatalStateReason::UnsupportedFuture);
     }
 
-    ReviewedSourceExpectedStateObservation expected =
-            ReviewedSourceLifecycleAuthority::expected(
-                    std::move(store_read));
+    ReviewedSourceExpectedStateObservation expected(
+            std::move(store_read));
     const ReviewedSourceStateObservation& observation =
             expected.observation();
 
     if(std::holds_alternative<ReviewedSourceStateMissing>(observation)) {
-        return ReviewedSourceLifecycleAuthority::requirement(
+        return ReviewedSourceReviewRequirement(
                 std::move(identity),
                 ReviewedSourceReviewRequirementKind::InitialFullReview,
                 std::nullopt, std::nullopt, std::move(expected));
@@ -293,16 +295,16 @@ ReviewedSourceLifecyclePlanResult plan_reviewed_source_lifecycle(
         const SourceRevisionIdentity baseline =
                 loaded->state.reviewed_revision();
         if(baseline == identity.target_revision()) {
-            return ReviewedSourceLifecycleAuthority::already_reviewed(
+            return ReviewedSourceAlreadyReviewedContinue(
                     std::move(identity), std::move(expected));
         }
-        return ReviewedSourceLifecycleAuthority::requirement(
+        return ReviewedSourceReviewRequirement(
                 std::move(identity),
                 ReviewedSourceReviewRequirementKind::UpdateReview,
                 baseline, std::nullopt, std::move(expected));
     }
     if(std::holds_alternative<ReviewedSourceStateInvalid>(observation)) {
-        return ReviewedSourceLifecycleAuthority::requirement(
+        return ReviewedSourceReviewRequirement(
                 std::move(identity),
                 ReviewedSourceReviewRequirementKind::
                         AbnormalStateRebindFullReview,
@@ -310,7 +312,7 @@ ReviewedSourceLifecyclePlanResult plan_reviewed_source_lifecycle(
                 std::move(expected));
     }
     if(std::holds_alternative<ReviewedSourceStateCorrupted>(observation)) {
-        return ReviewedSourceLifecycleAuthority::requirement(
+        return ReviewedSourceReviewRequirement(
                 std::move(identity),
                 ReviewedSourceReviewRequirementKind::
                         AbnormalStateRebindFullReview,
@@ -319,7 +321,7 @@ ReviewedSourceLifecyclePlanResult plan_reviewed_source_lifecycle(
     }
     if(std::holds_alternative<ReviewedSourceStateSourceMismatch>(
                observation)) {
-        return ReviewedSourceLifecycleAuthority::requirement(
+        return ReviewedSourceReviewRequirement(
                 std::move(identity),
                 ReviewedSourceReviewRequirementKind::
                         AbnormalStateRebindFullReview,
@@ -331,3 +333,17 @@ ReviewedSourceLifecyclePlanResult plan_reviewed_source_lifecycle(
     return ReviewedSourceOperationStop::fatal(
             ReviewedSourceFatalStateReason::InconsistentStoreObservation);
 }
+
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS
+ReviewedSourceLifecyclePlanResult plan_reviewed_source_lifecycle(
+        AurReviewedSourceReviewIdentity identity,
+        ReviewedSourceStateStoreReadResult store_result) {
+    if(g_reviewed_source_lifecycle_store_result.has_value()) {
+        throw std::logic_error(
+                "A reviewed source lifecycle test observation is already pending.");
+    }
+    g_reviewed_source_lifecycle_store_result.emplace(
+            std::move(store_result));
+    return plan_reviewed_source_lifecycle(std::move(identity));
+}
+#endif

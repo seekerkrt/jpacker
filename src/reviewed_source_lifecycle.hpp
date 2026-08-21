@@ -11,7 +11,29 @@
 // publish reviewed state, materialize a checkout, authorize a build, or connect
 // any production route.
 
-class ReviewedSourceLifecycleAuthority;
+class AurReviewedSourceReviewIdentity;
+class ReviewedSourceReviewRequirement;
+class ReviewedSourceAlreadyReviewedContinue;
+class ReviewedSourceOperationStop;
+
+using ReviewedSourceLifecyclePlanResult = std::variant<
+        ReviewedSourceReviewRequirement,
+        ReviewedSourceAlreadyReviewedContinue,
+        ReviewedSourceOperationStop>;
+
+// The exact production transition reads current persistent state at review
+// start. Git history relation and baseline object availability are bound later
+// from the verified 3B review rather than flattened into this observation.
+[[nodiscard]] ReviewedSourceLifecyclePlanResult
+plan_reviewed_source_lifecycle(
+        AurReviewedSourceReviewIdentity identity);
+
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS
+[[nodiscard]] ReviewedSourceLifecyclePlanResult
+plan_reviewed_source_lifecycle(
+        AurReviewedSourceReviewIdentity identity,
+        ReviewedSourceStateStoreReadResult store_result);
+#endif
 
 // PackageBase is the review/state unit. The canonical AUR source and exact
 // upstream base revision remain existing typed identities rather than being
@@ -75,7 +97,9 @@ public:
             const noexcept;
 
 private:
-    friend class ReviewedSourceLifecycleAuthority;
+    friend ReviewedSourceLifecyclePlanResult
+    plan_reviewed_source_lifecycle(
+            AurReviewedSourceReviewIdentity identity);
 
     explicit ReviewedSourceExpectedStateObservation(
             ReviewedSourceStateStoreRead store_read) noexcept;
@@ -225,7 +249,9 @@ public:
     expected_state_observation() const noexcept;
 
 private:
-    friend class ReviewedSourceLifecycleAuthority;
+    friend ReviewedSourceLifecyclePlanResult
+    plan_reviewed_source_lifecycle(
+            AurReviewedSourceReviewIdentity identity);
 
     ReviewedSourceReviewRequirement(
             AurReviewedSourceReviewIdentity identity,
@@ -249,13 +275,14 @@ public:
     ReviewedSourceAlreadyReviewedContinue(
             const ReviewedSourceAlreadyReviewedContinue&) = delete;
     ReviewedSourceAlreadyReviewedContinue(
-            ReviewedSourceAlreadyReviewedContinue&&) noexcept = default;
+            ReviewedSourceAlreadyReviewedContinue&& other) noexcept;
     ReviewedSourceAlreadyReviewedContinue& operator=(
             const ReviewedSourceAlreadyReviewedContinue&) = delete;
     ReviewedSourceAlreadyReviewedContinue& operator=(
-            ReviewedSourceAlreadyReviewedContinue&&) noexcept = default;
+            ReviewedSourceAlreadyReviewedContinue&&) noexcept = delete;
     ~ReviewedSourceAlreadyReviewedContinue() = default;
 
+    [[nodiscard]] bool valid() const noexcept;
     [[nodiscard]] const AurReviewedSourceReviewIdentity& identity()
             const noexcept;
     [[nodiscard]] const ReviewedSourceIntegrationLifecycle& lifecycle()
@@ -264,7 +291,9 @@ public:
     expected_state_observation() const noexcept;
 
 private:
-    friend class ReviewedSourceLifecycleAuthority;
+    friend ReviewedSourceLifecyclePlanResult
+    plan_reviewed_source_lifecycle(
+            AurReviewedSourceReviewIdentity identity);
 
     ReviewedSourceAlreadyReviewedContinue(
             AurReviewedSourceReviewIdentity identity,
@@ -273,17 +302,5 @@ private:
     AurReviewedSourceReviewIdentity       identity_;
     ReviewedSourceIntegrationLifecycle    lifecycle_;
     ReviewedSourceExpectedStateObservation expected_;
+    bool                                  valid_ = true;
 };
-
-using ReviewedSourceLifecyclePlanResult = std::variant<
-        ReviewedSourceReviewRequirement,
-        ReviewedSourceAlreadyReviewedContinue,
-        ReviewedSourceOperationStop>;
-
-// Maps only the exact store result observed at review start. Git history
-// relation and baseline object availability are bound later from the verified
-// 3B review rather than being flattened into this observation phase.
-[[nodiscard]] ReviewedSourceLifecyclePlanResult
-plan_reviewed_source_lifecycle(
-        AurReviewedSourceReviewIdentity identity,
-        ReviewedSourceStateStoreReadResult store_result);

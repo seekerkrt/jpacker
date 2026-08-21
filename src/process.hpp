@@ -25,6 +25,12 @@ struct ExplicitProcessInvocation {
     // Borrowed input descriptor. The child binds it to stdin after fork; the
     // caller retains ownership for the whole call and current offset is used.
     std::optional<int> standard_input_fd = std::nullopt;
+    // Borrowed descriptor whose open-file-description must outlive this
+    // mutator even if the caller or supervisor dies. run_explicit_process()
+    // duplicates it into both a non-execing subreaper supervisor and the
+    // executed mutator tree. An unexpected long-lived descendant therefore
+    // retains the guard fail-closed until that descendant terminates.
+    std::optional<int> parent_independent_lifetime_guard_fd = std::nullopt;
 };
 
 CapturedCommandResult capture_command_output(const char* cmd);

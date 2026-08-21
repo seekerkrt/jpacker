@@ -8,9 +8,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <variant>
+
+class ReviewedSourcePackageBaseLease;
 
 // Moguet-owned persistent checkoutで許可するGit operationだけを公開する。
 // Filesystem mutation authorityはValidatedCachePath側に残し、Gitへ渡すpathは
@@ -111,6 +114,118 @@ using TrustedGitAurReviewedSourceMaterializationResult = std::variant<
         TrustedAurReviewedSourceReview,
         ReviewedSourceReviewFailure,
         TrustedGitReviewFailure>;
+
+enum class TrustedGitPinnedCheckoutStage {
+    TargetValidation,
+    CheckoutMaterialization,
+    ResidueCleanup,
+    HeadVerification,
+    IndexVerification,
+    WorktreeVerification,
+    BoundaryRevalidation,
+};
+
+enum class TrustedGitPinnedCheckoutFailureReason {
+    InvalidCapability,
+    CheckoutBoundaryInvalid,
+    RemoteMismatch,
+    ObjectFormatMismatch,
+    TargetRevisionMismatch,
+    LocalAttributeOverride,
+    LocalHistoryOverride,
+    CommandFailed,
+    CaptureLimitExceeded,
+    MalformedOutput,
+    AttachedHead,
+    DirtyIndex,
+    DirtyWorktree,
+    UnsafeIndexFlags,
+};
+
+struct TrustedGitPinnedCheckoutFailure {
+    TrustedGitPinnedCheckoutFailureReason reason;
+    TrustedGitPinnedCheckoutStage         stage;
+    std::optional<int>                     exit_code;
+    std::size_t                            observed = 0;
+    std::size_t                            limit = 0;
+    std::optional<TrustedCacheFailure>      boundary_failure;
+
+    bool operator==(const TrustedGitPinnedCheckoutFailure&) const = default;
+};
+
+struct TrustedGitPinnedCheckoutRevalidated {
+    bool operator==(const TrustedGitPinnedCheckoutRevalidated&) const =
+            default;
+};
+
+// Sealed proof that one managed checkout was detached and materialized from
+// the exact reviewed target OID. The proof is useful only while its caller also
+// retains the PackageBase lease; raw path/OID sidecars cannot construct it.
+class TrustedGitPinnedCheckout final {
+public:
+    TrustedGitPinnedCheckout() = delete;
+    TrustedGitPinnedCheckout(const TrustedGitPinnedCheckout&) = delete;
+    TrustedGitPinnedCheckout(TrustedGitPinnedCheckout&& other) noexcept;
+    TrustedGitPinnedCheckout& operator=(
+            const TrustedGitPinnedCheckout&) = delete;
+    TrustedGitPinnedCheckout& operator=(
+            TrustedGitPinnedCheckout&& other) noexcept;
+    ~TrustedGitPinnedCheckout();
+
+    [[nodiscard]] bool valid() const noexcept;
+    [[nodiscard]] const AurReviewedSourceReviewIdentity& identity() const;
+    [[nodiscard]] const std::filesystem::path& checkout_path() const;
+    [[nodiscard]] std::uintmax_t checkout_device() const;
+    [[nodiscard]] std::uintmax_t checkout_inode() const;
+
+private:
+    friend std::variant<
+            TrustedGitPinnedCheckout,
+            TrustedGitPinnedCheckoutFailure>
+    trusted_git_materialize_pinned_checkout(
+            const ValidatedCachePath& checkout,
+            AurReviewedSourceReviewIdentity identity,
+            const ReviewedSourcePackageBaseLease& lease);
+    friend std::variant<
+            TrustedGitPinnedCheckoutRevalidated,
+            TrustedGitPinnedCheckoutFailure>
+    revalidate_trusted_git_pinned_checkout(
+            const TrustedGitPinnedCheckout& checkout);
+
+    struct State;
+
+    TrustedGitPinnedCheckout(
+            ValidatedCachePath checkout,
+            AurReviewedSourceReviewIdentity identity);
+
+    [[nodiscard]] const State& require_state() const;
+
+    std::unique_ptr<State> state_;
+};
+
+using TrustedGitPinnedCheckoutResult = std::variant<
+        TrustedGitPinnedCheckout,
+        TrustedGitPinnedCheckoutFailure>;
+
+using TrustedGitPinnedCheckoutRevalidationResult = std::variant<
+        TrustedGitPinnedCheckoutRevalidated,
+        TrustedGitPinnedCheckoutFailure>;
+
+// This is a mutation boundary, unlike the read-only review projection above.
+// It resolves no ref: the supplied identity already owns the complete target
+// OID, which is checked out detached and then re-proven clean.
+[[nodiscard]] TrustedGitPinnedCheckoutResult
+trusted_git_materialize_pinned_checkout(
+        const ValidatedCachePath& checkout,
+        AurReviewedSourceReviewIdentity identity,
+        const ReviewedSourcePackageBaseLease& lease);
+
+// Re-proves remote/object format, detached HEAD, exact index and clean
+// worktree. A caller must run this before converting a retained checkout into
+// build authority after another side-effect boundary such as state CAS.
+[[nodiscard]] TrustedGitPinnedCheckoutRevalidationResult
+revalidate_trusted_git_pinned_checkout(
+        const TrustedGitPinnedCheckout& checkout);
 
 // Resolve the mutable remote-tracking ref once. Callers must retain and use
 // only the returned complete commit OID for later projection.
