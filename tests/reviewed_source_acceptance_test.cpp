@@ -60,6 +60,13 @@ static_assert(!std::is_constructible_v<
               TrustedAurReviewedSourceReview,
               AurReviewedSourceReviewIdentity,
               ReviewedSourceVerifiedMaterializedReview>);
+static_assert(std::is_invocable_v<
+              decltype(make_trusted_aur_reviewed_source_review_fixture_for_test),
+              ReviewedSourceVerifiedMaterializedReview>);
+static_assert(!std::is_invocable_v<
+              decltype(make_trusted_aur_reviewed_source_review_fixture_for_test),
+              AurReviewedSourceReviewIdentity,
+              ReviewedSourceVerifiedMaterializedReview>);
 static_assert(!std::is_invocable_v<
               decltype(decide_reviewed_source_acceptance),
               PresentedReviewedSourceTarget,
@@ -289,11 +296,10 @@ ReviewedSourceVerifiedMaterializedReview nontext_initial_review(
 
 ReviewedSourceVerifiedLifecycleTarget bind_requirement(
         ReviewedSourceReviewRequirement requirement,
-        const AurReviewedSourceReviewIdentity& identity,
         ReviewedSourceVerifiedMaterializedReview review) {
     TrustedAurReviewedSourceReview trusted =
-            seal_trusted_aur_reviewed_source_review_for_test(
-                    identity, std::move(review));
+            make_trusted_aur_reviewed_source_review_fixture_for_test(
+                    std::move(review));
     ReviewedSourceVerifiedLifecycleResult bound =
             bind_reviewed_source_verified_review(
                     std::move(requirement), std::move(trusted));
@@ -304,8 +310,7 @@ ReviewedSourceVerifiedLifecycleTarget bind_requirement(
 ReviewedSourceVerifiedLifecycleTarget complete_bound_target(
         const AurReviewedSourceReviewIdentity& identity) {
     return bind_requirement(
-            missing_requirement(identity), identity,
-            complete_initial_review(identity));
+            missing_requirement(identity), complete_initial_review(identity));
 }
 
 PresentedReviewedSourceTarget present_complete_target(
@@ -396,7 +401,7 @@ void test_initial_update_rebaseline_and_abnormal_lifecycles_bind() {
                 ReviewedSourceHistoryRelation::Ancestor,
                 ReviewedSourceHistoryRelation::NonAncestor}) {
         ReviewedSourceVerifiedLifecycleTarget update = bind_requirement(
-                loaded_requirement(identity, baseline), identity,
+                loaded_requirement(identity, baseline),
                 complete_update_review(identity, baseline, relation));
         const auto& lifecycle =
                 require_arm<ReviewedSourceLifecycleUpdateReview>(
@@ -408,7 +413,7 @@ void test_initial_update_rebaseline_and_abnormal_lifecycles_bind() {
     }
 
     ReviewedSourceVerifiedLifecycleTarget rebaseline = bind_requirement(
-            loaded_requirement(identity, baseline), identity,
+            loaded_requirement(identity, baseline),
             complete_rebaseline_review(identity, baseline));
     const auto& rebaseline_lifecycle =
             require_arm<ReviewedSourceLifecycleRebaselineFullReview>(
@@ -425,7 +430,7 @@ void test_initial_update_rebaseline_and_abnormal_lifecycles_bind() {
     ReviewedSourceVerifiedLifecycleTarget abnormal = bind_requirement(
             abnormal_requirement(
                     identity, corrupted_document, &exact_abnormal),
-            identity, complete_initial_review(identity));
+            complete_initial_review(identity));
     const auto& abnormal_lifecycle = require_arm<
             ReviewedSourceLifecycleAbnormalStateRebindFullReview>(
             abnormal.lifecycle(),
@@ -441,15 +446,16 @@ void test_identity_and_revision_rebinding_is_rejected() {
     const AurReviewedSourceReviewIdentity expected = review_identity();
 
     const auto expect_stop = [&](
-            AurReviewedSourceReviewIdentity observed,
+            const AurReviewedSourceReviewIdentity& required_identity,
             ReviewedSourceOperationStopReason reason,
             ReviewedSourceVerifiedMaterializedReview review) {
         TrustedAurReviewedSourceReview trusted =
-                seal_trusted_aur_reviewed_source_review_for_test(
-                        std::move(observed), std::move(review));
+                make_trusted_aur_reviewed_source_review_fixture_for_test(
+                        std::move(review));
         ReviewedSourceVerifiedLifecycleResult bound =
                 bind_reviewed_source_verified_review(
-                        missing_requirement(expected), std::move(trusted));
+                        missing_requirement(required_identity),
+                        std::move(trusted));
         const auto& stopped = require_arm<ReviewedSourceOperationStop>(
                 bound, "Mismatched review identity was rebound.");
         require(stopped.reason() == reason,
@@ -462,7 +468,7 @@ void test_identity_and_revision_rebinding_is_rejected() {
     expect_stop(
             wrong_package,
             ReviewedSourceOperationStopReason::PackageBaseMismatch,
-            complete_initial_review(wrong_package));
+            complete_initial_review(expected));
 
     expect_invalid_argument([] {
         static_cast<void>(review_identity(
@@ -473,42 +479,16 @@ void test_identity_and_revision_rebinding_is_rejected() {
     const AurReviewedSourceReviewIdentity wrong_revision =
             review_identity(std::string(SHA1_B));
     expect_stop(
-            wrong_revision,
+            expected,
             ReviewedSourceOperationStopReason::TargetRevisionMismatch,
             complete_initial_review(wrong_revision));
 
     const AurReviewedSourceReviewIdentity wrong_format =
             review_identity(std::string(SHA256_A));
     expect_stop(
-            wrong_format,
+            expected,
             ReviewedSourceOperationStopReason::GitObjectFormatMismatch,
             complete_initial_review(wrong_format));
-
-    ReviewedSourceVerifiedLifecycleResult wrong_verified_revision =
-            bind_reviewed_source_verified_review(
-                    missing_requirement(expected),
-                    seal_trusted_aur_reviewed_source_review_for_test(
-                            expected,
-                            complete_initial_review(wrong_revision)));
-    require(require_arm<ReviewedSourceOperationStop>(
-                    wrong_verified_revision,
-                    "Wrong verified exact OID was accepted.")
-                            .reason() ==
-                    ReviewedSourceOperationStopReason::TargetRevisionMismatch,
-            "Wrong verified exact OID produced wrong stop reason.");
-
-    ReviewedSourceVerifiedLifecycleResult wrong_verified_format =
-            bind_reviewed_source_verified_review(
-                    missing_requirement(expected),
-                    seal_trusted_aur_reviewed_source_review_for_test(
-                            expected,
-                            complete_initial_review(wrong_format)));
-    require(require_arm<ReviewedSourceOperationStop>(
-                    wrong_verified_format,
-                    "Wrong verified object format was accepted.")
-                            .reason() ==
-                    ReviewedSourceOperationStopReason::GitObjectFormatMismatch,
-            "Wrong verified object format produced wrong stop reason.");
 }
 
 void test_presentation_completion_is_required_and_all_or_nothing() {
@@ -603,8 +583,7 @@ void test_presentation_completion_is_required_and_all_or_nothing() {
                                     {}}});
     ReviewedSourceVerifiedLifecycleTarget bound_inconsistent =
             bind_requirement(
-                    missing_requirement(identity), identity,
-                    std::move(inconsistent));
+                    missing_requirement(identity), std::move(inconsistent));
     std::ostringstream rejected_output;
     PresentedReviewedSourceTargetResult rejected =
             present_reviewed_source_target(
@@ -683,7 +662,7 @@ void test_capabilities_are_single_owner_and_one_shot() {
     ReviewedSourceStateStoreRead exact_read;
     ReviewedSourceVerifiedLifecycleTarget verified = bind_requirement(
             abnormal_requirement(identity, invalid_document, &exact_read),
-            identity, complete_initial_review(identity));
+            complete_initial_review(identity));
     ReviewedSourceVerifiedLifecycleTarget moved_verified(
             std::move(verified));
     require(!verified.valid() && moved_verified.valid(),
@@ -925,7 +904,7 @@ void test_manual_and_sensitive_readiness_stop_even_on_explicit_yes() {
 
     for(const auto& test_case : cases) {
         ReviewedSourceVerifiedLifecycleTarget bound = bind_requirement(
-                missing_requirement(identity), identity,
+                missing_requirement(identity),
                 nontext_initial_review(identity, test_case.path));
         require(bound.readiness() == test_case.readiness,
                 "Typed 3B readiness was not retained before presentation.");
@@ -954,7 +933,7 @@ void test_abnormal_acceptance_retains_exact_cas_observation() {
     ReviewedSourceReviewRequirement requirement = abnormal_requirement(
             identity, invalid_document, &exact_read);
     ReviewedSourceVerifiedLifecycleTarget bound = bind_requirement(
-            std::move(requirement), identity, complete_initial_review(identity));
+            std::move(requirement), complete_initial_review(identity));
     std::ostringstream output;
     PresentedReviewedSourceTargetResult presented_result =
             present_reviewed_source_target(std::move(bound), output);

@@ -13,8 +13,6 @@
 // base commit. Invocation-local editor overlays are neither accepted build
 // bytes nor authority to advance/invalidate historical reviewed state.
 
-class ReviewedSourceAcceptanceAuthority;
-
 // Binds a lifecycle observation to the verified 3B provenance without
 // permitting PackageBase/source/revision substitution.
 class ReviewedSourceVerifiedLifecycleTarget final {
@@ -42,7 +40,10 @@ public:
     expected_state_observation() const;
 
 private:
-    friend class ReviewedSourceAcceptanceAuthority;
+    friend ReviewedSourceVerifiedLifecycleTarget
+    bind_reviewed_source_verified_review_transition(
+            ReviewedSourceReviewRequirement requirement,
+            TrustedAurReviewedSourceReview trusted_review);
 
     ReviewedSourceVerifiedLifecycleTarget(
             ReviewedSourceReviewRequirement requirement,
@@ -85,7 +86,10 @@ public:
     expected_state_observation() const;
 
 private:
-    friend class ReviewedSourceAcceptanceAuthority;
+    friend PresentedReviewedSourceTarget
+    present_reviewed_source_target_transition(
+            ReviewedSourceVerifiedLifecycleTarget target,
+            std::ostream& output);
 
     explicit PresentedReviewedSourceTarget(
             ReviewedSourceVerifiedLifecycleTarget target);
@@ -126,7 +130,10 @@ public:
             const;
 
 private:
-    friend class ReviewedSourceAcceptanceAuthority;
+    friend AcceptedReviewedSourceTarget
+    accept_reviewed_source_target_transition(
+            PresentedReviewedSourceTarget target,
+            ExplicitConfirmationAcceptance confirmation);
 
     AcceptedReviewedSourceTarget(
             PresentedReviewedSourceTarget target,
@@ -176,7 +183,18 @@ public:
             const noexcept;
 
 private:
-    friend class ReviewedSourceAcceptanceAuthority;
+    friend ReviewedSourceCompatibilityBuildWithoutReview
+    reviewed_source_compatibility_from_explicit_confirmation(
+            PresentedReviewedSourceTarget target,
+            ExplicitConfirmationResult confirmation);
+    friend ReviewedSourceCompatibilityBuildWithoutReview
+    reviewed_source_compatibility_from_unsealed_confirmation(
+            PresentedReviewedSourceTarget target,
+            const ConfirmationResult& confirmation);
+    friend ReviewedSourceCompatibilityBuildWithoutReview
+    continue_reviewed_source_without_review(
+            ReviewedSourceReviewRequirement requirement,
+            ReviewedSourceReviewBypassReason reason);
 
     ReviewedSourceCompatibilityBuildWithoutReview(
             AurReviewedSourceReviewIdentity identity,

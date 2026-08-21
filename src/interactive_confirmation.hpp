@@ -30,8 +30,6 @@ enum class ConfirmationUnavailableReason {
     NoConfirm,
 };
 
-class ExplicitConfirmationAuthority;
-
 // A positive no-default confirmation recognized by the parser/session. Unlike
 // ConfirmationAccepted, this is a sealed capability: callers cannot construct
 // it from a public origin enum or relabel an automatic/default answer.
@@ -51,7 +49,11 @@ public:
     [[nodiscard]] bool valid() const noexcept;
 
 private:
-    friend class ExplicitConfirmationAuthority;
+    // Exact non-inline parser boundary. Its definition revalidates raw y/yes
+    // input before construction; there is no nameable authority class or
+    // generic mint operation to complete in another translation unit.
+    friend ExplicitConfirmationAcceptance
+    parse_explicit_confirmation_acceptance(std::string_view input);
 
     explicit ExplicitConfirmationAcceptance(bool valid) noexcept;
 

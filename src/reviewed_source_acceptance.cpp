@@ -116,39 +116,26 @@ std::optional<ReviewedSourceOperationStop> acceptance_precondition_stop(
             ReviewedSourceOperationStopReason::InvalidCapability);
 }
 
-} // namespace
-
-class ReviewedSourceAcceptanceAuthority final {
+class ReviewedSourceTransitionStopped final {
 public:
-    static ReviewedSourceVerifiedLifecycleTarget verified_target(
-            ReviewedSourceReviewRequirement requirement,
-            ReviewedSourceIntegrationLifecycle lifecycle,
-            ReviewedSourceVerifiedMaterializedReview verified_review,
-            ReviewedSourceReviewReadiness readiness) {
-        return ReviewedSourceVerifiedLifecycleTarget(
-                std::move(requirement), std::move(lifecycle),
-                std::move(verified_review), readiness);
+    explicit ReviewedSourceTransitionStopped(
+            ReviewedSourceOperationStopReason reason) noexcept
+        : reason_(reason) {}
+
+    [[nodiscard]] ReviewedSourceOperationStopReason reason() const noexcept {
+        return reason_;
     }
 
-    static PresentedReviewedSourceTarget presented_target(
-            ReviewedSourceVerifiedLifecycleTarget target) {
-        return PresentedReviewedSourceTarget(std::move(target));
-    }
-
-    static AcceptedReviewedSourceTarget accepted_target(
-            PresentedReviewedSourceTarget target,
-            ExplicitConfirmationAcceptance confirmation) {
-        return AcceptedReviewedSourceTarget(
-                std::move(target), std::move(confirmation));
-    }
-
-    static ReviewedSourceCompatibilityBuildWithoutReview compatibility(
-            AurReviewedSourceReviewIdentity identity,
-            ReviewedSourceCompatibilityBuildReason reason) {
-        return ReviewedSourceCompatibilityBuildWithoutReview(
-                std::move(identity), reason);
-    }
+private:
+    ReviewedSourceOperationStopReason reason_;
 };
+
+[[noreturn]] void stop_transition(
+        ReviewedSourceOperationStopReason reason) {
+    throw ReviewedSourceTransitionStopped(reason);
+}
+
+} // namespace
 
 struct ReviewedSourceVerifiedLifecycleTarget::State {
     ReviewedSourceReviewRequirement          requirement;
@@ -369,17 +356,20 @@ ReviewedSourceCompatibilityBuildWithoutReview::reason() const noexcept {
     return reason_;
 }
 
-ReviewedSourceVerifiedLifecycleResult bind_reviewed_source_verified_review(
+ReviewedSourceVerifiedLifecycleTarget
+bind_reviewed_source_verified_review_transition(
         ReviewedSourceReviewRequirement requirement,
         TrustedAurReviewedSourceReview trusted_review) {
     if(!trusted_review.valid()) {
-        return ReviewedSourceOperationStop::make(
-                ReviewedSourceOperationStopReason::InvalidCapability);
+        stop_transition(ReviewedSourceOperationStopReason::InvalidCapability);
     }
     const AurReviewedSourceReviewIdentity& verified_identity =
             trusted_review.identity();
     if(requirement.identity() != verified_identity) {
-        return identity_mismatch(requirement.identity(), verified_identity);
+        stop_transition(
+                identity_mismatch(
+                        requirement.identity(), verified_identity)
+                        .reason());
     }
 
     ReviewedSourceVerifiedMaterializedReview verified_review =
@@ -389,16 +379,18 @@ ReviewedSourceVerifiedLifecycleResult bind_reviewed_source_verified_review(
     const SourceRevisionIdentity& observed_target =
             materialized_target_revision(materialized);
     if(observed_target != verified_identity.target_revision()) {
-        return revision_mismatch(
-                verified_identity.target_revision(), observed_target,
-                ReviewedSourceOperationStopReason::TargetRevisionMismatch);
+        stop_transition(
+                revision_mismatch(
+                        verified_identity.target_revision(), observed_target,
+                        ReviewedSourceOperationStopReason::
+                                TargetRevisionMismatch)
+                        .reason());
     }
 
     const ReviewedSourceReviewBody* review_body =
             materialized_review_body(materialized);
     if(review_body == nullptr) {
-        return ReviewedSourceOperationStop::make(
-                ReviewedSourceOperationStopReason::LifecycleMismatch);
+        stop_transition(ReviewedSourceOperationStopReason::LifecycleMismatch);
     }
     const ReviewedSourceReviewReadiness readiness = review_body->readiness;
 
@@ -408,7 +400,7 @@ ReviewedSourceVerifiedLifecycleResult bind_reviewed_source_verified_review(
     case ReviewedSourceReviewRequirementKind::InitialFullReview:
         if(!std::holds_alternative<
                    ReviewedSourceMaterializedInitialFullReview>(materialized)) {
-            return ReviewedSourceOperationStop::make(
+            stop_transition(
                     ReviewedSourceOperationStopReason::LifecycleMismatch);
         }
         lifecycle = ReviewedSourceLifecycleInitialFullReview{};
@@ -418,7 +410,7 @@ ReviewedSourceVerifiedLifecycleResult bind_reviewed_source_verified_review(
         if(!std::holds_alternative<
                    ReviewedSourceMaterializedInitialFullReview>(materialized) ||
            requirement.abnormal_reason() == nullptr) {
-            return ReviewedSourceOperationStop::make(
+            stop_transition(
                     ReviewedSourceOperationStopReason::LifecycleMismatch);
         }
         lifecycle =
@@ -429,15 +421,18 @@ ReviewedSourceVerifiedLifecycleResult bind_reviewed_source_verified_review(
         const SourceRevisionIdentity* expected_baseline =
                 requirement.baseline();
         if(expected_baseline == nullptr) {
-            return ReviewedSourceOperationStop::make(
+            stop_transition(
                     ReviewedSourceOperationStopReason::LifecycleMismatch);
         }
         if(const auto* update = std::get_if<
                    ReviewedSourceMaterializedUpdateReview>(&materialized)) {
             if(update->baseline != *expected_baseline) {
-                return revision_mismatch(
-                        *expected_baseline, update->baseline,
-                        ReviewedSourceOperationStopReason::BaselineMismatch);
+                stop_transition(
+                        revision_mismatch(
+                                *expected_baseline, update->baseline,
+                                ReviewedSourceOperationStopReason::
+                                        BaselineMismatch)
+                                .reason());
             }
             lifecycle = ReviewedSourceLifecycleUpdateReview{
                     update->baseline, update->relation};
@@ -447,46 +442,56 @@ ReviewedSourceVerifiedLifecycleResult bind_reviewed_source_verified_review(
                    ReviewedSourceMaterializedRebaselineFullReview>(
                            &materialized)) {
             if(rebaseline->unavailable_baseline != *expected_baseline) {
-                return revision_mismatch(
-                        *expected_baseline,
-                        rebaseline->unavailable_baseline,
-                        ReviewedSourceOperationStopReason::BaselineMismatch);
+                stop_transition(
+                        revision_mismatch(
+                                *expected_baseline,
+                                rebaseline->unavailable_baseline,
+                                ReviewedSourceOperationStopReason::
+                                        BaselineMismatch)
+                                .reason());
             }
             lifecycle = ReviewedSourceLifecycleRebaselineFullReview{
                     rebaseline->unavailable_baseline, rebaseline->reason};
             break;
         }
-        return ReviewedSourceOperationStop::make(
-                ReviewedSourceOperationStopReason::LifecycleMismatch);
+        stop_transition(ReviewedSourceOperationStopReason::LifecycleMismatch);
     }
     }
 
-    return ReviewedSourceAcceptanceAuthority::verified_target(
+    return ReviewedSourceVerifiedLifecycleTarget(
             std::move(requirement), std::move(lifecycle),
             std::move(verified_review), readiness);
 }
 
-PresentedReviewedSourceTargetResult present_reviewed_source_target(
+ReviewedSourceVerifiedLifecycleResult bind_reviewed_source_verified_review(
+        ReviewedSourceReviewRequirement requirement,
+        TrustedAurReviewedSourceReview trusted_review) {
+    try {
+        return bind_reviewed_source_verified_review_transition(
+                std::move(requirement), std::move(trusted_review));
+    } catch(const ReviewedSourceTransitionStopped& stopped) {
+        return ReviewedSourceOperationStop::make(stopped.reason());
+    }
+}
+
+PresentedReviewedSourceTarget present_reviewed_source_target_transition(
         ReviewedSourceVerifiedLifecycleTarget target,
         std::ostream& output) {
     if(!target.valid()) {
-        return ReviewedSourceOperationStop::make(
-                ReviewedSourceOperationStopReason::InvalidCapability);
+        stop_transition(ReviewedSourceOperationStopReason::InvalidCapability);
     }
     ReviewedSourcePresentationResult rendered =
             render_reviewed_source_presentation(target.verified_review());
     const auto* presentation =
             std::get_if<ReviewedSourceRenderedPresentation>(&rendered);
     if(presentation == nullptr) {
-        return ReviewedSourceOperationStop::make(
-                ReviewedSourceOperationStopReason::PresentationFailure);
+        stop_transition(ReviewedSourceOperationStopReason::PresentationFailure);
     }
     if(presentation->text.size() >
        static_cast<std::size_t>(
                std::numeric_limits<std::streamsize>::max())) {
-        return ReviewedSourceOperationStop::make(
-                ReviewedSourceOperationStopReason::
-                        PresentationOutputFailure);
+        stop_transition(
+                ReviewedSourceOperationStopReason::PresentationOutputFailure);
     }
 
     try {
@@ -499,54 +504,71 @@ PresentedReviewedSourceTargetResult present_reviewed_source_target(
         // responsibility; ordinary/custom stream failures are normalized here.
         throw;
     } catch(...) {
-        return ReviewedSourceOperationStop::make(
-                ReviewedSourceOperationStopReason::
-                        PresentationOutputFailure);
+        stop_transition(
+                ReviewedSourceOperationStopReason::PresentationOutputFailure);
     }
     if(!output) {
-        return ReviewedSourceOperationStop::make(
-                ReviewedSourceOperationStopReason::
-                        PresentationOutputFailure);
+        stop_transition(
+                ReviewedSourceOperationStopReason::PresentationOutputFailure);
     }
-    return ReviewedSourceAcceptanceAuthority::presented_target(
-            std::move(target));
+    return PresentedReviewedSourceTarget(std::move(target));
 }
 
-ReviewedSourceAcceptanceDisposition decide_reviewed_source_acceptance(
+PresentedReviewedSourceTargetResult present_reviewed_source_target(
+        ReviewedSourceVerifiedLifecycleTarget target,
+        std::ostream& output) {
+    try {
+        return present_reviewed_source_target_transition(
+                std::move(target), output);
+    } catch(const ReviewedSourceTransitionStopped& stopped) {
+        return ReviewedSourceOperationStop::make(stopped.reason());
+    }
+}
+
+AcceptedReviewedSourceTarget accept_reviewed_source_target_transition(
+        PresentedReviewedSourceTarget target,
+        ExplicitConfirmationAcceptance confirmation) {
+    if(auto stop = acceptance_precondition_stop(target)) {
+        stop_transition(stop->reason());
+    }
+    if(!confirmation.valid()) {
+        stop_transition(ReviewedSourceOperationStopReason::InvalidCapability);
+    }
+    return AcceptedReviewedSourceTarget(
+            std::move(target), std::move(confirmation));
+}
+
+ReviewedSourceCompatibilityBuildWithoutReview
+reviewed_source_compatibility_from_explicit_confirmation(
         PresentedReviewedSourceTarget target,
         ExplicitConfirmationResult confirmation) {
     if(auto stop = acceptance_precondition_stop(target)) {
-        return std::move(*stop);
+        stop_transition(stop->reason());
     }
 
-    if(auto* accepted = std::get_if<ExplicitConfirmationAcceptance>(
-               &confirmation)) {
-        if(!accepted->valid()) {
-            return ReviewedSourceOperationStop::make(
-                    ReviewedSourceOperationStopReason::InvalidCapability);
-        }
-        return ReviewedSourceAcceptanceAuthority::accepted_target(
-                std::move(target), std::move(*accepted));
+    if(std::holds_alternative<ExplicitConfirmationAcceptance>(confirmation)) {
+        stop_transition(
+                ReviewedSourceOperationStopReason::NonExplicitAcceptance);
     }
     if(const auto* declined = std::get_if<ConfirmationDeclined>(
                &confirmation)) {
         switch(declined->origin) {
         case ConfirmationDecisionOrigin::ExplicitToken:
-            return ReviewedSourceAcceptanceAuthority::compatibility(
+            return ReviewedSourceCompatibilityBuildWithoutReview(
                     target.identity(),
                     ReviewedSourceCompatibilityBuildReason::
                             ExplicitReviewDecline);
         case ConfirmationDecisionOrigin::Default:
-            return ReviewedSourceAcceptanceAuthority::compatibility(
+            return ReviewedSourceCompatibilityBuildWithoutReview(
                     target.identity(),
                     ReviewedSourceCompatibilityBuildReason::
                             DefaultReviewDecline);
         case ConfirmationDecisionOrigin::NoConfirm:
-            return ReviewedSourceAcceptanceAuthority::compatibility(
+            return ReviewedSourceCompatibilityBuildWithoutReview(
                     target.identity(),
                     ReviewedSourceCompatibilityBuildReason::NoConfirm);
         case ConfirmationDecisionOrigin::NonInteractiveDefault:
-            return ReviewedSourceAcceptanceAuthority::compatibility(
+            return ReviewedSourceCompatibilityBuildWithoutReview(
                     target.identity(),
                     ReviewedSourceCompatibilityBuildReason::
                             NonInteractiveInput);
@@ -554,7 +576,7 @@ ReviewedSourceAcceptanceDisposition decide_reviewed_source_acceptance(
     }
     if(const auto* cancelled = std::get_if<ConfirmationCancelled>(
                &confirmation)) {
-        return ReviewedSourceOperationStop::make(
+        stop_transition(
                 cancelled->reason ==
                                 ConfirmationCancellationReason::EndOfInput
                         ? ReviewedSourceOperationStopReason::EndOfInput
@@ -563,7 +585,7 @@ ReviewedSourceAcceptanceDisposition decide_reviewed_source_acceptance(
     }
     if(const auto* unavailable = std::get_if<ConfirmationUnavailable>(
                &confirmation)) {
-        return ReviewedSourceAcceptanceAuthority::compatibility(
+        return ReviewedSourceCompatibilityBuildWithoutReview(
                 target.identity(),
                 unavailable->reason ==
                                 ConfirmationUnavailableReason::NoConfirm
@@ -572,58 +594,56 @@ ReviewedSourceAcceptanceDisposition decide_reviewed_source_acceptance(
                                   NonInteractiveInput);
     }
     if(std::holds_alternative<ConfirmationInputFailure>(confirmation)) {
-        return ReviewedSourceOperationStop::make(
-                ReviewedSourceOperationStopReason::InputFailure);
+        stop_transition(ReviewedSourceOperationStopReason::InputFailure);
     }
-    return ReviewedSourceOperationStop::make(
-            ReviewedSourceOperationStopReason::NonExplicitAcceptance);
+    stop_transition(ReviewedSourceOperationStopReason::NonExplicitAcceptance);
 }
 
-ReviewedSourceAcceptanceDisposition decide_reviewed_source_unsealed_confirmation(
+ReviewedSourceCompatibilityBuildWithoutReview
+reviewed_source_compatibility_from_unsealed_confirmation(
         PresentedReviewedSourceTarget target,
         const ConfirmationResult& confirmation) {
     if(auto stop = acceptance_precondition_stop(target)) {
-        return std::move(*stop);
+        stop_transition(stop->reason());
     }
 
     if(const auto* accepted = std::get_if<ConfirmationAccepted>(
                &confirmation)) {
         switch(accepted->origin) {
         case ConfirmationDecisionOrigin::NoConfirm:
-            return ReviewedSourceAcceptanceAuthority::compatibility(
+            return ReviewedSourceCompatibilityBuildWithoutReview(
                     target.identity(),
                     ReviewedSourceCompatibilityBuildReason::NoConfirm);
         case ConfirmationDecisionOrigin::NonInteractiveDefault:
-            return ReviewedSourceAcceptanceAuthority::compatibility(
+            return ReviewedSourceCompatibilityBuildWithoutReview(
                     target.identity(),
                     ReviewedSourceCompatibilityBuildReason::
                             NonInteractiveInput);
         case ConfirmationDecisionOrigin::ExplicitToken:
         case ConfirmationDecisionOrigin::Default:
-            return ReviewedSourceOperationStop::make(
-                    ReviewedSourceOperationStopReason::
-                            NonExplicitAcceptance);
+            stop_transition(
+                    ReviewedSourceOperationStopReason::NonExplicitAcceptance);
         }
     }
     if(const auto* declined = std::get_if<ConfirmationDeclined>(
                &confirmation)) {
         switch(declined->origin) {
         case ConfirmationDecisionOrigin::ExplicitToken:
-            return ReviewedSourceAcceptanceAuthority::compatibility(
+            return ReviewedSourceCompatibilityBuildWithoutReview(
                     target.identity(),
                     ReviewedSourceCompatibilityBuildReason::
                             ExplicitReviewDecline);
         case ConfirmationDecisionOrigin::Default:
-            return ReviewedSourceAcceptanceAuthority::compatibility(
+            return ReviewedSourceCompatibilityBuildWithoutReview(
                     target.identity(),
                     ReviewedSourceCompatibilityBuildReason::
                             DefaultReviewDecline);
         case ConfirmationDecisionOrigin::NoConfirm:
-            return ReviewedSourceAcceptanceAuthority::compatibility(
+            return ReviewedSourceCompatibilityBuildWithoutReview(
                     target.identity(),
                     ReviewedSourceCompatibilityBuildReason::NoConfirm);
         case ConfirmationDecisionOrigin::NonInteractiveDefault:
-            return ReviewedSourceAcceptanceAuthority::compatibility(
+            return ReviewedSourceCompatibilityBuildWithoutReview(
                     target.identity(),
                     ReviewedSourceCompatibilityBuildReason::
                             NonInteractiveInput);
@@ -631,7 +651,7 @@ ReviewedSourceAcceptanceDisposition decide_reviewed_source_unsealed_confirmation
     }
     if(const auto* cancelled = std::get_if<ConfirmationCancelled>(
                &confirmation)) {
-        return ReviewedSourceOperationStop::make(
+        stop_transition(
                 cancelled->reason ==
                                 ConfirmationCancellationReason::EndOfInput
                         ? ReviewedSourceOperationStopReason::EndOfInput
@@ -640,7 +660,7 @@ ReviewedSourceAcceptanceDisposition decide_reviewed_source_unsealed_confirmation
     }
     if(const auto* unavailable = std::get_if<ConfirmationUnavailable>(
                &confirmation)) {
-        return ReviewedSourceAcceptanceAuthority::compatibility(
+        return ReviewedSourceCompatibilityBuildWithoutReview(
                 target.identity(),
                 unavailable->reason ==
                                 ConfirmationUnavailableReason::NoConfirm
@@ -649,18 +669,43 @@ ReviewedSourceAcceptanceDisposition decide_reviewed_source_unsealed_confirmation
                                   NonInteractiveInput);
     }
     if(std::holds_alternative<ConfirmationInputFailure>(confirmation)) {
-        return ReviewedSourceOperationStop::make(
-                ReviewedSourceOperationStopReason::InputFailure);
+        stop_transition(ReviewedSourceOperationStopReason::InputFailure);
     }
-    return ReviewedSourceOperationStop::make(
-            ReviewedSourceOperationStopReason::NonExplicitAcceptance);
+    stop_transition(ReviewedSourceOperationStopReason::NonExplicitAcceptance);
+}
+
+ReviewedSourceAcceptanceDisposition decide_reviewed_source_acceptance(
+        PresentedReviewedSourceTarget target,
+        ExplicitConfirmationResult confirmation) {
+    try {
+        if(auto* accepted = std::get_if<ExplicitConfirmationAcceptance>(
+                   &confirmation)) {
+            return accept_reviewed_source_target_transition(
+                    std::move(target), std::move(*accepted));
+        }
+        return reviewed_source_compatibility_from_explicit_confirmation(
+                std::move(target), std::move(confirmation));
+    } catch(const ReviewedSourceTransitionStopped& stopped) {
+        return ReviewedSourceOperationStop::make(stopped.reason());
+    }
+}
+
+ReviewedSourceAcceptanceDisposition decide_reviewed_source_unsealed_confirmation(
+        PresentedReviewedSourceTarget target,
+        const ConfirmationResult& confirmation) {
+    try {
+        return reviewed_source_compatibility_from_unsealed_confirmation(
+                std::move(target), confirmation);
+    } catch(const ReviewedSourceTransitionStopped& stopped) {
+        return ReviewedSourceOperationStop::make(stopped.reason());
+    }
 }
 
 ReviewedSourceCompatibilityBuildWithoutReview
 continue_reviewed_source_without_review(
         ReviewedSourceReviewRequirement requirement,
         ReviewedSourceReviewBypassReason reason) {
-    return ReviewedSourceAcceptanceAuthority::compatibility(
+    return ReviewedSourceCompatibilityBuildWithoutReview(
             requirement.identity(), compatibility_reason(reason));
 }
 

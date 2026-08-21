@@ -5,7 +5,7 @@
 
 #include <memory>
 
-class ReviewedSourceTrustedMaterializationAuthority;
+class ValidatedCachePath;
 
 // Identity and the verified 3B review are sealed together by the trusted Git
 // materialization boundary. Presentation/acceptance callers cannot attach a
@@ -29,11 +29,19 @@ public:
     verified_review() const;
 
 private:
-    friend class ReviewedSourceTrustedMaterializationAuthority;
-#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_ACCEPTANCE_TEST_HOOKS
+    // Exact non-inline trusted Git boundary. Identity is checked against the
+    // checkout, object format, exact projection target, and verified 3B
+    // materialization before this composite can be constructed.
     friend TrustedAurReviewedSourceReview
-    seal_trusted_aur_reviewed_source_review_for_test(
+    materialize_aur_reviewed_source_from_trusted_git(
+            const ValidatedCachePath& checkout,
             AurReviewedSourceReviewIdentity identity,
+            const ReviewedSourceProjection& projection);
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_ACCEPTANCE_TEST_HOOKS
+    // Test fixture derives its fixed PackageBase/source identity from the
+    // verified review target. Tests cannot supply a replacement sidecar.
+    friend TrustedAurReviewedSourceReview
+    make_trusted_aur_reviewed_source_review_fixture_for_test(
             ReviewedSourceVerifiedMaterializedReview verified_review);
 #endif
 
@@ -49,8 +57,10 @@ private:
 };
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_ACCEPTANCE_TEST_HOOKS
+// Acceptance tests need a trusted carrier without a Git process. The fixture
+// has one fixed canonical AUR PackageBase and derives the exact target from the
+// verified review; there is deliberately no identity argument.
 [[nodiscard]] TrustedAurReviewedSourceReview
-seal_trusted_aur_reviewed_source_review_for_test(
-        AurReviewedSourceReviewIdentity identity,
+make_trusted_aur_reviewed_source_review_fixture_for_test(
         ReviewedSourceVerifiedMaterializedReview verified_review);
 #endif

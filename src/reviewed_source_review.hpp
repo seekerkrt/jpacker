@@ -12,6 +12,8 @@
 #include <variant>
 #include <vector>
 
+class ValidatedCachePath;
+
 inline constexpr std::size_t REVIEWED_SOURCE_REVIEW_ENTRY_LIMIT = 4096;
 inline constexpr std::uintmax_t REVIEWED_SOURCE_LINE_REVIEWABLE_BLOB_LIMIT =
         8U * 1024U * 1024U;
@@ -240,8 +242,6 @@ using ReviewedSourceMaterializedReview = std::variant<
         ReviewedSourceMaterializedUpdateReview,
         ReviewedSourceMaterializedRebaselineFullReview>;
 
-class ReviewedSourceTrustedMaterializationAuthority;
-
 // Capability proving that the materialized model crossed the trusted Git 3B1
 // content-address, strict patch replay, and readiness finalization path. The
 // contained model is immutable through this interface and cannot be sealed by
@@ -265,7 +265,14 @@ public:
             const ReviewedSourceVerifiedMaterializedReview&) const = default;
 
 private:
-    friend class ReviewedSourceTrustedMaterializationAuthority;
+    // Exact non-inline trusted Git boundary. It accepts the checkout, expected
+    // remote, and complete projection, performs materialization, and only then
+    // constructs this capability.
+    friend ReviewedSourceVerifiedMaterializedReview
+    materialize_verified_review_from_trusted_git(
+            const ValidatedCachePath& checkout,
+            const std::string& expected_remote_url,
+            const ReviewedSourceProjection& projection);
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_PRESENTATION_TEST_HOOKS
     friend ReviewedSourceVerifiedMaterializedReview
     seal_reviewed_source_materialized_review_for_test(
