@@ -19,6 +19,24 @@ constexpr const char* SHA1_D =
         "4444444444444444444444444444444444444444";
 constexpr const char* SHA1_E =
         "5555555555555555555555555555555555555555";
+constexpr const char* GIT_SHA1_EMPTY =
+        "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
+constexpr const char* GIT_SHA256_EMPTY =
+        "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
+constexpr const char* GIT_SHA1_ABC =
+        "f2ba8f84ab5c1bce84a7b441cb1959cfc7093b7f";
+constexpr const char* GIT_SHA256_ABC =
+        "c1cf6e465077930e88dc5136641d402f72a229ddd996f627d60e9639eaba35a6";
+constexpr const char* GIT_SHA1_NUL =
+        "20b5be91886d0b6f26dc98a225c0dac05fe2c86e";
+constexpr const char* GIT_SHA1_AAAA =
+        "a9a22e66dbef55a4bfba528dacaa2253145dc44d";
+constexpr const char* GIT_SHA256_AAAA =
+        "0348244081bc1dc0e613ecfdefffd7a98d1f74864e7faa7b9db9d770d33f309b";
+constexpr const char* GIT_SHA1_128_X =
+        "e9570ba66749101d9fb6b9bfdd9ae7bcc44b640f";
+constexpr const char* GIT_SHA256_128_X =
+        "7cb275110f56217f954ce3607841481b4420dc1c73221d3670da2e33c2a86b70";
 
 void require(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
@@ -63,6 +81,17 @@ std::string one_line_patch(
     return patch_header(old_oid, new_oid) +
            "@@ -1 +1 @@\n-" + std::string(old_line) +
            "\n+" + std::string(new_line) + "\n";
+}
+
+std::string blob_batch_record(
+        const ReviewedSourceBlobRequest& request,
+        std::string_view payload) {
+    std::string record = request.object_id.value() + " blob " +
+            std::to_string(payload.size());
+    record.push_back('\0');
+    record.append(payload);
+    record.push_back('\0');
+    return record;
 }
 
 void test_resource_boundaries() {
@@ -251,20 +280,35 @@ void test_sensitive_path_policy() {
 }
 
 void test_blob_batch_protocol() {
-    const ReviewedSourceBlobRequest text_request{
-            ReviewedSourceObjectId::make(SHA1_A), 3};
+    const ReviewedSourceBlobRequest sha1_text_request{
+            ReviewedSourceObjectId::make(GIT_SHA1_ABC), 3};
+    const ReviewedSourceBlobRequest sha256_text_request{
+            ReviewedSourceObjectId::make(GIT_SHA256_ABC), 3};
+    const ReviewedSourceBlobRequest sha1_empty_request{
+            ReviewedSourceObjectId::make(GIT_SHA1_EMPTY), 0};
+    const ReviewedSourceBlobRequest sha256_empty_request{
+            ReviewedSourceObjectId::make(GIT_SHA256_EMPTY), 0};
     const ReviewedSourceBlobRequest nul_request{
-            ReviewedSourceObjectId::make(SHA1_B), 3};
+            ReviewedSourceObjectId::make(GIT_SHA1_NUL), 3};
+    const ReviewedSourceBlobRequest sha1_multiblock_request{
+            ReviewedSourceObjectId::make(GIT_SHA1_128_X), 128};
+    const ReviewedSourceBlobRequest sha256_multiblock_request{
+            ReviewedSourceObjectId::make(GIT_SHA256_128_X), 128};
     const std::vector<ReviewedSourceBlobRequest> requests{
-            text_request, nul_request};
-    std::string output = std::string(SHA1_A) + " blob 3";
-    output.push_back('\0');
-    output += "abc";
-    output.push_back('\0');
-    output += std::string(SHA1_B) + " blob 3";
-    output.push_back('\0');
-    output.append(std::string("a\0b", 3));
-    output.push_back('\0');
+            sha1_text_request, sha256_text_request,
+            sha1_empty_request, sha256_empty_request, nul_request,
+            sha1_multiblock_request, sha256_multiblock_request};
+    const std::string nul_payload("a\0b", 3);
+    const std::string multiblock_payload(128, 'x');
+    std::string output = blob_batch_record(sha1_text_request, "abc");
+    output += blob_batch_record(sha256_text_request, "abc");
+    output += blob_batch_record(sha1_empty_request, "");
+    output += blob_batch_record(sha256_empty_request, "");
+    output += blob_batch_record(nul_request, nul_payload);
+    output += blob_batch_record(
+            sha1_multiblock_request, multiblock_payload);
+    output += blob_batch_record(
+            sha256_multiblock_request, multiblock_payload);
 
     const auto size = reviewed_source_blob_batch_capture_size(requests);
     require(require_arm<std::size_t>(
@@ -275,9 +319,33 @@ void test_blob_batch_protocol() {
             requests, output);
     const auto& blobs = require_arm<std::vector<ReviewedSourceRawBlob>>(
             parsed, "Valid blob batch did not parse");
-    require(blobs.size() == 2 && blobs[0].bytes == "abc" &&
-                    blobs[1].bytes == std::string("a\0b", 3),
-            "Blob batch payload bytes were not preserved");
+    require(blobs.size() == 7 && blobs[0].bytes == "abc" &&
+                    blobs[1].bytes == "abc" && blobs[2].bytes.empty() &&
+                    blobs[3].bytes.empty() && blobs[4].bytes == nul_payload &&
+                    blobs[5].bytes == multiblock_payload &&
+                    blobs[6].bytes == multiblock_payload,
+            "SHA-1/SHA-256 incremental blob payloads were not preserved");
+
+    const ReviewedSourceProjection nul_projection =
+            ReviewedSourceInitialFullReview{
+                    SourceRevisionIdentity::git_commit(std::string(40, 'a')),
+                    {ReviewedSourceAdded{
+                            version(
+                                    "binary.dat",
+                                    ReviewedSourceFileMode::Regular,
+                                    GIT_SHA1_NUL, 3),
+                            git_marker(false)}}};
+    const ReviewedSourceReviewPreparationResult nul_prepared =
+            prepare_reviewed_source_review(nul_projection, {blobs[4]});
+    const auto& nul_preparation =
+            require_arm<ReviewedSourceReviewPreparation>(
+                    nul_prepared,
+                    "Hash-verified NUL blob did not prepare");
+    require(nul_preparation.entries.size() == 1 &&
+                    nul_preparation.entries[0].new_observation.has_value() &&
+                    nul_preparation.entries[0].new_observation->kind ==
+                            ReviewedSourceBlobContentKind::ContainsNul,
+            "Hash-verified NUL blob was not classified as ContainsNul");
 
     output.pop_back();
     require(require_arm<ReviewedSourceReviewFailure>(
@@ -292,12 +360,73 @@ void test_blob_batch_protocol() {
     missing.push_back('\0');
     require(require_arm<ReviewedSourceReviewFailure>(
                     parse_reviewed_source_blob_batch_output(
-                            {text_request}, missing),
+                            {{ReviewedSourceObjectId::make(SHA1_A), 3}},
+                            missing),
                     "Missing exact blob was accepted")
                             .reason ==
                     ReviewedSourceReviewFailureReason::
                             InconsistentProjectionAndBlob,
             "Missing exact blob failure reason drifted");
+
+    const ReviewedSourceBlobRequest sha1_identity_request{
+            ReviewedSourceObjectId::make(GIT_SHA1_AAAA), 4};
+    const ReviewedSourceBlobBatchParseResult sha1_mismatch_result =
+            parse_reviewed_source_blob_batch_output(
+                    {sha1_identity_request},
+                    blob_batch_record(sha1_identity_request, "BBBB"));
+    const auto& sha1_mismatch = require_arm<ReviewedSourceReviewFailure>(
+            sha1_mismatch_result,
+            "Same-size SHA-1 payload identity mismatch was accepted");
+    require(sha1_mismatch.reason ==
+                            ReviewedSourceReviewFailureReason::
+                                    BlobContentHashMismatch &&
+                    sha1_mismatch.record_index == 0,
+            "SHA-1 payload identity mismatch failure detail drifted");
+
+    const ReviewedSourceBlobRequest sha256_identity_request{
+            ReviewedSourceObjectId::make(GIT_SHA256_AAAA), 4};
+    require(require_arm<ReviewedSourceReviewFailure>(
+                    parse_reviewed_source_blob_batch_output(
+                            {sha256_identity_request},
+                            blob_batch_record(
+                                    sha256_identity_request, "BBBB")),
+                    "Same-size SHA-256 payload identity mismatch was accepted")
+                            .reason ==
+                    ReviewedSourceReviewFailureReason::
+                            BlobContentHashMismatch,
+            "SHA-256 payload identity mismatch failure reason drifted");
+
+    const ReviewedSourceProjection sensitive_projection =
+            ReviewedSourceInitialFullReview{
+                    SourceRevisionIdentity::git_commit(std::string(40, 'a')),
+                    {ReviewedSourceAdded{
+                            version(
+                                    "PKGBUILD",
+                                    ReviewedSourceFileMode::Regular,
+                                    GIT_SHA1_AAAA, 4),
+                            git_marker(false)}}};
+    const ReviewedSourceBlobRequestPlanResult sensitive_plan =
+            plan_reviewed_source_blob_requests(sensitive_projection);
+    const auto& sensitive_requests =
+            require_arm<std::vector<ReviewedSourceBlobRequest>>(
+                    sensitive_plan,
+                    "Sensitive PKGBUILD blob request planning failed");
+    std::string partial_output = blob_batch_record(
+            sha1_text_request, "abc");
+    partial_output += blob_batch_record(
+            sensitive_requests.front(), "BBBB");
+    const ReviewedSourceBlobBatchParseResult partial_result =
+            parse_reviewed_source_blob_batch_output(
+                    {sha1_text_request, sensitive_requests.front()},
+                    partial_output);
+    const auto& partial_failure = require_arm<ReviewedSourceReviewFailure>(
+            partial_result,
+            "Sensitive PKGBUILD mismatch published a partial blob result");
+    require(partial_failure.reason ==
+                            ReviewedSourceReviewFailureReason::
+                                    BlobContentHashMismatch &&
+                    partial_failure.record_index == 1,
+            "Sensitive PKGBUILD mismatch did not fail the complete batch");
 }
 
 void test_representation_and_readiness() {

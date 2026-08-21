@@ -119,14 +119,39 @@ bool line_matches(
     return expected == actual;
 }
 
+bool apply_no_newline_marker(
+        ReviewedSourcePatchHunk& hunk,
+        bool& old_side_closed,
+        bool& new_side_closed) {
+    if(hunk.lines.empty() || !hunk.lines.back().line.has_newline) {
+        return false;
+    }
+    hunk.lines.back().line.has_newline = false;
+    switch(hunk.lines.back().kind) {
+    case ReviewedSourcePatchLineKind::Context:
+        old_side_closed = true;
+        new_side_closed = true;
+        break;
+    case ReviewedSourcePatchLineKind::Removed:
+        old_side_closed = true;
+        break;
+    case ReviewedSourcePatchLineKind::Added:
+        new_side_closed = true;
+        break;
+    }
+    return true;
+}
+
 bool replay_patch(
         const std::vector<ReviewedSourcePatchHunk>& hunks,
         std::string_view old_blob,
         std::string_view new_blob) {
     const std::vector<ReviewedSourceTextLine> old_lines =
             split_blob_lines(old_blob);
+    const std::vector<ReviewedSourceTextLine> new_lines =
+            split_blob_lines(new_blob);
     std::size_t old_index = 0;
-    std::size_t new_line_count = 0;
+    std::size_t new_index = 0;
     std::string replayed;
     replayed.reserve(new_blob.size());
 
@@ -139,10 +164,14 @@ bool replay_patch(
         }
 
         while(old_index < *old_position) {
+            if(new_index >= new_lines.size() ||
+               !line_matches(old_lines[old_index], new_lines[new_index])) {
+                return false;
+            }
             append_line(replayed, old_lines[old_index++]);
-            ++new_line_count;
+            ++new_index;
         }
-        if(new_line_count != *new_position) return false;
+        if(new_index != *new_position) return false;
 
         std::size_t observed_old_count = 0;
         std::size_t observed_new_count = 0;
@@ -150,12 +179,14 @@ bool replay_patch(
             switch(patch_line.kind) {
             case ReviewedSourcePatchLineKind::Context:
                 if(old_index >= old_lines.size() ||
-                   !line_matches(old_lines[old_index], patch_line.line)) {
+                   new_index >= new_lines.size() ||
+                   !line_matches(old_lines[old_index], patch_line.line) ||
+                   !line_matches(new_lines[new_index], patch_line.line)) {
                     return false;
                 }
                 append_line(replayed, patch_line.line);
                 ++old_index;
-                ++new_line_count;
+                ++new_index;
                 ++observed_old_count;
                 ++observed_new_count;
                 break;
@@ -168,8 +199,12 @@ bool replay_patch(
                 ++observed_old_count;
                 break;
             case ReviewedSourcePatchLineKind::Added:
+                if(new_index >= new_lines.size() ||
+                   !line_matches(new_lines[new_index], patch_line.line)) {
+                    return false;
+                }
                 append_line(replayed, patch_line.line);
-                ++new_line_count;
+                ++new_index;
                 ++observed_new_count;
                 break;
             }
@@ -181,9 +216,14 @@ bool replay_patch(
     }
 
     while(old_index < old_lines.size()) {
+        if(new_index >= new_lines.size() ||
+           !line_matches(old_lines[old_index], new_lines[new_index])) {
+            return false;
+        }
         append_line(replayed, old_lines[old_index++]);
+        ++new_index;
     }
-    return replayed == new_blob;
+    return new_index == new_lines.size() && replayed == new_blob;
 }
 
 } // namespace
@@ -221,6 +261,10 @@ ReviewedSourcePatchParseResult parse_and_verify_reviewed_source_patch(
     }
 
     std::vector<ReviewedSourcePatchHunk> hunks;
+    std::optional<std::size_t> previous_zero_width_old_position;
+    std::optional<std::size_t> previous_zero_width_new_position;
+    bool old_side_closed = false;
+    bool new_side_closed = false;
     while(offset < patch_output.size()) {
         const std::size_t hunk_index = hunks.size();
         const auto header = take_line(patch_output, offset);
@@ -234,6 +278,7 @@ ReviewedSourcePatchParseResult parse_and_verify_reviewed_source_patch(
         std::size_t observed_old = 0;
         std::size_t observed_new = 0;
         bool can_mark_no_newline = false;
+        bool has_change = false;
         while(observed_old < hunk.old_count ||
               observed_new < hunk.new_count) {
             const auto line = take_line(patch_output, offset);
@@ -243,13 +288,13 @@ ReviewedSourcePatchParseResult parse_and_verify_reviewed_source_patch(
                         hunk_index);
             }
             if(*line == NO_NEWLINE_MARKER) {
-                if(!can_mark_no_newline || hunk.lines.empty() ||
-                   !hunk.lines.back().line.has_newline) {
+                if(!can_mark_no_newline ||
+                   !apply_no_newline_marker(
+                           hunk, old_side_closed, new_side_closed)) {
                     return patch_failure(
                             ReviewedSourcePatchFailureReason::MalformedPatchOutput,
                             hunk_index);
                 }
-                hunk.lines.back().line.has_newline = false;
                 can_mark_no_newline = false;
                 continue;
             }
@@ -263,16 +308,36 @@ ReviewedSourcePatchParseResult parse_and_verify_reviewed_source_patch(
             switch(line->front()) {
             case ' ':
                 kind = ReviewedSourcePatchLineKind::Context;
+                if(old_side_closed || new_side_closed) {
+                    return patch_failure(
+                            ReviewedSourcePatchFailureReason::
+                                    MalformedPatchOutput,
+                            hunk_index);
+                }
                 ++observed_old;
                 ++observed_new;
                 break;
             case '-':
                 kind = ReviewedSourcePatchLineKind::Removed;
+                if(old_side_closed) {
+                    return patch_failure(
+                            ReviewedSourcePatchFailureReason::
+                                    MalformedPatchOutput,
+                            hunk_index);
+                }
                 ++observed_old;
+                has_change = true;
                 break;
             case '+':
                 kind = ReviewedSourcePatchLineKind::Added;
+                if(new_side_closed) {
+                    return patch_failure(
+                            ReviewedSourcePatchFailureReason::
+                                    MalformedPatchOutput,
+                            hunk_index);
+                }
                 ++observed_new;
+                has_change = true;
                 break;
             default:
                 return patch_failure(
@@ -304,16 +369,44 @@ ReviewedSourcePatchParseResult parse_and_verify_reviewed_source_patch(
             const auto possible_marker = take_line(patch_output, offset);
             if(possible_marker == std::optional<std::string_view>(
                                               NO_NEWLINE_MARKER)) {
-                if(!can_mark_no_newline || hunk.lines.empty() ||
-                   !hunk.lines.back().line.has_newline) {
+                if(!can_mark_no_newline ||
+                   !apply_no_newline_marker(
+                           hunk, old_side_closed, new_side_closed)) {
                     return patch_failure(
                             ReviewedSourcePatchFailureReason::MalformedPatchOutput,
                             hunk_index);
                 }
-                hunk.lines.back().line.has_newline = false;
             } else {
                 offset = marker_offset;
             }
+        }
+        if(hunk.lines.empty() || !has_change) {
+            return patch_failure(
+                    ReviewedSourcePatchFailureReason::MalformedPatchOutput,
+                    hunk_index);
+        }
+        const auto old_position = hunk_position(hunk.old_start, hunk.old_count);
+        const auto new_position = hunk_position(hunk.new_start, hunk.new_count);
+        if(!old_position.has_value() || !new_position.has_value()) {
+            return patch_failure(
+                    ReviewedSourcePatchFailureReason::MalformedPatchOutput,
+                    hunk_index);
+        }
+        if(hunk.old_count == 0) {
+            if(previous_zero_width_old_position == old_position) {
+                return patch_failure(
+                        ReviewedSourcePatchFailureReason::MalformedPatchOutput,
+                        hunk_index);
+            }
+            previous_zero_width_old_position = old_position;
+        }
+        if(hunk.new_count == 0) {
+            if(previous_zero_width_new_position == new_position) {
+                return patch_failure(
+                        ReviewedSourcePatchFailureReason::MalformedPatchOutput,
+                        hunk_index);
+            }
+            previous_zero_width_new_position = new_position;
         }
         hunks.push_back(std::move(hunk));
     }

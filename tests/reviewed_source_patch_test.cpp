@@ -109,6 +109,129 @@ void test_missing_final_newline() {
             "No-final-newline markers were lost");
 }
 
+void test_logical_line_and_noop_rejection() {
+    const ReviewedSourceObjectId old_oid =
+            ReviewedSourceObjectId::make(SHA1_OLD);
+    const ReviewedSourceObjectId new_oid =
+            ReviewedSourceObjectId::make(SHA1_NEW);
+
+    std::string split_added_line = patch_header(SHA1_OLD, SHA1_NEW);
+    split_added_line +=
+            "@@ -0,0 +1,2 @@\n"
+            "+foo\n"
+            "\\ No newline at end of file\n"
+            "+bar\n";
+    require(std::holds_alternative<ReviewedSourcePatchFailure>(
+                    parse_and_verify_reviewed_source_patch(
+                            split_added_line, old_oid, new_oid,
+                            "", "foobar\n")),
+            "One new logical line was accepted as two Added lines");
+
+    std::string empty_hunk = patch_header(SHA1_OLD, SHA1_NEW);
+    empty_hunk +=
+            "@@ -0,0 +0,0 @@\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n";
+    require(std::holds_alternative<ReviewedSourcePatchFailure>(
+                    parse_and_verify_reviewed_source_patch(
+                            empty_hunk, old_oid, new_oid,
+                            "old\n", "new\n")),
+            "Empty no-op hunk before a valid hunk was accepted");
+
+    std::string context_only = patch_header(SHA1_OLD, SHA1_NEW);
+    context_only += "@@ -1 +1 @@\n same\n";
+    require(std::holds_alternative<ReviewedSourcePatchFailure>(
+                    parse_and_verify_reviewed_source_patch(
+                            context_only, old_oid, new_oid,
+                            "same\n", "same\n")),
+            "Context-only no-op hunk was accepted");
+
+    std::string duplicate_insertion_anchor =
+            patch_header(SHA1_OLD, SHA1_NEW);
+    duplicate_insertion_anchor +=
+            "@@ -0,0 +1 @@\n"
+            "+first\n"
+            "@@ -0,0 +2 @@\n"
+            "+second\n";
+    require(std::holds_alternative<ReviewedSourcePatchFailure>(
+                    parse_and_verify_reviewed_source_patch(
+                            duplicate_insertion_anchor,
+                            old_oid, new_oid,
+                            "", "first\nsecond\n")),
+            "Duplicate old-side zero-width hunk was accepted");
+
+    std::string duplicate_deletion_anchor =
+            patch_header(SHA1_OLD, SHA1_NEW);
+    duplicate_deletion_anchor +=
+            "@@ -1 +0,0 @@\n"
+            "-first\n"
+            "@@ -2 +0,0 @@\n"
+            "-second\n";
+    require(std::holds_alternative<ReviewedSourcePatchFailure>(
+                    parse_and_verify_reviewed_source_patch(
+                            duplicate_deletion_anchor,
+                            old_oid, new_oid,
+                            "first\nsecond\n", "")),
+            "Duplicate new-side zero-width hunk was accepted");
+}
+
+void test_empty_file_transitions_and_multi_hunk() {
+    const ReviewedSourceObjectId old_oid =
+            ReviewedSourceObjectId::make(SHA1_OLD);
+    const ReviewedSourceObjectId new_oid =
+            ReviewedSourceObjectId::make(SHA1_NEW);
+
+    std::string from_empty = patch_header(SHA1_OLD, SHA1_NEW);
+    from_empty += "@@ -0,0 +1 @@\n+new\n";
+    require(std::holds_alternative<ReviewedSourceTextPatch>(
+                    parse_and_verify_reviewed_source_patch(
+                            from_empty, old_oid, new_oid,
+                            "", "new\n")),
+            "Valid empty-file addition was rejected");
+
+    std::string to_empty = patch_header(SHA1_OLD, SHA1_NEW);
+    to_empty += "@@ -1 +0,0 @@\n-old\n";
+    require(std::holds_alternative<ReviewedSourceTextPatch>(
+                    parse_and_verify_reviewed_source_patch(
+                            to_empty, old_oid, new_oid,
+                            "old\n", "")),
+            "Valid empty-file deletion was rejected");
+
+    std::string multi_hunk = patch_header(SHA1_OLD, SHA1_NEW);
+    multi_hunk +=
+            "@@ -2 +2 @@\n"
+            "-old-a\n"
+            "+new-a\n"
+            "@@ -5 +5 @@\n"
+            "-old-b\n"
+            "+new-b\n";
+    require(std::holds_alternative<ReviewedSourceTextPatch>(
+                    parse_and_verify_reviewed_source_patch(
+                            multi_hunk, old_oid, new_oid,
+                            "one\nold-a\nthree\nfour\nold-b\nsix\n",
+                            "one\nnew-a\nthree\nfour\nnew-b\nsix\n")),
+            "Valid ordered multi-hunk patch was rejected");
+}
+
+void test_malformed_no_newline_marker_placement() {
+    const ReviewedSourceObjectId old_oid =
+            ReviewedSourceObjectId::make(SHA1_OLD);
+    const ReviewedSourceObjectId new_oid =
+            ReviewedSourceObjectId::make(SHA1_NEW);
+    std::string marker_before_line = patch_header(SHA1_OLD, SHA1_NEW);
+    marker_before_line +=
+            "@@ -1 +1 @@\n"
+            "\\ No newline at end of file\n"
+            "-old\n"
+            "+new\n";
+    require(std::holds_alternative<ReviewedSourcePatchFailure>(
+                    parse_and_verify_reviewed_source_patch(
+                            marker_before_line, old_oid, new_oid,
+                            "old\n", "new\n")),
+            "No-newline marker before a logical line was accepted");
+}
+
 void test_malformed_and_replay_failures() {
     const ReviewedSourceObjectId old_oid =
             ReviewedSourceObjectId::make(SHA1_OLD);
@@ -209,6 +332,9 @@ void run_tests() {
     test_sha1_patch_and_replay();
     test_sha256_patch();
     test_missing_final_newline();
+    test_logical_line_and_noop_rejection();
+    test_empty_file_transitions_and_multi_hunk();
+    test_malformed_no_newline_marker_placement();
     test_malformed_and_replay_failures();
     test_patch_and_line_resource_boundaries();
 }

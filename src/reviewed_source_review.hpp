@@ -33,6 +33,7 @@ enum class ReviewedSourceReviewResourceKind {
 enum class ReviewedSourceReviewFailureReason {
     MalformedBlobBatchOutput,
     InconsistentProjectionAndBlob,
+    BlobContentHashMismatch,
     ResourceLimitExceeded,
     MalformedPatchOutput,
     InconsistentProjectionAndPatch,
