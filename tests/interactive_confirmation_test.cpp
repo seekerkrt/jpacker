@@ -5,9 +5,24 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <variant>
 
 namespace {
+
+static_assert(!std::is_default_constructible_v<
+              ExplicitConfirmationAcceptance>);
+static_assert(!std::is_copy_constructible_v<
+              ExplicitConfirmationAcceptance>);
+static_assert(std::is_move_constructible_v<
+              ExplicitConfirmationAcceptance>);
+static_assert(!std::is_constructible_v<
+              ExplicitConfirmationAcceptance,
+              ConfirmationDecisionOrigin>);
+static_assert(!std::is_constructible_v<
+              ExplicitConfirmationAcceptance,
+              ConfirmationAccepted>);
 
 void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
@@ -278,6 +293,70 @@ void test_no_default_matrix() {
             "[y/n] --noconfirm reason differs");
 }
 
+void test_sealed_explicit_acceptance() {
+    for(const std::string_view token : {
+                std::string_view("y"), std::string_view("yes")}) {
+        ExplicitConfirmationInputParseResult parsed =
+                parse_explicit_confirmation_input(token);
+        const auto* accepted =
+                std::get_if<ExplicitConfirmationAcceptance>(&parsed);
+        expect(accepted != nullptr && accepted->valid(),
+                std::string(token) +
+                        ": sealed explicit acceptance was not produced");
+    }
+
+    ExplicitConfirmationInputParseResult empty =
+            parse_explicit_confirmation_input("");
+    expect(std::holds_alternative<InvalidConfirmationInput>(empty),
+            "No-default empty input produced sealed acceptance");
+
+    for(const std::string_view token : {
+                std::string_view("y"), std::string_view("yes")}) {
+        std::istringstream input(std::string(token) + "\n");
+        std::ostringstream output;
+        ExplicitConfirmationResult result = request_explicit_confirmation(
+                "Continue?", false, true, input, output);
+        const auto* accepted =
+                std::get_if<ExplicitConfirmationAcceptance>(&result);
+        expect(accepted != nullptr && accepted->valid(),
+                std::string(token) +
+                        ": interactive session lost sealed acceptance");
+    }
+
+    std::istringstream unused_input;
+    std::ostringstream unused_output;
+    ExplicitConfirmationResult no_confirm = request_explicit_confirmation(
+            "Continue?", true, true, unused_input, unused_output);
+    const auto* no_confirm_unavailable =
+            std::get_if<ConfirmationUnavailable>(&no_confirm);
+    expect(no_confirm_unavailable != nullptr &&
+                    no_confirm_unavailable->reason ==
+                            ConfirmationUnavailableReason::NoConfirm,
+            "--noconfirm produced sealed explicit acceptance");
+
+    ExplicitConfirmationResult non_interactive =
+            request_explicit_confirmation(
+                    "Continue?", false, false, unused_input, unused_output);
+    const auto* non_interactive_unavailable =
+            std::get_if<ConfirmationUnavailable>(&non_interactive);
+    expect(non_interactive_unavailable != nullptr &&
+                    non_interactive_unavailable->reason ==
+                            ConfirmationUnavailableReason::NonInteractiveInput,
+            "Non-interactive input produced sealed explicit acceptance");
+
+    ExplicitConfirmationInputParseResult movable =
+            parse_explicit_confirmation_input("yes");
+    auto* source = std::get_if<ExplicitConfirmationAcceptance>(&movable);
+    expect(source != nullptr && source->valid(),
+            "Move fixture did not contain sealed acceptance");
+    ExplicitConfirmationAcceptance moved_to(std::move(*source));
+    expect(!source->valid() && moved_to.valid(),
+            "Moving sealed acceptance did not invalidate its source");
+    ExplicitConfirmationAcceptance second_move(std::move(*source));
+    expect(!second_move.valid(),
+            "A moved-from sealed acceptance regained authority");
+}
+
 } // namespace
 
 int main() {
@@ -285,6 +364,7 @@ int main() {
         test_default_yes_matrix();
         test_default_no_matrix();
         test_no_default_matrix();
+        test_sealed_explicit_acceptance();
         std::cout << "interactive confirmation tests: all checks passed\n";
         return 0;
     } catch(const std::exception& error) {

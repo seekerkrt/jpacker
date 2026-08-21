@@ -178,6 +178,16 @@ void test_typed_identity_reuses_aur_package_base_and_exact_revision() {
                 SourceRevisionIdentity::git_commit(std::string(SHA1_A))));
     });
     expect_invalid_argument([] {
+        static_cast<void>(review_identity(
+                std::string(SHA1_A), "example-base",
+                "https://mirror.invalid/example-base.git"));
+    });
+    expect_invalid_argument([] {
+        static_cast<void>(review_identity(
+                std::string(SHA1_A), "other-base",
+                "https://aur.archlinux.org/example-base.git"));
+    });
+    expect_invalid_argument([] {
         static_cast<void>(AurReviewedSourceReviewIdentity::make(
                 aur_package_base(), SourceRevisionIdentity::unknown()));
     });

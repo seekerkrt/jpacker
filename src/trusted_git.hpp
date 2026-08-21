@@ -2,6 +2,7 @@
 
 #include "reviewed_source_review.hpp"
 #include "reviewed_source_projection.hpp"
+#include "reviewed_source_trusted_review.hpp"
 #include "trusted_cache.hpp"
 
 #include <cstddef>
@@ -72,6 +73,7 @@ enum class TrustedGitReviewFailureReason {
     LocalHistoryOverride,
     ShallowRepositoryUnsupported,
     ObjectFormatMismatch,
+    ReviewIdentityMismatch,
 };
 
 struct TrustedGitReviewFailure {
@@ -101,6 +103,11 @@ using TrustedGitReviewedSourceMaterializationResult = std::variant<
         ReviewedSourceReviewFailure,
         TrustedGitReviewFailure>;
 
+using TrustedGitAurReviewedSourceMaterializationResult = std::variant<
+        TrustedAurReviewedSourceReview,
+        ReviewedSourceReviewFailure,
+        TrustedGitReviewFailure>;
+
 // Resolve the mutable remote-tracking ref once. Callers must retain and use
 // only the returned complete commit OID for later projection.
 TrustedGitCommitResolutionResult trusted_git_resolve_remote_commit(
@@ -123,6 +130,15 @@ TrustedGitReviewedSourceMaterializationResult
 trusted_git_materialize_reviewed_source_review(
         const ValidatedCachePath& checkout,
         const std::string& expected_remote_url,
+        const ReviewedSourceProjection& projection);
+
+// Seals PackageBase/source/remote/exact target and the verified 3B review in
+// one trusted construction boundary. The returned capability is the only 4A
+// input that can bind trusted Git review provenance to acceptance.
+TrustedGitAurReviewedSourceMaterializationResult
+trusted_git_materialize_aur_reviewed_source_review(
+        const ValidatedCachePath& checkout,
+        AurReviewedSourceReviewIdentity identity,
         const ReviewedSourceProjection& projection);
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_GIT_TEST_HOOKS

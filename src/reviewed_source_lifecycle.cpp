@@ -99,6 +99,13 @@ AurReviewedSourceReviewIdentity AurReviewedSourceReviewIdentity::make(
         throw std::invalid_argument(
                 "A reviewed source target requires a known canonical AUR Git remote.");
     }
+    const std::string expected_remote =
+            "https://aur.archlinux.org/" + package_base.package_base() +
+            ".git";
+    if(*location.value() != expected_remote) {
+        throw std::invalid_argument(
+                "A reviewed source target requires the canonical AUR Git remote for its PackageBase.");
+    }
     if(target_revision.state() != SourceRevisionState::Known ||
        target_revision.git_commit() == nullptr ||
        target_revision.git_object_format() == nullptr) {

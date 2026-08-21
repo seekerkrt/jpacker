@@ -1452,6 +1452,7 @@ REVIEWED_SOURCE_ACCEPTANCE_TEST_SRCS := \
 	tests/reviewed_source_acceptance_test.cpp \
 	$(SRC_DIR)/reviewed_source_acceptance.cpp \
 	$(SRC_DIR)/reviewed_source_lifecycle.cpp \
+	$(SRC_DIR)/reviewed_source_trusted_review.cpp \
 	$(SRC_DIR)/reviewed_source_presentation.cpp \
 	$(SRC_DIR)/reviewed_source_review.cpp \
 	$(SRC_DIR)/reviewed_source_patch.cpp \
@@ -1490,6 +1491,8 @@ REVIEWED_SOURCE_PRESENTATION_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp
 REVIEWED_SOURCE_GIT_TEST_SRCS := \
 	tests/reviewed_source_git_test.cpp \
+	$(SRC_DIR)/reviewed_source_trusted_review.cpp \
+	$(SRC_DIR)/reviewed_source_lifecycle.cpp \
 	$(SRC_DIR)/reviewed_source_presentation.cpp \
 	$(SRC_DIR)/reviewed_source_review.cpp \
 	$(SRC_DIR)/reviewed_source_patch.cpp \
@@ -1501,6 +1504,7 @@ REVIEWED_SOURCE_GIT_TEST_SRCS := \
 	$(SRC_DIR)/xdg_directory_safety.cpp \
 	$(SRC_DIR)/xdg_paths.cpp \
 	$(SRC_DIR)/source_package_identity.cpp \
+	$(SRC_DIR)/reviewed_source_state.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/process.cpp \
 	$(SRC_DIR)/logging.cpp \
@@ -2088,7 +2092,7 @@ $(eval $(call define_non_heavy_test_profile,SOURCE_PACKAGE_COMPATIBILITY,$(DIREC
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_STATE,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_STATE_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_STATE_STORE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS -I$(SRC_DIR),$(REVIEWED_SOURCE_STATE_STORE_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_LIFECYCLE,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_LIFECYCLE_TEST_SRCS)))
-$(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_ACCEPTANCE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_REVIEWED_SOURCE_PRESENTATION_TEST_HOOKS -I$(SRC_DIR),$(REVIEWED_SOURCE_ACCEPTANCE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_ACCEPTANCE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_REVIEWED_SOURCE_PRESENTATION_TEST_HOOKS -DMOGUET_ENABLE_REVIEWED_SOURCE_ACCEPTANCE_TEST_HOOKS -I$(SRC_DIR),$(REVIEWED_SOURCE_ACCEPTANCE_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_PROJECTION,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_PROJECTION_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_REVIEW,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_REVIEW_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_PATCH,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_PATCH_TEST_SRCS)))
@@ -2469,7 +2473,7 @@ $(REVIEWED_SOURCE_LIFECYCLE_TEST_TARGET): $(REVIEWED_SOURCE_LIFECYCLE_TEST_SRCS)
 	@echo ":: Compiling reviewed source lifecycle test binary"
 	$(call compile_non_heavy_test,REVIEWED_SOURCE_LIFECYCLE)
 
-$(REVIEWED_SOURCE_ACCEPTANCE_TEST_TARGET): $(REVIEWED_SOURCE_ACCEPTANCE_TEST_SRCS) $(SRC_DIR)/reviewed_source_acceptance.hpp $(SRC_DIR)/reviewed_source_lifecycle.hpp $(SRC_DIR)/reviewed_source_presentation.hpp $(SRC_DIR)/reviewed_source_review.hpp $(SRC_DIR)/reviewed_source_patch.hpp $(SRC_DIR)/reviewed_source_projection.hpp $(SRC_DIR)/reviewed_source_state_store.hpp $(SRC_DIR)/reviewed_source_state.hpp $(SRC_DIR)/source_package_identity.hpp $(SRC_DIR)/interactive_confirmation.hpp $(VERSION_FILE)
+$(REVIEWED_SOURCE_ACCEPTANCE_TEST_TARGET): $(REVIEWED_SOURCE_ACCEPTANCE_TEST_SRCS) $(SRC_DIR)/reviewed_source_acceptance.hpp $(SRC_DIR)/reviewed_source_lifecycle.hpp $(SRC_DIR)/reviewed_source_trusted_review.hpp $(SRC_DIR)/reviewed_source_presentation.hpp $(SRC_DIR)/reviewed_source_review.hpp $(SRC_DIR)/reviewed_source_patch.hpp $(SRC_DIR)/reviewed_source_projection.hpp $(SRC_DIR)/reviewed_source_state_store.hpp $(SRC_DIR)/reviewed_source_state.hpp $(SRC_DIR)/source_package_identity.hpp $(SRC_DIR)/interactive_confirmation.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling reviewed source acceptance test binary"
 	$(call compile_non_heavy_test,REVIEWED_SOURCE_ACCEPTANCE)
@@ -2494,7 +2498,7 @@ $(REVIEWED_SOURCE_PRESENTATION_TEST_TARGET): $(REVIEWED_SOURCE_PRESENTATION_TEST
 	@echo ":: Compiling reviewed source presentation test binary"
 	$(call compile_non_heavy_test,REVIEWED_SOURCE_PRESENTATION)
 
-$(REVIEWED_SOURCE_GIT_TEST_TARGET): $(REVIEWED_SOURCE_GIT_TEST_SRCS) $(SRC_DIR)/reviewed_source_presentation.hpp $(SRC_DIR)/reviewed_source_review.hpp $(SRC_DIR)/reviewed_source_patch.hpp $(SRC_DIR)/reviewed_source_projection.hpp $(SRC_DIR)/reviewed_source_git_parser.hpp $(SRC_DIR)/trusted_git.hpp $(SRC_DIR)/persistent_checkout.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/process.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) $(LOCALIZATION_CONFIG_HEADER) $(VERSION_FILE)
+$(REVIEWED_SOURCE_GIT_TEST_TARGET): $(REVIEWED_SOURCE_GIT_TEST_SRCS) $(SRC_DIR)/reviewed_source_trusted_review.hpp $(SRC_DIR)/reviewed_source_lifecycle.hpp $(SRC_DIR)/reviewed_source_presentation.hpp $(SRC_DIR)/reviewed_source_review.hpp $(SRC_DIR)/reviewed_source_patch.hpp $(SRC_DIR)/reviewed_source_projection.hpp $(SRC_DIR)/reviewed_source_git_parser.hpp $(SRC_DIR)/reviewed_source_state.hpp $(SRC_DIR)/trusted_git.hpp $(SRC_DIR)/persistent_checkout.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/process.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) $(LOCALIZATION_CONFIG_HEADER) $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling reviewed source Git test binary"
 	$(call compile_non_heavy_test,REVIEWED_SOURCE_GIT)

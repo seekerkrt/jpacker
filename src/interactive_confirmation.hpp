@@ -30,6 +30,34 @@ enum class ConfirmationUnavailableReason {
     NoConfirm,
 };
 
+class ExplicitConfirmationAuthority;
+
+// A positive no-default confirmation recognized by the parser/session. Unlike
+// ConfirmationAccepted, this is a sealed capability: callers cannot construct
+// it from a public origin enum or relabel an automatic/default answer.
+class ExplicitConfirmationAcceptance final {
+public:
+    ExplicitConfirmationAcceptance() = delete;
+    ExplicitConfirmationAcceptance(
+            const ExplicitConfirmationAcceptance&) = delete;
+    ExplicitConfirmationAcceptance(
+            ExplicitConfirmationAcceptance&& other) noexcept;
+    ExplicitConfirmationAcceptance& operator=(
+            const ExplicitConfirmationAcceptance&) = delete;
+    ExplicitConfirmationAcceptance& operator=(
+            ExplicitConfirmationAcceptance&& other) noexcept;
+    ~ExplicitConfirmationAcceptance() = default;
+
+    [[nodiscard]] bool valid() const noexcept;
+
+private:
+    friend class ExplicitConfirmationAuthority;
+
+    explicit ExplicitConfirmationAcceptance(bool valid) noexcept;
+
+    bool valid_ = false;
+};
+
 struct ConfirmationAccepted {
     ConfirmationDecisionOrigin origin;
 
@@ -75,8 +103,26 @@ using ConfirmationInputParseResult = std::variant<
         ConfirmationCancelled,
         InvalidConfirmationInput>;
 
+using ExplicitConfirmationInputParseResult = std::variant<
+        ExplicitConfirmationAcceptance,
+        ConfirmationDeclined,
+        ConfirmationCancelled,
+        InvalidConfirmationInput>;
+
+using ExplicitConfirmationResult = std::variant<
+        ExplicitConfirmationAcceptance,
+        ConfirmationDeclined,
+        ConfirmationCancelled,
+        ConfirmationUnavailable,
+        ConfirmationInputFailure>;
+
 ConfirmationInputParseResult parse_confirmation_input(
         std::string_view input, ConfirmationDefault default_answer);
+
+// Fixed no-default parser. Only actual y/yes bytes can produce the sealed
+// positive capability; empty/default/automatic decisions have no conversion.
+ExplicitConfirmationInputParseResult parse_explicit_confirmation_input(
+        std::string_view input);
 
 ConfirmationResult request_confirmation(
         const std::string& question, ConfirmationDefault default_answer,
@@ -89,6 +135,13 @@ ConfirmationResult request_confirmation(
         const std::string& question, ConfirmationDefault default_answer,
         bool no_confirm, bool is_interactive_input, std::istream& input,
         std::ostream& output);
+
+ExplicitConfirmationResult request_explicit_confirmation(
+        const std::string& question, bool no_confirm);
+
+ExplicitConfirmationResult request_explicit_confirmation(
+        const std::string& question, bool no_confirm,
+        bool is_interactive_input, std::istream& input, std::ostream& output);
 
 std::string confirmation_stop_diagnostic(const ConfirmationResult& result);
 

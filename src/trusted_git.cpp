@@ -33,6 +33,13 @@ public:
             ReviewedSourceMaterializedReview review) {
         return ReviewedSourceVerifiedMaterializedReview(std::move(review));
     }
+
+    static TrustedAurReviewedSourceReview seal(
+            AurReviewedSourceReviewIdentity identity,
+            ReviewedSourceVerifiedMaterializedReview verified_review) {
+        return TrustedAurReviewedSourceReview(
+                std::move(identity), std::move(verified_review));
+    }
 };
 
 namespace {
@@ -1498,8 +1505,29 @@ trusted_git_materialize_reviewed_source_review(
     const auto& requests = std::get<std::vector<ReviewedSourceBlobRequest>>(
             planned);
 
-    // AlreadyReviewed and a distinct same-tree update require no repository
-    // content observation. Preserve that no-command boundary.
+    const LocalGitConfiguration configuration =
+            inspect_review_checkout_configuration(checkout);
+    require_expected_remote(configuration, expected_remote_url);
+    const SourceRevisionIdentity& target =
+            materialization_target_revision(projection);
+    static_cast<void>(require_known_commit(target));
+    if(target.git_object_format() == nullptr ||
+       *target.git_object_format() != configuration.object_format) {
+        return review_failure(
+                TrustedGitReviewFailureReason::ObjectFormatMismatch,
+                TrustedGitReviewStage::TargetValidation);
+    }
+    ExactTargetCommitValidationResult target_validation =
+            validate_exact_target_commit(
+                    checkout, expected_remote_url, target,
+                    configuration.object_format,
+                    TrustedGitReviewStage::TargetValidation);
+    if(std::holds_alternative<TrustedGitReviewFailure>(target_validation)) {
+        return std::get<TrustedGitReviewFailure>(target_validation);
+    }
+
+    // AlreadyReviewed and a distinct same-tree update require no blob/patch
+    // observation, but the trusted seal still proves remote/format/exact target.
     if(requests.empty()) {
         ReviewedSourceReviewPreparationResult prepared =
                 prepare_reviewed_source_review(projection, {});
@@ -1519,18 +1547,6 @@ trusted_git_materialize_reviewed_source_review(
                         std::move(finalized)));
     }
 
-    const LocalGitConfiguration configuration =
-            inspect_review_checkout_configuration(checkout);
-    require_expected_remote(configuration, expected_remote_url);
-    const SourceRevisionIdentity& target =
-            materialization_target_revision(projection);
-    static_cast<void>(require_known_commit(target));
-    if(target.git_object_format() == nullptr ||
-       *target.git_object_format() != configuration.object_format) {
-        return review_failure(
-                TrustedGitReviewFailureReason::ObjectFormatMismatch,
-                TrustedGitReviewStage::BlobRead);
-    }
     for(const ReviewedSourceBlobRequest& request : requests) {
         if(request.object_id.format() != configuration.object_format) {
             return review_failure(
@@ -1706,6 +1722,44 @@ trusted_git_materialize_reviewed_source_review(
     return finish(lift_materialized_review(
             std::get<ReviewedSourceMaterializedReview>(
                     std::move(finalized))));
+}
+
+TrustedGitAurReviewedSourceMaterializationResult
+trusted_git_materialize_aur_reviewed_source_review(
+        const ValidatedCachePath& checkout,
+        AurReviewedSourceReviewIdentity identity,
+        const ReviewedSourceProjection& projection) {
+    const SourceRevisionIdentity& projected_target =
+            materialization_target_revision(projection);
+    const GitObjectFormat* projected_format =
+            projected_target.git_object_format();
+    if(projected_format == nullptr ||
+       identity.git_object_format() != *projected_format) {
+        return review_failure(
+                TrustedGitReviewFailureReason::ObjectFormatMismatch,
+                TrustedGitReviewStage::TargetValidation);
+    }
+    if(identity.target_revision() != projected_target) {
+        return review_failure(
+                TrustedGitReviewFailureReason::ReviewIdentityMismatch,
+                TrustedGitReviewStage::TargetValidation);
+    }
+
+    TrustedGitReviewedSourceMaterializationResult materialized =
+            trusted_git_materialize_reviewed_source_review(
+                    checkout, identity.canonical_git_remote(), projection);
+    if(const auto* failure =
+               std::get_if<ReviewedSourceReviewFailure>(&materialized)) {
+        return *failure;
+    }
+    if(const auto* failure = std::get_if<TrustedGitReviewFailure>(
+               &materialized)) {
+        return *failure;
+    }
+    return ReviewedSourceTrustedMaterializationAuthority::seal(
+            std::move(identity),
+            std::get<ReviewedSourceVerifiedMaterializedReview>(
+                    std::move(materialized)));
 }
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_GIT_TEST_HOOKS

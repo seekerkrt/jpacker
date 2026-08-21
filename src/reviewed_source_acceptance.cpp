@@ -2,7 +2,10 @@
 
 #include <ios>
 #include <limits>
+#include <memory>
+#include <new>
 #include <ostream>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 
@@ -91,6 +94,28 @@ ReviewedSourceCompatibilityBuildReason compatibility_reason(
     return ReviewedSourceCompatibilityBuildReason::NoDiff;
 }
 
+std::optional<ReviewedSourceOperationStop> acceptance_precondition_stop(
+        const PresentedReviewedSourceTarget& target) {
+    if(!target.valid()) {
+        return ReviewedSourceOperationStop::make(
+                ReviewedSourceOperationStopReason::InvalidCapability);
+    }
+    switch(target.readiness()) {
+    case ReviewedSourceReviewReadiness::Complete:
+        return std::nullopt;
+    case ReviewedSourceReviewReadiness::ManualInspectionRequired:
+        return ReviewedSourceOperationStop::make(
+                ReviewedSourceOperationStopReason::
+                        ManualInspectionRequired);
+    case ReviewedSourceReviewReadiness::SensitiveSourceUnrenderable:
+        return ReviewedSourceOperationStop::make(
+                ReviewedSourceOperationStopReason::
+                        SensitiveSourceUnrenderable);
+    }
+    return ReviewedSourceOperationStop::make(
+            ReviewedSourceOperationStopReason::InvalidCapability);
+}
+
 } // namespace
 
 class ReviewedSourceAcceptanceAuthority final {
@@ -112,9 +137,9 @@ public:
 
     static AcceptedReviewedSourceTarget accepted_target(
             PresentedReviewedSourceTarget target,
-            ConfirmationDecisionOrigin confirmation_origin) {
+            ExplicitConfirmationAcceptance confirmation) {
         return AcceptedReviewedSourceTarget(
-                std::move(target), confirmation_origin);
+                std::move(target), std::move(confirmation));
     }
 
     static ReviewedSourceCompatibilityBuildWithoutReview compatibility(
@@ -125,109 +150,207 @@ public:
     }
 };
 
+struct ReviewedSourceVerifiedLifecycleTarget::State {
+    ReviewedSourceReviewRequirement          requirement;
+    ReviewedSourceIntegrationLifecycle       lifecycle;
+    ReviewedSourceVerifiedMaterializedReview verified_review;
+    ReviewedSourceReviewReadiness            readiness;
+};
+
+struct PresentedReviewedSourceTarget::State {
+    ReviewedSourceVerifiedLifecycleTarget target;
+};
+
+struct AcceptedReviewedSourceTarget::State {
+    PresentedReviewedSourceTarget    target;
+    ExplicitConfirmationAcceptance confirmation;
+};
+
 ReviewedSourceVerifiedLifecycleTarget::
         ReviewedSourceVerifiedLifecycleTarget(
                 ReviewedSourceReviewRequirement requirement,
                 ReviewedSourceIntegrationLifecycle lifecycle,
                 ReviewedSourceVerifiedMaterializedReview verified_review,
-                ReviewedSourceReviewReadiness readiness) noexcept
-    : requirement_(std::move(requirement)), lifecycle_(std::move(lifecycle)),
-      verified_review_(std::move(verified_review)), readiness_(readiness) {}
+                ReviewedSourceReviewReadiness readiness)
+    : state_(std::make_unique<State>(State{
+              std::move(requirement), std::move(lifecycle),
+              std::move(verified_review), readiness})) {}
+
+ReviewedSourceVerifiedLifecycleTarget::
+        ReviewedSourceVerifiedLifecycleTarget(
+                ReviewedSourceVerifiedLifecycleTarget&& other) noexcept =
+                default;
+
+ReviewedSourceVerifiedLifecycleTarget&
+ReviewedSourceVerifiedLifecycleTarget::operator=(
+        ReviewedSourceVerifiedLifecycleTarget&& other) noexcept = default;
+
+ReviewedSourceVerifiedLifecycleTarget::~ReviewedSourceVerifiedLifecycleTarget() =
+        default;
+
+bool ReviewedSourceVerifiedLifecycleTarget::valid() const noexcept {
+    return state_ != nullptr;
+}
+
+const ReviewedSourceVerifiedLifecycleTarget::State&
+ReviewedSourceVerifiedLifecycleTarget::require_state() const {
+    if(!state_) {
+        throw std::logic_error(
+                "A moved-from verified reviewed source capability has no authority.");
+    }
+    return *state_;
+}
 
 const AurReviewedSourceReviewIdentity&
-ReviewedSourceVerifiedLifecycleTarget::identity() const noexcept {
-    return requirement_.identity();
+ReviewedSourceVerifiedLifecycleTarget::identity() const {
+    return require_state().requirement.identity();
 }
 
 const ReviewedSourceIntegrationLifecycle&
-ReviewedSourceVerifiedLifecycleTarget::lifecycle() const noexcept {
-    return lifecycle_;
+ReviewedSourceVerifiedLifecycleTarget::lifecycle() const {
+    return require_state().lifecycle;
 }
 
 const ReviewedSourceVerifiedMaterializedReview&
-ReviewedSourceVerifiedLifecycleTarget::verified_review() const noexcept {
-    return verified_review_;
+ReviewedSourceVerifiedLifecycleTarget::verified_review() const {
+    return require_state().verified_review;
 }
 
 ReviewedSourceReviewReadiness
-ReviewedSourceVerifiedLifecycleTarget::readiness() const noexcept {
-    return readiness_;
+ReviewedSourceVerifiedLifecycleTarget::readiness() const {
+    return require_state().readiness;
 }
 
 const ReviewedSourceExpectedStateObservation&
-ReviewedSourceVerifiedLifecycleTarget::expected_state_observation()
-        const noexcept {
-    return requirement_.expected_state_observation();
+ReviewedSourceVerifiedLifecycleTarget::expected_state_observation() const {
+    return require_state().requirement.expected_state_observation();
 }
 
 PresentedReviewedSourceTarget::PresentedReviewedSourceTarget(
-        ReviewedSourceVerifiedLifecycleTarget target) noexcept
-    : target_(std::move(target)) {}
+        ReviewedSourceVerifiedLifecycleTarget target) {
+    if(!target.valid()) {
+        throw std::logic_error(
+                "Cannot present an invalid reviewed source capability.");
+    }
+    state_ = std::make_unique<State>(State{std::move(target)});
+}
+
+PresentedReviewedSourceTarget::PresentedReviewedSourceTarget(
+        PresentedReviewedSourceTarget&& other) noexcept = default;
+
+PresentedReviewedSourceTarget& PresentedReviewedSourceTarget::operator=(
+        PresentedReviewedSourceTarget&& other) noexcept = default;
+
+PresentedReviewedSourceTarget::~PresentedReviewedSourceTarget() = default;
+
+bool PresentedReviewedSourceTarget::valid() const noexcept {
+    return state_ != nullptr;
+}
+
+const PresentedReviewedSourceTarget::State&
+PresentedReviewedSourceTarget::require_state() const {
+    if(!state_) {
+        throw std::logic_error(
+                "A moved-from presented reviewed source capability has no authority.");
+    }
+    return *state_;
+}
 
 const AurReviewedSourceReviewIdentity&
-PresentedReviewedSourceTarget::identity() const noexcept {
-    return target_.identity();
+PresentedReviewedSourceTarget::identity() const {
+    return require_state().target.identity();
 }
 
 const ReviewedSourceIntegrationLifecycle&
-PresentedReviewedSourceTarget::lifecycle() const noexcept {
-    return target_.lifecycle();
+PresentedReviewedSourceTarget::lifecycle() const {
+    return require_state().target.lifecycle();
 }
 
 const ReviewedSourceVerifiedMaterializedReview&
-PresentedReviewedSourceTarget::verified_review() const noexcept {
-    return target_.verified_review();
+PresentedReviewedSourceTarget::verified_review() const {
+    return require_state().target.verified_review();
 }
 
 ReviewedSourceReviewReadiness
-PresentedReviewedSourceTarget::readiness() const noexcept {
-    return target_.readiness();
+PresentedReviewedSourceTarget::readiness() const {
+    return require_state().target.readiness();
 }
 
 const ReviewedSourceExpectedStateObservation&
-PresentedReviewedSourceTarget::expected_state_observation() const noexcept {
-    return target_.expected_state_observation();
+PresentedReviewedSourceTarget::expected_state_observation() const {
+    return require_state().target.expected_state_observation();
 }
 
 AcceptedReviewedSourceTarget::AcceptedReviewedSourceTarget(
         PresentedReviewedSourceTarget target,
-        ConfirmationDecisionOrigin confirmation_origin) noexcept
-    : target_(std::move(target)), confirmation_origin_(confirmation_origin) {}
+        ExplicitConfirmationAcceptance confirmation) {
+    if(!target.valid() || !confirmation.valid()) {
+        throw std::logic_error(
+                "Cannot accept an invalid reviewed source capability.");
+    }
+    state_ = std::make_unique<State>(
+            State{std::move(target), std::move(confirmation)});
+}
+
+AcceptedReviewedSourceTarget::AcceptedReviewedSourceTarget(
+        AcceptedReviewedSourceTarget&& other) noexcept = default;
+
+AcceptedReviewedSourceTarget& AcceptedReviewedSourceTarget::operator=(
+        AcceptedReviewedSourceTarget&& other) noexcept = default;
+
+AcceptedReviewedSourceTarget::~AcceptedReviewedSourceTarget() = default;
+
+bool AcceptedReviewedSourceTarget::valid() const noexcept {
+    return state_ != nullptr;
+}
+
+const AcceptedReviewedSourceTarget::State&
+AcceptedReviewedSourceTarget::require_state() const {
+    if(!state_) {
+        throw std::logic_error(
+                "A moved-from accepted reviewed source capability has no authority.");
+    }
+    return *state_;
+}
 
 const AurReviewedSourceReviewIdentity&
-AcceptedReviewedSourceTarget::identity() const noexcept {
-    return target_.identity();
+AcceptedReviewedSourceTarget::identity() const {
+    return require_state().target.identity();
 }
 
 const SourceRevisionIdentity&
-AcceptedReviewedSourceTarget::reviewed_upstream_base_revision()
-        const noexcept {
+AcceptedReviewedSourceTarget::reviewed_upstream_base_revision() const {
     return identity().target_revision();
 }
 
 const ReviewedSourceIntegrationLifecycle&
-AcceptedReviewedSourceTarget::lifecycle() const noexcept {
-    return target_.lifecycle();
+AcceptedReviewedSourceTarget::lifecycle() const {
+    return require_state().target.lifecycle();
 }
 
 const ReviewedSourceVerifiedMaterializedReview&
-AcceptedReviewedSourceTarget::verified_review() const noexcept {
-    return target_.verified_review();
+AcceptedReviewedSourceTarget::verified_review() const {
+    return require_state().target.verified_review();
 }
 
 ReviewedSourceReviewReadiness
-AcceptedReviewedSourceTarget::readiness() const noexcept {
-    return target_.readiness();
+AcceptedReviewedSourceTarget::readiness() const {
+    return require_state().target.readiness();
 }
 
 const ReviewedSourceExpectedStateObservation&
-AcceptedReviewedSourceTarget::expected_state_observation() const noexcept {
-    return target_.expected_state_observation();
+AcceptedReviewedSourceTarget::expected_state_observation() const {
+    return require_state().target.expected_state_observation();
 }
 
 ConfirmationDecisionOrigin
-AcceptedReviewedSourceTarget::confirmation_origin() const noexcept {
-    return confirmation_origin_;
+AcceptedReviewedSourceTarget::confirmation_origin() const {
+    const State& state = require_state();
+    if(!state.confirmation.valid()) {
+        throw std::logic_error(
+                "Accepted reviewed source lost explicit confirmation provenance.");
+    }
+    return ConfirmationDecisionOrigin::ExplicitToken;
 }
 
 ReviewedSourceCompatibilityBuildWithoutReview::
@@ -248,12 +371,19 @@ ReviewedSourceCompatibilityBuildWithoutReview::reason() const noexcept {
 
 ReviewedSourceVerifiedLifecycleResult bind_reviewed_source_verified_review(
         ReviewedSourceReviewRequirement requirement,
-        AurReviewedSourceReviewIdentity verified_identity,
-        ReviewedSourceVerifiedMaterializedReview verified_review) {
+        TrustedAurReviewedSourceReview trusted_review) {
+    if(!trusted_review.valid()) {
+        return ReviewedSourceOperationStop::make(
+                ReviewedSourceOperationStopReason::InvalidCapability);
+    }
+    const AurReviewedSourceReviewIdentity& verified_identity =
+            trusted_review.identity();
     if(requirement.identity() != verified_identity) {
         return identity_mismatch(requirement.identity(), verified_identity);
     }
 
+    ReviewedSourceVerifiedMaterializedReview verified_review =
+            trusted_review.verified_review();
     const ReviewedSourceMaterializedReview& materialized =
             verified_review.review();
     const SourceRevisionIdentity& observed_target =
@@ -339,6 +469,10 @@ ReviewedSourceVerifiedLifecycleResult bind_reviewed_source_verified_review(
 PresentedReviewedSourceTargetResult present_reviewed_source_target(
         ReviewedSourceVerifiedLifecycleTarget target,
         std::ostream& output) {
+    if(!target.valid()) {
+        return ReviewedSourceOperationStop::make(
+                ReviewedSourceOperationStopReason::InvalidCapability);
+    }
     ReviewedSourcePresentationResult rendered =
             render_reviewed_source_presentation(target.verified_review());
     const auto* presentation =
@@ -360,7 +494,11 @@ PresentedReviewedSourceTargetResult present_reviewed_source_target(
                 presentation->text.data(),
                 static_cast<std::streamsize>(presentation->text.size()));
         output.flush();
-    } catch(const std::ios_base::failure&) {
+    } catch(const std::bad_alloc&) {
+        // Resource exhaustion remains the process/CLI exception boundary's
+        // responsibility; ordinary/custom stream failures are normalized here.
+        throw;
+    } catch(...) {
         return ReviewedSourceOperationStop::make(
                 ReviewedSourceOperationStopReason::
                         PresentationOutputFailure);
@@ -376,26 +514,33 @@ PresentedReviewedSourceTargetResult present_reviewed_source_target(
 
 ReviewedSourceAcceptanceDisposition decide_reviewed_source_acceptance(
         PresentedReviewedSourceTarget target,
-        const ConfirmationResult& confirmation) {
-    switch(target.readiness()) {
-    case ReviewedSourceReviewReadiness::Complete:
-        break;
-    case ReviewedSourceReviewReadiness::ManualInspectionRequired:
-        return ReviewedSourceOperationStop::make(
-                ReviewedSourceOperationStopReason::
-                        ManualInspectionRequired);
-    case ReviewedSourceReviewReadiness::SensitiveSourceUnrenderable:
-        return ReviewedSourceOperationStop::make(
-                ReviewedSourceOperationStopReason::
-                        SensitiveSourceUnrenderable);
+        ExplicitConfirmationResult confirmation) {
+    if(auto stop = acceptance_precondition_stop(target)) {
+        return std::move(*stop);
     }
 
-    if(const auto* accepted = std::get_if<ConfirmationAccepted>(
+    if(auto* accepted = std::get_if<ExplicitConfirmationAcceptance>(
                &confirmation)) {
-        switch(accepted->origin) {
+        if(!accepted->valid()) {
+            return ReviewedSourceOperationStop::make(
+                    ReviewedSourceOperationStopReason::InvalidCapability);
+        }
+        return ReviewedSourceAcceptanceAuthority::accepted_target(
+                std::move(target), std::move(*accepted));
+    }
+    if(const auto* declined = std::get_if<ConfirmationDeclined>(
+               &confirmation)) {
+        switch(declined->origin) {
         case ConfirmationDecisionOrigin::ExplicitToken:
-            return ReviewedSourceAcceptanceAuthority::accepted_target(
-                    std::move(target), accepted->origin);
+            return ReviewedSourceAcceptanceAuthority::compatibility(
+                    target.identity(),
+                    ReviewedSourceCompatibilityBuildReason::
+                            ExplicitReviewDecline);
+        case ConfirmationDecisionOrigin::Default:
+            return ReviewedSourceAcceptanceAuthority::compatibility(
+                    target.identity(),
+                    ReviewedSourceCompatibilityBuildReason::
+                            DefaultReviewDecline);
         case ConfirmationDecisionOrigin::NoConfirm:
             return ReviewedSourceAcceptanceAuthority::compatibility(
                     target.identity(),
@@ -405,6 +550,55 @@ ReviewedSourceAcceptanceDisposition decide_reviewed_source_acceptance(
                     target.identity(),
                     ReviewedSourceCompatibilityBuildReason::
                             NonInteractiveInput);
+        }
+    }
+    if(const auto* cancelled = std::get_if<ConfirmationCancelled>(
+               &confirmation)) {
+        return ReviewedSourceOperationStop::make(
+                cancelled->reason ==
+                                ConfirmationCancellationReason::EndOfInput
+                        ? ReviewedSourceOperationStopReason::EndOfInput
+                        : ReviewedSourceOperationStopReason::
+                                  ExplicitCancellation);
+    }
+    if(const auto* unavailable = std::get_if<ConfirmationUnavailable>(
+               &confirmation)) {
+        return ReviewedSourceAcceptanceAuthority::compatibility(
+                target.identity(),
+                unavailable->reason ==
+                                ConfirmationUnavailableReason::NoConfirm
+                        ? ReviewedSourceCompatibilityBuildReason::NoConfirm
+                        : ReviewedSourceCompatibilityBuildReason::
+                                  NonInteractiveInput);
+    }
+    if(std::holds_alternative<ConfirmationInputFailure>(confirmation)) {
+        return ReviewedSourceOperationStop::make(
+                ReviewedSourceOperationStopReason::InputFailure);
+    }
+    return ReviewedSourceOperationStop::make(
+            ReviewedSourceOperationStopReason::NonExplicitAcceptance);
+}
+
+ReviewedSourceAcceptanceDisposition decide_reviewed_source_unsealed_confirmation(
+        PresentedReviewedSourceTarget target,
+        const ConfirmationResult& confirmation) {
+    if(auto stop = acceptance_precondition_stop(target)) {
+        return std::move(*stop);
+    }
+
+    if(const auto* accepted = std::get_if<ConfirmationAccepted>(
+               &confirmation)) {
+        switch(accepted->origin) {
+        case ConfirmationDecisionOrigin::NoConfirm:
+            return ReviewedSourceAcceptanceAuthority::compatibility(
+                    target.identity(),
+                    ReviewedSourceCompatibilityBuildReason::NoConfirm);
+        case ConfirmationDecisionOrigin::NonInteractiveDefault:
+            return ReviewedSourceAcceptanceAuthority::compatibility(
+                    target.identity(),
+                    ReviewedSourceCompatibilityBuildReason::
+                            NonInteractiveInput);
+        case ConfirmationDecisionOrigin::ExplicitToken:
         case ConfirmationDecisionOrigin::Default:
             return ReviewedSourceOperationStop::make(
                     ReviewedSourceOperationStopReason::

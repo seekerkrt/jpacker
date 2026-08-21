@@ -169,6 +169,7 @@ enum class ReviewedSourceOperationStopReason {
     ManualInspectionRequired,
     SensitiveSourceUnrenderable,
     NonExplicitAcceptance,
+    InvalidCapability,
     ExplicitCancellation,
     EndOfInput,
     InputFailure,

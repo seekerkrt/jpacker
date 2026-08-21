@@ -3,8 +3,10 @@
 #include "interactive_confirmation.hpp"
 #include "reviewed_source_lifecycle.hpp"
 #include "reviewed_source_presentation.hpp"
+#include "reviewed_source_trusted_review.hpp"
 
 #include <iosfwd>
+#include <memory>
 #include <variant>
 
 // POLICY(#411): Slice 4A acceptance acknowledges only the reviewed upstream
@@ -21,22 +23,23 @@ public:
     ReviewedSourceVerifiedLifecycleTarget(
             const ReviewedSourceVerifiedLifecycleTarget&) = delete;
     ReviewedSourceVerifiedLifecycleTarget(
-            ReviewedSourceVerifiedLifecycleTarget&&) noexcept = default;
+            ReviewedSourceVerifiedLifecycleTarget&& other) noexcept;
     ReviewedSourceVerifiedLifecycleTarget& operator=(
             const ReviewedSourceVerifiedLifecycleTarget&) = delete;
     ReviewedSourceVerifiedLifecycleTarget& operator=(
-            ReviewedSourceVerifiedLifecycleTarget&&) noexcept = default;
-    ~ReviewedSourceVerifiedLifecycleTarget() = default;
+            ReviewedSourceVerifiedLifecycleTarget&& other) noexcept;
+    ~ReviewedSourceVerifiedLifecycleTarget();
 
+    [[nodiscard]] bool valid() const noexcept;
     [[nodiscard]] const AurReviewedSourceReviewIdentity& identity()
-            const noexcept;
+            const;
     [[nodiscard]] const ReviewedSourceIntegrationLifecycle& lifecycle()
-            const noexcept;
+            const;
     [[nodiscard]] const ReviewedSourceVerifiedMaterializedReview&
-    verified_review() const noexcept;
-    [[nodiscard]] ReviewedSourceReviewReadiness readiness() const noexcept;
+    verified_review() const;
+    [[nodiscard]] ReviewedSourceReviewReadiness readiness() const;
     [[nodiscard]] const ReviewedSourceExpectedStateObservation&
-    expected_state_observation() const noexcept;
+    expected_state_observation() const;
 
 private:
     friend class ReviewedSourceAcceptanceAuthority;
@@ -45,12 +48,13 @@ private:
             ReviewedSourceReviewRequirement requirement,
             ReviewedSourceIntegrationLifecycle lifecycle,
             ReviewedSourceVerifiedMaterializedReview verified_review,
-            ReviewedSourceReviewReadiness readiness) noexcept;
+            ReviewedSourceReviewReadiness readiness);
 
-    ReviewedSourceReviewRequirement          requirement_;
-    ReviewedSourceIntegrationLifecycle       lifecycle_;
-    ReviewedSourceVerifiedMaterializedReview verified_review_;
-    ReviewedSourceReviewReadiness            readiness_;
+    struct State;
+
+    [[nodiscard]] const State& require_state() const;
+
+    std::unique_ptr<State> state_;
 };
 
 // This capability exists only after the complete bounded 3B rendering was
@@ -62,30 +66,35 @@ public:
     PresentedReviewedSourceTarget(
             const PresentedReviewedSourceTarget&) = delete;
     PresentedReviewedSourceTarget(
-            PresentedReviewedSourceTarget&&) noexcept = default;
+            PresentedReviewedSourceTarget&& other) noexcept;
     PresentedReviewedSourceTarget& operator=(
             const PresentedReviewedSourceTarget&) = delete;
     PresentedReviewedSourceTarget& operator=(
-            PresentedReviewedSourceTarget&&) noexcept = default;
-    ~PresentedReviewedSourceTarget() = default;
+            PresentedReviewedSourceTarget&& other) noexcept;
+    ~PresentedReviewedSourceTarget();
 
+    [[nodiscard]] bool valid() const noexcept;
     [[nodiscard]] const AurReviewedSourceReviewIdentity& identity()
-            const noexcept;
+            const;
     [[nodiscard]] const ReviewedSourceIntegrationLifecycle& lifecycle()
-            const noexcept;
+            const;
     [[nodiscard]] const ReviewedSourceVerifiedMaterializedReview&
-    verified_review() const noexcept;
-    [[nodiscard]] ReviewedSourceReviewReadiness readiness() const noexcept;
+    verified_review() const;
+    [[nodiscard]] ReviewedSourceReviewReadiness readiness() const;
     [[nodiscard]] const ReviewedSourceExpectedStateObservation&
-    expected_state_observation() const noexcept;
+    expected_state_observation() const;
 
 private:
     friend class ReviewedSourceAcceptanceAuthority;
 
     explicit PresentedReviewedSourceTarget(
-            ReviewedSourceVerifiedLifecycleTarget target) noexcept;
+            ReviewedSourceVerifiedLifecycleTarget target);
 
-    ReviewedSourceVerifiedLifecycleTarget target_;
+    struct State;
+
+    [[nodiscard]] const State& require_state() const;
+
+    std::unique_ptr<State> state_;
 };
 
 class AcceptedReviewedSourceTarget final {
@@ -94,36 +103,40 @@ public:
     AcceptedReviewedSourceTarget(
             const AcceptedReviewedSourceTarget&) = delete;
     AcceptedReviewedSourceTarget(
-            AcceptedReviewedSourceTarget&&) noexcept = default;
+            AcceptedReviewedSourceTarget&& other) noexcept;
     AcceptedReviewedSourceTarget& operator=(
             const AcceptedReviewedSourceTarget&) = delete;
     AcceptedReviewedSourceTarget& operator=(
-            AcceptedReviewedSourceTarget&&) noexcept = default;
-    ~AcceptedReviewedSourceTarget() = default;
+            AcceptedReviewedSourceTarget&& other) noexcept;
+    ~AcceptedReviewedSourceTarget();
 
+    [[nodiscard]] bool valid() const noexcept;
     [[nodiscard]] const AurReviewedSourceReviewIdentity& identity()
-            const noexcept;
+            const;
     [[nodiscard]] const SourceRevisionIdentity&
-    reviewed_upstream_base_revision() const noexcept;
+    reviewed_upstream_base_revision() const;
     [[nodiscard]] const ReviewedSourceIntegrationLifecycle& lifecycle()
-            const noexcept;
+            const;
     [[nodiscard]] const ReviewedSourceVerifiedMaterializedReview&
-    verified_review() const noexcept;
-    [[nodiscard]] ReviewedSourceReviewReadiness readiness() const noexcept;
+    verified_review() const;
+    [[nodiscard]] ReviewedSourceReviewReadiness readiness() const;
     [[nodiscard]] const ReviewedSourceExpectedStateObservation&
-    expected_state_observation() const noexcept;
+    expected_state_observation() const;
     [[nodiscard]] ConfirmationDecisionOrigin confirmation_origin()
-            const noexcept;
+            const;
 
 private:
     friend class ReviewedSourceAcceptanceAuthority;
 
     AcceptedReviewedSourceTarget(
             PresentedReviewedSourceTarget target,
-            ConfirmationDecisionOrigin confirmation_origin) noexcept;
+            ExplicitConfirmationAcceptance confirmation);
 
-    PresentedReviewedSourceTarget target_;
-    ConfirmationDecisionOrigin    confirmation_origin_;
+    struct State;
+
+    [[nodiscard]] const State& require_state() const;
+
+    std::unique_ptr<State> state_;
 };
 
 enum class ReviewedSourceCompatibilityBuildReason {
@@ -189,8 +202,7 @@ using ReviewedSourceAcceptanceDisposition = std::variant<
 [[nodiscard]] ReviewedSourceVerifiedLifecycleResult
 bind_reviewed_source_verified_review(
         ReviewedSourceReviewRequirement requirement,
-        AurReviewedSourceReviewIdentity verified_identity,
-        ReviewedSourceVerifiedMaterializedReview verified_review);
+        TrustedAurReviewedSourceReview trusted_review);
 
 [[nodiscard]] PresentedReviewedSourceTargetResult
 present_reviewed_source_target(
@@ -199,6 +211,14 @@ present_reviewed_source_target(
 
 [[nodiscard]] ReviewedSourceAcceptanceDisposition
 decide_reviewed_source_acceptance(
+        PresentedReviewedSourceTarget target,
+        ExplicitConfirmationResult confirmation);
+
+// Generic ConfirmationResult is deliberately non-authoritative. This overload
+// preserves typed decline/skip/stop behavior but never accepts even a publicly
+// constructed or relabelled ExplicitToken arm.
+[[nodiscard]] ReviewedSourceAcceptanceDisposition
+decide_reviewed_source_unsealed_confirmation(
         PresentedReviewedSourceTarget target,
         const ConfirmationResult& confirmation);
 

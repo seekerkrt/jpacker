@@ -1,5 +1,6 @@
 #include "reviewed_source_acceptance.hpp"
 
+#include <algorithm>
 #include <exception>
 #include <iostream>
 #include <sstream>
@@ -17,13 +18,19 @@ static_assert(!std::is_default_constructible_v<
               ReviewedSourceVerifiedLifecycleTarget>);
 static_assert(!std::is_copy_constructible_v<
               ReviewedSourceVerifiedLifecycleTarget>);
+static_assert(std::is_move_constructible_v<
+              ReviewedSourceVerifiedLifecycleTarget>);
 static_assert(!std::is_default_constructible_v<
               PresentedReviewedSourceTarget>);
 static_assert(!std::is_copy_constructible_v<
+              PresentedReviewedSourceTarget>);
+static_assert(std::is_move_constructible_v<
               PresentedReviewedSourceTarget>);
 static_assert(!std::is_default_constructible_v<
               AcceptedReviewedSourceTarget>);
 static_assert(!std::is_copy_constructible_v<
+              AcceptedReviewedSourceTarget>);
+static_assert(std::is_move_constructible_v<
               AcceptedReviewedSourceTarget>);
 static_assert(!std::is_copy_assignable_v<
               AcceptedReviewedSourceTarget>);
@@ -31,6 +38,10 @@ static_assert(!std::is_constructible_v<
               AcceptedReviewedSourceTarget,
               PresentedReviewedSourceTarget,
               ConfirmationDecisionOrigin>);
+static_assert(!std::is_constructible_v<
+              AcceptedReviewedSourceTarget,
+              PresentedReviewedSourceTarget,
+              ExplicitConfirmationAcceptance>);
 static_assert(!std::is_constructible_v<
               PresentedReviewedSourceTarget,
               ReviewedSourceVerifiedLifecycleTarget>);
@@ -41,6 +52,22 @@ static_assert(!std::is_default_constructible_v<
               ReviewedSourceCompatibilityBuildWithoutReview>);
 static_assert(!std::is_copy_constructible_v<
               ReviewedSourceCompatibilityBuildWithoutReview>);
+static_assert(!std::is_default_constructible_v<
+              TrustedAurReviewedSourceReview>);
+static_assert(!std::is_copy_constructible_v<
+              TrustedAurReviewedSourceReview>);
+static_assert(!std::is_constructible_v<
+              TrustedAurReviewedSourceReview,
+              AurReviewedSourceReviewIdentity,
+              ReviewedSourceVerifiedMaterializedReview>);
+static_assert(!std::is_invocable_v<
+              decltype(decide_reviewed_source_acceptance),
+              PresentedReviewedSourceTarget,
+              ConfirmationResult>);
+static_assert(std::is_invocable_v<
+              decltype(decide_reviewed_source_unsealed_confirmation),
+              PresentedReviewedSourceTarget,
+              const ConfirmationResult&>);
 
 template<typename T>
 concept HasExpectedStateObservation = requires(const T& value) {
@@ -82,6 +109,16 @@ constexpr std::string_view SHA256_B =
 
 void require(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
+}
+
+template<typename Function>
+void expect_invalid_argument(Function&& function) {
+    try {
+        std::forward<Function>(function)();
+    } catch(const std::invalid_argument&) {
+        return;
+    }
+    throw std::runtime_error("Expected std::invalid_argument.");
 }
 
 template<typename Arm, typename Variant>
@@ -254,9 +291,12 @@ ReviewedSourceVerifiedLifecycleTarget bind_requirement(
         ReviewedSourceReviewRequirement requirement,
         const AurReviewedSourceReviewIdentity& identity,
         ReviewedSourceVerifiedMaterializedReview review) {
+    TrustedAurReviewedSourceReview trusted =
+            seal_trusted_aur_reviewed_source_review_for_test(
+                    identity, std::move(review));
     ReviewedSourceVerifiedLifecycleResult bound =
             bind_reviewed_source_verified_review(
-                    std::move(requirement), identity, std::move(review));
+                    std::move(requirement), std::move(trusted));
     return take_arm<ReviewedSourceVerifiedLifecycleTarget>(
             bound, "Verified review did not bind to lifecycle.");
 }
@@ -280,11 +320,12 @@ PresentedReviewedSourceTarget present_complete_target(
             presented, "Complete review presentation did not succeed.");
 }
 
-ConfirmationResult explicit_confirmation(std::string_view token) {
-    const ConfirmationInputParseResult parsed = parse_confirmation_input(
-            token, ConfirmationDefault::None);
-    if(const auto* accepted = std::get_if<ConfirmationAccepted>(&parsed)) {
-        return *accepted;
+ExplicitConfirmationResult explicit_confirmation(std::string_view token) {
+    ExplicitConfirmationInputParseResult parsed =
+            parse_explicit_confirmation_input(token);
+    if(auto* accepted =
+               std::get_if<ExplicitConfirmationAcceptance>(&parsed)) {
+        return std::move(*accepted);
     }
     throw std::runtime_error("Explicit yes token was not accepted by parser.");
 }
@@ -297,6 +338,45 @@ protected:
 
     int_type overflow(int_type) override {
         return traits_type::eof();
+    }
+};
+
+class PartialOutputBuffer final : public std::streambuf {
+public:
+    [[nodiscard]] std::size_t bytes_written() const noexcept {
+        return bytes_written_;
+    }
+
+protected:
+    std::streamsize xsputn(const char*, std::streamsize count) override {
+        const std::streamsize written = std::min<std::streamsize>(count, 7);
+        bytes_written_ += static_cast<std::size_t>(written);
+        return written;
+    }
+
+    int_type overflow(int_type) override {
+        return traits_type::eof();
+    }
+
+private:
+    std::size_t bytes_written_ = 0;
+};
+
+class FlushFailureBuffer final : public std::streambuf {
+protected:
+    std::streamsize xsputn(const char*, std::streamsize count) override {
+        return count;
+    }
+
+    int sync() override {
+        return -1;
+    }
+};
+
+class ThrowingOutputBuffer final : public std::streambuf {
+protected:
+    std::streamsize xsputn(const char*, std::streamsize) override {
+        throw std::runtime_error("injected streambuf write failure");
     }
 };
 
@@ -364,10 +444,12 @@ void test_identity_and_revision_rebinding_is_rejected() {
             AurReviewedSourceReviewIdentity observed,
             ReviewedSourceOperationStopReason reason,
             ReviewedSourceVerifiedMaterializedReview review) {
+        TrustedAurReviewedSourceReview trusted =
+                seal_trusted_aur_reviewed_source_review_for_test(
+                        std::move(observed), std::move(review));
         ReviewedSourceVerifiedLifecycleResult bound =
                 bind_reviewed_source_verified_review(
-                        missing_requirement(expected), std::move(observed),
-                        std::move(review));
+                        missing_requirement(expected), std::move(trusted));
         const auto& stopped = require_arm<ReviewedSourceOperationStop>(
                 bound, "Mismatched review identity was rebound.");
         require(stopped.reason() == reason,
@@ -376,19 +458,17 @@ void test_identity_and_revision_rebinding_is_rejected() {
 
     const AurReviewedSourceReviewIdentity wrong_package = review_identity(
             std::string(SHA1_A), "other-base",
-            "https://aur.archlinux.org/example-base.git");
+            "https://aur.archlinux.org/other-base.git");
     expect_stop(
             wrong_package,
             ReviewedSourceOperationStopReason::PackageBaseMismatch,
             complete_initial_review(wrong_package));
 
-    const AurReviewedSourceReviewIdentity wrong_source = review_identity(
-            std::string(SHA1_A), "example-base",
-            "https://mirror.invalid/example-base.git");
-    expect_stop(
-            wrong_source,
-            ReviewedSourceOperationStopReason::SourceIdentityMismatch,
-            complete_initial_review(wrong_source));
+    expect_invalid_argument([] {
+        static_cast<void>(review_identity(
+                std::string(SHA1_A), "example-base",
+                "https://mirror.invalid/example-base.git"));
+    });
 
     const AurReviewedSourceReviewIdentity wrong_revision =
             review_identity(std::string(SHA1_B));
@@ -406,8 +486,10 @@ void test_identity_and_revision_rebinding_is_rejected() {
 
     ReviewedSourceVerifiedLifecycleResult wrong_verified_revision =
             bind_reviewed_source_verified_review(
-                    missing_requirement(expected), expected,
-                    complete_initial_review(wrong_revision));
+                    missing_requirement(expected),
+                    seal_trusted_aur_reviewed_source_review_for_test(
+                            expected,
+                            complete_initial_review(wrong_revision)));
     require(require_arm<ReviewedSourceOperationStop>(
                     wrong_verified_revision,
                     "Wrong verified exact OID was accepted.")
@@ -417,8 +499,10 @@ void test_identity_and_revision_rebinding_is_rejected() {
 
     ReviewedSourceVerifiedLifecycleResult wrong_verified_format =
             bind_reviewed_source_verified_review(
-                    missing_requirement(expected), expected,
-                    complete_initial_review(wrong_format));
+                    missing_requirement(expected),
+                    seal_trusted_aur_reviewed_source_review_for_test(
+                            expected,
+                            complete_initial_review(wrong_format)));
     require(require_arm<ReviewedSourceOperationStop>(
                     wrong_verified_format,
                     "Wrong verified object format was accepted.")
@@ -467,6 +551,47 @@ void test_presentation_completion_is_required_and_all_or_nothing() {
                     ReviewedSourceOperationStopReason::
                             PresentationOutputFailure,
             "Throwing presentation output produced wrong stop reason.");
+
+    PartialOutputBuffer partial_buffer;
+    std::ostream partial_output(&partial_buffer);
+    PresentedReviewedSourceTargetResult partial_failure =
+            present_reviewed_source_target(
+                    complete_bound_target(identity), partial_output);
+    require(partial_buffer.bytes_written() > 0 &&
+                    require_arm<ReviewedSourceOperationStop>(
+                            partial_failure,
+                            "Partial output produced Presented capability.")
+                                    .reason() ==
+                            ReviewedSourceOperationStopReason::
+                                    PresentationOutputFailure,
+            "Partial output did not fail closed as output failure.");
+
+    FlushFailureBuffer flush_buffer;
+    std::ostream flush_output(&flush_buffer);
+    PresentedReviewedSourceTargetResult flush_failure =
+            present_reviewed_source_target(
+                    complete_bound_target(identity), flush_output);
+    require(require_arm<ReviewedSourceOperationStop>(
+                    flush_failure,
+                    "Flush failure produced Presented capability.")
+                            .reason() ==
+                    ReviewedSourceOperationStopReason::
+                            PresentationOutputFailure,
+            "Flush failure did not retain typed output failure.");
+
+    ThrowingOutputBuffer non_ios_buffer;
+    std::ostream non_ios_output(&non_ios_buffer);
+    non_ios_output.exceptions(std::ios::badbit | std::ios::failbit);
+    PresentedReviewedSourceTargetResult non_ios_failure =
+            present_reviewed_source_target(
+                    complete_bound_target(identity), non_ios_output);
+    require(require_arm<ReviewedSourceOperationStop>(
+                    non_ios_failure,
+                    "Non-ios stream exception escaped or produced Presented.")
+                            .reason() ==
+                    ReviewedSourceOperationStopReason::
+                            PresentationOutputFailure,
+            "Non-ios stream exception lost typed output failure.");
 
     ReviewedSourceVerifiedMaterializedReview inconsistent =
             seal_reviewed_source_materialized_review_for_test(
@@ -552,10 +677,79 @@ void test_only_complete_explicit_yes_creates_accepted_capability() {
             "Accepted capability did not retain exact SHA-256 identity.");
 }
 
+void test_capabilities_are_single_owner_and_one_shot() {
+    const AurReviewedSourceReviewIdentity identity = review_identity();
+    const std::string invalid_document = "schema_version = 1\n";
+    ReviewedSourceStateStoreRead exact_read;
+    ReviewedSourceVerifiedLifecycleTarget verified = bind_requirement(
+            abnormal_requirement(identity, invalid_document, &exact_read),
+            identity, complete_initial_review(identity));
+    ReviewedSourceVerifiedLifecycleTarget moved_verified(
+            std::move(verified));
+    require(!verified.valid() && moved_verified.valid(),
+            "Moving VerifiedLifecycleTarget did not transfer single ownership.");
+
+    std::ostringstream invalid_verified_output;
+    PresentedReviewedSourceTargetResult invalid_verified =
+            present_reviewed_source_target(
+                    std::move(verified), invalid_verified_output);
+    require(require_arm<ReviewedSourceOperationStop>(
+                    invalid_verified,
+                    "Moved-from VerifiedLifecycleTarget produced Presented.")
+                            .reason() ==
+                    ReviewedSourceOperationStopReason::InvalidCapability,
+            "Moved-from VerifiedLifecycleTarget did not fail closed.");
+
+    std::ostringstream output;
+    PresentedReviewedSourceTargetResult presented_result =
+            present_reviewed_source_target(
+                    std::move(moved_verified), output);
+    PresentedReviewedSourceTarget presented =
+            take_arm<PresentedReviewedSourceTarget>(
+                    presented_result,
+                    "Moved-to VerifiedLifecycleTarget did not present.");
+
+    ReviewedSourceAcceptanceDisposition first =
+            decide_reviewed_source_acceptance(
+                    std::move(presented), explicit_confirmation("yes"));
+    require(!presented.valid(),
+            "First Presented consume did not invalidate its source.");
+    ReviewedSourceAcceptanceDisposition second =
+            decide_reviewed_source_acceptance(
+                    std::move(presented), explicit_confirmation("yes"));
+    require(require_arm<ReviewedSourceOperationStop>(
+                    second,
+                    "Second Presented consume produced Accepted.")
+                            .reason() ==
+                    ReviewedSourceOperationStopReason::InvalidCapability,
+            "Second Presented consume did not fail closed.");
+
+    AcceptedReviewedSourceTarget accepted =
+            take_arm<AcceptedReviewedSourceTarget>(
+                    first, "First Presented consume did not produce Accepted.");
+    AcceptedReviewedSourceTarget moved_accepted(std::move(accepted));
+    require(!accepted.valid() && moved_accepted.valid(),
+            "Moving Accepted did not transfer single ownership.");
+    require(moved_accepted.identity() == identity &&
+                    moved_accepted.expected_state_observation().store_read() ==
+                            exact_read &&
+                    moved_accepted.expected_state_observation()
+                            .observed_record()
+                            .has_value() &&
+                    moved_accepted.expected_state_observation()
+                            .observed_record()
+                            ->raw_contents == invalid_document,
+            "Moved-to Accepted lost identity or exact CAS observation.");
+
+    AcceptedReviewedSourceTarget second_move(std::move(accepted));
+    require(!second_move.valid(),
+            "Moving an already moved-from Accepted recreated authority.");
+}
+
 void test_decline_and_compatibility_bypasses_never_accept() {
     const AurReviewedSourceReviewIdentity identity = review_identity();
     ReviewedSourceAcceptanceDisposition declined =
-            decide_reviewed_source_acceptance(
+            decide_reviewed_source_unsealed_confirmation(
                     present_complete_target(identity),
                     ConfirmationDeclined{
                             ConfirmationDecisionOrigin::ExplicitToken});
@@ -589,7 +783,7 @@ void test_decline_and_compatibility_bypasses_never_accept() {
             "Compatibility bypass reasons were flattened.");
 
     ReviewedSourceAcceptanceDisposition unavailable_no_confirm =
-            decide_reviewed_source_acceptance(
+            decide_reviewed_source_unsealed_confirmation(
                     present_complete_target(identity),
                     ConfirmationUnavailable{
                             ConfirmationUnavailableReason::NoConfirm});
@@ -601,7 +795,7 @@ void test_decline_and_compatibility_bypasses_never_accept() {
             "--noconfirm did not remain a no-state compatibility build.");
 
     ReviewedSourceAcceptanceDisposition unavailable_non_tty =
-            decide_reviewed_source_acceptance(
+            decide_reviewed_source_unsealed_confirmation(
                     present_complete_target(identity),
                     ConfirmationUnavailable{
                             ConfirmationUnavailableReason::
@@ -617,8 +811,33 @@ void test_decline_and_compatibility_bypasses_never_accept() {
 
 void test_automatic_yes_never_creates_accepted_capability() {
     const AurReviewedSourceReviewIdentity identity = review_identity();
+    ReviewedSourceAcceptanceDisposition forged_explicit =
+            decide_reviewed_source_unsealed_confirmation(
+                    present_complete_target(identity),
+                    ConfirmationAccepted{
+                            ConfirmationDecisionOrigin::ExplicitToken});
+    require(require_arm<ReviewedSourceOperationStop>(
+                    forged_explicit,
+                    "Publicly constructed ExplicitToken created Accepted.")
+                            .reason() ==
+                    ReviewedSourceOperationStopReason::NonExplicitAcceptance,
+            "Forged ExplicitToken did not fail closed.");
+
+    ConfirmationAccepted relabelled{
+            ConfirmationDecisionOrigin::NoConfirm};
+    relabelled.origin = ConfirmationDecisionOrigin::ExplicitToken;
+    ReviewedSourceAcceptanceDisposition relabelled_automatic =
+            decide_reviewed_source_unsealed_confirmation(
+                    present_complete_target(identity), relabelled);
+    require(require_arm<ReviewedSourceOperationStop>(
+                    relabelled_automatic,
+                    "Relabelled automatic yes created Accepted.")
+                            .reason() ==
+                    ReviewedSourceOperationStopReason::NonExplicitAcceptance,
+            "Relabelled automatic yes did not fail closed.");
+
     ReviewedSourceAcceptanceDisposition default_yes =
-            decide_reviewed_source_acceptance(
+            decide_reviewed_source_unsealed_confirmation(
                     present_complete_target(identity),
                     ConfirmationAccepted{
                             ConfirmationDecisionOrigin::Default});
@@ -630,7 +849,7 @@ void test_automatic_yes_never_creates_accepted_capability() {
             "Default yes did not fail closed as non-explicit acceptance.");
 
     ReviewedSourceAcceptanceDisposition no_confirm_yes =
-            decide_reviewed_source_acceptance(
+            decide_reviewed_source_unsealed_confirmation(
                     present_complete_target(identity),
                     ConfirmationAccepted{
                             ConfirmationDecisionOrigin::NoConfirm});
@@ -642,7 +861,7 @@ void test_automatic_yes_never_creates_accepted_capability() {
             "--noconfirm automatic yes gained state authority.");
 
     ReviewedSourceAcceptanceDisposition non_tty_yes =
-            decide_reviewed_source_acceptance(
+            decide_reviewed_source_unsealed_confirmation(
                     present_complete_target(identity),
                     ConfirmationAccepted{
                             ConfirmationDecisionOrigin::
@@ -673,7 +892,7 @@ void test_cancel_eof_and_input_failure_stop() {
     };
     for(const auto& test_case : cases) {
         ReviewedSourceAcceptanceDisposition disposition =
-                decide_reviewed_source_acceptance(
+                decide_reviewed_source_unsealed_confirmation(
                         present_complete_target(identity),
                         test_case.confirmation);
         require(require_arm<ReviewedSourceOperationStop>(
@@ -768,6 +987,7 @@ int main() {
         test_identity_and_revision_rebinding_is_rejected();
         test_presentation_completion_is_required_and_all_or_nothing();
         test_only_complete_explicit_yes_creates_accepted_capability();
+        test_capabilities_are_single_owner_and_one_shot();
         test_decline_and_compatibility_bypasses_never_accept();
         test_automatic_yes_never_creates_accepted_capability();
         test_cancel_eof_and_input_failure_stop();

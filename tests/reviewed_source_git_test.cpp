@@ -31,6 +31,28 @@ void require(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
 }
 
+template<typename Function>
+void expect_runtime_error(Function&& function, std::string_view message) {
+    try {
+        std::forward<Function>(function)();
+    } catch(const std::runtime_error&) {
+        return;
+    }
+    throw std::runtime_error(std::string(message));
+}
+
+AurReviewedSourceReviewIdentity aur_review_identity(
+        const std::string& package_base,
+        const std::string& remote,
+        const SourceRevisionIdentity& target) {
+    return AurReviewedSourceReviewIdentity::make(
+            PackageBaseIdentity::make(
+                    PackageSourceIdentity::aur(
+                            SourceLocationIdentity::known_git_remote(remote)),
+                    package_base),
+            target);
+}
+
 template<typename Expected, typename Variant>
 const Expected& require_arm(
         const Variant& value, std::string_view message) {
@@ -797,6 +819,66 @@ void test_sha1_content_materialization() {
             require_arm<ReviewedSourceVerifiedMaterializedReview>(
                     materialized,
                     "SHA-1 reviewed content materialization failed");
+    const AurReviewedSourceReviewIdentity review_identity =
+            aur_review_identity(
+                    "slice3a-fixture", fixture.remote_url(), target);
+    const auto trusted_materialized =
+            trusted_git_materialize_aur_reviewed_source_review(
+                    fixture.checkout(), review_identity,
+                    ReviewedSourceProjection(update));
+    const auto& trusted_review =
+            require_arm<TrustedAurReviewedSourceReview>(
+                    trusted_materialized,
+                    "SHA-1 trusted AUR review provenance was not sealed");
+    require(trusted_review.valid() &&
+                    trusted_review.identity() == review_identity &&
+                    trusted_review.verified_review() == verified_update,
+            "SHA-1 trusted review lost identity or 3B provenance");
+
+    const auto wrong_target =
+            trusted_git_materialize_aur_reviewed_source_review(
+                    fixture.checkout(),
+                    aur_review_identity(
+                            "slice3a-fixture", fixture.remote_url(), baseline),
+                    ReviewedSourceProjection(update));
+    const auto& wrong_target_failure = require_arm<TrustedGitReviewFailure>(
+            wrong_target,
+            "Wrong exact target was sealed into trusted AUR review");
+    require(wrong_target_failure.reason ==
+                            TrustedGitReviewFailureReason::
+                                    ReviewIdentityMismatch &&
+                    wrong_target_failure.stage ==
+                            TrustedGitReviewStage::TargetValidation,
+            "Wrong exact target produced the wrong trusted rejection");
+
+    const SourceRevisionIdentity wrong_format_revision =
+            SourceRevisionIdentity::git_commit(std::string(64, 'a'));
+    const auto wrong_format =
+            trusted_git_materialize_aur_reviewed_source_review(
+                    fixture.checkout(),
+                    aur_review_identity(
+                            "slice3a-fixture", fixture.remote_url(),
+                            wrong_format_revision),
+                    ReviewedSourceProjection(update));
+    require(require_arm<TrustedGitReviewFailure>(
+                    wrong_format,
+                    "Wrong object format was sealed into trusted AUR review")
+                            .reason ==
+                    TrustedGitReviewFailureReason::ObjectFormatMismatch,
+            "Wrong object format produced the wrong trusted rejection");
+
+    expect_runtime_error(
+            [&] {
+                static_cast<void>(
+                        trusted_git_materialize_aur_reviewed_source_review(
+                                fixture.checkout(),
+                                aur_review_identity(
+                                        "other-base",
+                                        "https://aur.archlinux.org/other-base.git",
+                                        target),
+                                ReviewedSourceProjection(update)));
+            },
+            "Same-OID cross-PackageBase/remote review was sealed");
     const auto& materialized_update =
             require_arm<ReviewedSourceMaterializedUpdateReview>(
                     verified_update.review(),
@@ -1165,6 +1247,23 @@ void test_sha256_projection_and_strict_config() {
                 require_arm<ReviewedSourceVerifiedMaterializedReview>(
                         initial_materialized,
                         "SHA-256 initial content materialization failed");
+        const AurReviewedSourceReviewIdentity review_identity =
+                aur_review_identity(
+                        "slice3a-fixture", fixture.remote_url(), target);
+        const auto trusted_initial =
+                trusted_git_materialize_aur_reviewed_source_review(
+                        fixture.checkout(), review_identity,
+                        ReviewedSourceProjection(initial));
+        const auto& trusted_review =
+                require_arm<TrustedAurReviewedSourceReview>(
+                        trusted_initial,
+                        "SHA-256 trusted AUR review provenance was not sealed");
+        require(trusted_review.valid() &&
+                        trusted_review.identity() == review_identity &&
+                        trusted_review.identity().git_object_format() ==
+                                GitObjectFormat::Sha256 &&
+                        trusted_review.verified_review() == verified_initial,
+                "SHA-256 trusted review lost identity or 3B provenance");
         const auto& materialized_initial =
                 require_arm<ReviewedSourceMaterializedInitialFullReview>(
                         verified_initial.review(),
