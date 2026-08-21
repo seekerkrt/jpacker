@@ -98,6 +98,10 @@ using TrustedGitReviewedSourceProjectionResult = std::variant<
         ReviewedSourceRebaselineFullReview,
         TrustedGitReviewFailure>;
 
+using TrustedGitAurReviewedSourceProjectionResult = std::variant<
+        TrustedAurReviewedSourceProjection,
+        TrustedGitReviewFailure>;
+
 using TrustedGitReviewedSourceMaterializationResult = std::variant<
         ReviewedSourceVerifiedMaterializedReview,
         ReviewedSourceReviewFailure,
@@ -123,14 +127,21 @@ TrustedGitReviewedSourceProjectionResult trusted_git_project_reviewed_source(
         const SourceRevisionIdentity& target,
         const std::optional<SourceRevisionIdentity>& baseline);
 
-// Materialize exact blobs already named by a successful Slice 3A projection.
+// Project and seal the complete Slice 3A inventory together with its AUR
+// PackageBase/source/remote/format/target/baseline provenance.
+TrustedGitAurReviewedSourceProjectionResult
+trusted_git_project_aur_reviewed_source(
+        const ValidatedCachePath& checkout,
+        AurReviewedSourceReviewIdentity identity,
+        std::optional<SourceRevisionIdentity> baseline);
+
+// Materialize exact blobs named by a sealed Slice 3A projection capability.
 // This API does not resolve refs, read worktree/index content, render human
 // output, publish reviewed state, or connect a production lifecycle.
 TrustedGitReviewedSourceMaterializationResult
 trusted_git_materialize_reviewed_source_review(
         const ValidatedCachePath& checkout,
-        const std::string& expected_remote_url,
-        const ReviewedSourceProjection& projection);
+        TrustedAurReviewedSourceProjection projection);
 
 // Seals PackageBase/source/remote/exact target and the verified 3B review in
 // one trusted construction boundary. The returned capability is the only 4A
@@ -138,8 +149,7 @@ trusted_git_materialize_reviewed_source_review(
 TrustedGitAurReviewedSourceMaterializationResult
 trusted_git_materialize_aur_reviewed_source_review(
         const ValidatedCachePath& checkout,
-        AurReviewedSourceReviewIdentity identity,
-        const ReviewedSourceProjection& projection);
+        TrustedAurReviewedSourceProjection projection);
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_GIT_TEST_HOOKS
 void set_trusted_git_review_machine_stream_limit_for_test(

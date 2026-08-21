@@ -27,6 +27,61 @@ namespace fs = std::filesystem;
 
 namespace {
 
+static_assert(!std::is_default_constructible_v<
+              TrustedAurReviewedSourceProjection>);
+static_assert(!std::is_copy_constructible_v<
+              TrustedAurReviewedSourceProjection>);
+static_assert(!std::is_copy_assignable_v<
+              TrustedAurReviewedSourceProjection>);
+static_assert(std::is_move_constructible_v<
+              TrustedAurReviewedSourceProjection>);
+static_assert(!std::is_constructible_v<
+              TrustedAurReviewedSourceProjection,
+              AurReviewedSourceReviewIdentity,
+              std::optional<SourceRevisionIdentity>,
+              ReviewedSourceProjection>);
+static_assert(!std::is_constructible_v<
+              TrustedAurReviewedSourceProjection,
+              ReviewedSourceProjection>);
+static_assert(!std::is_convertible_v<
+              ReviewedSourceProjection,
+              TrustedAurReviewedSourceProjection>);
+static_assert(std::is_same_v<
+              decltype(std::declval<TrustedAurReviewedSourceProjection&>()
+                               .projection()),
+              const ReviewedSourceProjection&>);
+static_assert(!std::is_invocable_v<
+              decltype(trusted_git_materialize_reviewed_source_review),
+              const ValidatedCachePath&,
+              const std::string&,
+              const ReviewedSourceProjection&>);
+static_assert(!std::is_invocable_v<
+              decltype(trusted_git_materialize_reviewed_source_review),
+              const ValidatedCachePath&,
+              const ReviewedSourceProjection&>);
+static_assert(!std::is_invocable_v<
+              decltype(trusted_git_materialize_aur_reviewed_source_review),
+              const ValidatedCachePath&,
+              AurReviewedSourceReviewIdentity,
+              const ReviewedSourceProjection&>);
+static_assert(!std::is_invocable_v<
+              decltype(trusted_git_materialize_aur_reviewed_source_review),
+              const ValidatedCachePath&,
+              const ReviewedSourceProjection&>);
+static_assert(!std::is_invocable_v<
+              decltype(trusted_git_materialize_aur_reviewed_source_review),
+              const ValidatedCachePath&,
+              AurReviewedSourceReviewIdentity,
+              TrustedAurReviewedSourceProjection>);
+static_assert(std::is_invocable_v<
+              decltype(trusted_git_materialize_reviewed_source_review),
+              const ValidatedCachePath&,
+              TrustedAurReviewedSourceProjection>);
+static_assert(std::is_invocable_v<
+              decltype(trusted_git_materialize_aur_reviewed_source_review),
+              const ValidatedCachePath&,
+              TrustedAurReviewedSourceProjection>);
+
 void require(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
 }
@@ -59,6 +114,13 @@ const Expected& require_arm(
     const Expected* arm = std::get_if<Expected>(&value);
     if(arm == nullptr) throw std::runtime_error(std::string(message));
     return *arm;
+}
+
+template<typename Expected, typename Variant>
+Expected take_arm(Variant& value, std::string_view message) {
+    Expected* arm = std::get_if<Expected>(&value);
+    if(arm == nullptr) throw std::runtime_error(std::string(message));
+    return std::move(*arm);
 }
 
 class TemporaryTree final {
@@ -281,6 +343,26 @@ private:
     std::optional<ValidatedCacheRoot> root_;
     std::optional<ValidatedCachePath> checkout_;
 };
+
+TrustedAurReviewedSourceProjection project_trusted_aur_review(
+        GitFixture& fixture,
+        AurReviewedSourceReviewIdentity identity,
+        std::optional<SourceRevisionIdentity> baseline,
+        std::string_view message) {
+    TrustedGitAurReviewedSourceProjectionResult result =
+            trusted_git_project_aur_reviewed_source(
+                    fixture.checkout(), std::move(identity),
+                    std::move(baseline));
+    if(const auto* failure =
+               std::get_if<TrustedGitReviewFailure>(&result)) {
+        throw std::runtime_error(
+                std::string(message) + ": reason=" +
+                std::to_string(static_cast<int>(failure->reason)) +
+                " stage=" +
+                std::to_string(static_cast<int>(failure->stage)));
+    }
+    return take_arm<TrustedAurReviewedSourceProjection>(result, message);
+}
 
 const ReviewedSourceFileChange* find_new_path(
         const std::vector<ReviewedSourceFileChange>& changes,
@@ -775,9 +857,21 @@ void test_sha1_content_materialization() {
     const std::string index_before = fixture.read_file(".git/index");
     const std::string head_before = fixture.output_git({"rev-parse", "HEAD"});
 
+    const AurReviewedSourceReviewIdentity review_identity =
+            aur_review_identity(
+                    "slice3a-fixture", fixture.remote_url(), target);
+    TrustedAurReviewedSourceProjection verified_projection =
+            project_trusted_aur_review(
+                    fixture, review_identity, baseline,
+                    "SHA-1 trusted projection failed");
+    require(verified_projection.valid() &&
+                    verified_projection.identity() == review_identity &&
+                    verified_projection.baseline() == baseline &&
+                    verified_projection.projection() ==
+                            ReviewedSourceProjection(update),
+            "SHA-1 sealed projection lost exact provenance or inventory");
     const auto materialized = trusted_git_materialize_reviewed_source_review(
-            fixture.checkout(), fixture.remote_url(),
-            ReviewedSourceProjection(update));
+            fixture.checkout(), std::move(verified_projection));
     if(const auto* failure = std::get_if<TrustedGitReviewFailure>(
                &materialized)) {
         throw std::runtime_error(
@@ -819,13 +913,13 @@ void test_sha1_content_materialization() {
             require_arm<ReviewedSourceVerifiedMaterializedReview>(
                     materialized,
                     "SHA-1 reviewed content materialization failed");
-    const AurReviewedSourceReviewIdentity review_identity =
-            aur_review_identity(
-                    "slice3a-fixture", fixture.remote_url(), target);
+    TrustedAurReviewedSourceProjection trusted_projection =
+            project_trusted_aur_review(
+                    fixture, review_identity, baseline,
+                    "SHA-1 trusted composite projection failed");
     const auto trusted_materialized =
             trusted_git_materialize_aur_reviewed_source_review(
-                    fixture.checkout(), review_identity,
-                    ReviewedSourceProjection(update));
+                    fixture.checkout(), std::move(trusted_projection));
     const auto& trusted_review =
             require_arm<TrustedAurReviewedSourceReview>(
                     trusted_materialized,
@@ -835,50 +929,21 @@ void test_sha1_content_materialization() {
                     trusted_review.verified_review() == verified_update,
             "SHA-1 trusted review lost identity or 3B provenance");
 
-    const auto wrong_target =
-            trusted_git_materialize_aur_reviewed_source_review(
-                    fixture.checkout(),
-                    aur_review_identity(
-                            "slice3a-fixture", fixture.remote_url(), baseline),
-                    ReviewedSourceProjection(update));
-    const auto& wrong_target_failure = require_arm<TrustedGitReviewFailure>(
-            wrong_target,
-            "Wrong exact target was sealed into trusted AUR review");
-    require(wrong_target_failure.reason ==
-                            TrustedGitReviewFailureReason::
-                                    ReviewIdentityMismatch &&
-                    wrong_target_failure.stage ==
-                            TrustedGitReviewStage::TargetValidation,
-            "Wrong exact target produced the wrong trusted rejection");
-
     const SourceRevisionIdentity wrong_format_revision =
             SourceRevisionIdentity::git_commit(std::string(64, 'a'));
     const auto wrong_format =
-            trusted_git_materialize_aur_reviewed_source_review(
+            trusted_git_project_aur_reviewed_source(
                     fixture.checkout(),
                     aur_review_identity(
                             "slice3a-fixture", fixture.remote_url(),
                             wrong_format_revision),
-                    ReviewedSourceProjection(update));
+                    baseline);
     require(require_arm<TrustedGitReviewFailure>(
                     wrong_format,
-                    "Wrong object format was sealed into trusted AUR review")
+                    "Wrong object format produced a trusted projection")
                             .reason ==
                     TrustedGitReviewFailureReason::ObjectFormatMismatch,
             "Wrong object format produced the wrong trusted rejection");
-
-    expect_runtime_error(
-            [&] {
-                static_cast<void>(
-                        trusted_git_materialize_aur_reviewed_source_review(
-                                fixture.checkout(),
-                                aur_review_identity(
-                                        "other-base",
-                                        "https://aur.archlinux.org/other-base.git",
-                                        target),
-                                ReviewedSourceProjection(update)));
-            },
-            "Same-OID cross-PackageBase/remote review was sealed");
     const auto& materialized_update =
             require_arm<ReviewedSourceMaterializedUpdateReview>(
                     verified_update.review(),
@@ -1013,6 +1078,156 @@ void test_sha1_content_materialization() {
             "Materialization changed Git index");
     require(fixture.output_git({"rev-parse", "HEAD"}) == head_before,
             "Materialization changed HEAD");
+}
+
+void test_sealed_projection_authority(GitObjectFormat object_format) {
+    GitFixture fixture(object_format);
+    const std::string format_name =
+            object_format == GitObjectFormat::Sha1 ? "SHA-1" : "SHA-256";
+
+    fixture.write_file(
+            "PKGBUILD", "pkgname=sealed\npkgver=1\npkgrel=1\n");
+    fixture.write_file("helper.sh", "echo before\n");
+    const std::string baseline_oid = fixture.commit("sealed baseline");
+
+    fixture.write_file(
+            "PKGBUILD", "pkgname=sealed\npkgver=2\npkgrel=1\n");
+    fixture.write_file("helper.sh", "echo after\n");
+    fixture.write_file("extra.conf", "enabled=true\n");
+    const std::string target_oid = fixture.commit("sealed target");
+    fixture.update_remote(target_oid);
+
+    const SourceRevisionIdentity baseline =
+            SourceRevisionIdentity::git_commit(baseline_oid);
+    const SourceRevisionIdentity target =
+            SourceRevisionIdentity::git_commit(target_oid);
+    const AurReviewedSourceReviewIdentity identity = aur_review_identity(
+            "slice3a-fixture", fixture.remote_url(), target);
+    TrustedAurReviewedSourceProjection sealed = project_trusted_aur_review(
+            fixture, identity, baseline,
+            format_name + " exact sealed projection failed");
+    const ReviewedSourceProjection exact = sealed.projection();
+    const auto& exact_update = require_arm<ReviewedSourceUpdateReview>(
+            exact, format_name + " sealed projection kind drifted");
+    require(exact_update.changes.size() >= 3,
+            format_name + " sealed projection fixture is incomplete");
+
+    const auto require_detached_forgery = [&sealed, &exact, &format_name](
+                                                   const ReviewedSourceProjection& forged,
+                                                   std::string_view kind) {
+        // The static API assertions above make every caller-owned raw copy
+        // non-invocable as materialization authority. These cases additionally
+        // prove that mutation never changes the immutable sealed snapshot.
+        require(forged != sealed.projection(),
+                format_name + " " + std::string(kind) +
+                        " projection did not differ from exact authority");
+        require(sealed.projection() == exact,
+                format_name + " " + std::string(kind) +
+                        " projection mutated the sealed authority");
+    };
+
+    const ReviewedSourceProjection forged_empty =
+            ReviewedSourceInitialFullReview{target, {}};
+    require_detached_forgery(forged_empty, "forged empty");
+
+    ReviewedSourceProjection omitted = exact;
+    std::get<ReviewedSourceUpdateReview>(omitted).changes.pop_back();
+    require_detached_forgery(omitted, "omitted entry");
+
+    ReviewedSourceProjection mutated = exact;
+    auto& mutated_changes =
+            std::get<ReviewedSourceUpdateReview>(mutated).changes;
+    mutated_changes.front() = mutated_changes.back();
+    require_detached_forgery(mutated, "mutated entry");
+
+    ReviewedSourceProjection spliced = exact;
+    auto& spliced_changes =
+            std::get<ReviewedSourceUpdateReview>(spliced).changes;
+    spliced_changes.push_back(spliced_changes.front());
+    require_detached_forgery(spliced, "added/spliced entry");
+
+    const auto first_materialization =
+            trusted_git_materialize_reviewed_source_review(
+                    fixture.checkout(), std::move(sealed));
+    require(std::holds_alternative<ReviewedSourceVerifiedMaterializedReview>(
+                    first_materialization) &&
+                    !sealed.valid(),
+            format_name + " sealed projection was not consumed once");
+    const auto second_materialization =
+            trusted_git_materialize_reviewed_source_review(
+                    fixture.checkout(), std::move(sealed));
+    require(require_arm<TrustedGitReviewFailure>(
+                    second_materialization,
+                    format_name + " moved-from projection was resealed")
+                            .reason ==
+                    TrustedGitReviewFailureReason::ReviewIdentityMismatch,
+            format_name + " moved-from projection rejection drifted");
+
+    TrustedAurReviewedSourceProjection initial = project_trusted_aur_review(
+            fixture, identity, std::nullopt,
+            format_name + " initial baseline binding failed");
+    require(!initial.baseline().has_value() &&
+                    std::holds_alternative<ReviewedSourceInitialFullReview>(
+                            initial.projection()),
+            format_name + " initial projection lost null baseline binding");
+
+    TrustedAurReviewedSourceProjection already = project_trusted_aur_review(
+            fixture, identity, target,
+            format_name + " already-reviewed baseline binding failed");
+    require(already.baseline().has_value() &&
+                    *already.baseline() == target &&
+                    std::holds_alternative<ReviewedSourceAlreadyReviewed>(
+                            already.projection()),
+            format_name + " already-reviewed projection lost exact baseline");
+
+    const SourceRevisionIdentity unavailable_baseline =
+            SourceRevisionIdentity::git_commit(std::string(
+                    object_format == GitObjectFormat::Sha1 ? 40 : 64, 'f'));
+    TrustedAurReviewedSourceProjection rebaseline =
+            project_trusted_aur_review(
+                    fixture, identity, unavailable_baseline,
+                    format_name + " unavailable baseline binding failed");
+    require(rebaseline.baseline().has_value() &&
+                    *rebaseline.baseline() == unavailable_baseline &&
+                    std::holds_alternative<
+                            ReviewedSourceRebaselineFullReview>(
+                            rebaseline.projection()),
+            format_name + " rebaseline projection lost exact baseline");
+
+    const std::string original_remote = fixture.remote_url();
+    TrustedAurReviewedSourceProjection cross_package =
+            project_trusted_aur_review(
+                    fixture, identity, baseline,
+                    format_name + " cross-PackageBase fixture failed");
+    fixture.run_git({
+            "config", "--local", "remote.origin.url",
+            "https://aur.archlinux.org/other-base.git"});
+    expect_runtime_error(
+            [&fixture, projection = std::move(cross_package)]() mutable {
+                static_cast<void>(
+                        trusted_git_materialize_aur_reviewed_source_review(
+                                fixture.checkout(), std::move(projection)));
+            },
+            format_name + " same-OID cross-PackageBase materialization passed");
+    fixture.run_git(
+            {"config", "--local", "remote.origin.url", original_remote});
+
+    TrustedAurReviewedSourceProjection cross_source =
+            project_trusted_aur_review(
+                    fixture, identity, baseline,
+                    format_name + " cross-source fixture failed");
+    fixture.run_git({
+            "config", "--local", "remote.origin.url",
+            "https://mirror.invalid/slice3a-fixture.git"});
+    expect_runtime_error(
+            [&fixture, projection = std::move(cross_source)]() mutable {
+                static_cast<void>(
+                        trusted_git_materialize_aur_reviewed_source_review(
+                                fixture.checkout(), std::move(projection)));
+            },
+            format_name + " same-OID cross-source materialization passed");
+    fixture.run_git(
+            {"config", "--local", "remote.origin.url", original_remote});
 }
 
 void test_baseline_object_access_failures() {
@@ -1239,21 +1454,33 @@ void test_sha256_projection_and_strict_config() {
                             GitObjectFormat::Sha256,
                     "SHA-256 tree object ID format was lost");
         }
+        const AurReviewedSourceReviewIdentity review_identity =
+                aur_review_identity(
+                        "slice3a-fixture", fixture.remote_url(), target);
+        TrustedAurReviewedSourceProjection verified_projection =
+                project_trusted_aur_review(
+                        fixture, review_identity, std::nullopt,
+                        "SHA-256 trusted initial projection failed");
+        require(verified_projection.valid() &&
+                        verified_projection.identity() == review_identity &&
+                        !verified_projection.baseline().has_value() &&
+                        verified_projection.projection() ==
+                                ReviewedSourceProjection(initial),
+                "SHA-256 sealed projection lost exact provenance or inventory");
         const auto initial_materialized =
                 trusted_git_materialize_reviewed_source_review(
-                        fixture.checkout(), fixture.remote_url(),
-                        ReviewedSourceProjection(initial));
+                        fixture.checkout(), std::move(verified_projection));
         const auto& verified_initial =
                 require_arm<ReviewedSourceVerifiedMaterializedReview>(
                         initial_materialized,
                         "SHA-256 initial content materialization failed");
-        const AurReviewedSourceReviewIdentity review_identity =
-                aur_review_identity(
-                        "slice3a-fixture", fixture.remote_url(), target);
+        TrustedAurReviewedSourceProjection trusted_projection =
+                project_trusted_aur_review(
+                        fixture, review_identity, std::nullopt,
+                        "SHA-256 trusted composite projection failed");
         const auto trusted_initial =
                 trusted_git_materialize_aur_reviewed_source_review(
-                        fixture.checkout(), review_identity,
-                        ReviewedSourceProjection(initial));
+                        fixture.checkout(), std::move(trusted_projection));
         const auto& trusted_review =
                 require_arm<TrustedAurReviewedSourceReview>(
                         trusted_initial,
@@ -1305,10 +1532,19 @@ void test_sha256_projection_and_strict_config() {
                 fixture.checkout(), fixture.remote_url(), updated, target);
         const auto& sha256_update = require_arm<ReviewedSourceUpdateReview>(
                 update_projection, "SHA-256 update projection failed");
+        const AurReviewedSourceReviewIdentity update_identity =
+                aur_review_identity(
+                        "slice3a-fixture", fixture.remote_url(), updated);
+        TrustedAurReviewedSourceProjection sealed_update =
+                project_trusted_aur_review(
+                        fixture, update_identity, target,
+                        "SHA-256 trusted update projection failed");
+        require(sealed_update.projection() ==
+                        ReviewedSourceProjection(sha256_update),
+                "SHA-256 sealed update inventory drifted");
         const auto update_materialized =
                 trusted_git_materialize_reviewed_source_review(
-                        fixture.checkout(), fixture.remote_url(),
-                        ReviewedSourceProjection(sha256_update));
+                        fixture.checkout(), std::move(sealed_update));
         const auto& verified_update =
                 require_arm<ReviewedSourceVerifiedMaterializedReview>(
                         update_materialized,
@@ -1360,6 +1596,8 @@ void test_sha256_projection_and_strict_config() {
 void run_tests() {
     test_sha1_projection_and_pinned_ref();
     test_sha1_content_materialization();
+    test_sealed_projection_authority(GitObjectFormat::Sha1);
+    test_sealed_projection_authority(GitObjectFormat::Sha256);
     test_baseline_object_access_failures();
     test_missing_gitlink_object_remains_supported();
     test_sha256_projection_and_strict_config();

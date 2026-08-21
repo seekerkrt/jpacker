@@ -4,8 +4,53 @@
 #include "reviewed_source_review.hpp"
 
 #include <memory>
+#include <optional>
 
 class ValidatedCachePath;
+
+// Move-only proof that one exact Slice 3A projection was observed from the
+// canonical AUR source bound to this PackageBase/target/baseline identity.
+// Callers may inspect the immutable projection but cannot mutate or reseal a
+// copied raw ReviewedSourceProjection as trusted materialization input.
+class TrustedAurReviewedSourceProjection final {
+public:
+    TrustedAurReviewedSourceProjection() = delete;
+    TrustedAurReviewedSourceProjection(
+            const TrustedAurReviewedSourceProjection&) = delete;
+    TrustedAurReviewedSourceProjection(
+            TrustedAurReviewedSourceProjection&& other) noexcept;
+    TrustedAurReviewedSourceProjection& operator=(
+            const TrustedAurReviewedSourceProjection&) = delete;
+    TrustedAurReviewedSourceProjection& operator=(
+            TrustedAurReviewedSourceProjection&& other) noexcept;
+    ~TrustedAurReviewedSourceProjection();
+
+    [[nodiscard]] bool valid() const noexcept;
+    [[nodiscard]] const AurReviewedSourceReviewIdentity& identity() const;
+    [[nodiscard]] const std::optional<SourceRevisionIdentity>& baseline()
+            const;
+    [[nodiscard]] const ReviewedSourceProjection& projection() const;
+
+private:
+    // Exact non-inline Slice 3A boundary. It derives the complete projection
+    // from the bound checkout/remote/target/baseline before construction.
+    friend TrustedAurReviewedSourceProjection
+    project_aur_reviewed_source_from_trusted_git(
+            const ValidatedCachePath& checkout,
+            AurReviewedSourceReviewIdentity identity,
+            std::optional<SourceRevisionIdentity> baseline);
+
+    struct State;
+
+    TrustedAurReviewedSourceProjection(
+            AurReviewedSourceReviewIdentity identity,
+            std::optional<SourceRevisionIdentity> baseline,
+            ReviewedSourceProjection projection);
+
+    [[nodiscard]] const State& require_state() const;
+
+    std::unique_ptr<State> state_;
+};
 
 // Identity and the verified 3B review are sealed together by the trusted Git
 // materialization boundary. Presentation/acceptance callers cannot attach a
@@ -35,8 +80,7 @@ private:
     friend TrustedAurReviewedSourceReview
     materialize_aur_reviewed_source_from_trusted_git(
             const ValidatedCachePath& checkout,
-            AurReviewedSourceReviewIdentity identity,
-            const ReviewedSourceProjection& projection);
+            TrustedAurReviewedSourceProjection projection);
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_ACCEPTANCE_TEST_HOOKS
     // Test fixture derives its fixed PackageBase/source identity from the
     // verified review target. Tests cannot supply a replacement sidecar.

@@ -1053,6 +1053,20 @@ using TrustedGitMaterializationFailure = std::variant<
         ReviewedSourceReviewFailure,
         TrustedGitReviewFailure>;
 
+class TrustedGitProjectionStopped final {
+public:
+    explicit TrustedGitProjectionStopped(
+            TrustedGitReviewFailure failure) noexcept
+        : failure_(std::move(failure)) {}
+
+    [[nodiscard]] const TrustedGitReviewFailure& failure() const noexcept {
+        return failure_;
+    }
+
+private:
+    TrustedGitReviewFailure failure_;
+};
+
 class TrustedGitMaterializationStopped final {
 public:
     explicit TrustedGitMaterializationStopped(
@@ -1497,6 +1511,49 @@ TrustedGitReviewedSourceProjectionResult trusted_git_project_reviewed_source(
             *baseline, target, *history_relation, std::move(changes)});
 }
 
+TrustedAurReviewedSourceProjection
+project_aur_reviewed_source_from_trusted_git(
+        const ValidatedCachePath& checkout,
+        AurReviewedSourceReviewIdentity identity,
+        std::optional<SourceRevisionIdentity> baseline) {
+    TrustedGitReviewedSourceProjectionResult projected =
+            trusted_git_project_reviewed_source(
+                    checkout, identity.canonical_git_remote(),
+                    identity.target_revision(), baseline);
+    if(const auto* failure =
+               std::get_if<TrustedGitReviewFailure>(&projected)) {
+        throw TrustedGitProjectionStopped(*failure);
+    }
+
+    ReviewedSourceProjection projection = std::visit(
+            [](auto&& value) -> ReviewedSourceProjection {
+                using Value = std::decay_t<decltype(value)>;
+                if constexpr(std::is_same_v<Value, TrustedGitReviewFailure>) {
+                    throw std::logic_error(
+                            "Trusted projection failure escaped its boundary.");
+                } else {
+                    return ReviewedSourceProjection(std::move(value));
+                }
+            },
+            std::move(projected));
+    return TrustedAurReviewedSourceProjection(
+            std::move(identity), std::move(baseline),
+            std::move(projection));
+}
+
+TrustedGitAurReviewedSourceProjectionResult
+trusted_git_project_aur_reviewed_source(
+        const ValidatedCachePath& checkout,
+        AurReviewedSourceReviewIdentity identity,
+        std::optional<SourceRevisionIdentity> baseline) {
+    try {
+        return project_aur_reviewed_source_from_trusted_git(
+                checkout, std::move(identity), std::move(baseline));
+    } catch(const TrustedGitProjectionStopped& stopped) {
+        return stopped.failure();
+    }
+}
+
 namespace {
 
 TrustedGitReviewedSourceModelMaterializationResult
@@ -1734,11 +1791,17 @@ materialize_reviewed_source_model_from_trusted_git(
 ReviewedSourceVerifiedMaterializedReview
 materialize_verified_review_from_trusted_git(
         const ValidatedCachePath& checkout,
-        const std::string& expected_remote_url,
-        const ReviewedSourceProjection& projection) {
+        TrustedAurReviewedSourceProjection projection) {
+    if(!projection.valid()) {
+        throw TrustedGitMaterializationStopped(review_failure(
+                TrustedGitReviewFailureReason::ReviewIdentityMismatch,
+                TrustedGitReviewStage::TargetValidation));
+    }
     TrustedGitReviewedSourceModelMaterializationResult materialized =
             materialize_reviewed_source_model_from_trusted_git(
-                    checkout, expected_remote_url, projection);
+                    checkout,
+                    projection.identity().canonical_git_remote(),
+                    projection.projection());
     if(const auto* failure =
                std::get_if<ReviewedSourceReviewFailure>(&materialized)) {
         throw TrustedGitMaterializationStopped(*failure);
@@ -1755,11 +1818,10 @@ materialize_verified_review_from_trusted_git(
 TrustedGitReviewedSourceMaterializationResult
 trusted_git_materialize_reviewed_source_review(
         const ValidatedCachePath& checkout,
-        const std::string& expected_remote_url,
-        const ReviewedSourceProjection& projection) {
+        TrustedAurReviewedSourceProjection projection) {
     try {
         return materialize_verified_review_from_trusted_git(
-                checkout, expected_remote_url, projection);
+                checkout, std::move(projection));
     } catch(const TrustedGitMaterializationStopped& stopped) {
         if(const auto* failure = std::get_if<ReviewedSourceReviewFailure>(
                    &stopped.failure())) {
@@ -1772,27 +1834,17 @@ trusted_git_materialize_reviewed_source_review(
 TrustedAurReviewedSourceReview
 materialize_aur_reviewed_source_from_trusted_git(
         const ValidatedCachePath& checkout,
-        AurReviewedSourceReviewIdentity identity,
-        const ReviewedSourceProjection& projection) {
-    const SourceRevisionIdentity& projected_target =
-            materialization_target_revision(projection);
-    const GitObjectFormat* projected_format =
-            projected_target.git_object_format();
-    if(projected_format == nullptr ||
-       identity.git_object_format() != *projected_format) {
-        throw TrustedGitMaterializationStopped(review_failure(
-                TrustedGitReviewFailureReason::ObjectFormatMismatch,
-                TrustedGitReviewStage::TargetValidation));
-    }
-    if(identity.target_revision() != projected_target) {
+        TrustedAurReviewedSourceProjection projection) {
+    if(!projection.valid()) {
         throw TrustedGitMaterializationStopped(review_failure(
                 TrustedGitReviewFailureReason::ReviewIdentityMismatch,
                 TrustedGitReviewStage::TargetValidation));
     }
 
+    AurReviewedSourceReviewIdentity identity = projection.identity();
     ReviewedSourceVerifiedMaterializedReview verified_review =
             materialize_verified_review_from_trusted_git(
-                    checkout, identity.canonical_git_remote(), projection);
+                    checkout, std::move(projection));
     return TrustedAurReviewedSourceReview(
             std::move(identity), std::move(verified_review));
 }
@@ -1800,11 +1852,10 @@ materialize_aur_reviewed_source_from_trusted_git(
 TrustedGitAurReviewedSourceMaterializationResult
 trusted_git_materialize_aur_reviewed_source_review(
         const ValidatedCachePath& checkout,
-        AurReviewedSourceReviewIdentity identity,
-        const ReviewedSourceProjection& projection) {
+        TrustedAurReviewedSourceProjection projection) {
     try {
         return materialize_aur_reviewed_source_from_trusted_git(
-                checkout, std::move(identity), projection);
+                checkout, std::move(projection));
     } catch(const TrustedGitMaterializationStopped& stopped) {
         if(const auto* failure = std::get_if<ReviewedSourceReviewFailure>(
                    &stopped.failure())) {
