@@ -68,6 +68,8 @@ SOURCE_PACKAGE_IDENTITY_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/source-pack
 SOURCE_PACKAGE_COMPATIBILITY_TEST_TARGET := $(BUILD_DIR)/tests/source-package-compatibility-test
 REVIEWED_SOURCE_STATE_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-state-test
 REVIEWED_SOURCE_STATE_STORE_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-state-store-test
+REVIEWED_SOURCE_LIFECYCLE_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-lifecycle-test
+REVIEWED_SOURCE_ACCEPTANCE_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-acceptance-test
 REVIEWED_SOURCE_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-projection-test
 REVIEWED_SOURCE_REVIEW_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-review-test
 REVIEWED_SOURCE_PATCH_TEST_TARGET := $(BUILD_DIR)/tests/reviewed-source-patch-test
@@ -1440,6 +1442,25 @@ REVIEWED_SOURCE_STATE_STORE_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/xdg_directory_safety.cpp \
 	$(SRC_DIR)/xdg_paths.cpp
+REVIEWED_SOURCE_LIFECYCLE_TEST_SRCS := \
+	tests/reviewed_source_lifecycle_test.cpp \
+	$(SRC_DIR)/reviewed_source_lifecycle.cpp \
+	$(SRC_DIR)/reviewed_source_state.cpp \
+	$(SRC_DIR)/source_package_identity.cpp \
+	$(SRC_DIR)/package_identifier.cpp
+REVIEWED_SOURCE_ACCEPTANCE_TEST_SRCS := \
+	tests/reviewed_source_acceptance_test.cpp \
+	$(SRC_DIR)/reviewed_source_acceptance.cpp \
+	$(SRC_DIR)/reviewed_source_lifecycle.cpp \
+	$(SRC_DIR)/reviewed_source_presentation.cpp \
+	$(SRC_DIR)/reviewed_source_review.cpp \
+	$(SRC_DIR)/reviewed_source_patch.cpp \
+	$(SRC_DIR)/reviewed_source_projection.cpp \
+	$(SRC_DIR)/reviewed_source_state.cpp \
+	$(SRC_DIR)/source_package_identity.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/interactive_confirmation.cpp \
+	$(SRC_DIR)/logging.cpp
 REVIEWED_SOURCE_PROJECTION_TEST_SRCS := \
 	tests/reviewed_source_projection_test.cpp \
 	$(SRC_DIR)/reviewed_source_projection.cpp \
@@ -1694,6 +1715,8 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: test-source-package-compatibility
 .PHONY: test-reviewed-source-state
 .PHONY: test-reviewed-source-state-store
+.PHONY: test-reviewed-source-lifecycle
+.PHONY: test-reviewed-source-acceptance
 .PHONY: test-reviewed-source-projection
 .PHONY: test-reviewed-source-review
 .PHONY: test-reviewed-source-patch
@@ -1909,6 +1932,8 @@ NON_HEAVY_TARGETS := \
 	$(SOURCE_PACKAGE_COMPATIBILITY_TEST_TARGET) \
 	$(REVIEWED_SOURCE_STATE_TEST_TARGET) \
 	$(REVIEWED_SOURCE_STATE_STORE_TEST_TARGET) \
+	$(REVIEWED_SOURCE_LIFECYCLE_TEST_TARGET) \
+	$(REVIEWED_SOURCE_ACCEPTANCE_TEST_TARGET) \
 	$(REVIEWED_SOURCE_PROJECTION_TEST_TARGET) \
 	$(REVIEWED_SOURCE_REVIEW_TEST_TARGET) \
 	$(REVIEWED_SOURCE_PATCH_TEST_TARGET) \
@@ -2062,6 +2087,8 @@ $(eval $(call define_non_heavy_test_profile,SOURCE_PACKAGE_IDENTITY_PROJECTION,$
 $(eval $(call define_non_heavy_test_profile,SOURCE_PACKAGE_COMPATIBILITY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(SOURCE_PACKAGE_COMPATIBILITY_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_STATE,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_STATE_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_STATE_STORE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS -I$(SRC_DIR),$(REVIEWED_SOURCE_STATE_STORE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_LIFECYCLE,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_LIFECYCLE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_ACCEPTANCE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_REVIEWED_SOURCE_PRESENTATION_TEST_HOOKS -I$(SRC_DIR),$(REVIEWED_SOURCE_ACCEPTANCE_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_PROJECTION,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_PROJECTION_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_REVIEW,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_REVIEW_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,REVIEWED_SOURCE_PATCH,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(REVIEWED_SOURCE_PATCH_TEST_SRCS)))
@@ -2436,6 +2463,16 @@ $(REVIEWED_SOURCE_STATE_STORE_TEST_TARGET): $(REVIEWED_SOURCE_STATE_STORE_TEST_S
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling reviewed source state store test binary"
 	$(call compile_non_heavy_test,REVIEWED_SOURCE_STATE_STORE)
+
+$(REVIEWED_SOURCE_LIFECYCLE_TEST_TARGET): $(REVIEWED_SOURCE_LIFECYCLE_TEST_SRCS) $(SRC_DIR)/reviewed_source_lifecycle.hpp $(SRC_DIR)/reviewed_source_state_store.hpp $(SRC_DIR)/reviewed_source_state.hpp $(SRC_DIR)/reviewed_source_projection.hpp $(SRC_DIR)/source_package_identity.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling reviewed source lifecycle test binary"
+	$(call compile_non_heavy_test,REVIEWED_SOURCE_LIFECYCLE)
+
+$(REVIEWED_SOURCE_ACCEPTANCE_TEST_TARGET): $(REVIEWED_SOURCE_ACCEPTANCE_TEST_SRCS) $(SRC_DIR)/reviewed_source_acceptance.hpp $(SRC_DIR)/reviewed_source_lifecycle.hpp $(SRC_DIR)/reviewed_source_presentation.hpp $(SRC_DIR)/reviewed_source_review.hpp $(SRC_DIR)/reviewed_source_patch.hpp $(SRC_DIR)/reviewed_source_projection.hpp $(SRC_DIR)/reviewed_source_state_store.hpp $(SRC_DIR)/reviewed_source_state.hpp $(SRC_DIR)/source_package_identity.hpp $(SRC_DIR)/interactive_confirmation.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling reviewed source acceptance test binary"
+	$(call compile_non_heavy_test,REVIEWED_SOURCE_ACCEPTANCE)
 
 $(REVIEWED_SOURCE_PROJECTION_TEST_TARGET): $(REVIEWED_SOURCE_PROJECTION_TEST_SRCS) $(SRC_DIR)/reviewed_source_projection.hpp $(SRC_DIR)/reviewed_source_git_parser.hpp $(SRC_DIR)/source_package_identity.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -3247,6 +3284,12 @@ test-reviewed-source-state: $(REVIEWED_SOURCE_STATE_TEST_TARGET)
 
 test-reviewed-source-state-store: $(REVIEWED_SOURCE_STATE_STORE_TEST_TARGET)
 	$(abspath $(REVIEWED_SOURCE_STATE_STORE_TEST_TARGET))
+
+test-reviewed-source-lifecycle: $(REVIEWED_SOURCE_LIFECYCLE_TEST_TARGET)
+	$(abspath $(REVIEWED_SOURCE_LIFECYCLE_TEST_TARGET))
+
+test-reviewed-source-acceptance: $(REVIEWED_SOURCE_ACCEPTANCE_TEST_TARGET)
+	$(abspath $(REVIEWED_SOURCE_ACCEPTANCE_TEST_TARGET))
 
 test-reviewed-source-projection: $(REVIEWED_SOURCE_PROJECTION_TEST_TARGET)
 	$(abspath $(REVIEWED_SOURCE_PROJECTION_TEST_TARGET))
@@ -4114,6 +4157,8 @@ test: \
 	test-source-package-identity \
 	test-reviewed-source-state \
 	test-reviewed-source-state-store \
+	test-reviewed-source-lifecycle \
+	test-reviewed-source-acceptance \
 	test-reviewed-source-projection \
 	test-reviewed-source-review \
 	test-reviewed-source-patch \
