@@ -1649,6 +1649,17 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
             state.source_invocation =
                     prepare_production_source_build_invocation(
                             std::move(source_work_items), config);
+        } catch(const ReviewedSourceProductionError& error) {
+            SystemSourceUpgradeIssue issue = make_issue(
+                    SystemSourceUpgradeIssueKind::
+                            SourceInvocationPreparationFailed,
+                    SystemSourceUpgradeIssueImpact::BlocksExecution,
+                    SystemSourceUpgradePhase::Preparation,
+                    error.what());
+            issue.reviewed_source_failure = error.failure();
+            return block_preparation(
+                    std::move(state), std::move(issue), std::nullopt,
+                    RegisteredSourceUpgradeFailureKind::BuildOrInstallFailed);
         } catch(const std::exception& error) {
             SystemSourceUpgradeIssue issue = make_issue(
                     SystemSourceUpgradeIssueKind::

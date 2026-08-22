@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.3.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-19 07:09+0900\n"
+"POT-Creation-Date: 2026-08-22 11:28+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -127,6 +127,10 @@ msgstr "{} によって同一バージョンのインストールが省略され
 #, c++-format
 msgid "Separated build/install does not support {}."
 msgstr "分離されたビルド／インストールでは {} をサポートしていません。"
+
+#, c++-format
+msgid "Internal {} output capture failed."
+msgstr "{}内部出力の取得に失敗しました。"
 
 #, c++-format
 msgid "Failed to retain the current working directory: {}"
@@ -6144,6 +6148,72 @@ msgstr "警告: プロバイダー候補 {} のインストール状態を取得
 msgid "Repository provider capability metadata is invalid."
 msgstr "リポジトリプロバイダーのcapabilityメタデータが無効です。"
 
+msgid "Reviewed source state uses an unsupported future schema; the build was not started."
+msgstr "確認済みソースの状態は未対応の将来スキーマを使用しています。ビルドを開始しませんでした。"
+
+msgid "Reviewed source state history is unsafe; the build was not started."
+msgstr "確認済みソースの状態履歴が安全ではないため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source state could not be read safely; the build was not started."
+msgstr "確認済みソースの状態を安全に読み取れなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source state observation was inconsistent; the build was not started."
+msgstr "確認済みソースの状態観測に整合性がないため、ビルドを開始しませんでした。"
+
+#, c++-format
+msgid "Reviewed source {} lease is already held; the build was not started."
+msgstr "確認済みソースの{}ロックは別の処理が保持中です。ビルドを開始しませんでした。"
+
+#, c++-format
+msgid "Reviewed source {} lease could not be acquired; the build was not started."
+msgstr "確認済みソースの{}ロックを取得できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source target revision resolution failed; the build was not started."
+msgstr "確認済みソースの対象リビジョンを解決できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source lifecycle planning failed; the build was not started."
+msgstr "確認済みソースのライフサイクルを計画できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source exact checkout materialization failed; the build was not started."
+msgstr "確認済みソースの完全一致チェックアウトを作成できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source review projection failed; the build was not started."
+msgstr "確認済みソースのレビュー内容を投影できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source review materialization failed; the build was not started."
+msgstr "確認済みソースのレビュー内容を具体化できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source review could not produce explicit acceptance; the build was not started."
+msgstr "確認済みソースのレビューで明示的な受諾を得られなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source editor overlay could not be proven; the build was not started."
+msgstr "確認済みソースのエディター差分を証明できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source checkout revalidation failed; the build was not started."
+msgstr "確認済みソースのチェックアウトを再検証できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source state publication conflicted with current state; the build was not started."
+msgstr "確認済みソースの状態公開が現在の状態と競合したため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source state publication outcome is uncertain; the build was not started and automatic retry is forbidden."
+msgstr "確認済みソースの状態公開結果を確定できません。ビルドは開始せず、自動再試行もしません。"
+
+msgid "Reviewed source state publication encountered unsafe history; the build was not started."
+msgstr "確認済みソースの状態公開で安全でない履歴を検出したため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source state publication failed; the build was not started."
+msgstr "確認済みソースの状態を公開できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source checkout changed after state publication; the build was not started."
+msgstr "状態公開後に確認済みソースのチェックアウトが変化したため、ビルドを開始しませんでした。"
+
+#, c++-format
+msgid "Reviewed source checkout changed before {}; the build was not started."
+msgstr "{}実行前に確認済みソースのチェックアウトが変化したため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source production preparation failed; the build was not started."
+msgstr "確認済みソースの実行準備に失敗したため、ビルドを開始しませんでした。"
+
 msgid "Unsupported"
 msgstr "未対応"
 
@@ -6281,6 +6351,9 @@ msgstr "{}/{}のレビューを省略します（{}）。"
 msgid "Edit install script {}?"
 msgstr "インストールスクリプト {} を編集しますか？"
 
+msgid "Accept this reviewed upstream revision?"
+msgstr "この確認済みupstream revisionを受理しますか？"
+
 #, c++-format
 msgid "{} was updated by the system transaction ({} -> {}); rebuilding the preferred source package."
 msgstr "{}はシステムトランザクションで更新されました（{} -> {}）。優先ソースパッケージを再ビルドします。"
@@ -6312,6 +6385,13 @@ msgstr "リポジトリを更新しています..."
 msgid "Failed to fetch updates."
 msgstr "更新を取得できませんでした。"
 
+msgid "Cloning repository..."
+msgstr "リポジトリを clone しています..."
+
+#, c++-format
+msgid "Failed to clone {}"
+msgstr "{} を clone できませんでした"
+
 #, c++-format
 msgid "Detected branch: {}"
 msgstr "検出したブランチ: {}"
@@ -6325,13 +6405,6 @@ msgstr "既存のキャッシュリポジトリで更新が検出されました
 
 msgid "Failed to reset repository."
 msgstr "リポジトリをリセットできませんでした。"
-
-msgid "Cloning repository..."
-msgstr "リポジトリを clone しています..."
-
-#, c++-format
-msgid "Failed to clone {}"
-msgstr "{} を clone できませんでした"
 
 #, c++-format
 msgid "Unable to determine update status from {} for {}."

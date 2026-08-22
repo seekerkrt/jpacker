@@ -12,6 +12,7 @@
 // any production route.
 
 class AurReviewedSourceReviewIdentity;
+class ReviewedSourceFatalStatePreflight;
 class ReviewedSourceReviewRequirement;
 class ReviewedSourceAlreadyReviewedContinue;
 class ReviewedSourceOperationStop;
@@ -100,6 +101,10 @@ private:
     friend ReviewedSourceLifecyclePlanResult
     plan_reviewed_source_lifecycle(
             AurReviewedSourceReviewIdentity identity);
+    friend ReviewedSourceLifecyclePlanResult
+    plan_reviewed_source_lifecycle_from_preflight(
+            AurReviewedSourceReviewIdentity identity,
+            ReviewedSourceFatalStatePreflight preflight);
 
     explicit ReviewedSourceExpectedStateObservation(
             ReviewedSourceStateStoreRead store_read) noexcept;
@@ -168,6 +173,19 @@ struct ReviewedSourceLifecycleFatalState {
             const ReviewedSourceLifecycleFatalState&) const = default;
 };
 
+// Fatal state retains the exact store payload that made continuation unsafe.
+// Unsupported/incoherent observations keep the complete read snapshot;
+// filesystem/store failures and unsafe histories keep their existing typed
+// values instead of reducing them to a diagnostic string.
+struct ReviewedSourceFatalStateFailure {
+    ReviewedSourceFatalStateReason reason;
+    std::optional<ReviewedSourceStateStoreRead> store_read;
+    std::optional<ReviewedSourceStateStoreUnsafeHistory> unsafe_history;
+    std::optional<ReviewedSourceStateStoreFailure> store_failure;
+
+    bool operator==(const ReviewedSourceFatalStateFailure&) const = default;
+};
+
 using ReviewedSourceIntegrationLifecycle = std::variant<
         ReviewedSourceLifecycleInitialFullReview,
         ReviewedSourceLifecycleAlreadyReviewed,
@@ -208,23 +226,81 @@ public:
     [[nodiscard]] static ReviewedSourceOperationStop make(
             ReviewedSourceOperationStopReason reason) noexcept;
     [[nodiscard]] static ReviewedSourceOperationStop fatal(
-            ReviewedSourceFatalStateReason reason) noexcept;
+            ReviewedSourceFatalStateFailure failure) noexcept;
 
     [[nodiscard]] ReviewedSourceOperationStopReason reason() const noexcept;
     [[nodiscard]] const std::optional<ReviewedSourceIntegrationLifecycle>&
     lifecycle() const noexcept;
+    [[nodiscard]] const std::optional<ReviewedSourceFatalStateFailure>&
+    fatal_state_failure() const noexcept;
 
     bool operator==(const ReviewedSourceOperationStop&) const = default;
 
 private:
     ReviewedSourceOperationStop(
             ReviewedSourceOperationStopReason reason,
-            std::optional<ReviewedSourceIntegrationLifecycle> lifecycle)
+            std::optional<ReviewedSourceIntegrationLifecycle> lifecycle,
+            std::optional<ReviewedSourceFatalStateFailure> fatal_failure)
         noexcept;
 
     ReviewedSourceOperationStopReason                  reason_;
     std::optional<ReviewedSourceIntegrationLifecycle> lifecycle_;
+    std::optional<ReviewedSourceFatalStateFailure>    fatal_failure_;
 };
+
+// A non-fatal read-time proof for one exact PackageBase. Compatibility routes
+// may consume and discard it after observing fatal state; reviewed routes pass
+// the same store observation into lifecycle planning without a second read.
+class ReviewedSourceFatalStatePreflight final {
+public:
+    ReviewedSourceFatalStatePreflight() = delete;
+    ReviewedSourceFatalStatePreflight(
+            const ReviewedSourceFatalStatePreflight&) = delete;
+    ReviewedSourceFatalStatePreflight(
+            ReviewedSourceFatalStatePreflight&&) noexcept = default;
+    ReviewedSourceFatalStatePreflight& operator=(
+            const ReviewedSourceFatalStatePreflight&) = delete;
+    ReviewedSourceFatalStatePreflight& operator=(
+            ReviewedSourceFatalStatePreflight&&) noexcept = default;
+    ~ReviewedSourceFatalStatePreflight() = default;
+
+    [[nodiscard]] const PackageBaseIdentity& package_base() const noexcept;
+
+private:
+    friend std::variant<
+            ReviewedSourceFatalStatePreflight,
+            ReviewedSourceOperationStop>
+    preflight_reviewed_source_fatal_state(
+            PackageBaseIdentity package_base);
+    friend ReviewedSourceLifecyclePlanResult
+    plan_reviewed_source_lifecycle_from_preflight(
+            AurReviewedSourceReviewIdentity identity,
+            ReviewedSourceFatalStatePreflight preflight);
+
+    ReviewedSourceFatalStatePreflight(
+            PackageBaseIdentity package_base,
+            ReviewedSourceStateStoreRead store_read) noexcept;
+
+    PackageBaseIdentity             package_base_;
+    ReviewedSourceStateStoreRead    store_read_;
+};
+
+using ReviewedSourceFatalStatePreflightResult = std::variant<
+        ReviewedSourceFatalStatePreflight,
+        ReviewedSourceOperationStop>;
+
+// This boundary observes only persistent reviewed-state fatality. It never
+// creates review, acceptance, publication, checkout, or build authority.
+[[nodiscard]] ReviewedSourceFatalStatePreflightResult
+preflight_reviewed_source_fatal_state(
+        PackageBaseIdentity package_base);
+
+// Review planning consumes the exact non-fatal observation returned above.
+// The PackageBase must match the later exact target identity.
+[[nodiscard]] ReviewedSourceLifecyclePlanResult
+plan_reviewed_source_lifecycle_from_preflight(
+        AurReviewedSourceReviewIdentity identity,
+        ReviewedSourceFatalStatePreflight preflight);
 
 class ReviewedSourceReviewRequirement final {
 public:
@@ -252,6 +328,10 @@ private:
     friend ReviewedSourceLifecyclePlanResult
     plan_reviewed_source_lifecycle(
             AurReviewedSourceReviewIdentity identity);
+    friend ReviewedSourceLifecyclePlanResult
+    plan_reviewed_source_lifecycle_from_preflight(
+            AurReviewedSourceReviewIdentity identity,
+            ReviewedSourceFatalStatePreflight preflight);
 
     ReviewedSourceReviewRequirement(
             AurReviewedSourceReviewIdentity identity,
@@ -294,6 +374,10 @@ private:
     friend ReviewedSourceLifecyclePlanResult
     plan_reviewed_source_lifecycle(
             AurReviewedSourceReviewIdentity identity);
+    friend ReviewedSourceLifecyclePlanResult
+    plan_reviewed_source_lifecycle_from_preflight(
+            AurReviewedSourceReviewIdentity identity,
+            ReviewedSourceFatalStatePreflight preflight);
 
     ReviewedSourceAlreadyReviewedContinue(
             AurReviewedSourceReviewIdentity identity,
@@ -304,3 +388,10 @@ private:
     ReviewedSourceExpectedStateObservation expected_;
     bool                                  valid_ = true;
 };
+
+#if defined(MOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS) || \
+        defined(MOGUET_ENABLE_REVIEWED_SOURCE_PRODUCTION_TEST_HOOKS)
+void set_reviewed_source_lifecycle_store_result_for_test(
+        ReviewedSourceStateStoreReadResult store_result);
+void set_reviewed_source_lifecycle_default_missing_for_test(bool enabled);
+#endif

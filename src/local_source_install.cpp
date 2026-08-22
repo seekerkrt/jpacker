@@ -118,7 +118,8 @@ public:
                     selected_children,
             std::vector<ArtifactPackageIdentity> unselected_artifacts) {
         return PackageBaseSourceBuildExecutionResult(
-                std::move(package_base), std::move(selected_children),
+                std::move(package_base), ProductionSourceBuildProvenance{},
+                std::move(selected_children),
                 std::move(unselected_artifacts));
     }
 };

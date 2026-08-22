@@ -306,7 +306,10 @@ cmp -s "$case_dir/config.before" "$config_file" ||
 # CLI final valueはuser configを両方向に反転し、last-value semanticsを使わない。
 run_integration_ok \
     --edit --diff --noconfirm --build-mode=normal -S --aur clean-root
-assert_command "git diff --quiet HEAD..origin/main"
+# --noconfirm はreviewed-source acceptanceを開始せず、legacy diffを
+# reviewed authorityとして再利用しない。editor policy自体はconsumerへ届く。
+assert_command_absent "git diff --quiet HEAD..origin/main"
+assert_command "git reset --hard origin/main"
 assert_contains "Review target: PKGBUILD" "$output_file"
 assert_not_contains "Skipping PKGBUILD/.install review (--noedit)." "$output_file"
 assert_command "makepkg -sc --noconfirm"

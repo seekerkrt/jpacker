@@ -21,6 +21,8 @@
 #include <utility>
 #include <vector>
 
+extern char** environ;
+
 namespace {
 
 struct CommandSignalState {
@@ -665,6 +667,25 @@ int command_status(const std::string& cmd) {
 int run_command(const std::string& cmd) {
     Logger::raw_cmd(cmd);
     return command_status(cmd);
+}
+
+int run_command_with_parent_independent_lifetime_guard(
+        const std::string& command,
+        int lifetime_guard_fd,
+        const std::string& display_command) {
+    Logger::raw_cmd(display_command.empty() ? command : display_command);
+    std::vector<std::string> environment;
+    for(char** current = ::environ;
+        current != nullptr && *current != nullptr; ++current) {
+        environment.emplace_back(*current);
+    }
+    ExplicitProcessInvocation invocation;
+    invocation.executable = "/bin/sh";
+    invocation.arguments = {"-c", command};
+    invocation.environment = std::move(environment);
+    invocation.parent_independent_lifetime_guard_fd =
+            lifetime_guard_fd;
+    return run_explicit_process(invocation);
 }
 
 int run_command_with_stdin_fd(const std::string& command, int source_fd) {

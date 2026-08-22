@@ -1,8 +1,10 @@
 #pragma once
 
 #include "package_base_artifact_install_executor.hpp"
+#include "reviewed_source_production_failure.hpp"
 #include "separated_source_build.hpp"
 
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -15,7 +17,7 @@
 // 1 PackageBaseのordered required child setを一つのworkspace/transactionで扱う。
 // Artifact path、selection index、install directiveはlifecycle内部だけで生成する。
 struct SeparatedPackageBaseSourceBuildRequest {
-    ValidatedCachePath                 checkout;
+    ProductionArtifactSourceTree       source_tree;
     ValidatedPrivateCacheRoot          artifact_root;
     std::string                        package_base;
     std::vector<RequiredPackageArtifactTarget> required_targets;
@@ -35,11 +37,15 @@ struct PackageBaseSourceBuildSelectedResult {
 // selected childをrequired順、unselected outputをproduced順でowned保持する。
 class PackageBaseSourceBuildExecutionResult final {
     std::string package_base_;
+    ProductionSourceBuildProvenance source_provenance_;
+    ProductionSourceBuildCommandOutcome build_outcome_ =
+            ProductionSourceBuildCommandOutcome::Succeeded;
     std::vector<PackageBaseSourceBuildSelectedResult> selected_children_;
     std::vector<ArtifactPackageIdentity> unselected_artifacts_;
 
     PackageBaseSourceBuildExecutionResult(
             std::string package_base,
+            ProductionSourceBuildProvenance source_provenance,
             std::vector<PackageBaseSourceBuildSelectedResult>
                     selected_children,
             std::vector<ArtifactPackageIdentity> unselected_artifacts)
@@ -57,6 +63,7 @@ class PackageBaseSourceBuildExecutionResult final {
             std::vector<ArtifactPackageIdentity> unselected_artifacts)
             noexcept
         : package_base_(std::move(package_base)),
+          source_provenance_(),
           selected_children_(std::move(selected_children)),
           unselected_artifacts_(std::move(unselected_artifacts)) {
     }
@@ -80,6 +87,9 @@ public:
     ~PackageBaseSourceBuildExecutionResult() = default;
 
     const std::string& package_base() const noexcept;
+    const ProductionSourceBuildProvenance& source_provenance()
+            const noexcept;
+    ProductionSourceBuildCommandOutcome build_outcome() const noexcept;
     const std::vector<PackageBaseSourceBuildSelectedResult>&
     selected_children() const noexcept;
     const std::vector<ArtifactPackageIdentity>&
@@ -123,6 +133,8 @@ enum class SeparatedPackageBaseSourceBuildFailurePhase {
 class SeparatedPackageBaseSourceBuildPhaseError final
     : public std::runtime_error {
     SeparatedPackageBaseSourceBuildFailurePhase phase_;
+    std::optional<ReviewedSourceProductionFailure>
+            reviewed_source_failure_;
 
 #ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     struct AurUpdateRunnerTestTag {};
@@ -130,25 +142,36 @@ class SeparatedPackageBaseSourceBuildPhaseError final
     SeparatedPackageBaseSourceBuildPhaseError(
             AurUpdateRunnerTestTag,
             SeparatedPackageBaseSourceBuildFailurePhase phase,
-            const std::string& diagnostic)
-        : std::runtime_error(diagnostic), phase_(phase) {
+            const std::string& diagnostic,
+            std::optional<ReviewedSourceProductionFailure>
+                    reviewed_source_failure = std::nullopt)
+        : std::runtime_error(diagnostic), phase_(phase),
+          reviewed_source_failure_(
+                  std::move(reviewed_source_failure)) {
     }
 #endif
 
 public:
     SeparatedPackageBaseSourceBuildPhaseError(
             SeparatedPackageBaseSourceBuildFailurePhase phase,
-            const std::string& diagnostic);
+            const std::string& diagnostic,
+            std::optional<ReviewedSourceProductionFailure>
+                    reviewed_source_failure = std::nullopt);
 
     SeparatedPackageBaseSourceBuildFailurePhase phase() const noexcept;
+    const std::optional<ReviewedSourceProductionFailure>&
+    reviewed_source_failure() const noexcept;
 
 #ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     static SeparatedPackageBaseSourceBuildPhaseError
     make_for_aur_update_runner_test(
             SeparatedPackageBaseSourceBuildFailurePhase phase,
-            const std::string& diagnostic) {
+            const std::string& diagnostic,
+            std::optional<ReviewedSourceProductionFailure>
+                    reviewed_source_failure = std::nullopt) {
         return SeparatedPackageBaseSourceBuildPhaseError(
-                AurUpdateRunnerTestTag{}, phase, diagnostic);
+                AurUpdateRunnerTestTag{}, phase, diagnostic,
+                std::move(reviewed_source_failure));
     }
 #endif
 };

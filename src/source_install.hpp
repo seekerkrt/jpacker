@@ -319,6 +319,9 @@ class LocalSourceBuildDependencyPreparation final {
             const LocalBuildPlan& plan,
             bool use_source_build_preferences,
             bool needed);
+    friend void preflight_local_source_build_dependencies(
+            LocalSourceBuildDependencyPreparation& preparation,
+            const AppConfig& config);
     friend PreparedProductionSourceBuildInvocation
     prepare_local_source_build_dependency_invocation(
             LocalSourceBuildDependencyPreparation preparation,
@@ -605,6 +608,12 @@ prepare_local_source_build_dependencies(
         bool use_source_build_preferences,
         bool needed);
 
+// Local planから構築したremote AUR dependency全件について、cache authorityを
+// 作る前にfatal reviewed-stateを観測し、既存のsingle-consumption slotへ保持する。
+void preflight_local_source_build_dependencies(
+        LocalSourceBuildDependencyPreparation& preparation,
+        const AppConfig& config);
+
 PreparedProductionSourceBuildInvocation prepare_production_source_build_invocation(
         std::vector<ProductionSourceBuildWorkItem> work_items,
         const AppConfig& config);
@@ -614,13 +623,6 @@ PreparedProductionSourceBuildInvocation prepare_production_source_build_invocati
 PreparedProductionSourceBuildInvocation
 prepare_local_source_build_dependency_invocation(
         LocalSourceBuildDependencyPreparation preparation,
-        const ValidatedCacheRoot& cache_root,
-        const AppConfig& config);
-PreparedProductionSourceBuildInvocation
-prepare_local_source_build_dependency_invocation(
-        const LocalBuildPlan& plan,
-        bool use_source_build_preferences,
-        bool needed,
         const ValidatedCacheRoot& cache_root,
         const AppConfig& config);
 

@@ -166,6 +166,8 @@ struct SystemSourceUpgradeIssue {
             cache_preparation_failure;
     std::optional<TrustedCacheFailure> trusted_cache_failure;
     std::string diagnostic;
+    std::optional<ReviewedSourceProductionFailure>
+            reviewed_source_failure;
 };
 
 // Prepared source invocation内のactual work itemから、source identityと

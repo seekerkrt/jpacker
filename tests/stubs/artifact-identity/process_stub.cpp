@@ -94,3 +94,10 @@ int run_command(const std::string&) {
     // Identity testはbuild commandを実行しない。link対象workspace moduleからの予期せぬ呼出しはfail closedにする。
     throw std::runtime_error("Unexpected run_command call in artifact identity test.");
 }
+
+int run_command_with_parent_independent_lifetime_guard(
+        const std::string& command,
+        int,
+        const std::string&) {
+    return run_command(command);
+}

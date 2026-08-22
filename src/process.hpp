@@ -51,5 +51,12 @@ std::string exec_command(const char* cmd);
 int command_status(const std::string& cmd);
 int run_command(const std::string& cmd);
 
+// std::system()-compatible shell/environment/cwd semantics with the same
+// parent-independent lifetime guard used by exact Git mutators.
+int run_command_with_parent_independent_lifetime_guard(
+        const std::string& command,
+        int lifetime_guard_fd,
+        const std::string& display_command = {});
+
 // source_fdはcaller所有のままborrowし、childだけがcurrent offsetからstdinとして読む。
 int run_command_with_stdin_fd(const std::string& command, int source_fd);

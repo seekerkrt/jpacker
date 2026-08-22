@@ -23,6 +23,10 @@ std::string trusted_git_remote_origin_url(
 int trusted_git_fetch_origin(
         const ValidatedCachePath& checkout,
         const std::string& expected_remote_url);
+int trusted_git_fetch_origin(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        const ReviewedSourcePackageBaseLease& lease);
 std::string trusted_git_detect_remote_branch(
         const ValidatedCachePath& checkout,
         const std::string& expected_remote_url);
@@ -42,9 +46,18 @@ int trusted_git_reset_hard(
         const ValidatedCachePath& checkout,
         const std::string& expected_remote_url,
         const std::string& branch);
+int trusted_git_reset_hard(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        const std::string& branch,
+        const ReviewedSourcePackageBaseLease& lease);
 int trusted_git_clone_persistent_checkout(
         const ValidatedCachePath& destination,
         const std::string& remote_url);
+int trusted_git_clone_persistent_checkout(
+        const ValidatedCachePath& destination,
+        const std::string& remote_url,
+        const ReviewedSourcePackageBaseLease& lease);
 
 enum class TrustedGitReviewStage {
     TargetResolution,
@@ -122,6 +135,8 @@ enum class TrustedGitPinnedCheckoutStage {
     HeadVerification,
     IndexVerification,
     WorktreeVerification,
+    OverlayObservation,
+    OverlayRevalidation,
     BoundaryRevalidation,
 };
 
@@ -140,6 +155,8 @@ enum class TrustedGitPinnedCheckoutFailureReason {
     DirtyIndex,
     DirtyWorktree,
     UnsafeIndexFlags,
+    OverlayMismatch,
+    UnsupportedOverlayEntry,
 };
 
 struct TrustedGitPinnedCheckoutFailure {
@@ -191,6 +208,26 @@ private:
             TrustedGitPinnedCheckoutFailure>
     revalidate_trusted_git_pinned_checkout(
             const TrustedGitPinnedCheckout& checkout);
+    friend std::variant<
+            class TrustedGitPinnedCheckoutOverlayObservation,
+            TrustedGitPinnedCheckoutFailure>
+    observe_clean_trusted_git_pinned_checkout_overlay(
+            const TrustedGitPinnedCheckout& checkout,
+            const ReviewedSourcePackageBaseLease& lease);
+    friend std::variant<
+            class TrustedGitPinnedCheckoutOverlayObservation,
+            TrustedGitPinnedCheckoutFailure>
+    observe_trusted_git_pinned_checkout_overlay(
+            const TrustedGitPinnedCheckout& checkout,
+            const ReviewedSourcePackageBaseLease& lease);
+    friend std::variant<
+            TrustedGitPinnedCheckoutRevalidated,
+            TrustedGitPinnedCheckoutFailure>
+    revalidate_trusted_git_pinned_checkout_overlay(
+            const TrustedGitPinnedCheckout& checkout,
+            const ReviewedSourcePackageBaseLease& lease,
+            const class TrustedGitPinnedCheckoutOverlayObservation&
+                    expected);
 
     struct State;
 
@@ -203,12 +240,75 @@ private:
     std::unique_ptr<State> state_;
 };
 
+// Exact Git-backed projection plus a descriptor-observed filesystem manifest
+// of all worktree entries except the repository's own top-level .git metadata.
+// The Git projection uses an invocation-private alternate index and includes
+// ignored/untracked entries; the manifest additionally seals directories,
+// full modes, and nested .git inputs that Git trees cannot represent.
+// Only the three exact observation/revalidation functions below can construct
+// or consume this value as proof.
+class TrustedGitPinnedCheckoutOverlayObservation final {
+public:
+    TrustedGitPinnedCheckoutOverlayObservation() = delete;
+    TrustedGitPinnedCheckoutOverlayObservation(
+            const TrustedGitPinnedCheckoutOverlayObservation&) = default;
+    TrustedGitPinnedCheckoutOverlayObservation(
+            TrustedGitPinnedCheckoutOverlayObservation&&) noexcept = default;
+    TrustedGitPinnedCheckoutOverlayObservation& operator=(
+            const TrustedGitPinnedCheckoutOverlayObservation&) = default;
+    TrustedGitPinnedCheckoutOverlayObservation& operator=(
+            TrustedGitPinnedCheckoutOverlayObservation&&) noexcept = default;
+    ~TrustedGitPinnedCheckoutOverlayObservation() = default;
+
+    bool operator==(
+            const TrustedGitPinnedCheckoutOverlayObservation&) const =
+            default;
+
+private:
+    friend std::variant<
+            TrustedGitPinnedCheckoutOverlayObservation,
+            TrustedGitPinnedCheckoutFailure>
+    observe_clean_trusted_git_pinned_checkout_overlay(
+            const TrustedGitPinnedCheckout& checkout,
+            const ReviewedSourcePackageBaseLease& lease);
+    friend std::variant<
+            TrustedGitPinnedCheckoutOverlayObservation,
+            TrustedGitPinnedCheckoutFailure>
+    observe_trusted_git_pinned_checkout_overlay(
+            const TrustedGitPinnedCheckout& checkout,
+            const ReviewedSourcePackageBaseLease& lease);
+    friend std::variant<
+            TrustedGitPinnedCheckoutRevalidated,
+            TrustedGitPinnedCheckoutFailure>
+    revalidate_trusted_git_pinned_checkout_overlay(
+            const TrustedGitPinnedCheckout& checkout,
+            const ReviewedSourcePackageBaseLease& lease,
+            const TrustedGitPinnedCheckoutOverlayObservation& expected);
+
+    TrustedGitPinnedCheckoutOverlayObservation(
+            AurReviewedSourceReviewIdentity identity,
+            std::uintmax_t checkout_device,
+            std::uintmax_t checkout_inode,
+            ReviewedSourceObjectId tree,
+            std::string filesystem_manifest) noexcept;
+
+    AurReviewedSourceReviewIdentity identity_;
+    std::uintmax_t checkout_device_ = 0;
+    std::uintmax_t checkout_inode_ = 0;
+    ReviewedSourceObjectId tree_;
+    std::string filesystem_manifest_;
+};
+
 using TrustedGitPinnedCheckoutResult = std::variant<
         TrustedGitPinnedCheckout,
         TrustedGitPinnedCheckoutFailure>;
 
 using TrustedGitPinnedCheckoutRevalidationResult = std::variant<
         TrustedGitPinnedCheckoutRevalidated,
+        TrustedGitPinnedCheckoutFailure>;
+
+using TrustedGitPinnedCheckoutOverlayObservationResult = std::variant<
+        TrustedGitPinnedCheckoutOverlayObservation,
         TrustedGitPinnedCheckoutFailure>;
 
 // This is a mutation boundary, unlike the read-only review projection above.
@@ -226,6 +326,25 @@ trusted_git_materialize_pinned_checkout(
 [[nodiscard]] TrustedGitPinnedCheckoutRevalidationResult
 revalidate_trusted_git_pinned_checkout(
         const TrustedGitPinnedCheckout& checkout);
+
+// The clean observation is the pre-editor boundary. The second observation
+// permits a dirty worktree but still requires exact detached HEAD, exact real
+// index, safe Git metadata, and the same retained checkout identity.
+[[nodiscard]] TrustedGitPinnedCheckoutOverlayObservationResult
+observe_clean_trusted_git_pinned_checkout_overlay(
+        const TrustedGitPinnedCheckout& checkout,
+        const ReviewedSourcePackageBaseLease& lease);
+
+[[nodiscard]] TrustedGitPinnedCheckoutOverlayObservationResult
+observe_trusted_git_pinned_checkout_overlay(
+        const TrustedGitPinnedCheckout& checkout,
+        const ReviewedSourcePackageBaseLease& lease);
+
+[[nodiscard]] TrustedGitPinnedCheckoutRevalidationResult
+revalidate_trusted_git_pinned_checkout_overlay(
+        const TrustedGitPinnedCheckout& checkout,
+        const ReviewedSourcePackageBaseLease& lease,
+        const TrustedGitPinnedCheckoutOverlayObservation& expected);
 
 // Resolve the mutable remote-tracking ref once. Callers must retain and use
 // only the returned complete commit OID for later projection.

@@ -1,14 +1,17 @@
 #include "reviewed_source_lifecycle.hpp"
 
+#include <deque>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
 
 namespace {
 
-#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS
-std::optional<ReviewedSourceStateStoreReadResult>
-        g_reviewed_source_lifecycle_store_result;
+#if defined(MOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS) || \
+        defined(MOGUET_ENABLE_REVIEWED_SOURCE_PRODUCTION_TEST_HOOKS)
+std::deque<ReviewedSourceStateStoreReadResult>
+        g_reviewed_source_lifecycle_store_results;
+bool g_reviewed_source_lifecycle_default_missing = false;
 #endif
 
 bool store_read_is_coherent(
@@ -141,20 +144,25 @@ ReviewedSourceExpectedStateObservation::store_read() const noexcept {
 
 ReviewedSourceOperationStop::ReviewedSourceOperationStop(
         ReviewedSourceOperationStopReason reason,
-        std::optional<ReviewedSourceIntegrationLifecycle> lifecycle) noexcept
-    : reason_(reason), lifecycle_(std::move(lifecycle)) {}
+        std::optional<ReviewedSourceIntegrationLifecycle> lifecycle,
+        std::optional<ReviewedSourceFatalStateFailure> fatal_failure) noexcept
+    : reason_(reason), lifecycle_(std::move(lifecycle)),
+      fatal_failure_(std::move(fatal_failure)) {}
 
 ReviewedSourceOperationStop ReviewedSourceOperationStop::make(
         ReviewedSourceOperationStopReason reason) noexcept {
-    return ReviewedSourceOperationStop(reason, std::nullopt);
+    return ReviewedSourceOperationStop(
+            reason, std::nullopt, std::nullopt);
 }
 
 ReviewedSourceOperationStop ReviewedSourceOperationStop::fatal(
-        ReviewedSourceFatalStateReason reason) noexcept {
+        ReviewedSourceFatalStateFailure failure) noexcept {
+    const ReviewedSourceFatalStateReason reason = failure.reason;
     return ReviewedSourceOperationStop(
             stop_reason(reason),
             ReviewedSourceIntegrationLifecycle(
-                    ReviewedSourceLifecycleFatalState{reason}));
+                    ReviewedSourceLifecycleFatalState{reason}),
+            std::move(failure));
 }
 
 ReviewedSourceOperationStopReason
@@ -165,6 +173,22 @@ ReviewedSourceOperationStop::reason() const noexcept {
 const std::optional<ReviewedSourceIntegrationLifecycle>&
 ReviewedSourceOperationStop::lifecycle() const noexcept {
     return lifecycle_;
+}
+
+const std::optional<ReviewedSourceFatalStateFailure>&
+ReviewedSourceOperationStop::fatal_state_failure() const noexcept {
+    return fatal_failure_;
+}
+
+ReviewedSourceFatalStatePreflight::ReviewedSourceFatalStatePreflight(
+        PackageBaseIdentity package_base,
+        ReviewedSourceStateStoreRead store_read) noexcept
+    : package_base_(std::move(package_base)),
+      store_read_(std::move(store_read)) {}
+
+const PackageBaseIdentity&
+ReviewedSourceFatalStatePreflight::package_base() const noexcept {
+    return package_base_;
 }
 
 ReviewedSourceReviewRequirement::ReviewedSourceReviewRequirement(
@@ -241,46 +265,93 @@ ReviewedSourceAlreadyReviewedContinue::expected_state_observation()
 
 ReviewedSourceLifecyclePlanResult plan_reviewed_source_lifecycle(
         AurReviewedSourceReviewIdentity identity) {
-    ReviewedSourceStateStoreReadResult store_result = [&identity] {
-#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS
-        if(g_reviewed_source_lifecycle_store_result.has_value()) {
+    ReviewedSourceFatalStatePreflightResult preflight =
+            preflight_reviewed_source_fatal_state(
+                    identity.package_base());
+    if(auto* stop = std::get_if<ReviewedSourceOperationStop>(&preflight)) {
+        return std::move(*stop);
+    }
+    return plan_reviewed_source_lifecycle_from_preflight(
+            std::move(identity),
+            std::get<ReviewedSourceFatalStatePreflight>(
+                    std::move(preflight)));
+}
+
+ReviewedSourceFatalStatePreflightResult
+preflight_reviewed_source_fatal_state(
+        PackageBaseIdentity package_base) {
+    ReviewedSourceStateStoreReadResult store_result = [&package_base] {
+#if defined(MOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS) || \
+        defined(MOGUET_ENABLE_REVIEWED_SOURCE_PRODUCTION_TEST_HOOKS)
+        if(!g_reviewed_source_lifecycle_store_results.empty()) {
             ReviewedSourceStateStoreReadResult injected = std::move(
-                    *g_reviewed_source_lifecycle_store_result);
-            g_reviewed_source_lifecycle_store_result.reset();
+                    g_reviewed_source_lifecycle_store_results.front());
+            g_reviewed_source_lifecycle_store_results.pop_front();
             return injected;
         }
+#if defined(MOGUET_ENABLE_REVIEWED_SOURCE_PRODUCTION_TEST_HOOKS)
+        if(g_reviewed_source_lifecycle_default_missing) {
+            return ReviewedSourceStateStoreReadResult(
+                    ReviewedSourceStateStoreRead{
+                            ReviewedSourceStateMissing{}, std::nullopt});
+        }
+#endif
+#endif
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS
         throw std::logic_error(
                 "A reviewed source lifecycle test observation is required.");
 #else
-        return read_reviewed_source_state(identity.package_base());
+        return read_reviewed_source_state(package_base);
 #endif
     }();
-    if(std::holds_alternative<ReviewedSourceStateStoreUnsafeHistory>(
-               store_result)) {
+    if(auto* unsafe = std::get_if<ReviewedSourceStateStoreUnsafeHistory>(
+               &store_result)) {
         return ReviewedSourceOperationStop::fatal(
-                ReviewedSourceFatalStateReason::UnsafeHistory);
+                ReviewedSourceFatalStateFailure{
+                        ReviewedSourceFatalStateReason::UnsafeHistory,
+                        std::nullopt, std::move(*unsafe), std::nullopt});
     }
-    if(std::holds_alternative<ReviewedSourceStateStoreFailure>(store_result)) {
+    if(auto* failure = std::get_if<ReviewedSourceStateStoreFailure>(
+               &store_result)) {
         return ReviewedSourceOperationStop::fatal(
-                ReviewedSourceFatalStateReason::StoreFailure);
+                ReviewedSourceFatalStateFailure{
+                        ReviewedSourceFatalStateReason::StoreFailure,
+                        std::nullopt, std::nullopt, std::move(*failure)});
     }
 
     ReviewedSourceStateStoreRead store_read =
             std::get<ReviewedSourceStateStoreRead>(std::move(store_result));
-    if(!store_read_is_coherent(store_read, identity.package_base())) {
+    if(!store_read_is_coherent(store_read, package_base)) {
         return ReviewedSourceOperationStop::fatal(
-                ReviewedSourceFatalStateReason::
-                        InconsistentStoreObservation);
+                ReviewedSourceFatalStateFailure{
+                        ReviewedSourceFatalStateReason::
+                                InconsistentStoreObservation,
+                        std::move(store_read), std::nullopt, std::nullopt});
     }
 
     if(std::holds_alternative<ReviewedSourceStateUnsupportedFuture>(
                store_read.observation)) {
         return ReviewedSourceOperationStop::fatal(
-                ReviewedSourceFatalStateReason::UnsupportedFuture);
+                ReviewedSourceFatalStateFailure{
+                        ReviewedSourceFatalStateReason::UnsupportedFuture,
+                        std::move(store_read), std::nullopt, std::nullopt});
+    }
+
+    return ReviewedSourceFatalStatePreflight(
+            std::move(package_base), std::move(store_read));
+}
+
+ReviewedSourceLifecyclePlanResult
+plan_reviewed_source_lifecycle_from_preflight(
+        AurReviewedSourceReviewIdentity identity,
+        ReviewedSourceFatalStatePreflight preflight) {
+    if(preflight.package_base_ != identity.package_base()) {
+        return ReviewedSourceOperationStop::make(
+                ReviewedSourceOperationStopReason::PackageBaseMismatch);
     }
 
     ReviewedSourceExpectedStateObservation expected(
-            std::move(store_read));
+            std::move(preflight.store_read_));
     const ReviewedSourceStateObservation& observation =
             expected.observation();
 
@@ -331,18 +402,30 @@ ReviewedSourceLifecyclePlanResult plan_reviewed_source_lifecycle(
     }
 
     return ReviewedSourceOperationStop::fatal(
-            ReviewedSourceFatalStateReason::InconsistentStoreObservation);
+            ReviewedSourceFatalStateFailure{
+                    ReviewedSourceFatalStateReason::
+                            InconsistentStoreObservation,
+                    expected.store_read(), std::nullopt, std::nullopt});
 }
+
+#if defined(MOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS) || \
+        defined(MOGUET_ENABLE_REVIEWED_SOURCE_PRODUCTION_TEST_HOOKS)
+void set_reviewed_source_lifecycle_store_result_for_test(
+        ReviewedSourceStateStoreReadResult store_result) {
+    g_reviewed_source_lifecycle_store_results.push_back(
+            std::move(store_result));
+}
+
+void set_reviewed_source_lifecycle_default_missing_for_test(bool enabled) {
+    g_reviewed_source_lifecycle_default_missing = enabled;
+}
+#endif
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_LIFECYCLE_TEST_HOOKS
 ReviewedSourceLifecyclePlanResult plan_reviewed_source_lifecycle(
         AurReviewedSourceReviewIdentity identity,
         ReviewedSourceStateStoreReadResult store_result) {
-    if(g_reviewed_source_lifecycle_store_result.has_value()) {
-        throw std::logic_error(
-                "A reviewed source lifecycle test observation is already pending.");
-    }
-    g_reviewed_source_lifecycle_store_result.emplace(
+    set_reviewed_source_lifecycle_store_result_for_test(
             std::move(store_result));
     return plan_reviewed_source_lifecycle(std::move(identity));
 }

@@ -884,6 +884,12 @@ void require_unclaimed_artifact_pkgdest(
     }
 }
 
+std::shared_ptr<ReviewedSourceFatalStatePreflightSlot>
+preflight_reviewed_source_fatal_state_for_production(
+        const SourceBuildRequest&) {
+    return nullptr;
+}
+
 PacmanDatabasePaths resolve_pacman_database_paths() {
     ++g_state.database_calls;
     record_event(
@@ -975,7 +981,7 @@ prepare_package_base_source_build_work_item_typed(
     if(execution.kind == ScriptedSourceExecutionKind::Success) {
         if(execution.result.status == SourceBuildExecutionStatus::UpToDate) {
             SourceBuildUpToDate outcome{
-                    std::move(execution.result.diagnostic)};
+                    std::move(execution.result.diagnostic), std::nullopt};
             g_state.source_executions.pop_front();
             return outcome;
         }
@@ -986,7 +992,7 @@ prepare_package_base_source_build_work_item_typed(
                             .value_or(
                                     SourceBuildUpdateStatusUnknownSkipReason::
                                             NoConfirm),
-                    std::move(execution.result.diagnostic)};
+                    std::move(execution.result.diagnostic), std::nullopt};
             g_state.source_executions.pop_front();
             return outcome;
         }
@@ -1313,6 +1319,12 @@ PackageBaseSourceBuildExecutionResult::release_unselected_artifacts()
 SeparatedPackageBaseSourceBuildFailurePhase
 SeparatedPackageBaseSourceBuildPhaseError::phase() const noexcept {
     return phase_;
+}
+
+const std::optional<ReviewedSourceProductionFailure>&
+SeparatedPackageBaseSourceBuildPhaseError::reviewed_source_failure()
+        const noexcept {
+    return reviewed_source_failure_;
 }
 
 const PackageBaseArtifactIdentitySelectionFailure*

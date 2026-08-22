@@ -151,6 +151,15 @@ std::string aur_git_url_for_package_base(const std::string& package_base) {
     return AUR_BASE_URL + package_base + ".git";
 }
 
+PackageBaseIdentity aur_review_identity_for_package_base(
+        const std::string& package_base) {
+    const std::string remote = aur_git_url_for_package_base(package_base);
+    return PackageBaseIdentity::make(
+            PackageSourceIdentity::aur(
+                    SourceLocationIdentity::known_git_remote(remote)),
+            package_base);
+}
+
 void add_selected_repository_provider(
         std::vector<ProvidedDependency>& providers,
         const ProvidedDependency& provider) {
@@ -215,6 +224,8 @@ ProductionSourceBuildWorkItem make_aur_source_build_work_item(
     }
     work_item.request.checkout_name = unit.package_base;
     work_item.request.git_url = aur_git_url_for_package_base(unit.package_base);
+    work_item.request.aur_review_identity =
+            aur_review_identity_for_package_base(unit.package_base);
     work_item.request.custom_environment = std::move(environment);
     work_item.request.needed = needed;
     work_item.required_targets = unit.required_targets;
@@ -342,6 +353,11 @@ ProductionSourceBuildWorkItem make_direct_source_build_work_item(
     work_item.request.package_name = source.requested_name();
     work_item.request.checkout_name = source.package_base();
     work_item.request.git_url = source.git_url();
+    if(source.source_kind() == SourceBuildSourceKind::Aur) {
+        work_item.request.aur_review_identity =
+                aur_review_identity_for_package_base(
+                        source.package_base());
+    }
     work_item.request.custom_environment = std::move(environment);
     work_item.request.empty_value_policy = empty_value_policy;
     work_item.request.only_if_updated = only_if_updated;
@@ -981,6 +997,8 @@ prepare_package_base_source_build_work_item_typed(
                 work_item.request, work_item.request.checkout_name,
                 update_policy, require_prepared_cache_root(work_item),
                 config);
+    } catch(const ReviewedSourceProductionError&) {
+        throw;
     } catch(const TrustedCacheError&) {
         throw;
     } catch(const ConfirmationOperationStopped&) {
@@ -1011,6 +1029,7 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
+    require_static_production_source_build_work_item(work_item);
     const RequiredPackageArtifactTarget& target =
             require_singular_required_package_target(work_item);
     if(work_item.required_target_provenance ==
@@ -1030,6 +1049,8 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
                 work_item.request, require_prepared_cache_root(work_item),
                 target.desired_reason,
                 database_paths, config);
+    } catch(const ReviewedSourceProductionError&) {
+        throw;
     } catch(const SeparatedSourceBuildCleanupError&) {
         // POLICY(#242): install成功後cleanup失敗の型とdiagnosticをgeneric
         // build/install failureへflattenしない。

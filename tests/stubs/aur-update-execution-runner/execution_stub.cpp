@@ -28,6 +28,8 @@ struct ScriptedPhaseFailure {
     SeparatedPackageBaseSourceBuildFailurePhase phase =
             SeparatedPackageBaseSourceBuildFailurePhase::Build;
     std::string diagnostic;
+    std::optional<ReviewedSourceProductionFailure>
+            reviewed_source_failure;
 };
 
 struct ScriptedSelectionFailure {
@@ -292,10 +294,14 @@ void enqueue_cleanup_failure(
 void enqueue_phase_failure(
         ExpectedExecution expected,
         SeparatedPackageBaseSourceBuildFailurePhase phase,
-        std::string diagnostic) {
+        std::string diagnostic,
+        std::optional<ReviewedSourceProductionFailure>
+                reviewed_source_failure) {
     enqueue(
             std::move(expected),
-            ScriptedPhaseFailure{phase, std::move(diagnostic)});
+            ScriptedPhaseFailure{
+                    phase, std::move(diagnostic),
+                    std::move(reviewed_source_failure)});
 }
 
 void enqueue_selection_failure(
@@ -452,6 +458,12 @@ SeparatedPackageBaseSourceBuildPhaseError::phase() const noexcept {
     return phase_;
 }
 
+const std::optional<ReviewedSourceProductionFailure>&
+SeparatedPackageBaseSourceBuildPhaseError::reviewed_source_failure()
+        const noexcept {
+    return reviewed_source_failure_;
+}
+
 const PackageBaseArtifactIdentitySelectionFailure*
 PackageBaseArtifactInstallPreparationFailure::selection_failure()
         const noexcept {
@@ -580,7 +592,8 @@ execute_prepared_package_base_source_build_work_item_typed(
                std::get_if<ScriptedPhaseFailure>(&scripted.outcome)) {
         throw SeparatedPackageBaseSourceBuildPhaseError::
                 make_for_aur_update_runner_test(
-                        phase->phase, phase->diagnostic);
+                        phase->phase, phase->diagnostic,
+                        std::move(phase->reviewed_source_failure));
     }
     if(auto* selection =
                std::get_if<ScriptedSelectionFailure>(&scripted.outcome)) {

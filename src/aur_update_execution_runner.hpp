@@ -53,6 +53,8 @@ struct AurUpdateSourceBuildFailureSnapshot {
     AurUpdateSourceBuildFailureCategory category =
             AurUpdateSourceBuildFailureCategory::Other;
     std::string diagnostic;
+    std::optional<ReviewedSourceProductionFailure>
+            reviewed_source_failure;
 };
 
 enum class AurUpdatePackageTransactionFailureCategory {

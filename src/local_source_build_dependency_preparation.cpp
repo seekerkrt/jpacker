@@ -92,16 +92,3 @@ prepare_local_source_build_dependencies(
             std::move(remote_work_items),
             collect_selected_repository_providers(plan));
 }
-
-PreparedProductionSourceBuildInvocation
-prepare_local_source_build_dependency_invocation(
-        const LocalBuildPlan& plan,
-        bool use_source_build_preferences,
-        bool needed,
-        const ValidatedCacheRoot& cache_root,
-        const AppConfig& config) {
-    return prepare_local_source_build_dependency_invocation(
-            prepare_local_source_build_dependencies(
-                    plan, use_source_build_preferences, needed),
-            cache_root, config);
-}

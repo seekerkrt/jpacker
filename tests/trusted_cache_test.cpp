@@ -15,6 +15,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <sys/file.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -557,6 +558,44 @@ void test_repeated_cleanup_preflight_restarts_directory_scan() {
     create_trusted_cache_directory(root, "beta");
     expect(preflight_cache_cleanup(root).size() == 2,
            "Repeated cleanup preflight reused an exhausted directory offset.");
+}
+
+void test_cleanup_refuses_held_package_base_lease() {
+    TemporaryTree tree;
+    fs::path cache_home = tree.path() / "cache-anchor";
+    fs::create_directory(cache_home);
+    fs::permissions(
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
+    ValidatedCacheRoot root = prepare_root(cache_home);
+    ValidatedCachePath checkout =
+            create_trusted_cache_directory(root, "leased-checkout");
+
+    const int descriptor = open(
+            checkout.path().c_str(),
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    expect(descriptor >= 0, "Failed to open cleanup lease fixture");
+    expect(flock(descriptor, LOCK_EX | LOCK_NB) == 0,
+           "Failed to hold cleanup lease fixture");
+    TrustedCacheFailure failure = expect_cache_error(
+            [&]() {
+                static_cast<void>(preflight_cache_cleanup(root));
+            },
+            TrustedCacheErrorCode::ConcurrentReplacement,
+            "cleanup PackageBase lease contention");
+    expect(failure.stage == TrustedCacheStage::CleanupPreflight,
+           "Cleanup lease contention has the wrong stage.");
+    expect(fs::is_directory(checkout.path()),
+           "Cleanup removed a checkout while its lease was held.");
+    expect(flock(descriptor, LOCK_UN) == 0,
+           "Failed to release cleanup lease fixture");
+    expect(close(descriptor) == 0,
+           "Failed to close cleanup lease fixture");
+
+    PreparedCacheCleanup cleanup = preflight_cache_cleanup(root);
+    remove_preflighted_cache_paths(std::move(cleanup));
+    expect(!fs::exists(checkout.path()),
+           "Cleanup did not proceed after PackageBase lease release.");
 }
 
 void test_empty_cleanup_capability_is_consumable() {
@@ -1419,6 +1458,7 @@ int main() {
         test_nested_symlink_cleanup_pins_link_without_following();
         test_cleanup_capability_revalidation_is_global();
         test_repeated_cleanup_preflight_restarts_directory_scan();
+        test_cleanup_refuses_held_package_base_lease();
         test_empty_cleanup_capability_is_consumable();
         test_cleanup_capability_reports_fd_exhaustion_before_removal();
         test_cleanup_capability_pins_nodes_until_consumed();

@@ -703,6 +703,13 @@ ReviewedSourceReviewFailure map_patch_failure(
 
 } // namespace
 
+std::string reviewed_source_sha256_content_identity(
+        std::string_view content) {
+    Sha256 hash;
+    hash.update(content);
+    return hash.finish();
+}
+
 std::uintmax_t reviewed_source_review_resource_limit(
         ReviewedSourceReviewResourceKind resource) noexcept {
     switch(resource) {

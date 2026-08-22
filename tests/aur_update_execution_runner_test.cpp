@@ -794,6 +794,38 @@ void test_selected_repository_provider_transaction_precedes_source_and_stops_fai
     execution_stub::require_script_consumed();
 }
 
+void test_later_fatal_preflight_blocks_cache_provider_and_first_work_item() {
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
+            "/fatal/root", "/fatal/database"};
+    preparation_stub::reset();
+    preparation_stub::set_database_paths(database_paths);
+    preparation_stub::fail_reviewed_state_preflight_on_call(
+            2, "scripted later reviewed-state fatal observation");
+    execution_stub::reset();
+
+    AurUpdateSourceBuildPreparation preparation =
+            prepare_aur_update_source_build_invocation(
+                    later_repository_provider_preflight(), false, config);
+    expect(!preparation.is_prepared() &&
+                   !preparation.invocation.has_value() &&
+                   preparation.issues.size() == 1 &&
+                   preparation.issues.front().reason ==
+                           AurUpdatePreparationReason::
+                                   GenericPreparationInconsistent &&
+                   preparation.issues.front().diagnostic.find(
+                           "scripted later reviewed-state fatal observation") !=
+                           std::string::npos,
+           "Later fatal preflight did not stop aggregate preparation");
+    expect(preparation_stub::reviewed_state_preflight_call_count() == 2 &&
+                   preparation_stub::database_call_count() == 0,
+           "Later fatal preflight did not precede the DB invocation snapshot");
+    expect(execution_stub::invocation_event_history().empty() &&
+                   execution_stub::call_history().empty() &&
+                   execution_stub::event_history().empty(),
+           "Later fatal preflight reached cache/provider/source execution");
+}
+
 void test_requested_split_child_size_one_is_no_change() {
     const AppConfig config = runner_config();
     const PacmanDatabasePaths database_paths{
@@ -1344,6 +1376,65 @@ void test_selection_mixed_reason_metadata_and_phase_failures_are_typed() {
                                .category == expected_category,
                diagnostic + ": category differs");
     }
+
+    const PackageBaseIdentity reviewed_package_base =
+            PackageBaseIdentity::make(
+                    PackageSourceIdentity::aur(
+                            SourceLocationIdentity::known_git_remote(
+                                    "https://aur.archlinux.org/split-suite.git")),
+                    "split-suite");
+    const ReviewedSourceState uncertain_state = ReviewedSourceState::make(
+            reviewed_package_base,
+            SourceRevisionIdentity::git_commit(
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+    const ReviewedSourceProductionFailure published_uncertain{
+            ReviewedSourceProductionFailureStage::StatePublication,
+            ReviewedSourceProductionFailureReason::PublishedUncertain,
+            ReviewedSourcePublicationUncertain{
+                    ReviewedSourceStateStorePublishedUncertain{
+                            uncertain_state, std::nullopt,
+                            ReviewedSourceStatePostPublicationIssue::
+                                    DirectorySyncUncertain,
+                            ReviewedSourceStateStoreFailureKind::SyncFailed,
+                            "/state/split-suite/2.toml", std::nullopt,
+                            std::nullopt}}};
+    const std::string uncertain_diagnostic =
+            "typed reviewed publication uncertainty";
+    const auto uncertain_result = run_one_multiple_failure(
+            uncertain_diagnostic,
+            [published_uncertain, uncertain_diagnostic](
+                    execution_stub::ExpectedExecution expected) {
+                execution_stub::enqueue_phase_failure(
+                        std::move(expected),
+                        SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                        uncertain_diagnostic, published_uncertain);
+            });
+    expect_typed_failure_base(
+            uncertain_result, uncertain_diagnostic,
+            uncertain_diagnostic);
+    const auto& uncertain_snapshot = require_failure_detail<
+            AurUpdateSourceBuildFailureSnapshot>(
+            uncertain_result.work_item_results.front(),
+            uncertain_diagnostic);
+    expect(uncertain_snapshot.reviewed_source_failure.has_value() &&
+                   uncertain_snapshot.reviewed_source_failure->stage ==
+                           ReviewedSourceProductionFailureStage::
+                                   StatePublication &&
+                   uncertain_snapshot.reviewed_source_failure->reason ==
+                           ReviewedSourceProductionFailureReason::
+                                   PublishedUncertain,
+           "AUR update aggregate flattened PublishedUncertain classification");
+    const auto* uncertain_detail = std::get_if<
+            ReviewedSourcePublicationUncertain>(
+            &uncertain_snapshot.reviewed_source_failure->detail);
+    const auto* expected_uncertain_detail = std::get_if<
+            ReviewedSourcePublicationUncertain>(
+            &published_uncertain.detail);
+    expect(uncertain_detail != nullptr &&
+                   expected_uncertain_detail != nullptr &&
+                   uncertain_detail->store_result ==
+                           expected_uncertain_detail->store_result,
+           "AUR update aggregate lost PublishedUncertain store payload");
 }
 
 void test_transaction_failure_has_attempts_without_child_success_and_suffix() {
@@ -1840,6 +1931,9 @@ int main() {
         run_case(
                 "selected repository provider phase transaction",
                 test_selected_repository_provider_transaction_precedes_source_and_stops_failure);
+        run_case(
+                "later fatal preflight blocks aggregate mutation",
+                test_later_fatal_preflight_blocks_cache_provider_and_first_work_item);
         run_case(
                 "requested split child size-one",
                 test_requested_split_child_size_one_is_no_change);

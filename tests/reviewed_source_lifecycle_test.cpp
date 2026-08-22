@@ -20,6 +20,12 @@ static_assert(!std::is_default_constructible_v<
 static_assert(!std::is_copy_constructible_v<
               ReviewedSourceExpectedStateObservation>);
 static_assert(!std::is_default_constructible_v<
+              ReviewedSourceFatalStatePreflight>);
+static_assert(!std::is_copy_constructible_v<
+              ReviewedSourceFatalStatePreflight>);
+static_assert(std::is_move_constructible_v<
+              ReviewedSourceFatalStatePreflight>);
+static_assert(!std::is_default_constructible_v<
               ReviewedSourceReviewRequirement>);
 static_assert(!std::is_copy_constructible_v<
               ReviewedSourceReviewRequirement>);
@@ -355,6 +361,13 @@ void test_future_unsafe_and_store_failure_fail_closed_without_authority() {
                                     .reason ==
                             ReviewedSourceFatalStateReason::UnsupportedFuture,
             "Unsupported future state produced the wrong stop reason.");
+    require(future.fatal_state_failure().has_value() &&
+                    future.fatal_state_failure()->store_read.has_value() &&
+                    std::holds_alternative<
+                            ReviewedSourceStateUnsupportedFuture>(
+                            future.fatal_state_failure()
+                                    ->store_read->observation),
+            "Unsupported future state lost its exact read payload.");
 
     const ReviewedSourceLifecyclePlanResult unsafe_result =
             plan_reviewed_source_lifecycle(
@@ -376,6 +389,11 @@ void test_future_unsafe_and_store_failure_fail_closed_without_authority() {
                                     .reason ==
                             ReviewedSourceFatalStateReason::UnsafeHistory,
             "Unsafe history produced the wrong stop reason.");
+    require(unsafe.fatal_state_failure().has_value() &&
+                    unsafe.fatal_state_failure()->unsafe_history.has_value() &&
+                    unsafe.fatal_state_failure()->unsafe_history->issue ==
+                            ReviewedSourceStateStoreHistoryIssue::ForkDetected,
+            "Unsafe history lost its store payload.");
 
     const ReviewedSourceLifecyclePlanResult failure_result =
             plan_reviewed_source_lifecycle(
@@ -397,6 +415,11 @@ void test_future_unsafe_and_store_failure_fail_closed_without_authority() {
                                     .reason ==
                             ReviewedSourceFatalStateReason::StoreFailure,
             "Store failure produced the wrong stop reason.");
+    require(failure.fatal_state_failure().has_value() &&
+                    failure.fatal_state_failure()->store_failure.has_value() &&
+                    failure.fatal_state_failure()->store_failure->kind ==
+                            ReviewedSourceStateStoreFailureKind::ReadFailed,
+            "Store failure lost its filesystem payload.");
 }
 
 void test_inconsistent_store_observation_fails_closed() {
@@ -415,6 +438,12 @@ void test_inconsistent_store_observation_fails_closed() {
                     ReviewedSourceOperationStopReason::
                             InconsistentStoreObservation,
             "Inconsistent Missing produced the wrong stop reason.");
+    require(missing_with_record.fatal_state_failure().has_value() &&
+                    missing_with_record.fatal_state_failure()
+                            ->store_read.has_value() &&
+                    missing_with_record.fatal_state_failure()
+                            ->store_read->observed.has_value(),
+            "Inconsistent observation lost its exact store snapshot.");
 
     const ReviewedSourceLifecyclePlanResult abnormal_without_record_result =
             plan_reviewed_source_lifecycle(

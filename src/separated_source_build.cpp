@@ -44,7 +44,8 @@ ArtifactInstallExecutionOutcome execute_separated_source_build_unit(
 
     ArtifactMakepkgContext makepkg_context =
             prepare_artifact_makepkg_context(
-                    request.checkout, workspace, request.source_environment,
+                    std::move(request.source_tree), workspace,
+                    request.source_environment,
                     request.empty_value_policy);
     ExpectedPackageArtifactPath expected = query_makepkg_packagelist(
             workspace, makepkg_context);

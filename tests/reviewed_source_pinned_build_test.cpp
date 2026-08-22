@@ -112,6 +112,27 @@ static_assert(!std::is_constructible_v<
               TrustedGitPinnedCheckout,
               ValidatedCachePath,
               AurReviewedSourceReviewIdentity>);
+static_assert(!std::is_default_constructible_v<
+              ReviewedSourceEditorBoundary>);
+static_assert(!std::is_copy_constructible_v<
+              ReviewedSourceEditorBoundary>);
+static_assert(std::is_move_constructible_v<
+              ReviewedSourceEditorBoundary>);
+static_assert(!std::is_default_constructible_v<
+              ReviewedSourceEditorOverlayProof>);
+static_assert(!std::is_copy_constructible_v<
+              ReviewedSourceEditorOverlayProof>);
+static_assert(std::is_move_constructible_v<
+              ReviewedSourceEditorOverlayProof>);
+static_assert(!std::is_constructible_v<
+              ReviewedSourceEditorOverlayProof,
+              ReviewedSourceEditorOverlayStatus>);
+static_assert(!std::is_constructible_v<
+              ReviewedSourceEditorOverlayProof,
+              bool>);
+static_assert(!std::is_constructible_v<
+              ReviewedSourceEditorOverlayProof,
+              ValidatedCachePath>);
 static_assert(!std::is_invocable_v<
               decltype(trusted_git_materialize_pinned_checkout),
               const ValidatedCachePath&,
@@ -449,6 +470,37 @@ AcceptedReviewedSourceCheckout materialize(
                     std::move(accepted), checkout);
     return take_arm<AcceptedReviewedSourceCheckout>(
             result, "Accepted target did not materialize exact checkout");
+}
+
+template<typename Checkout>
+ReviewedSourceEditorBoundary begin_editor_boundary(
+        const Checkout& checkout,
+        std::string_view message = "Editor boundary was not proven") {
+    ReviewedSourceEditorBoundaryResult result =
+            begin_reviewed_source_editor_boundary(checkout);
+    return take_arm<ReviewedSourceEditorBoundary>(result, message);
+}
+
+template<typename Checkout>
+ReviewedSourceEditorOverlayProof seal_editor_overlay(
+        const Checkout& checkout,
+        ReviewedSourceEditorBoundary boundary,
+        std::string_view message = "Editor overlay was not sealed") {
+    ReviewedSourceEditorOverlayProofResult result =
+            seal_reviewed_source_editor_overlay(
+                    checkout, std::move(boundary));
+    return take_arm<ReviewedSourceEditorOverlayProof>(result, message);
+}
+
+template<typename Checkout>
+ReviewedSourceEditorOverlayProof seal_no_editor_overlay(
+        const Checkout& checkout,
+        ReviewedSourceEditorBoundary boundary,
+        std::string_view message = "No-editor overlay was not sealed") {
+    ReviewedSourceEditorOverlayProofResult result =
+            seal_reviewed_source_no_editor_overlay(
+                    checkout, std::move(boundary));
+    return take_arm<ReviewedSourceEditorOverlayProof>(result, message);
 }
 
 const ReviewedSourceStateStoreRead& read_loaded(
@@ -793,13 +845,516 @@ void test_post_publication_checkout_failure_keeps_state() {
                     ReviewedSourcePublicationStatus::Published &&
                     failure.checkout_failure.reason ==
                             TrustedGitPinnedCheckoutFailureReason::
-                                    DirtyWorktree,
+                                    OverlayMismatch,
             "Post-publication checkout failure lost definite state outcome");
     ReviewedSourceStateStoreReadResult after =
             read_reviewed_source_state(identity.package_base());
     static_cast<void>(read_loaded(after, identity.target_revision()));
     reset_reviewed_source_state_store_test_hooks();
     g_checkout_for_ignored_residue.clear();
+}
+
+void test_editor_overlay_is_explicit_build_provenance() {
+    {
+        PinnedBuildFixture fixture;
+        const AurReviewedSourceReviewIdentity identity =
+                fixture.identity(fixture.first_oid());
+        AcceptedReviewedSourceCheckout exact = materialize(
+                make_initial_accepted(identity), fixture.checkout());
+        fixture.write_file(
+                "PKGBUILD",
+                "pkgname=fixture\npkgver=edited\npkgrel=1\n");
+        ReviewedSourcePublicationResult rejected =
+                publish_accepted_reviewed_source_checkout(
+                        std::move(exact));
+        const auto& failure = require_arm<
+                ReviewedSourcePublicationFailure>(
+                rejected,
+                "Dirty editor tree was flattened into exact build authority");
+        require(
+                failure.reason == ReviewedSourcePublicationFailureReason::
+                                          CheckoutRevalidationFailed &&
+                        failure.checkout_failure.has_value() &&
+                        failure.checkout_failure->reason ==
+                                TrustedGitPinnedCheckoutFailureReason::
+                                        DirtyWorktree,
+                "Exact publication did not reject an untyped editor overlay");
+    }
+
+    PinnedBuildFixture fixture;
+    const AurReviewedSourceReviewIdentity identity =
+            fixture.identity(fixture.first_oid());
+    AcceptedReviewedSourceCheckout exact = materialize(
+            make_initial_accepted(identity), fixture.checkout());
+    ReviewedSourceEditorBoundary boundary =
+            begin_editor_boundary(exact);
+    fixture.write_file(
+            "PKGBUILD",
+            "pkgname=fixture\npkgver=edited\npkgrel=1\n");
+    ReviewedSourceEditorOverlayProof overlay = seal_editor_overlay(
+            exact, std::move(boundary));
+    ReviewedSourcePublicationResult published =
+            publish_accepted_reviewed_source_checkout_with_editor_overlay(
+                    std::move(exact),
+                    std::move(overlay));
+    const auto& pinned = require_arm<PinnedReviewedSourceBuild>(
+            published, "Typed editor overlay did not produce build authority");
+    require(
+            pinned.editor_overlay_status() ==
+                            ReviewedSourceEditorOverlayStatus::
+                                    InvocationLocal &&
+                    pinned.reviewed_upstream_base_revision() ==
+                            identity.target_revision() &&
+                    fixture.read_file("PKGBUILD").find(
+                            "pkgver=edited") != std::string::npos,
+            "Editor overlay was reported as an exact commit tree");
+}
+
+void test_noop_editor_seals_no_overlay() {
+    PinnedBuildFixture fixture;
+    const AurReviewedSourceReviewIdentity identity =
+            fixture.identity(fixture.first_oid());
+    AcceptedReviewedSourceCheckout exact = materialize(
+            make_initial_accepted(identity), fixture.checkout());
+    ReviewedSourceEditorBoundary boundary =
+            begin_editor_boundary(exact);
+    ReviewedSourceEditorOverlayProof overlay = seal_editor_overlay(
+            exact, std::move(boundary));
+    require(overlay.status() == ReviewedSourceEditorOverlayStatus::None,
+            "No-op editor was classified as a dirty overlay");
+    ReviewedSourcePublicationResult published =
+            publish_accepted_reviewed_source_checkout_with_editor_overlay(
+                    std::move(exact), std::move(overlay));
+    const auto& pinned = require_arm<PinnedReviewedSourceBuild>(
+            published, "No-op editor did not retain build authority");
+    require(pinned.editor_overlay_status() ==
+                    ReviewedSourceEditorOverlayStatus::None,
+            "No-op editor provenance changed after publication");
+}
+
+void test_overlay_mutation_after_seal_is_rejected_before_publication() {
+    PinnedBuildFixture fixture;
+    const AurReviewedSourceReviewIdentity identity =
+            fixture.identity(fixture.first_oid());
+    AcceptedReviewedSourceCheckout exact = materialize(
+            make_initial_accepted(identity), fixture.checkout());
+    ReviewedSourceEditorBoundary boundary =
+            begin_editor_boundary(exact);
+    fixture.write_file(
+            "PKGBUILD",
+            "pkgname=fixture\npkgver=edited\npkgrel=1\n");
+    fixture.write_file("ignored-editor.tmp", "sealed ignored bytes\n");
+    ReviewedSourceEditorOverlayProof overlay = seal_editor_overlay(
+            exact, std::move(boundary));
+    fixture.write_file("ignored-editor.tmp", "external mutation\n");
+
+    ReviewedSourcePublicationResult rejected =
+            publish_accepted_reviewed_source_checkout_with_editor_overlay(
+                    std::move(exact), std::move(overlay));
+    const auto& failure = require_arm<ReviewedSourcePublicationFailure>(
+            rejected,
+            "Post-editor ignored-file mutation produced build authority");
+    require(
+            failure.reason == ReviewedSourcePublicationFailureReason::
+                                      CheckoutRevalidationFailed &&
+                    failure.checkout_failure.has_value() &&
+                    failure.checkout_failure->reason ==
+                            TrustedGitPinnedCheckoutFailureReason::
+                                    OverlayMismatch,
+            "Post-editor exact overlay drift was not rejected");
+    ReviewedSourceStateStoreReadResult after =
+            read_reviewed_source_state(identity.package_base());
+    require(std::holds_alternative<ReviewedSourceStateMissing>(
+                    require_arm<ReviewedSourceStateStoreRead>(
+                            after, "Overlay drift lookup failed")
+                            .observation),
+            "Pre-CAS overlay drift advanced reviewed state");
+}
+
+void test_empty_directory_after_seal_is_rejected_before_cas() {
+    PinnedBuildFixture fixture;
+    const AurReviewedSourceReviewIdentity identity =
+            fixture.identity(fixture.first_oid());
+    AcceptedReviewedSourceCheckout exact = materialize(
+            make_initial_accepted(identity), fixture.checkout());
+    ReviewedSourceEditorBoundary boundary = begin_editor_boundary(exact);
+    ReviewedSourceEditorOverlayProof overlay = seal_no_editor_overlay(
+            exact, std::move(boundary));
+    const std::string sealed_git_tree = fixture.output_git({"write-tree"});
+    const fs::path empty_directory = fixture.repository() / "empty-dir";
+    fs::create_directory(empty_directory);
+    require(::chmod(empty_directory.c_str(), 0700) == 0,
+            "Failed to secure empty-directory overlay fixture");
+    require(fixture.output_git({"write-tree"}) == sealed_git_tree,
+            "Empty directory unexpectedly changed the Git tree oracle");
+
+    ReviewedSourcePublicationResult rejected =
+            publish_accepted_reviewed_source_checkout_with_editor_overlay(
+                    std::move(exact), std::move(overlay));
+    const auto& failure = require_arm<ReviewedSourcePublicationFailure>(
+            rejected, "Empty directory produced reviewed build authority");
+    require(failure.checkout_failure.has_value() &&
+                    failure.checkout_failure->reason ==
+                            TrustedGitPinnedCheckoutFailureReason::
+                                    OverlayMismatch,
+            "Empty-directory manifest drift lost overlay mismatch");
+    ReviewedSourceStateStoreReadResult after =
+            read_reviewed_source_state(identity.package_base());
+    require(std::holds_alternative<ReviewedSourceStateMissing>(
+                    require_arm<ReviewedSourceStateStoreRead>(
+                            after, "Empty-directory drift lookup failed")
+                            .observation),
+            "Empty-directory pre-CAS drift advanced reviewed state");
+}
+
+void test_manifest_change_during_git_projection_is_not_sealed() {
+    PinnedBuildFixture fixture;
+    const AurReviewedSourceReviewIdentity identity =
+            fixture.identity(fixture.first_oid());
+    AcceptedReviewedSourceCheckout exact = materialize(
+            make_initial_accepted(identity), fixture.checkout());
+    ReviewedSourceEditorBoundary boundary = begin_editor_boundary(exact);
+    const fs::path wrapper = fixture.fixture_root() /
+            "git-overlay-stability-wrapper";
+    const fs::path marker = fixture.fixture_root() /
+            "overlay-stability-race-fired";
+    const fs::path raced_directory = fixture.repository() /
+            "raced-empty-dir";
+    {
+        std::ofstream script(wrapper, std::ios::binary | std::ios::trunc);
+        script << R"(#!/bin/sh
+set -eu
+if [ "${MOGUET_TEST_TRUSTED_GIT_DISPLAY_COMMAND:-}" = "git hash-object -w -t tree /dev/null" ] && [ ! -e "$MOGUET_TEST_OVERLAY_RACE_MARKER" ]; then
+    /usr/bin/touch "$MOGUET_TEST_OVERLAY_RACE_MARKER"
+    /usr/bin/mkdir --mode=0700 -- "$MOGUET_TEST_OVERLAY_RACE_DIRECTORY"
+fi
+exec /usr/bin/git "$@"
+)";
+        script.close();
+        require(static_cast<bool>(script) &&
+                        ::chmod(wrapper.c_str(), 0700) == 0,
+                "Failed to create overlay stability Git wrapper");
+    }
+    require(::setenv(
+                    "MOGUET_TEST_GIT_EXECUTABLE", wrapper.c_str(), 1) == 0 &&
+                    ::setenv(
+                            "MOGUET_TEST_OVERLAY_RACE_MARKER",
+                            marker.c_str(), 1) == 0 &&
+                    ::setenv(
+                            "MOGUET_TEST_OVERLAY_RACE_DIRECTORY",
+                            raced_directory.c_str(), 1) == 0,
+            "Failed to configure overlay stability Git wrapper");
+    ReviewedSourceEditorOverlayProofResult sealed =
+            seal_reviewed_source_no_editor_overlay(
+                    exact, std::move(boundary));
+    static_cast<void>(::unsetenv("MOGUET_TEST_GIT_EXECUTABLE"));
+    static_cast<void>(::unsetenv("MOGUET_TEST_OVERLAY_RACE_MARKER"));
+    static_cast<void>(::unsetenv("MOGUET_TEST_OVERLAY_RACE_DIRECTORY"));
+
+    const auto& failure = require_arm<ReviewedSourcePublicationFailure>(
+            sealed,
+            "Git-invisible mutation during projection was sealed");
+    require(fs::exists(marker) && fs::is_directory(raced_directory) &&
+                    failure.checkout_failure.has_value() &&
+                    failure.checkout_failure->reason ==
+                            TrustedGitPinnedCheckoutFailureReason::
+                                    OverlayMismatch,
+            "Manifest-before/after stability mismatch was not retained");
+}
+
+fs::path g_checkout_for_mode_mutation;
+
+void chmod_regular_file_after_publication(
+        const ReviewedSourceStateStoreTestRaceContext&) {
+    if(::chmod(
+               (g_checkout_for_mode_mutation / "PKGBUILD").c_str(),
+               0600) != 0) {
+        throw std::runtime_error(
+                "Failed to mutate reviewed overlay file mode");
+    }
+}
+
+void test_mode_mutation_after_cas_keeps_publication_and_stops_pinned_build() {
+    PinnedBuildFixture fixture;
+    const AurReviewedSourceReviewIdentity identity =
+            fixture.identity(fixture.first_oid());
+    AcceptedReviewedSourceCheckout exact = materialize(
+            make_initial_accepted(identity), fixture.checkout());
+    ReviewedSourceEditorBoundary boundary = begin_editor_boundary(exact);
+    ReviewedSourceEditorOverlayProof overlay = seal_no_editor_overlay(
+            exact, std::move(boundary));
+    const std::string sealed_git_tree = fixture.output_git({"write-tree"});
+    g_checkout_for_mode_mutation = fixture.repository();
+    run_reviewed_source_state_store_race_once_for_test(
+            ReviewedSourceStateStoreTestRacePoint::AfterPublication,
+            chmod_regular_file_after_publication);
+
+    ReviewedSourcePublicationResult rejected =
+            publish_accepted_reviewed_source_checkout_with_editor_overlay(
+                    std::move(exact), std::move(overlay));
+    const auto& failure = require_arm<
+            ReviewedSourcePostPublicationCheckoutFailure>(
+            rejected,
+            "Post-CAS chmod produced pinned reviewed build authority");
+    require(failure.publication_status ==
+                            ReviewedSourcePublicationStatus::Published &&
+                    failure.checkout_failure.reason ==
+                            TrustedGitPinnedCheckoutFailureReason::
+                                    OverlayMismatch &&
+                    fixture.output_git({"write-tree"}) == sealed_git_tree,
+            "Post-CAS chmod was not isolated from Git tree authority");
+    ReviewedSourceStateStoreReadResult after =
+            read_reviewed_source_state(identity.package_base());
+    static_cast<void>(read_loaded(after, identity.target_revision()));
+    reset_reviewed_source_state_store_test_hooks();
+    g_checkout_for_mode_mutation.clear();
+}
+
+void test_index_and_head_mutation_after_overlay_seal_are_rejected() {
+    {
+        PinnedBuildFixture fixture;
+        const AurReviewedSourceReviewIdentity identity =
+                fixture.identity(fixture.first_oid());
+        AcceptedReviewedSourceCheckout exact = materialize(
+                make_initial_accepted(identity), fixture.checkout());
+        ReviewedSourceEditorBoundary boundary =
+                begin_editor_boundary(exact);
+        fixture.write_file(
+                "PKGBUILD",
+                "pkgname=fixture\npkgver=edited\npkgrel=1\n");
+        ReviewedSourceEditorOverlayProof overlay = seal_editor_overlay(
+                exact, std::move(boundary));
+        fixture.run_git({"add", "PKGBUILD"});
+        ReviewedSourcePublicationResult rejected =
+                publish_accepted_reviewed_source_checkout_with_editor_overlay(
+                        std::move(exact), std::move(overlay));
+        const auto& failure = require_arm<ReviewedSourcePublicationFailure>(
+                rejected, "Index mutation produced build authority");
+        require(failure.checkout_failure.has_value() &&
+                        failure.checkout_failure->reason ==
+                                TrustedGitPinnedCheckoutFailureReason::
+                                        DirtyIndex,
+                "Index mutation lost its typed rejection");
+    }
+
+    {
+        PinnedBuildFixture fixture;
+        const AurReviewedSourceReviewIdentity identity =
+                fixture.identity(fixture.first_oid());
+        AcceptedReviewedSourceCheckout exact = materialize(
+                make_initial_accepted(identity), fixture.checkout());
+        ReviewedSourceEditorBoundary boundary =
+                begin_editor_boundary(exact);
+        ReviewedSourceEditorOverlayProof overlay = seal_no_editor_overlay(
+                exact, std::move(boundary));
+        fixture.run_git({"checkout", "--detach", "--force",
+                         fixture.second_oid()});
+        ReviewedSourcePublicationResult rejected =
+                publish_accepted_reviewed_source_checkout_with_editor_overlay(
+                        std::move(exact), std::move(overlay));
+        const auto& failure = require_arm<ReviewedSourcePublicationFailure>(
+                rejected, "HEAD mutation produced build authority");
+        require(failure.checkout_failure.has_value() &&
+                        failure.checkout_failure->reason ==
+                                TrustedGitPinnedCheckoutFailureReason::
+                                        TargetRevisionMismatch,
+                "HEAD mutation lost its typed rejection");
+    }
+}
+
+void test_checkout_replacement_after_overlay_seal_is_rejected() {
+    PinnedBuildFixture fixture;
+    const AurReviewedSourceReviewIdentity identity =
+            fixture.identity(fixture.first_oid());
+    AcceptedReviewedSourceCheckout exact = materialize(
+            make_initial_accepted(identity), fixture.checkout());
+    ReviewedSourceEditorBoundary boundary =
+            begin_editor_boundary(exact);
+    ReviewedSourceEditorOverlayProof overlay = seal_no_editor_overlay(
+            exact, std::move(boundary));
+
+    fs::path moved = fixture.repository();
+    moved += ".replaced-original";
+    fs::rename(fixture.repository(), moved);
+    fs::create_directory(fixture.repository());
+    require(::chmod(fixture.repository().c_str(), 0700) == 0,
+            "Failed to secure replacement checkout");
+
+    ReviewedSourcePublicationResult rejected =
+            publish_accepted_reviewed_source_checkout_with_editor_overlay(
+                    std::move(exact), std::move(overlay));
+    const auto& failure = require_arm<ReviewedSourcePublicationFailure>(
+            rejected, "Checkout replacement produced build authority");
+    require(failure.checkout_failure.has_value() &&
+                    failure.checkout_failure->reason ==
+                            TrustedGitPinnedCheckoutFailureReason::
+                                    CheckoutBoundaryInvalid,
+            "Checkout replacement lost its typed rejection");
+}
+
+void test_embedded_repository_cannot_hide_overlay_files() {
+    PinnedBuildFixture fixture;
+    const AurReviewedSourceReviewIdentity identity =
+            fixture.identity(fixture.first_oid());
+    AcceptedReviewedSourceCheckout exact = materialize(
+            make_initial_accepted(identity), fixture.checkout());
+    ReviewedSourceEditorBoundary boundary =
+            begin_editor_boundary(exact);
+    fixture.run_git({"init", "-q", "embedded-helper"});
+    fixture.write_file(
+            "embedded-helper/helper.sh", "#!/bin/sh\nexit 0\n");
+    fixture.run_git({"-C", "embedded-helper", "add", "helper.sh"});
+    fixture.run_git({"-C", "embedded-helper", "commit", "-q", "-m",
+                     "embedded helper"});
+    ReviewedSourceEditorOverlayProofResult sealed =
+            seal_reviewed_source_editor_overlay(
+                    exact, std::move(boundary));
+    const auto& failure = require_arm<ReviewedSourcePublicationFailure>(
+            sealed, "Embedded repository was sealed as exact overlay input");
+    require(failure.checkout_failure.has_value() &&
+                    failure.checkout_failure->reason ==
+                            TrustedGitPinnedCheckoutFailureReason::
+                                    UnsupportedOverlayEntry,
+            "Embedded repository did not fail closed at overlay observation");
+}
+
+void test_special_and_oversized_overlay_entries_fail_closed() {
+    {
+        PinnedBuildFixture fixture;
+        const AurReviewedSourceReviewIdentity identity =
+                fixture.identity(fixture.first_oid());
+        AcceptedReviewedSourceCheckout exact = materialize(
+                make_initial_accepted(identity), fixture.checkout());
+        ReviewedSourceEditorBoundary boundary = begin_editor_boundary(exact);
+        const fs::path fifo = fixture.repository() / "build-input.fifo";
+        require(::mkfifo(fifo.c_str(), 0600) == 0,
+                "Failed to create special overlay fixture");
+        ReviewedSourceEditorOverlayProofResult sealed =
+                seal_reviewed_source_editor_overlay(
+                        exact, std::move(boundary));
+        const auto& failure = require_arm<ReviewedSourcePublicationFailure>(
+                sealed, "FIFO was read or sealed as overlay input");
+        require(failure.checkout_failure.has_value() &&
+                        failure.checkout_failure->reason ==
+                                TrustedGitPinnedCheckoutFailureReason::
+                                        UnsupportedOverlayEntry,
+                "FIFO did not fail closed before Git projection");
+    }
+
+    {
+        PinnedBuildFixture fixture;
+        const AurReviewedSourceReviewIdentity identity =
+                fixture.identity(fixture.first_oid());
+        AcceptedReviewedSourceCheckout exact = materialize(
+                make_initial_accepted(identity), fixture.checkout());
+        ReviewedSourceEditorBoundary boundary = begin_editor_boundary(exact);
+        const fs::path oversized = fixture.repository() / "oversized.input";
+        const int descriptor = ::open(
+                oversized.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
+                0600);
+        require(descriptor >= 0,
+                "Failed to create oversized overlay fixture");
+        require(::ftruncate(
+                        descriptor,
+                        static_cast<off_t>(
+                                REVIEWED_SOURCE_SINGLE_BLOB_LIMIT + 1)) == 0,
+                "Failed to size oversized overlay fixture");
+        static_cast<void>(::close(descriptor));
+        ReviewedSourceEditorOverlayProofResult sealed =
+                seal_reviewed_source_editor_overlay(
+                        exact, std::move(boundary));
+        const auto& failure = require_arm<ReviewedSourcePublicationFailure>(
+                sealed, "Oversized file was sealed as overlay input");
+        require(failure.checkout_failure.has_value() &&
+                        failure.checkout_failure->reason ==
+                                TrustedGitPinnedCheckoutFailureReason::
+                                        CaptureLimitExceeded,
+                "Oversized regular file did not enforce manifest bounds");
+    }
+}
+
+void test_makepkg_boundary_reproof_rejects_post_cas_mutation() {
+    PinnedBuildFixture fixture;
+    const AurReviewedSourceReviewIdentity identity =
+            fixture.identity(fixture.first_oid());
+    AcceptedReviewedSourceCheckout exact = materialize(
+            make_initial_accepted(identity), fixture.checkout());
+    ReviewedSourceEditorBoundary boundary =
+            begin_editor_boundary(exact);
+    fixture.write_file(
+            "PKGBUILD",
+            "pkgname=fixture\npkgver=edited\npkgrel=1\n");
+    ReviewedSourceEditorOverlayProof overlay = seal_editor_overlay(
+            exact, std::move(boundary));
+    ReviewedSourcePublicationResult published =
+            publish_accepted_reviewed_source_checkout_with_editor_overlay(
+                    std::move(exact), std::move(overlay));
+    PinnedReviewedSourceBuild pinned = take_arm<PinnedReviewedSourceBuild>(
+            published, "Overlay publication did not produce pinned build");
+
+    fixture.write_file(
+            "PKGBUILD",
+            "pkgname=fixture\npkgver=external\npkgrel=1\n");
+    const fs::path marker = fixture.fixture_root() / "makepkg-invoked";
+    try {
+        static_cast<void>(pinned.run_guarded_command(
+                "touch " + marker.string()));
+        throw std::runtime_error(
+                "Post-CAS mutation reached the makepkg command boundary");
+    } catch(const ReviewedSourceBuildCheckoutReproofError& error) {
+        require(error.failure().reason ==
+                        TrustedGitPinnedCheckoutFailureReason::
+                                OverlayMismatch,
+                "Post-CAS mutation lost overlay mismatch detail");
+    }
+    require(!fs::exists(marker),
+            "Post-CAS overlay drift invoked the guarded command");
+    ReviewedSourceStateStoreReadResult after =
+            read_reviewed_source_state(identity.package_base());
+    static_cast<void>(read_loaded(after, identity.target_revision()));
+}
+
+void test_nested_dot_git_input_is_rejected_at_makepkg_boundary() {
+    PinnedBuildFixture fixture;
+    const AurReviewedSourceReviewIdentity identity =
+            fixture.identity(fixture.first_oid());
+    AcceptedReviewedSourceCheckout exact = materialize(
+            make_initial_accepted(identity), fixture.checkout());
+    ReviewedSourceEditorBoundary boundary = begin_editor_boundary(exact);
+    ReviewedSourceEditorOverlayProof overlay = seal_no_editor_overlay(
+            exact, std::move(boundary));
+    ReviewedSourcePublicationResult published =
+            publish_accepted_reviewed_source_checkout_with_editor_overlay(
+                    std::move(exact), std::move(overlay));
+    PinnedReviewedSourceBuild pinned = take_arm<PinnedReviewedSourceBuild>(
+            published, "Clean overlay did not produce pinned build");
+
+    const std::string sealed_git_tree = fixture.output_git({"write-tree"});
+    fixture.write_file(
+            "helper/.git/build-input", "nested metadata build input\n");
+    require(fixture.output_git({"write-tree"}) == sealed_git_tree,
+            "Nested .git input unexpectedly changed the Git tree oracle");
+    const fs::path marker = fixture.fixture_root() /
+            "nested-dot-git-makepkg-invoked";
+    try {
+        static_cast<void>(pinned.run_guarded_command(
+                "touch " + marker.string()));
+        throw std::runtime_error(
+                "Nested .git input reached the makepkg command boundary");
+    } catch(const ReviewedSourceBuildCheckoutReproofError& error) {
+        require(error.failure().reason ==
+                        TrustedGitPinnedCheckoutFailureReason::
+                                OverlayMismatch ||
+                        error.failure().reason ==
+                                TrustedGitPinnedCheckoutFailureReason::
+                                        UnsupportedOverlayEntry,
+                "Nested .git input lost typed fail-closed detail");
+    }
+    require(!fs::exists(marker),
+            "Nested .git input invoked the guarded build command");
+    ReviewedSourceStateStoreReadResult after =
+            read_reviewed_source_state(identity.package_base());
+    static_cast<void>(read_loaded(after, identity.target_revision()));
 }
 
 fs::path prepare_raw_state_directory(
@@ -1442,6 +1997,18 @@ int main() {
         test_already_reviewed_reconfirmation_rejects_newer_target();
         test_precommit_failure_and_published_uncertain();
         test_post_publication_checkout_failure_keeps_state();
+        test_editor_overlay_is_explicit_build_provenance();
+        test_noop_editor_seals_no_overlay();
+        test_overlay_mutation_after_seal_is_rejected_before_publication();
+        test_empty_directory_after_seal_is_rejected_before_cas();
+        test_manifest_change_during_git_projection_is_not_sealed();
+        test_mode_mutation_after_cas_keeps_publication_and_stops_pinned_build();
+        test_index_and_head_mutation_after_overlay_seal_are_rejected();
+        test_checkout_replacement_after_overlay_seal_is_rejected();
+        test_embedded_repository_cannot_hide_overlay_files();
+        test_special_and_oversized_overlay_entries_fail_closed();
+        test_makepkg_boundary_reproof_rejects_post_cas_mutation();
+        test_nested_dot_git_input_is_rejected_at_makepkg_boundary();
         test_future_state_is_not_overwritten();
         test_abnormal_history_uses_exact_cas_rebind();
         test_unsafe_history_is_not_flattened();

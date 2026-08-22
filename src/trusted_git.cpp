@@ -11,7 +11,9 @@
 #include <array>
 #include <cerrno>
 #include <cctype>
+#include <cstring>
 #include <cstdlib>
+#include <dirent.h>
 #include <filesystem>
 #include <fcntl.h>
 #include <iterator>
@@ -21,6 +23,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sys/stat.h>
+#include <system_error>
 #include <type_traits>
 #include <unistd.h>
 #include <utility>
@@ -38,6 +42,14 @@ constexpr std::size_t MAX_SHALLOW_OUTPUT = 6;
 constexpr std::size_t REVIEW_BLOB_BATCH_INPUT_LIMIT = 4096;
 constexpr std::uintmax_t REVIEW_BLOB_BATCH_PAYLOAD_LIMIT =
         REVIEWED_SOURCE_SINGLE_BLOB_LIMIT;
+constexpr std::size_t REVIEWED_SOURCE_OVERLAY_PATH_LIMIT = 4096;
+constexpr std::size_t REVIEWED_SOURCE_OVERLAY_DEPTH_LIMIT = 256;
+constexpr std::size_t REVIEWED_SOURCE_OVERLAY_SYMLINK_TARGET_LIMIT = 4096;
+
+enum class PinnedCheckoutWorktreePolicy {
+    RequireClean,
+    AllowEditorOverlay,
+};
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_GIT_TEST_HOOKS
 std::optional<std::size_t> g_review_machine_stream_limit;
@@ -70,6 +82,65 @@ public:
 
 private:
     int descriptor_ = -1;
+};
+
+struct DirectoryStreamCloser {
+    void operator()(DIR* directory) const noexcept {
+        if(directory != nullptr) static_cast<void>(::closedir(directory));
+    }
+};
+
+using OwnedDirectoryStream =
+        std::unique_ptr<DIR, DirectoryStreamCloser>;
+
+class TemporaryOverlayIndex final {
+public:
+    TemporaryOverlayIndex() {
+        std::string pattern =
+                (fs::temp_directory_path() /
+                 "moguet-reviewed-overlay-index-XXXXXX")
+                        .string();
+        std::vector<char> writable(pattern.begin(), pattern.end());
+        writable.push_back('\0');
+        char* created = ::mkdtemp(writable.data());
+        if(created == nullptr) {
+            throw std::system_error(
+                    errno, std::generic_category(),
+                    "Failed to create reviewed source overlay index directory");
+        }
+        directory_ = created;
+        index_ = directory_ / "index";
+        std::error_code error;
+        if(!fs::create_directory(directory_ / "objects", error) || error) {
+            std::error_code cleanup_error;
+            fs::remove_all(directory_, cleanup_error);
+            throw std::system_error(
+                    error, "Failed to create reviewed source overlay object directory");
+        }
+        fs::permissions(
+                directory_ / "objects", fs::perms::owner_all,
+                fs::perm_options::replace, error);
+        if(error) {
+            std::error_code cleanup_error;
+            fs::remove_all(directory_, cleanup_error);
+            throw std::system_error(
+                    error, "Failed to secure reviewed source overlay object directory");
+        }
+    }
+
+    TemporaryOverlayIndex(const TemporaryOverlayIndex&) = delete;
+    TemporaryOverlayIndex& operator=(const TemporaryOverlayIndex&) = delete;
+
+    ~TemporaryOverlayIndex() noexcept {
+        std::error_code error;
+        fs::remove_all(directory_, error);
+    }
+
+    [[nodiscard]] const fs::path& path() const noexcept { return index_; }
+
+private:
+    fs::path directory_;
+    fs::path index_;
 };
 
 constexpr std::array<const char*, 8> TRUSTED_PROXY_ENVIRONMENT_VARIABLES{
@@ -944,7 +1015,8 @@ int run_managed_git(
         const ValidatedCachePath& checkout,
         const std::string& expected_remote_url,
         std::vector<std::string> operation_arguments,
-        const std::string& display_command) {
+        const std::string& display_command,
+        std::optional<int> lifetime_guard_descriptor = std::nullopt) {
     require_expected_remote(
             inspect_managed_checkout_configuration(checkout),
             expected_remote_url);
@@ -954,11 +1026,14 @@ int run_managed_git(
             retain_trusted_cache_directory(current);
     retained.require_unchanged_identity();
     Logger::raw_cmd(display_command);
-    const int status = run_explicit_process(isolated_invocation(
+    ExplicitProcessInvocation invocation = isolated_invocation(
             bound_git_arguments(
                     current.canonical_path(),
                     std::move(operation_arguments)),
-            display_command));
+            display_command);
+    invocation.parent_independent_lifetime_guard_fd =
+            lifetime_guard_descriptor;
+    const int status = run_explicit_process(invocation);
     retained.require_unchanged_identity();
     current = revalidate_trusted_cache_path(
             current, CachePathRequirement::ExistingDirectory);
@@ -1194,6 +1269,768 @@ CapturedCommandResult capture_pinned_checkout_git(
     return result;
 }
 
+std::optional<TrustedGitPinnedCheckoutFailure>
+validate_pinned_checkout_materialization(
+        const ValidatedCachePath& checkout,
+        const AurReviewedSourceReviewIdentity& identity,
+        PinnedCheckoutWorktreePolicy worktree_policy);
+
+CapturedCommandResult capture_overlay_git(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        std::vector<std::string> operation_arguments,
+        const std::string& display_command,
+        std::size_t stdout_limit,
+        const fs::path& alternate_index,
+        int lifetime_guard_descriptor,
+        const std::optional<std::string>& attribute_source = std::nullopt) {
+    require_expected_remote(
+            inspect_review_checkout_configuration(checkout),
+            expected_remote_url);
+    ValidatedCachePath current = revalidate_trusted_cache_path(
+            checkout, CachePathRequirement::ExistingDirectory);
+    RetainedTrustedCacheDirectory retained =
+            retain_trusted_cache_directory(current);
+    retained.require_unchanged_identity();
+    CapturedCommandResult result;
+    {
+        WorkDirGuard workdir(current);
+        ExplicitProcessInvocation invocation = isolated_invocation(
+                bound_review_git_arguments(
+                        fs::path("."), std::move(operation_arguments),
+                        attribute_source),
+                display_command);
+        invocation.environment.push_back(
+                "GIT_INDEX_FILE=" + alternate_index.string());
+        invocation.environment.push_back(
+                "GIT_OBJECT_DIRECTORY=" +
+                (alternate_index.parent_path() / "objects").string());
+        invocation.environment.push_back(
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES=" +
+                (current.canonical_path() / ".git" / "objects").string());
+        invocation.stdout_capture_limit = stdout_limit;
+        // Captured explicit processes cannot use the mutator supervisor. This
+        // projection never changes refs, the real index, or the worktree; if
+        // the parent dies it cannot mint or return overlay/build authority.
+        static_cast<void>(lifetime_guard_descriptor);
+        result = capture_explicit_process_output_raw(invocation, true);
+    }
+    retained.require_unchanged_identity();
+    current = revalidate_trusted_cache_path(
+            current, CachePathRequirement::ExistingDirectory);
+    require_safe_persistent_checkout_git_metadata(current);
+    return result;
+}
+
+std::variant<ReviewedSourceObjectId, TrustedGitPinnedCheckoutFailure>
+parse_overlay_object_id(
+        CapturedCommandResult result,
+        GitObjectFormat expected_format,
+        TrustedGitPinnedCheckoutStage stage) {
+    if(result.stdout_capture_limit_exceeded) {
+        return pinned_checkout_capture_failure(
+                stage, result.output.size(), MAX_COMMIT_OID_OUTPUT);
+    }
+    if(result.exit_code != 0) {
+        return pinned_checkout_command_failure(stage, result.exit_code);
+    }
+    if(result.output.empty() || result.output.back() != '\n' ||
+       result.output.find('\n') != result.output.size() - 1) {
+        return pinned_checkout_failure(
+                TrustedGitPinnedCheckoutFailureReason::MalformedOutput,
+                stage);
+    }
+    result.output.pop_back();
+    try {
+        ReviewedSourceObjectId object_id =
+                ReviewedSourceObjectId::make(std::move(result.output));
+        if(object_id.format() != expected_format) {
+            return pinned_checkout_failure(
+                    TrustedGitPinnedCheckoutFailureReason::
+                            ObjectFormatMismatch,
+                    stage);
+        }
+        return object_id;
+    } catch(const std::invalid_argument&) {
+        return pinned_checkout_failure(
+                TrustedGitPinnedCheckoutFailureReason::MalformedOutput,
+                stage);
+    }
+}
+
+enum class OverlayFilesystemEntryKind : unsigned char {
+    Directory = 1,
+    RegularFile = 2,
+    Symlink = 3,
+};
+
+struct OverlayFilesystemEntry {
+    std::string path;
+    OverlayFilesystemEntryKind kind =
+            OverlayFilesystemEntryKind::Directory;
+    struct stat status {};
+    std::string payload_identity;
+};
+
+struct OverlayFilesystemManifestState {
+    TrustedGitPinnedCheckoutStage stage =
+            TrustedGitPinnedCheckoutStage::OverlayObservation;
+    std::vector<OverlayFilesystemEntry> entries;
+    std::uintmax_t aggregate_regular_bytes = 0;
+    std::size_t aggregate_path_bytes = 0;
+};
+
+using OverlayDirectoryNamesResult = std::variant<
+        std::vector<std::string>,
+        TrustedGitPinnedCheckoutFailure>;
+using OverlayFilesystemManifestResult = std::variant<
+        std::string,
+        TrustedGitPinnedCheckoutFailure>;
+
+bool stable_overlay_status_equal(
+        const struct stat& left,
+        const struct stat& right) noexcept {
+    return left.st_dev == right.st_dev &&
+           left.st_ino == right.st_ino &&
+           left.st_mode == right.st_mode &&
+           left.st_nlink == right.st_nlink &&
+           left.st_uid == right.st_uid &&
+           left.st_gid == right.st_gid &&
+           left.st_rdev == right.st_rdev &&
+           left.st_size == right.st_size &&
+           left.st_blksize == right.st_blksize &&
+           left.st_blocks == right.st_blocks &&
+           left.st_mtim.tv_sec == right.st_mtim.tv_sec &&
+           left.st_mtim.tv_nsec == right.st_mtim.tv_nsec &&
+           left.st_ctim.tv_sec == right.st_ctim.tv_sec &&
+           left.st_ctim.tv_nsec == right.st_ctim.tv_nsec;
+}
+
+bool overlay_path_less(
+        const OverlayFilesystemEntry& left,
+        const OverlayFilesystemEntry& right) {
+    return std::lexicographical_compare(
+            left.path.begin(), left.path.end(),
+            right.path.begin(), right.path.end(),
+            [](char left_byte, char right_byte) {
+                return static_cast<unsigned char>(left_byte) <
+                        static_cast<unsigned char>(right_byte);
+            });
+}
+
+void append_overlay_manifest_integer(
+        std::string& output,
+        std::uint64_t value) {
+    for(int shift = 56; shift >= 0; shift -= 8) {
+        output.push_back(static_cast<char>(
+                static_cast<unsigned char>(value >> shift)));
+    }
+}
+
+void append_overlay_manifest_bytes(
+        std::string& output,
+        std::string_view bytes) {
+    append_overlay_manifest_integer(output, bytes.size());
+    output.append(bytes);
+}
+
+std::string serialize_overlay_filesystem_manifest(
+        std::vector<OverlayFilesystemEntry> entries) {
+    std::sort(entries.begin(), entries.end(), overlay_path_less);
+    std::string manifest("moguet-reviewed-overlay-filesystem-v1");
+    manifest.push_back('\0');
+    append_overlay_manifest_integer(manifest, entries.size());
+    for(const OverlayFilesystemEntry& entry : entries) {
+        append_overlay_manifest_bytes(manifest, entry.path);
+        manifest.push_back(static_cast<char>(entry.kind));
+        append_overlay_manifest_integer(
+                manifest, static_cast<std::uint64_t>(entry.status.st_mode));
+        append_overlay_manifest_integer(
+                manifest, static_cast<std::uint64_t>(entry.status.st_dev));
+        append_overlay_manifest_integer(
+                manifest, static_cast<std::uint64_t>(entry.status.st_ino));
+        append_overlay_manifest_integer(
+                manifest, static_cast<std::uint64_t>(entry.status.st_nlink));
+        append_overlay_manifest_integer(
+                manifest, static_cast<std::uint64_t>(entry.status.st_uid));
+        append_overlay_manifest_integer(
+                manifest, static_cast<std::uint64_t>(entry.status.st_gid));
+        append_overlay_manifest_integer(
+                manifest, static_cast<std::uint64_t>(entry.status.st_rdev));
+        append_overlay_manifest_integer(
+                manifest, static_cast<std::uint64_t>(entry.status.st_size));
+        append_overlay_manifest_integer(
+                manifest,
+                static_cast<std::uint64_t>(entry.status.st_blksize));
+        append_overlay_manifest_integer(
+                manifest, static_cast<std::uint64_t>(entry.status.st_blocks));
+        append_overlay_manifest_integer(
+                manifest,
+                static_cast<std::uint64_t>(entry.status.st_mtim.tv_sec));
+        append_overlay_manifest_integer(
+                manifest,
+                static_cast<std::uint64_t>(entry.status.st_mtim.tv_nsec));
+        append_overlay_manifest_integer(
+                manifest,
+                static_cast<std::uint64_t>(entry.status.st_ctim.tv_sec));
+        append_overlay_manifest_integer(
+                manifest,
+                static_cast<std::uint64_t>(entry.status.st_ctim.tv_nsec));
+        append_overlay_manifest_bytes(manifest, entry.payload_identity);
+    }
+    return manifest;
+}
+
+OverlayDirectoryNamesResult read_overlay_directory_names(
+        int directory_descriptor,
+        bool is_checkout_root,
+        TrustedGitPinnedCheckoutStage stage) {
+    const int scan_descriptor = ::openat(
+            directory_descriptor, ".",
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(scan_descriptor < 0) return pinned_checkout_boundary_failure(stage);
+    DIR* raw_directory = ::fdopendir(scan_descriptor);
+    if(raw_directory == nullptr) {
+        static_cast<void>(::close(scan_descriptor));
+        return pinned_checkout_boundary_failure(stage);
+    }
+    OwnedDirectoryStream directory(raw_directory);
+    std::vector<std::string> names;
+    errno = 0;
+    while(dirent* entry = ::readdir(directory.get())) {
+        const std::string_view name(entry->d_name);
+        if(name == "." || name == ".." ||
+           (is_checkout_root && name == ".git")) {
+            continue;
+        }
+        names.emplace_back(name);
+        if(names.size() > REVIEWED_SOURCE_REVIEW_ENTRY_LIMIT) {
+            return pinned_checkout_capture_failure(
+                    stage, names.size(),
+                    REVIEWED_SOURCE_REVIEW_ENTRY_LIMIT);
+        }
+        errno = 0;
+    }
+    if(errno != 0) return pinned_checkout_boundary_failure(stage);
+    std::sort(
+            names.begin(), names.end(),
+            [](const std::string& left, const std::string& right) {
+                return std::lexicographical_compare(
+                        left.begin(), left.end(), right.begin(), right.end(),
+                        [](char left_byte, char right_byte) {
+                            return static_cast<unsigned char>(left_byte) <
+                                    static_cast<unsigned char>(right_byte);
+                        });
+            });
+    return names;
+}
+
+std::optional<TrustedGitPinnedCheckoutFailure>
+add_overlay_manifest_entry(
+        OverlayFilesystemManifestState& manifest,
+        OverlayFilesystemEntry entry) {
+    if(manifest.entries.size() >= REVIEWED_SOURCE_REVIEW_ENTRY_LIMIT) {
+        return pinned_checkout_capture_failure(
+                manifest.stage, manifest.entries.size() + 1,
+                REVIEWED_SOURCE_REVIEW_ENTRY_LIMIT);
+    }
+    if(entry.path.size() > REVIEWED_SOURCE_OVERLAY_PATH_LIMIT) {
+        return pinned_checkout_capture_failure(
+                manifest.stage, entry.path.size(),
+                REVIEWED_SOURCE_OVERLAY_PATH_LIMIT);
+    }
+    if(entry.path.size() >
+       REVIEWED_SOURCE_MACHINE_STREAM_LIMIT -
+               manifest.aggregate_path_bytes) {
+        return pinned_checkout_capture_failure(
+                manifest.stage,
+                manifest.aggregate_path_bytes + entry.path.size(),
+                REVIEWED_SOURCE_MACHINE_STREAM_LIMIT);
+    }
+    manifest.aggregate_path_bytes += entry.path.size();
+    manifest.entries.push_back(std::move(entry));
+    return std::nullopt;
+}
+
+std::variant<std::string, TrustedGitPinnedCheckoutFailure>
+read_overlay_regular_file(
+        int parent_descriptor,
+        const std::string& name,
+        const struct stat& named_status,
+        OverlayFilesystemManifestState& manifest) {
+    OwnedFileDescriptor file(::openat(
+            parent_descriptor, name.c_str(),
+            O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW));
+    if(!file.valid()) return pinned_checkout_boundary_failure(manifest.stage);
+    struct stat opened_status {};
+    if(::fstat(file.get(), &opened_status) != 0 ||
+       !S_ISREG(opened_status.st_mode) ||
+       !stable_overlay_status_equal(named_status, opened_status) ||
+       opened_status.st_size < 0) {
+        return pinned_checkout_boundary_failure(manifest.stage);
+    }
+    const std::uintmax_t expected_size =
+            static_cast<std::uintmax_t>(opened_status.st_size);
+    if(expected_size > REVIEWED_SOURCE_SINGLE_BLOB_LIMIT) {
+        return pinned_checkout_capture_failure(
+                manifest.stage, static_cast<std::size_t>(expected_size),
+                static_cast<std::size_t>(
+                        REVIEWED_SOURCE_SINGLE_BLOB_LIMIT));
+    }
+    if(expected_size > REVIEWED_SOURCE_AGGREGATE_BLOB_LIMIT -
+               manifest.aggregate_regular_bytes) {
+        return pinned_checkout_capture_failure(
+                manifest.stage,
+                static_cast<std::size_t>(
+                        manifest.aggregate_regular_bytes + expected_size),
+                static_cast<std::size_t>(
+                        REVIEWED_SOURCE_AGGREGATE_BLOB_LIMIT));
+    }
+
+    std::string content;
+    content.reserve(static_cast<std::size_t>(expected_size));
+    std::array<char, 64U * 1024U> buffer{};
+    while(true) {
+        ssize_t read_size;
+        do {
+            read_size = ::read(file.get(), buffer.data(), buffer.size());
+        } while(read_size < 0 && errno == EINTR);
+        if(read_size < 0) {
+            return pinned_checkout_boundary_failure(manifest.stage);
+        }
+        if(read_size == 0) break;
+        const std::size_t chunk_size =
+                static_cast<std::size_t>(read_size);
+        if(chunk_size > REVIEWED_SOURCE_SINGLE_BLOB_LIMIT - content.size()) {
+            return pinned_checkout_capture_failure(
+                    manifest.stage, content.size() + chunk_size,
+                    static_cast<std::size_t>(
+                            REVIEWED_SOURCE_SINGLE_BLOB_LIMIT));
+        }
+        content.append(buffer.data(), chunk_size);
+    }
+
+    struct stat final_status {};
+    struct stat final_named_status {};
+    if(::fstat(file.get(), &final_status) != 0 ||
+       ::fstatat(
+               parent_descriptor, name.c_str(), &final_named_status,
+               AT_SYMLINK_NOFOLLOW) != 0 ||
+       !stable_overlay_status_equal(opened_status, final_status) ||
+       !stable_overlay_status_equal(opened_status, final_named_status) ||
+       content.size() != expected_size) {
+        return pinned_checkout_boundary_failure(manifest.stage);
+    }
+    manifest.aggregate_regular_bytes += expected_size;
+    return reviewed_source_sha256_content_identity(content);
+}
+
+std::variant<std::string, TrustedGitPinnedCheckoutFailure>
+read_overlay_symlink_target(
+        int parent_descriptor,
+        const std::string& name,
+        const struct stat& named_status,
+        TrustedGitPinnedCheckoutStage stage) {
+    OwnedFileDescriptor link(::openat(
+            parent_descriptor, name.c_str(),
+            O_PATH | O_CLOEXEC | O_NOFOLLOW));
+    if(!link.valid()) return pinned_checkout_boundary_failure(stage);
+    struct stat opened_status {};
+    if(::fstat(link.get(), &opened_status) != 0 ||
+       !S_ISLNK(opened_status.st_mode) ||
+       !stable_overlay_status_equal(named_status, opened_status)) {
+        return pinned_checkout_boundary_failure(stage);
+    }
+    std::array<char, REVIEWED_SOURCE_OVERLAY_SYMLINK_TARGET_LIMIT + 1>
+            target{};
+    ssize_t target_size;
+    do {
+        target_size = ::readlinkat(
+                link.get(), "", target.data(), target.size());
+    } while(target_size < 0 && errno == EINTR);
+    if(target_size < 0) return pinned_checkout_boundary_failure(stage);
+    if(static_cast<std::size_t>(target_size) >
+       REVIEWED_SOURCE_OVERLAY_SYMLINK_TARGET_LIMIT) {
+        return pinned_checkout_capture_failure(
+                stage, static_cast<std::size_t>(target_size),
+                REVIEWED_SOURCE_OVERLAY_SYMLINK_TARGET_LIMIT);
+    }
+    struct stat final_status {};
+    struct stat final_named_status {};
+    if(::fstat(link.get(), &final_status) != 0 ||
+       ::fstatat(
+               parent_descriptor, name.c_str(), &final_named_status,
+               AT_SYMLINK_NOFOLLOW) != 0 ||
+       !stable_overlay_status_equal(opened_status, final_status) ||
+       !stable_overlay_status_equal(opened_status, final_named_status)) {
+        return pinned_checkout_boundary_failure(stage);
+    }
+    return std::string(
+            target.data(), static_cast<std::size_t>(target_size));
+}
+
+std::optional<TrustedGitPinnedCheckoutFailure>
+scan_overlay_filesystem_directory(
+        int directory_descriptor,
+        std::string relative_path,
+        std::size_t depth,
+        bool is_checkout_root,
+        OverlayFilesystemManifestState& manifest) {
+    if(depth > REVIEWED_SOURCE_OVERLAY_DEPTH_LIMIT) {
+        return pinned_checkout_capture_failure(
+                manifest.stage, depth,
+                REVIEWED_SOURCE_OVERLAY_DEPTH_LIMIT);
+    }
+    struct stat initial_directory_status {};
+    if(::fstat(directory_descriptor, &initial_directory_status) != 0 ||
+       !S_ISDIR(initial_directory_status.st_mode)) {
+        return pinned_checkout_boundary_failure(manifest.stage);
+    }
+    if(auto failure = add_overlay_manifest_entry(
+               manifest,
+               OverlayFilesystemEntry{
+                       std::move(relative_path),
+                       OverlayFilesystemEntryKind::Directory,
+                       initial_directory_status, {}})) {
+        return failure;
+    }
+    const std::string current_path = manifest.entries.back().path;
+    OverlayDirectoryNamesResult names_result = read_overlay_directory_names(
+            directory_descriptor, is_checkout_root, manifest.stage);
+    if(auto* failure = std::get_if<TrustedGitPinnedCheckoutFailure>(
+               &names_result)) {
+        return std::move(*failure);
+    }
+
+    for(const std::string& name :
+        std::get<std::vector<std::string>>(std::move(names_result))) {
+        const std::string child_path = current_path.empty()
+                ? name
+                : current_path + "/" + name;
+        if(child_path.size() > REVIEWED_SOURCE_OVERLAY_PATH_LIMIT) {
+            return pinned_checkout_capture_failure(
+                    manifest.stage, child_path.size(),
+                    REVIEWED_SOURCE_OVERLAY_PATH_LIMIT);
+        }
+        struct stat named_status {};
+        if(::fstatat(
+                   directory_descriptor, name.c_str(), &named_status,
+                   AT_SYMLINK_NOFOLLOW) != 0) {
+            return pinned_checkout_boundary_failure(manifest.stage);
+        }
+
+        if(S_ISDIR(named_status.st_mode)) {
+            OwnedFileDescriptor child(::openat(
+                    directory_descriptor, name.c_str(),
+                    O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
+            struct stat opened_status {};
+            if(!child.valid() || ::fstat(child.get(), &opened_status) != 0 ||
+               !stable_overlay_status_equal(named_status, opened_status)) {
+                return pinned_checkout_boundary_failure(manifest.stage);
+            }
+            if(auto failure = scan_overlay_filesystem_directory(
+                       child.get(), child_path, depth + 1, false,
+                       manifest)) {
+                return failure;
+            }
+            struct stat final_status {};
+            struct stat final_named_status {};
+            if(::fstat(child.get(), &final_status) != 0 ||
+               ::fstatat(
+                       directory_descriptor, name.c_str(),
+                       &final_named_status, AT_SYMLINK_NOFOLLOW) != 0 ||
+               !stable_overlay_status_equal(opened_status, final_status) ||
+               !stable_overlay_status_equal(
+                       opened_status, final_named_status)) {
+                return pinned_checkout_boundary_failure(manifest.stage);
+            }
+            continue;
+        }
+
+        if(S_ISREG(named_status.st_mode)) {
+            auto content = read_overlay_regular_file(
+                    directory_descriptor, name, named_status, manifest);
+            if(auto* failure = std::get_if<
+                       TrustedGitPinnedCheckoutFailure>(&content)) {
+                return std::move(*failure);
+            }
+            if(auto failure = add_overlay_manifest_entry(
+                       manifest,
+                       OverlayFilesystemEntry{
+                               child_path,
+                               OverlayFilesystemEntryKind::RegularFile,
+                               named_status,
+                               std::get<std::string>(std::move(content))})) {
+                return failure;
+            }
+            continue;
+        }
+
+        if(S_ISLNK(named_status.st_mode)) {
+            auto target = read_overlay_symlink_target(
+                    directory_descriptor, name, named_status,
+                    manifest.stage);
+            if(auto* failure = std::get_if<
+                       TrustedGitPinnedCheckoutFailure>(&target)) {
+                return std::move(*failure);
+            }
+            std::string target_bytes =
+                    std::get<std::string>(std::move(target));
+            if(target_bytes.size() >
+               REVIEWED_SOURCE_MACHINE_STREAM_LIMIT -
+                       manifest.aggregate_path_bytes) {
+                return pinned_checkout_capture_failure(
+                        manifest.stage,
+                        manifest.aggregate_path_bytes + target_bytes.size(),
+                        REVIEWED_SOURCE_MACHINE_STREAM_LIMIT);
+            }
+            manifest.aggregate_path_bytes += target_bytes.size();
+            if(auto failure = add_overlay_manifest_entry(
+                       manifest,
+                       OverlayFilesystemEntry{
+                               child_path,
+                               OverlayFilesystemEntryKind::Symlink,
+                               named_status, std::move(target_bytes)})) {
+                return failure;
+            }
+            continue;
+        }
+
+        // Never open or read FIFOs, sockets, devices, or unknown types.
+        return pinned_checkout_failure(
+                TrustedGitPinnedCheckoutFailureReason::
+                        UnsupportedOverlayEntry,
+                manifest.stage);
+    }
+
+    struct stat final_directory_status {};
+    if(::fstat(directory_descriptor, &final_directory_status) != 0 ||
+       !stable_overlay_status_equal(
+               initial_directory_status, final_directory_status)) {
+        return pinned_checkout_boundary_failure(manifest.stage);
+    }
+    return std::nullopt;
+}
+
+OverlayFilesystemManifestResult project_overlay_filesystem_manifest(
+        int checkout_descriptor,
+        std::uintmax_t expected_device,
+        std::uintmax_t expected_inode,
+        TrustedGitPinnedCheckoutStage stage) {
+    OwnedFileDescriptor root(::openat(
+            checkout_descriptor, ".",
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
+    struct stat root_status {};
+    if(!root.valid() || ::fstat(root.get(), &root_status) != 0 ||
+       !S_ISDIR(root_status.st_mode) ||
+       static_cast<std::uintmax_t>(root_status.st_dev) != expected_device ||
+       static_cast<std::uintmax_t>(root_status.st_ino) != expected_inode) {
+        return pinned_checkout_boundary_failure(stage);
+    }
+    OverlayFilesystemManifestState manifest;
+    manifest.stage = stage;
+    if(auto failure = scan_overlay_filesystem_directory(
+               root.get(), {}, 0, true, manifest)) {
+        return std::move(*failure);
+    }
+    return serialize_overlay_filesystem_manifest(
+            std::move(manifest.entries));
+}
+
+using OverlayTreeProjectionResult = std::variant<
+        ReviewedSourceObjectId,
+        TrustedGitPinnedCheckoutFailure>;
+
+struct OverlayProjection {
+    ReviewedSourceObjectId tree;
+    std::string filesystem_manifest;
+
+    bool operator==(const OverlayProjection&) const = default;
+};
+
+using OverlayProjectionResult = std::variant<
+        OverlayProjection,
+        TrustedGitPinnedCheckoutFailure>;
+
+OverlayTreeProjectionResult project_pinned_checkout_overlay_tree(
+        const ValidatedCachePath& checkout,
+        const AurReviewedSourceReviewIdentity& identity,
+        int lifetime_guard_descriptor,
+        TrustedGitPinnedCheckoutStage stage) {
+    TemporaryOverlayIndex alternate_index;
+    const std::string& expected_remote = identity.canonical_git_remote();
+
+    CapturedCommandResult empty_tree_result = capture_overlay_git(
+            checkout, expected_remote,
+            {"hash-object", "-w", "-t", "tree", "/dev/null"},
+            "git hash-object -w -t tree /dev/null",
+            MAX_COMMIT_OID_OUTPUT, alternate_index.path(),
+            lifetime_guard_descriptor);
+    OverlayTreeProjectionResult empty_tree = parse_overlay_object_id(
+            std::move(empty_tree_result), identity.git_object_format(),
+            stage);
+    if(auto* failure = std::get_if<TrustedGitPinnedCheckoutFailure>(
+               &empty_tree)) {
+        return std::move(*failure);
+    }
+    const ReviewedSourceObjectId& empty_tree_id =
+            std::get<ReviewedSourceObjectId>(empty_tree);
+    if(empty_tree_id !=
+       reviewed_source_empty_tree_object_id(identity.git_object_format())) {
+        return pinned_checkout_failure(
+                TrustedGitPinnedCheckoutFailureReason::MalformedOutput,
+                stage);
+    }
+
+    CapturedCommandResult initialized = capture_overlay_git(
+            checkout, expected_remote, {"read-tree", "--empty"},
+            "git read-tree --empty", MAX_EMPTY_COMMAND_OUTPUT,
+            alternate_index.path(), lifetime_guard_descriptor);
+    if(initialized.stdout_capture_limit_exceeded) {
+        return pinned_checkout_capture_failure(
+                stage, initialized.output.size(), MAX_EMPTY_COMMAND_OUTPUT);
+    }
+    if(initialized.exit_code != 0 || !initialized.output.empty()) {
+        return pinned_checkout_command_failure(stage, initialized.exit_code);
+    }
+
+    // --force includes ignored entries. --attr-source=<empty-tree> and the
+    // explicit autocrlf setting make the alternate index a projection of raw
+    // worktree bytes/modes rather than caller- or worktree-owned filters.
+    CapturedCommandResult added = capture_overlay_git(
+            checkout, expected_remote,
+            {"-c", "core.autocrlf=false", "-c", "core.filemode=true",
+             "add", "--all", "--force", "--", "."},
+            "git add --all --force -- .", MAX_EMPTY_COMMAND_OUTPUT,
+            alternate_index.path(), lifetime_guard_descriptor,
+            empty_tree_id.value());
+    if(added.stdout_capture_limit_exceeded) {
+        return pinned_checkout_capture_failure(
+                stage, added.output.size(), MAX_EMPTY_COMMAND_OUTPUT);
+    }
+    if(added.exit_code != 0 || !added.output.empty()) {
+        return pinned_checkout_command_failure(stage, added.exit_code);
+    }
+
+    CapturedCommandResult entries = capture_overlay_git(
+            checkout, expected_remote, {"ls-files", "--stage", "-z"},
+            "git ls-files --stage -z", REVIEWED_SOURCE_MACHINE_STREAM_LIMIT,
+            alternate_index.path(), lifetime_guard_descriptor);
+    if(entries.stdout_capture_limit_exceeded) {
+        return pinned_checkout_capture_failure(
+                stage, entries.output.size(),
+                REVIEWED_SOURCE_MACHINE_STREAM_LIMIT);
+    }
+    if(entries.exit_code != 0) {
+        return pinned_checkout_command_failure(stage, entries.exit_code);
+    }
+    std::size_t entry_offset = 0;
+    while(entry_offset < entries.output.size()) {
+        const std::size_t entry_end =
+                entries.output.find('\0', entry_offset);
+        if(entry_end == std::string::npos || entry_end == entry_offset) {
+            return pinned_checkout_failure(
+                    TrustedGitPinnedCheckoutFailureReason::MalformedOutput,
+                    stage);
+        }
+        const std::string_view entry(
+                entries.output.data() + entry_offset,
+                entry_end - entry_offset);
+        const bool representable =
+                entry.starts_with("100644 ") ||
+                entry.starts_with("100755 ") ||
+                entry.starts_with("120000 ");
+        if(!representable) {
+            // A Gitlink hides the nested worktree behind one commit OID, so
+            // later nested-file mutation would not change the sealed tree.
+            return pinned_checkout_failure(
+                    TrustedGitPinnedCheckoutFailureReason::
+                            UnsupportedOverlayEntry,
+                    stage);
+        }
+        entry_offset = entry_end + 1;
+    }
+
+    return parse_overlay_object_id(
+            capture_overlay_git(
+                    checkout, expected_remote, {"write-tree"},
+                    "git write-tree", MAX_COMMIT_OID_OUTPUT,
+                    alternate_index.path(), lifetime_guard_descriptor),
+            identity.git_object_format(), stage);
+}
+
+OverlayProjectionResult project_pinned_checkout_overlay(
+        const ValidatedCachePath& checkout,
+        const AurReviewedSourceReviewIdentity& identity,
+        int lifetime_guard_descriptor,
+        TrustedGitPinnedCheckoutStage stage) {
+    OverlayFilesystemManifestResult manifest_before =
+            project_overlay_filesystem_manifest(
+                    lifetime_guard_descriptor, checkout.device(),
+                    checkout.inode(), stage);
+    if(auto* failure = std::get_if<TrustedGitPinnedCheckoutFailure>(
+               &manifest_before)) {
+        return std::move(*failure);
+    }
+    // The descriptor manifest runs first so a FIFO/socket/device is rejected
+    // without allowing the alternate-index Git projection to open it.
+    OverlayTreeProjectionResult tree = project_pinned_checkout_overlay_tree(
+            checkout, identity, lifetime_guard_descriptor, stage);
+    if(auto* failure = std::get_if<TrustedGitPinnedCheckoutFailure>(&tree)) {
+        return std::move(*failure);
+    }
+    OverlayFilesystemManifestResult manifest_after =
+            project_overlay_filesystem_manifest(
+                    lifetime_guard_descriptor, checkout.device(),
+                    checkout.inode(), stage);
+    if(auto* failure = std::get_if<TrustedGitPinnedCheckoutFailure>(
+               &manifest_after)) {
+        return std::move(*failure);
+    }
+    if(std::get<std::string>(manifest_before) !=
+       std::get<std::string>(manifest_after)) {
+        return pinned_checkout_failure(
+                TrustedGitPinnedCheckoutFailureReason::OverlayMismatch,
+                stage);
+    }
+    return OverlayProjection{
+            std::get<ReviewedSourceObjectId>(std::move(tree)),
+            std::get<std::string>(std::move(manifest_after))};
+}
+
+OverlayProjectionResult observe_stable_pinned_checkout_overlay(
+        const ValidatedCachePath& checkout,
+        const AurReviewedSourceReviewIdentity& identity,
+        int lifetime_guard_descriptor,
+        PinnedCheckoutWorktreePolicy worktree_policy,
+        TrustedGitPinnedCheckoutStage stage) {
+    if(auto failure = validate_pinned_checkout_materialization(
+               checkout, identity, worktree_policy)) {
+        return *failure;
+    }
+    OverlayProjectionResult first = project_pinned_checkout_overlay(
+            checkout, identity, lifetime_guard_descriptor, stage);
+    if(std::holds_alternative<TrustedGitPinnedCheckoutFailure>(first)) {
+        return std::get<TrustedGitPinnedCheckoutFailure>(std::move(first));
+    }
+    if(auto failure = validate_pinned_checkout_materialization(
+               checkout, identity, worktree_policy)) {
+        return *failure;
+    }
+    OverlayProjectionResult second = project_pinned_checkout_overlay(
+            checkout, identity, lifetime_guard_descriptor, stage);
+    if(std::holds_alternative<TrustedGitPinnedCheckoutFailure>(second)) {
+        return std::get<TrustedGitPinnedCheckoutFailure>(std::move(second));
+    }
+    if(std::get<OverlayProjection>(first) !=
+       std::get<OverlayProjection>(second)) {
+        return pinned_checkout_failure(
+                TrustedGitPinnedCheckoutFailureReason::OverlayMismatch,
+                stage);
+    }
+    return std::get<OverlayProjection>(std::move(second));
+}
+
 int run_pinned_checkout_git(
         const ValidatedCachePath& checkout,
         const std::string& expected_remote_url,
@@ -1230,7 +2067,9 @@ int run_pinned_checkout_git(
 std::optional<TrustedGitPinnedCheckoutFailure>
 validate_pinned_checkout_materialization(
         const ValidatedCachePath& checkout,
-        const AurReviewedSourceReviewIdentity& identity) {
+        const AurReviewedSourceReviewIdentity& identity,
+        PinnedCheckoutWorktreePolicy worktree_policy =
+                PinnedCheckoutWorktreePolicy::RequireClean) {
     constexpr std::size_t INDEX_OUTPUT_LIMIT =
             REVIEWED_SOURCE_MACHINE_STREAM_LIMIT;
     const std::string& expected_remote = identity.canonical_git_remote();
@@ -1378,7 +2217,9 @@ validate_pinned_checkout_materialization(
                 TrustedGitPinnedCheckoutStage::WorktreeVerification,
                 status.exit_code);
     }
-    if(!status.output.empty()) {
+    if(!status.output.empty() &&
+       worktree_policy ==
+               PinnedCheckoutWorktreePolicy::RequireClean) {
         return pinned_checkout_failure(
                 TrustedGitPinnedCheckoutFailureReason::DirtyWorktree,
                 TrustedGitPinnedCheckoutStage::WorktreeVerification);
@@ -1524,6 +2365,17 @@ std::uintmax_t TrustedGitPinnedCheckout::checkout_inode() const {
     return require_state().checkout.inode();
 }
 
+TrustedGitPinnedCheckoutOverlayObservation::
+        TrustedGitPinnedCheckoutOverlayObservation(
+                AurReviewedSourceReviewIdentity identity,
+                std::uintmax_t checkout_device,
+                std::uintmax_t checkout_inode,
+                ReviewedSourceObjectId tree,
+                std::string filesystem_manifest) noexcept
+    : identity_(std::move(identity)), checkout_device_(checkout_device),
+      checkout_inode_(checkout_inode), tree_(std::move(tree)),
+      filesystem_manifest_(std::move(filesystem_manifest)) {}
+
 TrustedGitPinnedCheckoutResult trusted_git_materialize_pinned_checkout(
         const ValidatedCachePath& checkout,
         AurReviewedSourceReviewIdentity identity,
@@ -1571,7 +2423,8 @@ revalidate_trusted_git_pinned_checkout(
     try {
         if(auto failure = validate_pinned_checkout_materialization(
                    checkout.require_state().checkout,
-                   checkout.require_state().identity)) {
+                   checkout.require_state().identity,
+                   PinnedCheckoutWorktreePolicy::RequireClean)) {
             return *failure;
         }
         return TrustedGitPinnedCheckoutRevalidated{};
@@ -1583,6 +2436,110 @@ revalidate_trusted_git_pinned_checkout(
         return pinned_checkout_boundary_failure(
                 TrustedGitPinnedCheckoutStage::BoundaryRevalidation);
     }
+}
+
+TrustedGitPinnedCheckoutOverlayObservationResult
+observe_clean_trusted_git_pinned_checkout_overlay(
+        const TrustedGitPinnedCheckout& checkout,
+        const ReviewedSourcePackageBaseLease& lease) {
+    if(!checkout.valid() || !lease.valid_ || lease.descriptor_ < 0 ||
+       checkout.checkout_device() != lease.device() ||
+       checkout.checkout_inode() != lease.inode()) {
+        return pinned_checkout_failure(
+                TrustedGitPinnedCheckoutFailureReason::InvalidCapability,
+                TrustedGitPinnedCheckoutStage::OverlayObservation);
+    }
+    try {
+        lease.require_unchanged_identity();
+        const TrustedGitPinnedCheckout::State& state =
+                checkout.require_state();
+        OverlayProjectionResult projected =
+                observe_stable_pinned_checkout_overlay(
+                        state.checkout, state.identity, lease.descriptor_,
+                        PinnedCheckoutWorktreePolicy::RequireClean,
+                        TrustedGitPinnedCheckoutStage::OverlayObservation);
+        if(auto* failure = std::get_if<TrustedGitPinnedCheckoutFailure>(
+                   &projected)) {
+            return std::move(*failure);
+        }
+        lease.require_unchanged_identity();
+        OverlayProjection stable =
+                std::get<OverlayProjection>(std::move(projected));
+        return TrustedGitPinnedCheckoutOverlayObservation(
+                state.identity, state.checkout.device(),
+                state.checkout.inode(), std::move(stable.tree),
+                std::move(stable.filesystem_manifest));
+    } catch(const TrustedCacheError& error) {
+        return pinned_checkout_boundary_failure(
+                TrustedGitPinnedCheckoutStage::OverlayObservation,
+                error.failure());
+    } catch(const std::exception&) {
+        return pinned_checkout_boundary_failure(
+                TrustedGitPinnedCheckoutStage::OverlayObservation);
+    }
+}
+
+TrustedGitPinnedCheckoutOverlayObservationResult
+observe_trusted_git_pinned_checkout_overlay(
+        const TrustedGitPinnedCheckout& checkout,
+        const ReviewedSourcePackageBaseLease& lease) {
+    if(!checkout.valid() || !lease.valid_ || lease.descriptor_ < 0 ||
+       checkout.checkout_device() != lease.device() ||
+       checkout.checkout_inode() != lease.inode()) {
+        return pinned_checkout_failure(
+                TrustedGitPinnedCheckoutFailureReason::InvalidCapability,
+                TrustedGitPinnedCheckoutStage::OverlayObservation);
+    }
+    try {
+        lease.require_unchanged_identity();
+        const TrustedGitPinnedCheckout::State& state =
+                checkout.require_state();
+        OverlayProjectionResult projected =
+                observe_stable_pinned_checkout_overlay(
+                        state.checkout, state.identity, lease.descriptor_,
+                        PinnedCheckoutWorktreePolicy::AllowEditorOverlay,
+                        TrustedGitPinnedCheckoutStage::OverlayObservation);
+        if(auto* failure = std::get_if<TrustedGitPinnedCheckoutFailure>(
+                   &projected)) {
+            return std::move(*failure);
+        }
+        lease.require_unchanged_identity();
+        OverlayProjection stable =
+                std::get<OverlayProjection>(std::move(projected));
+        return TrustedGitPinnedCheckoutOverlayObservation(
+                state.identity, state.checkout.device(),
+                state.checkout.inode(), std::move(stable.tree),
+                std::move(stable.filesystem_manifest));
+    } catch(const TrustedCacheError& error) {
+        return pinned_checkout_boundary_failure(
+                TrustedGitPinnedCheckoutStage::OverlayObservation,
+                error.failure());
+    } catch(const std::exception&) {
+        return pinned_checkout_boundary_failure(
+                TrustedGitPinnedCheckoutStage::OverlayObservation);
+    }
+}
+
+TrustedGitPinnedCheckoutRevalidationResult
+revalidate_trusted_git_pinned_checkout_overlay(
+        const TrustedGitPinnedCheckout& checkout,
+        const ReviewedSourcePackageBaseLease& lease,
+        const TrustedGitPinnedCheckoutOverlayObservation& expected) {
+    TrustedGitPinnedCheckoutOverlayObservationResult observed =
+            observe_trusted_git_pinned_checkout_overlay(checkout, lease);
+    if(auto* failure = std::get_if<TrustedGitPinnedCheckoutFailure>(
+               &observed)) {
+        failure->stage = TrustedGitPinnedCheckoutStage::OverlayRevalidation;
+        return std::move(*failure);
+    }
+    const auto& current =
+            std::get<TrustedGitPinnedCheckoutOverlayObservation>(observed);
+    if(current != expected) {
+        return pinned_checkout_failure(
+                TrustedGitPinnedCheckoutFailureReason::OverlayMismatch,
+                TrustedGitPinnedCheckoutStage::OverlayRevalidation);
+    }
+    return TrustedGitPinnedCheckoutRevalidated{};
 }
 
 std::string trusted_git_remote_origin_url(
@@ -1601,6 +2558,25 @@ int trusted_git_fetch_origin(
             {"fetch", "--no-auto-maintenance", "--no-recurse-submodules",
              "origin"},
             "git fetch origin");
+}
+
+int trusted_git_fetch_origin(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        const ReviewedSourcePackageBaseLease& lease) {
+    lease.require_unchanged_identity();
+    if(checkout.device() != lease.device() ||
+       checkout.inode() != lease.inode()) {
+        throw std::logic_error(
+                "Managed Git fetch lease binding is inconsistent.");
+    }
+    const int status = run_managed_git(
+            checkout, expected_remote_url,
+            {"fetch", "--no-auto-maintenance", "--no-recurse-submodules",
+             "origin"},
+            "git fetch origin", lease.descriptor_);
+    lease.require_unchanged_identity();
+    return status;
 }
 
 std::string trusted_git_detect_remote_branch(
@@ -1679,6 +2655,26 @@ int trusted_git_reset_hard(
             checkout, expected_remote_url,
             {"reset", "--hard", remote_ref, "--"},
             "git reset --hard " + remote_ref);
+}
+
+int trusted_git_reset_hard(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        const std::string& branch,
+        const ReviewedSourcePackageBaseLease& lease) {
+    lease.require_unchanged_identity();
+    if(checkout.device() != lease.device() ||
+       checkout.inode() != lease.inode()) {
+        throw std::logic_error(
+                "Managed Git reset lease binding is inconsistent.");
+    }
+    const std::string remote_ref = remote_ref_for_branch(branch);
+    const int status = run_managed_git(
+            checkout, expected_remote_url,
+            {"reset", "--hard", remote_ref, "--"},
+            "git reset --hard " + remote_ref, lease.descriptor_);
+    lease.require_unchanged_identity();
+    return status;
 }
 
 TrustedGitCommitResolutionResult trusted_git_resolve_remote_commit(
@@ -2357,9 +3353,12 @@ void set_trusted_git_review_machine_stream_limit_for_test(
 }
 #endif
 
-int trusted_git_clone_persistent_checkout(
+namespace {
+
+int clone_persistent_checkout(
         const ValidatedCachePath& destination,
-        const std::string& remote_url) {
+        const std::string& remote_url,
+        std::optional<int> lifetime_guard_descriptor) {
     ValidatedCachePath current = revalidate_trusted_cache_path(
             destination, CachePathRequirement::ExistingDirectory);
     RetainedTrustedCacheDirectory retained =
@@ -2374,9 +3373,37 @@ int trusted_git_clone_persistent_checkout(
             arguments.end(),
             {"clone", "--no-recurse-submodules", "--", remote_url,
              current.canonical_path().string()});
-    const int status = run_explicit_process(isolated_invocation(
-            std::move(arguments), display_command));
+    ExplicitProcessInvocation invocation = isolated_invocation(
+            std::move(arguments), display_command);
+    invocation.parent_independent_lifetime_guard_fd =
+            lifetime_guard_descriptor;
+    const int status = run_explicit_process(invocation);
     retained.require_unchanged_identity();
+    return status;
+}
+
+} // namespace
+
+int trusted_git_clone_persistent_checkout(
+        const ValidatedCachePath& destination,
+        const std::string& remote_url) {
+    return clone_persistent_checkout(
+            destination, remote_url, std::nullopt);
+}
+
+int trusted_git_clone_persistent_checkout(
+        const ValidatedCachePath& destination,
+        const std::string& remote_url,
+        const ReviewedSourcePackageBaseLease& lease) {
+    lease.require_unchanged_identity();
+    if(destination.device() != lease.device() ||
+       destination.inode() != lease.inode()) {
+        throw std::logic_error(
+                "Managed Git clone lease binding is inconsistent.");
+    }
+    const int status = clone_persistent_checkout(
+            destination, remote_url, lease.descriptor_);
+    lease.require_unchanged_identity();
     return status;
 }
 

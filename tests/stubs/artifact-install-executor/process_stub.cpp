@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <deque>
+#include <fstream>
 #include <stdexcept>
 #include <utility>
 
@@ -169,4 +170,41 @@ int run_command(const std::string& command) {
     state.expected_calls.pop_front();
     if(state.run_hook != nullptr) state.run_hook();
     return expectation.run_exit_code;
+}
+
+int run_command_with_parent_independent_lifetime_guard(
+        const std::string& command,
+        int,
+        const std::string& display_command) {
+    if(display_command.empty()) return run_command(command);
+
+    CapturedCommandResult result =
+            capture_command_output_raw(display_command.c_str());
+    const std::size_t redirect = command.rfind(" > ");
+    if(redirect == std::string::npos) {
+        throw std::logic_error(
+                "Guarded capture command has no output redirection.");
+    }
+    std::string output_path = command.substr(redirect + 3);
+    if(output_path.size() < 2 || output_path.front() != '\'' ||
+       output_path.back() != '\'') {
+        throw std::logic_error(
+                "Guarded capture command has an unsupported output path.");
+    }
+    output_path = output_path.substr(1, output_path.size() - 2);
+    std::ofstream output(
+            output_path, std::ios::binary | std::ios::trunc);
+    if(!output) {
+        throw std::logic_error(
+                "Guarded capture stub could not open its output path.");
+    }
+    output.write(
+            result.output.data(),
+            static_cast<std::streamsize>(result.output.size()));
+    output.close();
+    if(!output) {
+        throw std::logic_error(
+                "Guarded capture stub could not write its output.");
+    }
+    return result.exit_code;
 }

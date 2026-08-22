@@ -839,7 +839,7 @@ prepare_package_base_source_build_work_item_typed(
     if(execution.kind == ScriptedSourceExecutionKind::Success) {
         if(execution.result.status == SourceBuildExecutionStatus::UpToDate) {
             SourceBuildUpToDate outcome{
-                    std::move(execution.result.diagnostic)};
+                    std::move(execution.result.diagnostic), std::nullopt};
             g_state.source_executions.pop_front();
             return outcome;
         }
@@ -850,7 +850,7 @@ prepare_package_base_source_build_work_item_typed(
                             .value_or(
                                     SourceBuildUpdateStatusUnknownSkipReason::
                                             NoConfirm),
-                    std::move(execution.result.diagnostic)};
+                    std::move(execution.result.diagnostic), std::nullopt};
             g_state.source_executions.pop_front();
             return outcome;
         }

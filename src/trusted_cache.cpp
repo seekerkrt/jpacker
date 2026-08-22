@@ -18,6 +18,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <system_error>
@@ -911,6 +912,7 @@ struct RemovalNode {
 struct RemovalPlan {
     ValidatedCachePath target;
     RemovalNode        root;
+    OwnedFileDescriptor cooperative_lease;
 };
 
 std::vector<std::string> directory_entry_names(
@@ -1327,7 +1329,8 @@ void remove_removal_node(
 }
 
 RemovalPlan make_removal_plan(
-        const ValidatedCachePath& expected, TrustedCacheStage stage) {
+        const ValidatedCachePath& expected, TrustedCacheStage stage,
+        bool acquire_cooperative_lease = false) {
     if(!expected.exists()) {
         throw_cache_error(stage, TrustedCacheErrorCode::ConcurrentReplacement);
     }
@@ -1339,6 +1342,49 @@ RemovalPlan make_removal_plan(
     require_same_cache_path_identity(expected, current, stage);
     const auto& root_state = require_root_state(
             TrustedCacheAccess::root(expected), stage);
+    OwnedFileDescriptor cooperative_lease;
+    if(acquire_cooperative_lease && current.is_directory()) {
+        const int lease_descriptor =
+                open_child_directory_without_mount_crossing(
+                        root_state->directory_descriptor,
+                        TrustedCacheAccess::leaf(expected));
+        if(lease_descriptor < 0) {
+            const int open_error = errno;
+            throw_cache_error(
+                    stage,
+                    open_error == ENOENT || open_error == ELOOP ||
+                                    open_error == ENOTDIR
+                            ? TrustedCacheErrorCode::ConcurrentReplacement
+                            : (is_permission_error(open_error)
+                                       ? TrustedCacheErrorCode::PermissionDenied
+                                       : TrustedCacheErrorCode::MetadataFailure),
+                    open_error);
+        }
+        cooperative_lease = OwnedFileDescriptor(lease_descriptor);
+        int lock_result;
+        do {
+            lock_result = flock(
+                    cooperative_lease.get(), LOCK_EX | LOCK_NB);
+        } while(lock_result != 0 && errno == EINTR);
+        if(lock_result != 0) {
+            const int lock_error = errno;
+            throw_cache_error(
+                    stage,
+                    lock_error == EWOULDBLOCK || lock_error == EAGAIN
+                            ? TrustedCacheErrorCode::ConcurrentReplacement
+                            : (is_permission_error(lock_error)
+                                       ? TrustedCacheErrorCode::PermissionDenied
+                                       : TrustedCacheErrorCode::MetadataFailure),
+                    lock_error);
+        }
+        struct stat lease_status {};
+        if(fstat(cooperative_lease.get(), &lease_status) != 0 ||
+           !same_identity(
+                   lease_status, current.device(), current.inode())) {
+            throw_cache_error(
+                    stage, TrustedCacheErrorCode::ConcurrentReplacement);
+        }
+    }
     RemovalNode root_node = preflight_removal_node(
             root_state->directory_descriptor,
             TrustedCacheAccess::leaf(expected), root_state->device,
@@ -1346,7 +1392,9 @@ RemovalPlan make_removal_plan(
     if(!same_identity(root_node.status, expected.device(), expected.inode())) {
         throw_cache_error(stage, TrustedCacheErrorCode::ConcurrentReplacement);
     }
-    return RemovalPlan{expected, std::move(root_node)};
+    return RemovalPlan{
+            expected, std::move(root_node),
+            std::move(cooperative_lease)};
 }
 
 void require_cleanup_root_lineage(
@@ -2057,7 +2105,7 @@ PreparedCacheCleanup preflight_cache_cleanup(
             ValidatedCachePath target = inspect_cache_child(
                     root, name, CachePathRequirement::Existing);
             plans.push_back(make_removal_plan(
-                    target, TrustedCacheStage::CleanupPreflight));
+                    target, TrustedCacheStage::CleanupPreflight, true));
         }
         return PreparedCacheCleanup(std::make_unique<PreparedCacheCleanup::State>(
                 root, std::move(plans)));

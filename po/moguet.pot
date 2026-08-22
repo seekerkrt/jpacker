@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.3.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-19 07:09+0900\n"
+"POT-Creation-Date: 2026-08-22 11:28+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -132,6 +132,10 @@ msgstr ""
 #. TRANSLATORS: {} is the literal CLI option "--rmdeps".
 #, c++-format
 msgid "Separated build/install does not support {}."
+msgstr ""
+
+#, c++-format
+msgid "Internal {} output capture failed."
 msgstr ""
 
 #, c++-format
@@ -6151,6 +6155,72 @@ msgstr ""
 msgid "Repository provider capability metadata is invalid."
 msgstr ""
 
+msgid "Reviewed source state uses an unsupported future schema; the build was not started."
+msgstr ""
+
+msgid "Reviewed source state history is unsafe; the build was not started."
+msgstr ""
+
+msgid "Reviewed source state could not be read safely; the build was not started."
+msgstr ""
+
+msgid "Reviewed source state observation was inconsistent; the build was not started."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed source {} lease is already held; the build was not started."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed source {} lease could not be acquired; the build was not started."
+msgstr ""
+
+msgid "Reviewed source target revision resolution failed; the build was not started."
+msgstr ""
+
+msgid "Reviewed source lifecycle planning failed; the build was not started."
+msgstr ""
+
+msgid "Reviewed source exact checkout materialization failed; the build was not started."
+msgstr ""
+
+msgid "Reviewed source review projection failed; the build was not started."
+msgstr ""
+
+msgid "Reviewed source review materialization failed; the build was not started."
+msgstr ""
+
+msgid "Reviewed source review could not produce explicit acceptance; the build was not started."
+msgstr ""
+
+msgid "Reviewed source editor overlay could not be proven; the build was not started."
+msgstr ""
+
+msgid "Reviewed source checkout revalidation failed; the build was not started."
+msgstr ""
+
+msgid "Reviewed source state publication conflicted with current state; the build was not started."
+msgstr ""
+
+msgid "Reviewed source state publication outcome is uncertain; the build was not started and automatic retry is forbidden."
+msgstr ""
+
+msgid "Reviewed source state publication encountered unsafe history; the build was not started."
+msgstr ""
+
+msgid "Reviewed source state publication failed; the build was not started."
+msgstr ""
+
+msgid "Reviewed source checkout changed after state publication; the build was not started."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed source checkout changed before {}; the build was not started."
+msgstr ""
+
+msgid "Reviewed source production preparation failed; the build was not started."
+msgstr ""
+
 msgid "Unsupported"
 msgstr ""
 
@@ -6288,6 +6358,9 @@ msgstr ""
 msgid "Edit install script {}?"
 msgstr ""
 
+msgid "Accept this reviewed upstream revision?"
+msgstr ""
+
 #, c++-format
 msgid "{} was updated by the system transaction ({} -> {}); rebuilding the preferred source package."
 msgstr ""
@@ -6319,6 +6392,13 @@ msgstr ""
 msgid "Failed to fetch updates."
 msgstr ""
 
+msgid "Cloning repository..."
+msgstr ""
+
+#, c++-format
+msgid "Failed to clone {}"
+msgstr ""
+
 #, c++-format
 msgid "Detected branch: {}"
 msgstr ""
@@ -6331,13 +6411,6 @@ msgid "Updates were detected in the existing cache repository. View the {} diff?
 msgstr ""
 
 msgid "Failed to reset repository."
-msgstr ""
-
-msgid "Cloning repository..."
-msgstr ""
-
-#, c++-format
-msgid "Failed to clone {}"
 msgstr ""
 
 #, c++-format

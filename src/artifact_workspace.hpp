@@ -1,13 +1,16 @@
 #pragma once
 
 #include "process.hpp"
+#include "reviewed_source_pinned_build.hpp"
 #include "source_environment.hpp"
 #include "trusted_cache.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -15,8 +18,130 @@ class ExpectedPackageArtifactPath;
 class ExpectedPackageArtifactSet;
 class ValidatedPackageArtifactPath;
 class ValidatedPackageArtifactSet;
+class ArtifactWorkspace;
 class ArtifactMakepkgContext;
 struct ArtifactMakepkgContextProvenance;
+
+enum class ProductionSourceReviewStatus {
+    NotApplicable,
+    CompatibilityWithoutReview,
+    Reviewed,
+};
+
+enum class ProductionSourceBuildCommandOutcome {
+    NotAttempted,
+    Succeeded,
+};
+
+struct ProductionSourceBuildProvenance {
+    ProductionSourceReviewStatus review_status =
+            ProductionSourceReviewStatus::NotApplicable;
+    ReviewedSourceEditorOverlayStatus editor_overlay =
+            ReviewedSourceEditorOverlayStatus::None;
+    std::optional<ReviewedSourceCompatibilityBuildReason>
+            compatibility_reason;
+    std::optional<SourceRevisionIdentity> reviewed_upstream_base_revision;
+    std::optional<ReviewedSourcePublicationStatus> publication_status;
+
+    bool operator==(const ProductionSourceBuildProvenance&) const = default;
+};
+
+// Remote production makepkg authority. Compatibility routes retain the same
+// cooperative PackageBase lease; reviewed routes retain the complete 4B
+// capability instead of reducing it to a path/OID sidecar.
+class ProductionArtifactSourceTree final {
+    ValidatedCachePath checkout_;
+    std::shared_ptr<void> authority_lifetime_;
+    std::function<int(const std::string&, const std::string&)>
+            guarded_command_;
+    ProductionSourceBuildProvenance provenance_;
+
+    ProductionArtifactSourceTree(
+            ValidatedCachePath checkout,
+            std::shared_ptr<void> authority_lifetime,
+            std::function<int(
+                    const std::string&, const std::string&)>
+                    guarded_command,
+            ProductionSourceBuildProvenance provenance);
+
+    const ValidatedCachePath& checkout() const noexcept;
+    void require_unchanged_identity() const;
+    int run_guarded_command(
+            const std::string& command,
+            const std::string& display_command = {}) const;
+
+    friend class ArtifactMakepkgContext;
+    friend ProductionArtifactSourceTree
+    make_unreviewed_production_artifact_source_tree(
+            ValidatedCachePath checkout,
+            ReviewedSourcePackageBaseLease lease,
+            ProductionSourceReviewStatus review_status,
+            ReviewedSourceEditorOverlayStatus editor_overlay,
+            std::optional<ReviewedSourceCompatibilityBuildReason>
+                    compatibility_reason);
+    friend ProductionArtifactSourceTree
+    make_reviewed_production_artifact_source_tree(
+            ValidatedCachePath checkout,
+            PinnedReviewedSourceBuild reviewed);
+    friend ArtifactMakepkgContext prepare_artifact_makepkg_context(
+            ProductionArtifactSourceTree source_tree,
+            const ArtifactWorkspace& workspace,
+            const SourceBuildEnvironment& environment,
+            SourceEnvironmentEmptyValuePolicy empty_value_policy);
+
+public:
+    ProductionArtifactSourceTree(
+            const ProductionArtifactSourceTree&) = delete;
+    ProductionArtifactSourceTree& operator=(
+            const ProductionArtifactSourceTree&) = delete;
+    ProductionArtifactSourceTree(
+            ProductionArtifactSourceTree&&) noexcept = default;
+    ProductionArtifactSourceTree& operator=(
+            ProductionArtifactSourceTree&&) = delete;
+    ~ProductionArtifactSourceTree() = default;
+
+    [[nodiscard]] const ProductionSourceBuildProvenance& provenance()
+            const noexcept;
+
+#if defined(MOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS) || \
+        defined(MOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS)
+    ProductionArtifactSourceTree(ValidatedCachePath checkout)
+        : ProductionArtifactSourceTree(
+                  std::move(checkout), std::make_shared<int>(0),
+                  [](const std::string& command,
+                     const std::string& display_command) {
+                      return run_command_with_parent_independent_lifetime_guard(
+                              command, -1, display_command);
+                  },
+                  {}) {}
+
+    [[nodiscard]] static ProductionArtifactSourceTree make_for_test(
+            ValidatedCachePath checkout) {
+        return ProductionArtifactSourceTree(
+                std::move(checkout), std::make_shared<int>(0),
+                [](const std::string& command,
+                   const std::string& display_command) {
+                    return run_command_with_parent_independent_lifetime_guard(
+                            command, -1, display_command);
+                },
+                {});
+    }
+#endif
+};
+
+[[nodiscard]] ProductionArtifactSourceTree
+make_unreviewed_production_artifact_source_tree(
+        ValidatedCachePath checkout,
+        ReviewedSourcePackageBaseLease lease,
+        ProductionSourceReviewStatus review_status,
+        ReviewedSourceEditorOverlayStatus editor_overlay,
+        std::optional<ReviewedSourceCompatibilityBuildReason>
+                compatibility_reason = std::nullopt);
+
+[[nodiscard]] ProductionArtifactSourceTree
+make_reviewed_production_artifact_source_tree(
+        ValidatedCachePath checkout,
+        PinnedReviewedSourceBuild reviewed);
 
 // 一回のsource-build invocationだけが所有するfresh PKGDEST。
 // POLICY(#242): named pathだけでなくroot/workspace FDと作成時identityを保持し、
@@ -46,6 +171,11 @@ class ArtifactWorkspace final {
             ValidatedPrivateCacheRoot root);
     friend ArtifactMakepkgContext prepare_artifact_makepkg_context(
             const ValidatedCachePath& checkout,
+            const ArtifactWorkspace& workspace,
+            const SourceBuildEnvironment& environment,
+            SourceEnvironmentEmptyValuePolicy empty_value_policy);
+    friend ArtifactMakepkgContext prepare_artifact_makepkg_context(
+            ProductionArtifactSourceTree source_tree,
             const ArtifactWorkspace& workspace,
             const SourceBuildEnvironment& environment,
             SourceEnvironmentEmptyValuePolicy empty_value_policy);
@@ -134,6 +264,7 @@ struct ArtifactMakepkgBuildOptions {
 // owned PKGDESTはsource assignmentの順序を保った末尾へ一度だけ追加する。
 class ArtifactMakepkgContext final {
     RetainedTrustedCacheDirectory        checkout_;
+    std::unique_ptr<ProductionArtifactSourceTree> production_source_tree_;
     SourceBuildEnvironment               command_environment_;
     SourceEnvironmentEmptyValuePolicy    empty_value_policy_;
     std::shared_ptr<const ArtifactMakepkgContextProvenance> provenance_;
@@ -143,6 +274,14 @@ class ArtifactMakepkgContext final {
 
     ArtifactMakepkgContext(
             RetainedTrustedCacheDirectory checkout,
+            SourceBuildEnvironment command_environment,
+            SourceEnvironmentEmptyValuePolicy empty_value_policy,
+            std::filesystem::path workspace_path,
+            std::uintmax_t workspace_device,
+            std::uintmax_t workspace_inode);
+    ArtifactMakepkgContext(
+            RetainedTrustedCacheDirectory checkout,
+            ProductionArtifactSourceTree source_tree,
             SourceBuildEnvironment command_environment,
             SourceEnvironmentEmptyValuePolicy empty_value_policy,
             std::filesystem::path workspace_path,
@@ -159,6 +298,11 @@ class ArtifactMakepkgContext final {
 
     friend ArtifactMakepkgContext prepare_artifact_makepkg_context(
             const ValidatedCachePath& checkout,
+            const ArtifactWorkspace& workspace,
+            const SourceBuildEnvironment& environment,
+            SourceEnvironmentEmptyValuePolicy empty_value_policy);
+    friend ArtifactMakepkgContext prepare_artifact_makepkg_context(
+            ProductionArtifactSourceTree source_tree,
             const ArtifactWorkspace& workspace,
             const SourceBuildEnvironment& environment,
             SourceEnvironmentEmptyValuePolicy empty_value_policy);
@@ -207,6 +351,12 @@ public:
 
 ArtifactMakepkgContext prepare_artifact_makepkg_context(
         const ValidatedCachePath& checkout,
+        const ArtifactWorkspace& workspace,
+        const SourceBuildEnvironment& environment,
+        SourceEnvironmentEmptyValuePolicy empty_value_policy);
+
+ArtifactMakepkgContext prepare_artifact_makepkg_context(
+        ProductionArtifactSourceTree source_tree,
         const ArtifactWorkspace& workspace,
         const SourceBuildEnvironment& environment,
         SourceEnvironmentEmptyValuePolicy empty_value_policy);

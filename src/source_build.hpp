@@ -2,9 +2,11 @@
 
 #include "dependency_plan.hpp"
 #include "package_metadata.hpp"
+#include "reviewed_source_production_failure.hpp"
 #include "separated_package_base_source_build.hpp"
 #include "source_environment.hpp"
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -12,6 +14,7 @@
 #include <vector>
 
 struct AppConfig;
+class ReviewedSourceFatalStatePreflightSlot;
 
 enum class SourceBuildExecutionStatus {
     Installed,
@@ -33,12 +36,14 @@ enum class SourceBuildUpdatePolicy {
 
 struct SourceBuildUpToDate {
     std::string diagnostic;
+    std::optional<ProductionSourceBuildProvenance> source_provenance;
 };
 
 struct SourceBuildUpdateStatusUnknownSkipped {
     SourceBuildUpdateStatusUnknownSkipReason reason =
             SourceBuildUpdateStatusUnknownSkipReason::NoConfirm;
     std::string diagnostic;
+    std::optional<ProductionSourceBuildProvenance> source_provenance;
 };
 
 // generic source-buildの正常終了を、package transactionの有無まで潰さず返す。
@@ -49,6 +54,9 @@ struct SourceBuildExecutionResult {
     std::optional<SourceBuildUpdateStatusUnknownSkipReason>
             update_status_unknown_skip_reason;
     std::string diagnostic;
+    std::optional<ProductionSourceBuildProvenance> source_provenance;
+    ProductionSourceBuildCommandOutcome build_outcome =
+            ProductionSourceBuildCommandOutcome::NotAttempted;
 };
 
 // upgrade baselineの有無と、snapshot時点の未installを別状態として保持する。
@@ -72,22 +80,33 @@ struct SourceBuildRequest {
     std::optional<SourceInstalledSnapshot> installed_snapshot;
     bool        only_if_updated = false;
     bool        needed = false;
+    std::optional<PackageBaseIdentity> aur_review_identity;
+    // Invocation preparation owns this read. Copies of a prepared work item
+    // share one consumable snapshot rather than minting another observation.
+    std::shared_ptr<ReviewedSourceFatalStatePreflightSlot>
+            reviewed_state_preflight;
 };
+
+// AUR requests return one single-consumption slot; repository requests return
+// nullptr. Fatal observations throw before the invocation can reach mutation.
+[[nodiscard]] std::shared_ptr<ReviewedSourceFatalStatePreflightSlot>
+preflight_reviewed_source_fatal_state_for_production(
+        const SourceBuildRequest& request);
 
 // checkout/update-check/reviewとprivate artifact rootを一度だけ通過した
 // execution capability。raw pathはpreparation/executor ownerへ閉じる。
 class PreparedSourceBuildNeedsBuild final {
-    std::optional<ValidatedCachePath> checkout_;
+    std::optional<ProductionArtifactSourceTree> source_tree_;
     std::optional<ValidatedPrivateCacheRoot> artifact_root_;
     bool rebuild_ = false;
     bool clean_build_ = false;
 
     PreparedSourceBuildNeedsBuild(
-            ValidatedCachePath checkout,
+            ProductionArtifactSourceTree source_tree,
             ValidatedPrivateCacheRoot artifact_root,
             bool rebuild,
             bool clean_build) noexcept
-        : checkout_(std::move(checkout)),
+        : source_tree_(std::move(source_tree)),
           artifact_root_(std::move(artifact_root)), rebuild_(rebuild),
           clean_build_(clean_build) {
     }
@@ -96,6 +115,11 @@ class PreparedSourceBuildNeedsBuild final {
 
     friend struct SourceBuildPreparationAccess;
     friend struct SourceBuildPreparedExecutionAccess;
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_PRODUCTION_TEST_HOOKS
+    friend const ProductionSourceBuildProvenance&
+    prepared_source_build_provenance_for_test(
+            const PreparedSourceBuildNeedsBuild& prepared);
+#endif
 
 public:
     PreparedSourceBuildNeedsBuild(
@@ -121,6 +145,16 @@ using SourceBuildPreparationOutcome = std::variant<
         SourceBuildUpToDate,
         SourceBuildUpdateStatusUnknownSkipped,
         PreparedSourceBuildNeedsBuild>;
+
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_PRODUCTION_TEST_HOOKS
+const ProductionSourceBuildProvenance&
+prepared_source_build_provenance_for_test(
+        const PreparedSourceBuildNeedsBuild& prepared);
+
+using ReviewedSourceBeforePublicationHookForTest = void (*)();
+void set_reviewed_source_before_publication_hook_for_test(
+        ReviewedSourceBeforePublicationHookForTest hook);
+#endif
 
 SourceBuildPreparationOutcome prepare_source_build_for_execution(
         const SourceBuildRequest& request,

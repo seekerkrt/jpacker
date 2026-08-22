@@ -574,7 +574,7 @@ void record_preparation_failure(
                 AurUpdateSourceBuildFailureSnapshot>(
                 AurUpdateSourceBuildFailureSnapshot{
                         AurUpdateSourceBuildFailureCategory::Other,
-                        error.what()});
+                        error.what(), std::nullopt});
     }
 }
 
@@ -589,7 +589,7 @@ void record_phase_failure(
             AurUpdateSourceBuildFailureSnapshot>(
             AurUpdateSourceBuildFailureSnapshot{
                     map_source_build_failure_phase(error.phase()),
-                    error.what()});
+                    error.what(), error.reviewed_source_failure()});
 }
 
 void record_transaction_failure(
@@ -819,7 +819,7 @@ execute_prepared_aur_update_source_build_invocation(
                     AurUpdateSourceBuildFailureSnapshot>(
                     AurUpdateSourceBuildFailureSnapshot{
                             AurUpdateSourceBuildFailureCategory::Other,
-                            error.what()});
+                            error.what(), std::nullopt});
             work_item_result.diagnostic = error.what();
             result.status = AurUpdateInvocationExecutionStatus::
                     StoppedOnWorkItemFailure;

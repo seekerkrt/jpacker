@@ -159,11 +159,13 @@ std::string preparation_failure_diagnostic(
 PackageBaseSourceBuildExecutionResult::
         PackageBaseSourceBuildExecutionResult(
                 std::string package_base,
+                ProductionSourceBuildProvenance source_provenance,
                 std::vector<PackageBaseSourceBuildSelectedResult>
                         selected_children,
                 std::vector<ArtifactPackageIdentity> unselected_artifacts)
         noexcept
     : package_base_(std::move(package_base)),
+      source_provenance_(std::move(source_provenance)),
       selected_children_(std::move(selected_children)),
       unselected_artifacts_(std::move(unselected_artifacts)) {
 }
@@ -171,6 +173,16 @@ PackageBaseSourceBuildExecutionResult::
 const std::string&
 PackageBaseSourceBuildExecutionResult::package_base() const noexcept {
     return package_base_;
+}
+
+const ProductionSourceBuildProvenance&
+PackageBaseSourceBuildExecutionResult::source_provenance() const noexcept {
+    return source_provenance_;
+}
+
+ProductionSourceBuildCommandOutcome
+PackageBaseSourceBuildExecutionResult::build_outcome() const noexcept {
+    return build_outcome_;
 }
 
 const std::vector<PackageBaseSourceBuildSelectedResult>&
@@ -221,13 +233,22 @@ PackageBaseSourceBuildExecutionResult::release_unselected_artifacts()
 SeparatedPackageBaseSourceBuildPhaseError::
         SeparatedPackageBaseSourceBuildPhaseError(
                 SeparatedPackageBaseSourceBuildFailurePhase phase,
-                const std::string& diagnostic)
-    : std::runtime_error(diagnostic), phase_(phase) {
+                const std::string& diagnostic,
+                std::optional<ReviewedSourceProductionFailure>
+                        reviewed_source_failure)
+    : std::runtime_error(diagnostic), phase_(phase),
+      reviewed_source_failure_(std::move(reviewed_source_failure)) {
 }
 
 SeparatedPackageBaseSourceBuildFailurePhase
 SeparatedPackageBaseSourceBuildPhaseError::phase() const noexcept {
     return phase_;
+}
+
+const std::optional<ReviewedSourceProductionFailure>&
+SeparatedPackageBaseSourceBuildPhaseError::reviewed_source_failure()
+        const noexcept {
+    return reviewed_source_failure_;
 }
 
 SeparatedPackageBaseSourceBuildPreparationError::
@@ -285,12 +306,19 @@ execute_separated_package_base_source_build(
             std::move(request.artifact_root));
     notify_workspace_created_for_test(workspace.path());
 
+    const ProductionSourceBuildProvenance source_provenance =
+            request.source_tree.provenance();
     ArtifactMakepkgContext makepkg_context = [&]() {
         try {
             return prepare_artifact_makepkg_context(
-                    request.checkout, workspace,
+                    std::move(request.source_tree), workspace,
                     request.source_environment,
                     request.empty_value_policy);
+        } catch(const ReviewedSourceProductionError& error) {
+            workspace.retain_for_diagnostics();
+            throw SeparatedPackageBaseSourceBuildPhaseError(
+                    SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                    error.what(), error.failure());
         } catch(...) {
             workspace.retain_for_diagnostics();
             throw SeparatedPackageBaseSourceBuildPhaseError(
@@ -305,6 +333,11 @@ execute_separated_package_base_source_build(
     ExpectedPackageArtifactSet expected = [&]() {
         try {
             return query_makepkg_packagelist_set(workspace, makepkg_context);
+        } catch(const ReviewedSourceProductionError& error) {
+            workspace.retain_for_diagnostics();
+            throw SeparatedPackageBaseSourceBuildPhaseError(
+                    SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                    error.what(), error.failure());
         } catch(...) {
             workspace.retain_for_diagnostics();
             throw SeparatedPackageBaseSourceBuildPhaseError(
@@ -327,6 +360,11 @@ execute_separated_package_base_source_build(
     try {
         build_exit_code = makepkg_context.run_makepkg_build_only(
                 workspace, expected, makepkg_options);
+    } catch(const ReviewedSourceProductionError& error) {
+        workspace.retain_for_diagnostics();
+        throw SeparatedPackageBaseSourceBuildPhaseError(
+                SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                error.what(), error.failure());
     } catch(...) {
         workspace.retain_for_diagnostics();
         throw SeparatedPackageBaseSourceBuildPhaseError(
@@ -450,6 +488,7 @@ execute_separated_package_base_source_build(
             result_draft, std::move(executed_selected));
     PackageBaseSourceBuildExecutionResult result(
             std::move(executed_package_base),
+            source_provenance,
             std::move(result_draft.promoted_selected),
             std::move(result_draft.promoted_unselected));
 

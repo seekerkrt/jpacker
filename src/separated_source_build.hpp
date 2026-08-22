@@ -10,7 +10,7 @@
 // 1 PackageBaseのseparated build/installへ渡すvalidated inputだけを束ねる。
 // Artifact path/identity/directiveはlifecycle内部で生成し、入力として公開しない。
 struct SeparatedSourceBuildUnitRequest {
-    ValidatedCachePath                 checkout;
+    ProductionArtifactSourceTree       source_tree;
     ValidatedPrivateCacheRoot          artifact_root;
     std::string                        requested_name;
     std::string                        package_base;

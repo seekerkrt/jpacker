@@ -1,5 +1,6 @@
 #include "application_identity.hpp"
 #include "localization.hpp"
+#include "reviewed_source_production_failure.hpp"
 
 #include <clocale>
 #include <iostream>
@@ -64,6 +65,33 @@ int main(int argc, char* argv[]) {
               << '\n';
     std::cout << "prompt="
               << localization::translate_message("Rebuild package?") << '\n';
+    std::cout << "reviewed_target_failure="
+              << reviewed_source_production_failure_diagnostic(
+                         ReviewedSourceProductionFailure{
+                                 ReviewedSourceProductionFailureStage::
+                                         TargetResolution,
+                                 ReviewedSourceProductionFailureReason::
+                                         TargetResolutionFailure,
+                                 std::monostate{}})
+              << '\n';
+    std::cout << "reviewed_uncertain_failure="
+              << reviewed_source_production_failure_diagnostic(
+                         ReviewedSourceProductionFailure{
+                                 ReviewedSourceProductionFailureStage::
+                                         StatePublication,
+                                 ReviewedSourceProductionFailureReason::
+                                         PublishedUncertain,
+                                 std::monostate{}})
+              << '\n';
+    std::cout << "reviewed_lease_failure="
+              << reviewed_source_production_failure_diagnostic(
+                         ReviewedSourceProductionFailure{
+                                 ReviewedSourceProductionFailureStage::
+                                         LeaseAcquisition,
+                                 ReviewedSourceProductionFailureReason::
+                                         LeaseContended,
+                                 std::monostate{}})
+              << '\n';
     std::cout << "missing="
               << localization::translate_message("Missing catalog entry.")
               << '\n';

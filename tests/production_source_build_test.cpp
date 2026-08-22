@@ -429,10 +429,11 @@ class TemporaryProductionEnvironment final {
     fs::path                   path_;
     fs::path                   cache_root_path_;
     std::optional<std::string> previous_xdg_cache_home_;
+    std::optional<std::string> previous_xdg_state_home_;
     std::optional<std::string> previous_pkgdest_;
 
 public:
-    TemporaryProductionEnvironment()
+    explicit TemporaryProductionEnvironment(bool prepare_cache = true)
         : original_working_directory_(fs::current_path()) {
         const std::string template_text =
                 (fs::temp_directory_path() /
@@ -450,10 +451,20 @@ public:
 
         const char* previous_xdg = std::getenv("XDG_CACHE_HOME");
         if(previous_xdg != nullptr) previous_xdg_cache_home_ = previous_xdg;
+        const char* previous_xdg_state = std::getenv("XDG_STATE_HOME");
+        if(previous_xdg_state != nullptr) {
+            previous_xdg_state_home_ = previous_xdg_state;
+        }
         const char* previous_pkgdest = std::getenv("PKGDEST");
         if(previous_pkgdest != nullptr) previous_pkgdest_ = previous_pkgdest;
 
+        const fs::path state_home = path_ / "state";
+        fs::create_directory(state_home);
+        fs::permissions(
+                state_home, fs::perms::owner_all,
+                fs::perm_options::replace);
         if(setenv("XDG_CACHE_HOME", path_.c_str(), 1) != 0 ||
+           setenv("XDG_STATE_HOME", state_home.c_str(), 1) != 0 ||
            unsetenv("PKGDEST") != 0) {
             restore_environment();
             throw std::runtime_error(
@@ -463,6 +474,8 @@ public:
         try {
             xdg_paths::CachePaths cache_paths =
                     xdg_paths::resolve_cache_process_environment();
+            cache_root_path_ = cache_paths.directory;
+            if(!prepare_cache) return;
             xdg_directory_safety::PreparedDirectory cache_directory =
                     xdg_directory_safety::prepare_directory(cache_paths);
             ValidatedCacheRoot root = adopt_trusted_cache_root(
@@ -569,6 +582,13 @@ private:
         } else {
             static_cast<void>(unsetenv("XDG_CACHE_HOME"));
         }
+        if(previous_xdg_state_home_.has_value()) {
+            static_cast<void>(setenv(
+                    "XDG_STATE_HOME",
+                    previous_xdg_state_home_->c_str(), 1));
+        } else {
+            static_cast<void>(unsetenv("XDG_STATE_HOME"));
+        }
         if(previous_pkgdest_.has_value()) {
             static_cast<void>(setenv(
                     "PKGDEST", previous_pkgdest_->c_str(), 1));
@@ -608,6 +628,11 @@ ProductionSourceBuildWorkItem make_work_item(
     work_item.request.checkout_name = package_name;
     work_item.request.git_url =
             "https://aur.archlinux.org/" + package_name + ".git";
+    work_item.request.aur_review_identity = PackageBaseIdentity::make(
+            PackageSourceIdentity::aur(
+                    SourceLocationIdentity::known_git_remote(
+                            work_item.request.git_url)),
+            package_name);
     work_item.required_targets.push_back(RequiredPackageArtifactTarget{
             package_name, package_name, desired_reason});
     work_item.required_target_provenance =
@@ -628,6 +653,11 @@ ProductionSourceBuildWorkItem make_package_base_work_item(
     work_item.request.checkout_name = package_base;
     work_item.request.git_url =
             "https://aur.archlinux.org/" + package_base + ".git";
+    work_item.request.aur_review_identity = PackageBaseIdentity::make(
+            PackageSourceIdentity::aur(
+                    SourceLocationIdentity::known_git_remote(
+                            work_item.request.git_url)),
+            package_base);
     work_item.required_targets = std::move(required_targets);
     work_item.required_target_provenance =
             RequiredTargetProvenance::AurBuildPlanProjection;
@@ -1816,7 +1846,6 @@ void test_local_dependency_invocation_accepts_zero_remote_units(
         const TemporaryProductionEnvironment&) {
     process_stub::reset_process_stub();
     const AppConfig config = noninteractive_config();
-    const ValidatedCacheRoot cache_root = prepare_process_cache_root();
     LocalSourceBuildDependencyPreparation preparation =
             LocalSourceBuildDependencyPreparation::
                     make_for_production_source_build_test({}, {});
@@ -1827,6 +1856,8 @@ void test_local_dependency_invocation_accepts_zero_remote_units(
             preparation.selected_repository_providers().empty(),
             "Empty local dependency preparation unexpectedly contains a repository provider");
 
+    preflight_local_source_build_dependencies(preparation, config);
+    const ValidatedCacheRoot cache_root = prepare_process_cache_root();
     expect_database_paths();
     PreparedProductionSourceBuildInvocation invocation =
             prepare_local_source_build_dependency_invocation(
@@ -1875,7 +1906,6 @@ void test_local_dependency_invocation_executes_provider_without_aur_units(
     metadata_stub::reset_alpm_stub();
     metadata_stub::set_package_absent();
     const AppConfig config = noninteractive_config();
-    const ValidatedCacheRoot cache_root = prepare_process_cache_root();
     const ProvidedDependency first_provider = make_repository_provider(
             "extra", "local-root-provider", "virtual-local-api",
             "virtual-local-api=1", std::string("1.0-1"));
@@ -1887,6 +1917,8 @@ void test_local_dependency_invocation_executes_provider_without_aur_units(
                     make_for_production_source_build_test(
                             {}, {first_provider, duplicate_provider});
 
+    preflight_local_source_build_dependencies(preparation, config);
+    const ValidatedCacheRoot cache_root = prepare_process_cache_root();
     expect_database_paths();
     PreparedProductionSourceBuildInvocation invocation =
             prepare_local_source_build_dependency_invocation(
@@ -2944,6 +2976,51 @@ void test_repository_work_item_static_identity_invariants() {
             "no supported artifact lifecycle intent"));
 }
 
+void test_aur_work_item_review_identity_invariants() {
+    const ProductionSourceBuildWorkItem valid = make_work_item(
+            "review-identity-root");
+    require_static_production_source_build_work_item(valid);
+
+    ProductionSourceBuildWorkItem missing = valid;
+    missing.request.aur_review_identity.reset();
+    static_cast<void>(expect_logic_error(
+            [&missing]() {
+                require_static_production_source_build_work_item(missing);
+            },
+            "AUR work item without reviewed identity",
+            "has no reviewed PackageBase identity"));
+
+    ProductionSourceBuildWorkItem mismatched_remote = valid;
+    mismatched_remote.request.aur_review_identity =
+            PackageBaseIdentity::make(
+                    PackageSourceIdentity::aur(
+                            SourceLocationIdentity::known_git_remote(
+                                    "https://aur.archlinux.org/other.git")),
+                    "review-identity-root");
+    static_cast<void>(expect_logic_error(
+            [&mismatched_remote]() {
+                require_static_production_source_build_work_item(
+                        mismatched_remote);
+            },
+            "AUR reviewed identity remote mismatch",
+            "does not match its reviewed PackageBase identity"));
+
+    ProductionSourceBuildWorkItem mismatched_base = valid;
+    mismatched_base.request.aur_review_identity =
+            PackageBaseIdentity::make(
+                    PackageSourceIdentity::aur(
+                            SourceLocationIdentity::known_git_remote(
+                                    mismatched_base.request.git_url)),
+                    "other-base");
+    static_cast<void>(expect_logic_error(
+            [&mismatched_base]() {
+                require_static_production_source_build_work_item(
+                        mismatched_base);
+            },
+            "AUR reviewed identity PackageBase mismatch",
+            "does not match its reviewed PackageBase identity"));
+}
+
 void test_set_static_preparation_accepts_split_and_multiple(
         const TemporaryProductionEnvironment& environment) {
     ProductionScenario scenario;
@@ -3558,6 +3635,21 @@ void expect_extended_work_item_outcome(
             context + ": unexpected update-status skip reason");
     expect(result.diagnostic.empty(), context + ": unexpected diagnostic");
     expect(
+            result.source_provenance.has_value() &&
+                    result.source_provenance->review_status ==
+                            ProductionSourceReviewStatus::
+                                    CompatibilityWithoutReview &&
+                    result.source_provenance->editor_overlay ==
+                            ReviewedSourceEditorOverlayStatus::None &&
+                    result.source_provenance->compatibility_reason ==
+                            std::optional<
+                                    ReviewedSourceCompatibilityBuildReason>{
+                                    ReviewedSourceCompatibilityBuildReason::
+                                            NoDiff} &&
+                    result.build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded,
+            context + ": review/build provenance was flattened");
+    expect(
             scenario.install_attempt_order ==
                     std::vector<std::string>{package_name},
             context + ": successful pacman -U was not observed");
@@ -3576,6 +3668,421 @@ void test_extended_work_item_install_outcomes(
             MetadataMode::ExistingExplicitSameVersion,
             SourceBuildExecutionStatus::SkippedAsNeeded,
             "extended --needed skip outcome");
+}
+
+void expect_review_bypass_provenance(
+        const TemporaryProductionEnvironment& environment,
+        const std::string& package_name,
+        AppConfig config,
+        ReviewedSourceCompatibilityBuildReason expected_reason,
+        const std::string& context) {
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_work_item(package_name));
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+    const SourceBuildExecutionResult result =
+            execute_work_item_typed(invocation, 0, scenario);
+    expect(
+            result.status == SourceBuildExecutionStatus::Installed &&
+                    result.source_provenance.has_value() &&
+                    result.source_provenance->review_status ==
+                            ProductionSourceReviewStatus::
+                                    CompatibilityWithoutReview &&
+                    result.source_provenance->compatibility_reason ==
+                            std::optional<
+                                    ReviewedSourceCompatibilityBuildReason>{
+                                    expected_reason},
+            context + ": review bypass provenance differs");
+    require_scenario_complete(scenario, 1, context);
+}
+
+void test_review_bypass_provenance(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig no_confirm = noninteractive_config();
+    no_confirm.user_config.review.diff = ReviewPolicy::Prompt;
+    no_confirm.no_confirm = true;
+    expect_review_bypass_provenance(
+            environment, "review-bypass-no-confirm", no_confirm,
+            ReviewedSourceCompatibilityBuildReason::NoConfirm,
+            "--noconfirm review bypass");
+
+    AppConfig non_tty = noninteractive_config();
+    non_tty.user_config.review.diff = ReviewPolicy::Prompt;
+    expect_review_bypass_provenance(
+            environment, "review-bypass-non-tty", non_tty,
+            ReviewedSourceCompatibilityBuildReason::NonInteractiveInput,
+            "non-TTY review bypass");
+}
+
+enum class FatalPreflightFixtureKind {
+    UnsupportedFuture,
+    UnsafeHistory,
+    StoreFailure,
+};
+
+ReviewedSourceStateStoreReadResult fatal_preflight_fixture(
+        FatalPreflightFixtureKind kind,
+        const PackageBaseIdentity& package_base) {
+    switch(kind) {
+    case FatalPreflightFixtureKind::UnsupportedFuture: {
+        const std::string document =
+                "schema_version = 2\nfuture_field = true\n";
+        ReviewedSourceStateObservation observation = std::visit(
+                [](const auto& value) -> ReviewedSourceStateObservation {
+                    return value;
+                },
+                interpret_reviewed_source_state(document, package_base));
+        return ReviewedSourceStateStoreRead{
+                std::move(observation),
+                ReviewedSourceStateObservedRecord{
+                        1, "1.toml",
+                        ReviewedSourceStateRecordIdentity{
+                                1, 2, 3, 0600, 1, 42, 4, 5, 6, 7},
+                        document}};
+    }
+    case FatalPreflightFixtureKind::UnsafeHistory:
+        return ReviewedSourceStateStoreUnsafeHistory{
+                ReviewedSourceStateStoreHistoryIssue::ForkDetected,
+                "/state/fatal-package", {"1.toml", "2-a.toml", "2-b.toml"},
+                1, 2};
+    case FatalPreflightFixtureKind::StoreFailure:
+        return ReviewedSourceStateStoreFailure{
+                ReviewedSourceStateStoreFailureKind::ReadFailed,
+                "/state/fatal-package/1.toml", std::nullopt,
+                std::nullopt, std::nullopt};
+    }
+    throw std::logic_error("Unknown fatal preflight fixture kind");
+}
+
+ReviewedSourceProductionFailureReason fatal_preflight_expected_reason(
+        FatalPreflightFixtureKind kind) {
+    switch(kind) {
+    case FatalPreflightFixtureKind::UnsupportedFuture:
+        return ReviewedSourceProductionFailureReason::UnsupportedFuture;
+    case FatalPreflightFixtureKind::UnsafeHistory:
+        return ReviewedSourceProductionFailureReason::UnsafeHistory;
+    case FatalPreflightFixtureKind::StoreFailure:
+        return ReviewedSourceProductionFailureReason::StateStoreFailure;
+    }
+    throw std::logic_error("Unknown fatal preflight expected reason");
+}
+
+void test_invocation_preflight_snapshot_is_consumed_without_reread(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items{
+            make_work_item("stable-preflight-snapshot")};
+    const PackageBaseIdentity package_base =
+            *work_items.front().request.aur_review_identity;
+    ProductionScenario scenario = make_execution_scenario(
+            environment, work_items, config);
+    set_reviewed_source_lifecycle_store_result_for_test(
+            ReviewedSourceStateStoreRead{
+                    ReviewedSourceStateMissing{}, std::nullopt});
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+
+    // This later fatal result must remain pending: execution consumes the
+    // invocation-owned Missing observation instead of reading the store again.
+    set_reviewed_source_lifecycle_store_result_for_test(
+            fatal_preflight_fixture(
+                    FatalPreflightFixtureKind::UnsupportedFuture,
+                    package_base));
+    const SourceBuildExecutionResult result = execute_work_item_typed(
+            invocation, 0, scenario);
+    expect(result.status == SourceBuildExecutionStatus::Installed,
+           "Invocation preflight snapshot was replaced before execution");
+    try {
+        static_cast<void>(
+                preflight_reviewed_source_fatal_state_for_production(
+                        invocation.work_items.front().request));
+        throw std::runtime_error(
+                "Later fatal observation was consumed by work-item execution");
+    } catch(const ReviewedSourceProductionError& error) {
+        expect(error.failure().reason ==
+                       ReviewedSourceProductionFailureReason::
+                               UnsupportedFuture,
+               "Pending fatal observation lost its typed identity");
+    }
+    require_scenario_complete(
+            scenario, 1, "invocation preflight snapshot propagation");
+}
+
+void test_local_dependency_preflight_snapshot_is_consumed_without_reread(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items{
+            make_work_item("local-stable-preflight-snapshot")};
+    const PackageBaseIdentity package_base =
+            *work_items.front().request.aur_review_identity;
+    ProductionScenario scenario = make_execution_scenario(
+            environment, work_items, config);
+    activate_scenario(scenario);
+
+    LocalSourceBuildDependencyPreparation preparation =
+            LocalSourceBuildDependencyPreparation::
+                    make_for_production_source_build_test(
+                            std::move(work_items), {});
+    set_reviewed_source_lifecycle_store_result_for_test(
+            ReviewedSourceStateStoreRead{
+                    ReviewedSourceStateMissing{}, std::nullopt});
+    preflight_local_source_build_dependencies(preparation, config);
+
+    // Cache-bound preparation and execution must retain the pre-cache Missing
+    // observation. This later fatal result must remain pending.
+    set_reviewed_source_lifecycle_store_result_for_test(
+            fatal_preflight_fixture(
+                    FatalPreflightFixtureKind::UnsupportedFuture,
+                    package_base));
+    const ValidatedCacheRoot cache_root = prepare_process_cache_root();
+    expect_database_paths();
+    PreparedProductionSourceBuildInvocation invocation =
+            prepare_local_source_build_dependency_invocation(
+                    std::move(preparation), cache_root, config);
+    expect(
+            scenario.resolver_calls == 1,
+            "Local dependency cache-bound preparation did not resolve the database snapshot once");
+    schedule_source_unit(0);
+
+    const SourceBuildExecutionResult result = execute_work_item_typed(
+            invocation, 0, scenario);
+    expect(
+            result.status == SourceBuildExecutionStatus::Installed,
+            "Local dependency preflight snapshot was replaced before execution");
+    try {
+        static_cast<void>(
+                preflight_reviewed_source_fatal_state_for_production(
+                        invocation.work_items.front().request));
+        throw std::runtime_error(
+                "Later local dependency fatal observation was consumed by execution");
+    } catch(const ReviewedSourceProductionError& error) {
+        expect(
+                error.failure().reason ==
+                        ReviewedSourceProductionFailureReason::
+                                UnsupportedFuture,
+                "Pending local dependency fatal observation lost its typed identity");
+    }
+    require_scenario_complete(
+            scenario, 1,
+            "local dependency preflight snapshot propagation");
+}
+
+void test_invocation_wide_fatal_preflight_stops_before_cache_provider_and_work_items() {
+    TemporaryProductionEnvironment environment(false);
+    const fs::path missing_cache_root =
+            environment.checkout_target_path("safe-before-fatal").parent_path();
+    expect(!fs::exists(missing_cache_root),
+           "Invocation-wide fatal preflight fixture created its cache root");
+
+    std::vector<ProductionSourceBuildWorkItem> work_items{
+            make_work_item("safe-before-fatal"),
+            make_work_item("fatal-later-target")};
+    work_items.front().selected_repository_providers.push_back(
+            make_repository_provider(
+                    "extra", "fatal-preflight-provider",
+                    "virtual-fatal-preflight",
+                    "virtual-fatal-preflight=1", std::string("1.0-1")));
+    const PackageBaseIdentity safe_identity =
+            *work_items.front().request.aur_review_identity;
+    const PackageBaseIdentity fatal_identity =
+            *work_items.back().request.aur_review_identity;
+    set_reviewed_source_lifecycle_store_result_for_test(
+            ReviewedSourceStateStoreRead{
+                    ReviewedSourceStateMissing{}, std::nullopt});
+    set_reviewed_source_lifecycle_store_result_for_test(
+            fatal_preflight_fixture(
+                    FatalPreflightFixtureKind::UnsupportedFuture,
+                    fatal_identity));
+    process_stub::reset_process_stub();
+    metadata_stub::reset_alpm_stub();
+
+    try {
+        static_cast<void>(prepare_production_source_build_invocation(
+                std::move(work_items), noninteractive_config()));
+        throw std::runtime_error(
+                "Later fatal target produced a production invocation");
+    } catch(const ReviewedSourceProductionError& error) {
+        expect(error.failure().stage ==
+                               ReviewedSourceProductionFailureStage::
+                                       FatalStatePreflight &&
+                       error.failure().reason ==
+                               ReviewedSourceProductionFailureReason::
+                                       UnsupportedFuture,
+               "Invocation-wide fatal target lost typed classification");
+    }
+
+    expect(!fs::exists(missing_cache_root) &&
+                   !fs::exists(
+                           reviewed_source_state_store_entry_path(
+                                   safe_identity)) &&
+                   !fs::exists(
+                           reviewed_source_state_store_entry_path(
+                                   fatal_identity)) &&
+                   process_stub::run_command_call_count() == 0 &&
+                   process_stub::capture_command_call_count() == 0 &&
+                   metadata_stub::initialize_call_count() == 0,
+           "Fatal preflight reached cache/provider/work-item mutation");
+}
+
+void test_all_compatibility_modes_observe_fatal_reviewed_state(
+        const TemporaryProductionEnvironment& environment) {
+    struct ModeCase {
+        std::string name;
+        AppConfig config;
+    };
+
+    AppConfig no_diff = noninteractive_config();
+    AppConfig no_confirm = noninteractive_config();
+    no_confirm.user_config.review.diff = ReviewPolicy::Prompt;
+    no_confirm.no_confirm = true;
+    AppConfig non_tty = noninteractive_config();
+    non_tty.user_config.review.diff = ReviewPolicy::Prompt;
+
+    const std::vector<ModeCase> modes{
+            {"nodiff", no_diff},
+            {"noconfirm", no_confirm},
+            {"non-tty", non_tty},
+    };
+    const std::vector<FatalPreflightFixtureKind> fatal_kinds{
+            FatalPreflightFixtureKind::UnsupportedFuture,
+            FatalPreflightFixtureKind::UnsafeHistory,
+            FatalPreflightFixtureKind::StoreFailure,
+    };
+
+    for(const ModeCase& mode : modes) {
+        for(std::size_t fatal_index = 0;
+            fatal_index < fatal_kinds.size(); ++fatal_index) {
+            const FatalPreflightFixtureKind fatal_kind =
+                    fatal_kinds[fatal_index];
+            const std::string package_name =
+                    "fatal-" + mode.name + "-" +
+                    std::to_string(fatal_index);
+            std::vector<ProductionSourceBuildWorkItem> work_items{
+                    make_work_item(package_name)};
+            const PackageBaseIdentity package_base =
+                    *work_items.front().request.aur_review_identity;
+            ProductionScenario scenario = make_execution_scenario(
+                    environment, work_items, mode.config);
+            const fs::path state_entry =
+                    reviewed_source_state_store_entry_path(package_base);
+            expect(!fs::exists(state_entry),
+                    "Fatal preflight fixture started with reviewed state");
+            activate_scenario(scenario);
+            set_reviewed_source_lifecycle_store_result_for_test(
+                    fatal_preflight_fixture(fatal_kind, package_base));
+
+            try {
+                static_cast<void>(prepare_production_source_build_invocation(
+                        std::move(work_items), mode.config));
+                throw std::runtime_error(
+                        "Fatal reviewed state produced a compatibility invocation");
+            } catch(const ReviewedSourceProductionError& error) {
+                expect(
+                        error.failure().stage ==
+                                        ReviewedSourceProductionFailureStage::
+                                                FatalStatePreflight &&
+                                error.failure().reason ==
+                                        fatal_preflight_expected_reason(
+                                                fatal_kind),
+                        "Fatal reviewed state lost typed production classification");
+                const auto* detail = std::get_if<
+                        ReviewedSourceFatalStateFailure>(
+                        &error.failure().detail);
+                expect(detail != nullptr,
+                        "Fatal reviewed state lost its store payload");
+            }
+            expect(
+                    scenario.git_reset_calls == 0 &&
+                            scenario.workspace_paths.empty() &&
+                            scenario.packagelist_calls == 0 &&
+                            scenario.build_calls == 0 &&
+                            scenario.install_calls == 0 &&
+                            !fs::exists(state_entry),
+                    "Fatal reviewed state reached reset/editor/makepkg/CAS");
+            deactivate_scenario();
+        }
+    }
+}
+
+void test_reviewed_source_failure_payload_crosses_singular_and_set_routes(
+        const TemporaryProductionEnvironment& environment) {
+    {
+        AppConfig config = noninteractive_config();
+        std::vector<ProductionSourceBuildWorkItem> work_items{
+                make_work_item("typed-lease-contention")};
+        ProductionScenario scenario = make_execution_scenario(
+                environment, work_items, config);
+        PreparedProductionSourceBuildInvocation invocation =
+                prepare_execution(std::move(work_items), scenario);
+        ReviewedSourcePackageBaseLease held =
+                acquire_reviewed_source_package_base_lease(
+                        retain_trusted_cache_directory(
+                                require_trusted_cache_path(
+                                        invocation.work_items.front()
+                                                .cache_root.value(),
+                                        invocation.work_items.front()
+                                                .request.checkout_name,
+                                        CachePathRequirement::
+                                                ExistingDirectory)));
+        static_cast<void>(held);
+        try {
+            static_cast<void>(execute_work_item_typed(
+                    invocation, 0, scenario));
+            throw std::runtime_error(
+                    "Lease contention was flattened into source execution");
+        } catch(const ReviewedSourceProductionError& error) {
+            expect(error.failure().reason ==
+                            ReviewedSourceProductionFailureReason::
+                                    LeaseContended,
+                    "Singular route lost LeaseContended classification");
+        }
+        expect(scenario.git_reset_calls == 0 &&
+                       scenario.workspace_paths.empty() &&
+                       scenario.build_calls == 0,
+               "Lease contention reached source mutation");
+        deactivate_scenario();
+    }
+
+    {
+        AppConfig config = noninteractive_config();
+        const std::string package_base_name = "typed-unsafe-set";
+        std::vector<ProductionSourceBuildWorkItem> work_items{
+                make_package_base_work_item(
+                        package_base_name,
+                        {RequiredPackageArtifactTarget{
+                                package_base_name, package_base_name,
+                                DesiredInstallReason::Explicit}})};
+        const PackageBaseIdentity package_base =
+                *work_items.front().request.aur_review_identity;
+        ProductionScenario scenario = make_execution_scenario(
+                environment, work_items, config);
+        activate_scenario(scenario);
+        set_reviewed_source_lifecycle_store_result_for_test(
+                fatal_preflight_fixture(
+                        FatalPreflightFixtureKind::UnsafeHistory,
+                        package_base));
+        try {
+            static_cast<void>(prepare_production_source_build_invocation(
+                    std::move(work_items), config));
+            throw std::runtime_error(
+                    "PackageBase unsafe history was flattened");
+        } catch(const ReviewedSourceProductionError& error) {
+            expect(error.failure().reason ==
+                           ReviewedSourceProductionFailureReason::
+                                   UnsafeHistory &&
+                           std::holds_alternative<
+                                   ReviewedSourceFatalStateFailure>(
+                                   error.failure().detail),
+                   "PackageBase route lost reviewed source failure payload");
+        }
+        expect(scenario.git_reset_calls == 0 &&
+                       scenario.workspace_paths.empty() &&
+                       scenario.build_calls == 0,
+               "PackageBase unsafe history reached source mutation");
+        deactivate_scenario();
+    }
 }
 
 void test_registered_repository_closed_preparation_outcomes(
@@ -3700,6 +4207,11 @@ void test_registered_repository_closed_preparation_outcomes(
                         config);
         expect(
                 result.package_base() == "registered-needs-build-base" &&
+                        result.source_provenance().review_status ==
+                                ProductionSourceReviewStatus::NotApplicable &&
+                        result.build_outcome() ==
+                                ProductionSourceBuildCommandOutcome::
+                                        Succeeded &&
                         result.selected_children().size() == 1 &&
                         result.selected_children().front()
                                         .identity.package_name ==
@@ -4655,6 +5167,7 @@ void test_needed_same_version_cleanup_failure_preserves_no_change(
 
 int main() {
     try {
+        set_reviewed_source_lifecycle_default_missing_for_test(true);
         test_process_stub_rejects_cross_kind_reordering();
         test_build_plan_projection();
         test_local_dependency_preparation_collects_selected_repository_providers();
@@ -4670,6 +5183,7 @@ int main() {
         test_repository_query_failure_stops_before_aur_or_mutation();
         test_confirmed_repository_not_found_allows_exact_aur_fallback();
         test_repository_work_item_static_identity_invariants();
+        test_aur_work_item_review_identity_invariants();
         {
             // Production must remain private-first even when the caller's
             // ordinary collaborative umask would make a legacy mkdir 0775.
@@ -4708,6 +5222,16 @@ int main() {
             test_database_resolver_failure_stops_all_targets(environment);
             test_work_item_typed_install_outcomes(environment);
             test_extended_work_item_install_outcomes(environment);
+            test_review_bypass_provenance(environment);
+            test_invocation_preflight_snapshot_is_consumed_without_reread(
+                    environment);
+            test_local_dependency_preflight_snapshot_is_consumed_without_reread(
+                    environment);
+            test_invocation_wide_fatal_preflight_stops_before_cache_provider_and_work_items();
+            test_all_compatibility_modes_observe_fatal_reviewed_state(
+                    environment);
+            test_reviewed_source_failure_payload_crosses_singular_and_set_routes(
+                    environment);
             test_registered_repository_closed_preparation_outcomes(
                     environment);
             test_up_to_date_outcome_and_legacy_flattening(environment);

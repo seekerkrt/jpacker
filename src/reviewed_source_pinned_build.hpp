@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <system_error>
 #include <variant>
 
@@ -19,6 +21,8 @@
 class ReviewedSourcePackageBaseLease;
 class AcceptedReviewedSourceCheckout;
 class AlreadyReviewedSourceCheckout;
+class ReviewedSourceEditorBoundary;
+class ReviewedSourceEditorOverlayProof;
 class PinnedReviewedSourceBuild;
 struct ReviewedSourcePinnedCheckoutFailure;
 struct ReviewedSourcePublicationConflict;
@@ -43,17 +47,42 @@ using ReviewedSourcePublicationResult = std::variant<
         ReviewedSourcePublicationFailure,
         ReviewedSourcePostPublicationCheckoutFailure>;
 
-// These two exact transitions acquire a sealed PackageBase lease, materialize
-// the detached target, clean all residue, and prove the final checkout.
+using ReviewedSourceEditorBoundaryResult = std::variant<
+        ReviewedSourceEditorBoundary,
+        ReviewedSourcePublicationFailure>;
+
+using ReviewedSourceEditorOverlayProofResult = std::variant<
+        ReviewedSourceEditorOverlayProof,
+        ReviewedSourcePublicationFailure>;
+
+// Path-based transitions acquire a sealed PackageBase lease. Production may
+// instead pass the already-held shared lease through the with_lease forms.
+// Both materialize the detached target, clean all residue, and prove the final
+// checkout without resolving a mutable ref again.
 [[nodiscard]] AcceptedReviewedSourceCheckoutResult
 materialize_accepted_reviewed_source_checkout(
         AcceptedReviewedSourceTarget target,
         const ValidatedCachePath& checkout);
 
+[[nodiscard]] AcceptedReviewedSourceCheckoutResult
+materialize_accepted_reviewed_source_checkout_with_lease(
+        AcceptedReviewedSourceTarget target,
+        ReviewedSourcePackageBaseLease lease);
+
 [[nodiscard]] AlreadyReviewedSourceCheckoutResult
 materialize_already_reviewed_source_checkout(
         ReviewedSourceAlreadyReviewedContinue target,
         const ValidatedCachePath& checkout);
+
+[[nodiscard]] AlreadyReviewedSourceCheckoutResult
+materialize_already_reviewed_source_checkout_with_lease(
+        ReviewedSourceAlreadyReviewedContinue target,
+        ReviewedSourcePackageBaseLease lease);
+
+enum class ReviewedSourceEditorOverlayStatus {
+    None,
+    InvocationLocal,
+};
 
 // Consumes exact checkout + accepted authority. A CAS conflict is re-read only
 // to classify an exact same-target idempotent success; it is never retried as
@@ -110,6 +139,9 @@ public:
     [[nodiscard]] std::uintmax_t device() const;
     [[nodiscard]] std::uintmax_t inode() const;
     void require_unchanged_identity() const;
+    int run_guarded_command(
+            const std::string& command,
+            const std::string& display_command = {}) const;
 
 private:
     friend ReviewedSourcePackageBaseLease
@@ -120,6 +152,32 @@ private:
             const ValidatedCachePath& checkout,
             AurReviewedSourceReviewIdentity identity,
             const ReviewedSourcePackageBaseLease& lease);
+    friend int trusted_git_fetch_origin(
+            const ValidatedCachePath& checkout,
+            const std::string& expected_remote_url,
+            const ReviewedSourcePackageBaseLease& lease);
+    friend int trusted_git_reset_hard(
+            const ValidatedCachePath& checkout,
+            const std::string& expected_remote_url,
+            const std::string& branch,
+            const ReviewedSourcePackageBaseLease& lease);
+    friend int trusted_git_clone_persistent_checkout(
+            const ValidatedCachePath& destination,
+            const std::string& remote_url,
+            const ReviewedSourcePackageBaseLease& lease);
+    friend TrustedGitPinnedCheckoutOverlayObservationResult
+    observe_clean_trusted_git_pinned_checkout_overlay(
+            const TrustedGitPinnedCheckout& checkout,
+            const ReviewedSourcePackageBaseLease& lease);
+    friend TrustedGitPinnedCheckoutOverlayObservationResult
+    observe_trusted_git_pinned_checkout_overlay(
+            const TrustedGitPinnedCheckout& checkout,
+            const ReviewedSourcePackageBaseLease& lease);
+    friend TrustedGitPinnedCheckoutRevalidationResult
+    revalidate_trusted_git_pinned_checkout_overlay(
+            const TrustedGitPinnedCheckout& checkout,
+            const ReviewedSourcePackageBaseLease& lease,
+            const TrustedGitPinnedCheckoutOverlayObservation& expected);
 
     ReviewedSourcePackageBaseLease(
             RetainedTrustedCacheDirectory directory,
@@ -156,15 +214,39 @@ public:
     [[nodiscard]] const std::filesystem::path& checkout_path() const;
     [[nodiscard]] std::uintmax_t checkout_device() const;
     [[nodiscard]] std::uintmax_t checkout_inode() const;
+    void require_unchanged_checkout_identity() const;
+    int run_guarded_command(
+            const std::string& command,
+            const std::string& display_command = {}) const;
 
 private:
+    friend class PinnedReviewedSourceBuild;
     friend AcceptedReviewedSourceCheckoutResult
     materialize_accepted_reviewed_source_checkout(
             AcceptedReviewedSourceTarget target,
             const ValidatedCachePath& checkout);
+    friend AcceptedReviewedSourceCheckoutResult
+    materialize_accepted_reviewed_source_checkout_with_lease(
+            AcceptedReviewedSourceTarget target,
+            ReviewedSourcePackageBaseLease lease);
     friend ReviewedSourcePublicationResult
     publish_accepted_reviewed_source_checkout(
             AcceptedReviewedSourceCheckout target);
+    friend ReviewedSourceEditorBoundaryResult
+    begin_reviewed_source_editor_boundary(
+            const AcceptedReviewedSourceCheckout& checkout);
+    friend ReviewedSourceEditorOverlayProofResult
+    seal_reviewed_source_editor_overlay(
+            const AcceptedReviewedSourceCheckout& checkout,
+            ReviewedSourceEditorBoundary boundary);
+    friend ReviewedSourceEditorOverlayProofResult
+    seal_reviewed_source_no_editor_overlay(
+            const AcceptedReviewedSourceCheckout& checkout,
+            ReviewedSourceEditorBoundary boundary);
+    friend ReviewedSourcePublicationResult
+    publish_accepted_reviewed_source_checkout_with_editor_overlay(
+            AcceptedReviewedSourceCheckout target,
+            ReviewedSourceEditorOverlayProof editor_overlay);
 
     struct State;
 
@@ -199,15 +281,39 @@ public:
     [[nodiscard]] const std::filesystem::path& checkout_path() const;
     [[nodiscard]] std::uintmax_t checkout_device() const;
     [[nodiscard]] std::uintmax_t checkout_inode() const;
+    void require_unchanged_checkout_identity() const;
+    int run_guarded_command(
+            const std::string& command,
+            const std::string& display_command = {}) const;
 
 private:
+    friend class PinnedReviewedSourceBuild;
     friend AlreadyReviewedSourceCheckoutResult
     materialize_already_reviewed_source_checkout(
             ReviewedSourceAlreadyReviewedContinue target,
             const ValidatedCachePath& checkout);
+    friend AlreadyReviewedSourceCheckoutResult
+    materialize_already_reviewed_source_checkout_with_lease(
+            ReviewedSourceAlreadyReviewedContinue target,
+            ReviewedSourcePackageBaseLease lease);
     friend ReviewedSourcePublicationResult
     confirm_already_reviewed_source_checkout(
             AlreadyReviewedSourceCheckout target);
+    friend ReviewedSourceEditorBoundaryResult
+    begin_reviewed_source_editor_boundary(
+            const AlreadyReviewedSourceCheckout& checkout);
+    friend ReviewedSourceEditorOverlayProofResult
+    seal_reviewed_source_editor_overlay(
+            const AlreadyReviewedSourceCheckout& checkout,
+            ReviewedSourceEditorBoundary boundary);
+    friend ReviewedSourceEditorOverlayProofResult
+    seal_reviewed_source_no_editor_overlay(
+            const AlreadyReviewedSourceCheckout& checkout,
+            ReviewedSourceEditorBoundary boundary);
+    friend ReviewedSourcePublicationResult
+    confirm_already_reviewed_source_checkout_with_editor_overlay(
+            AlreadyReviewedSourceCheckout target,
+            ReviewedSourceEditorOverlayProof editor_overlay);
 
     struct State;
 
@@ -220,6 +326,163 @@ private:
 
     std::unique_ptr<State> state_;
 };
+
+// Pre-editor proof. It is minted only from an exact leased checkout and owns
+// the clean worktree projection observed immediately before the editor
+// boundary. Raw paths, status output, booleans, and overlay enums cannot
+// construct it.
+class ReviewedSourceEditorBoundary final {
+public:
+    ReviewedSourceEditorBoundary() = delete;
+    ReviewedSourceEditorBoundary(
+            const ReviewedSourceEditorBoundary&) = delete;
+    ReviewedSourceEditorBoundary(
+            ReviewedSourceEditorBoundary&&) noexcept;
+    ReviewedSourceEditorBoundary& operator=(
+            const ReviewedSourceEditorBoundary&) = delete;
+    ReviewedSourceEditorBoundary& operator=(
+            ReviewedSourceEditorBoundary&&) noexcept = delete;
+    ~ReviewedSourceEditorBoundary();
+
+    [[nodiscard]] bool valid() const noexcept;
+
+private:
+    friend ReviewedSourceEditorBoundaryResult
+    begin_reviewed_source_editor_boundary(
+            const AcceptedReviewedSourceCheckout& checkout);
+    friend ReviewedSourceEditorBoundaryResult
+    begin_reviewed_source_editor_boundary(
+            const AlreadyReviewedSourceCheckout& checkout);
+    friend ReviewedSourceEditorOverlayProofResult
+    seal_reviewed_source_editor_overlay(
+            const AcceptedReviewedSourceCheckout& checkout,
+            ReviewedSourceEditorBoundary boundary);
+    friend ReviewedSourceEditorOverlayProofResult
+    seal_reviewed_source_editor_overlay(
+            const AlreadyReviewedSourceCheckout& checkout,
+            ReviewedSourceEditorBoundary boundary);
+    friend ReviewedSourceEditorOverlayProofResult
+    seal_reviewed_source_no_editor_overlay(
+            const AcceptedReviewedSourceCheckout& checkout,
+            ReviewedSourceEditorBoundary boundary);
+    friend ReviewedSourceEditorOverlayProofResult
+    seal_reviewed_source_no_editor_overlay(
+            const AlreadyReviewedSourceCheckout& checkout,
+            ReviewedSourceEditorBoundary boundary);
+
+    struct State;
+
+    ReviewedSourceEditorBoundary(
+            AurReviewedSourceReviewIdentity identity,
+            std::uintmax_t checkout_device,
+            std::uintmax_t checkout_inode,
+            TrustedGitPinnedCheckoutOverlayObservation pre_editor);
+
+    [[nodiscard]] const State& require_state() const;
+
+    std::unique_ptr<State> state_;
+};
+
+// Sealed post-editor worktree authority. It binds PackageBase/source/exact
+// reviewed base, checkout device/inode, and both exact Git worktree
+// projections. Its status is derived from those projections, never supplied by
+// a caller-owned bool or enum.
+class ReviewedSourceEditorOverlayProof final {
+public:
+    ReviewedSourceEditorOverlayProof() = delete;
+    ReviewedSourceEditorOverlayProof(
+            const ReviewedSourceEditorOverlayProof&) = delete;
+    ReviewedSourceEditorOverlayProof(
+            ReviewedSourceEditorOverlayProof&&) noexcept;
+    ReviewedSourceEditorOverlayProof& operator=(
+            const ReviewedSourceEditorOverlayProof&) = delete;
+    ReviewedSourceEditorOverlayProof& operator=(
+            ReviewedSourceEditorOverlayProof&&) noexcept = delete;
+    ~ReviewedSourceEditorOverlayProof();
+
+    [[nodiscard]] bool valid() const noexcept;
+    [[nodiscard]] ReviewedSourceEditorOverlayStatus status() const;
+
+private:
+    friend ReviewedSourceEditorOverlayProofResult
+    seal_reviewed_source_editor_overlay(
+            const AcceptedReviewedSourceCheckout& checkout,
+            ReviewedSourceEditorBoundary boundary);
+    friend ReviewedSourceEditorOverlayProofResult
+    seal_reviewed_source_editor_overlay(
+            const AlreadyReviewedSourceCheckout& checkout,
+            ReviewedSourceEditorBoundary boundary);
+    friend ReviewedSourceEditorOverlayProofResult
+    seal_reviewed_source_no_editor_overlay(
+            const AcceptedReviewedSourceCheckout& checkout,
+            ReviewedSourceEditorBoundary boundary);
+    friend ReviewedSourceEditorOverlayProofResult
+    seal_reviewed_source_no_editor_overlay(
+            const AlreadyReviewedSourceCheckout& checkout,
+            ReviewedSourceEditorBoundary boundary);
+    friend ReviewedSourcePublicationResult
+    publish_accepted_reviewed_source_checkout_with_editor_overlay(
+            AcceptedReviewedSourceCheckout target,
+            ReviewedSourceEditorOverlayProof editor_overlay);
+    friend ReviewedSourcePublicationResult
+    confirm_already_reviewed_source_checkout_with_editor_overlay(
+            AlreadyReviewedSourceCheckout target,
+            ReviewedSourceEditorOverlayProof editor_overlay);
+    friend class PinnedReviewedSourceBuild;
+
+    struct State;
+
+    ReviewedSourceEditorOverlayProof(
+            AurReviewedSourceReviewIdentity identity,
+            std::uintmax_t checkout_device,
+            std::uintmax_t checkout_inode,
+            TrustedGitPinnedCheckoutOverlayObservation pre_editor,
+            TrustedGitPinnedCheckoutOverlayObservation post_editor);
+
+    [[nodiscard]] const State& require_state() const;
+
+    std::unique_ptr<State> state_;
+};
+
+[[nodiscard]] ReviewedSourceEditorBoundaryResult
+begin_reviewed_source_editor_boundary(
+        const AcceptedReviewedSourceCheckout& checkout);
+
+[[nodiscard]] ReviewedSourceEditorBoundaryResult
+begin_reviewed_source_editor_boundary(
+        const AlreadyReviewedSourceCheckout& checkout);
+
+// The editor form permits a changed post-state and derives None for a no-op
+// editor. The no-editor form requires the exact pre/post projection to match.
+[[nodiscard]] ReviewedSourceEditorOverlayProofResult
+seal_reviewed_source_editor_overlay(
+        const AcceptedReviewedSourceCheckout& checkout,
+        ReviewedSourceEditorBoundary boundary);
+
+[[nodiscard]] ReviewedSourceEditorOverlayProofResult
+seal_reviewed_source_editor_overlay(
+        const AlreadyReviewedSourceCheckout& checkout,
+        ReviewedSourceEditorBoundary boundary);
+
+[[nodiscard]] ReviewedSourceEditorOverlayProofResult
+seal_reviewed_source_no_editor_overlay(
+        const AcceptedReviewedSourceCheckout& checkout,
+        ReviewedSourceEditorBoundary boundary);
+
+[[nodiscard]] ReviewedSourceEditorOverlayProofResult
+seal_reviewed_source_no_editor_overlay(
+        const AlreadyReviewedSourceCheckout& checkout,
+        ReviewedSourceEditorBoundary boundary);
+
+[[nodiscard]] ReviewedSourcePublicationResult
+publish_accepted_reviewed_source_checkout_with_editor_overlay(
+        AcceptedReviewedSourceCheckout target,
+        ReviewedSourceEditorOverlayProof editor_overlay);
+
+[[nodiscard]] ReviewedSourcePublicationResult
+confirm_already_reviewed_source_checkout_with_editor_overlay(
+        AlreadyReviewedSourceCheckout target,
+        ReviewedSourceEditorOverlayProof editor_overlay);
 
 enum class ReviewedSourcePublicationStatus {
     Published,
@@ -245,17 +508,34 @@ public:
     [[nodiscard]] const ReviewedSourceState& reviewed_state() const;
     [[nodiscard]] const ReviewedSourceStateObservedRecord& published_record()
             const;
+    // The reviewed revision is always the exact upstream base. InvocationLocal
+    // means the leased worktree differs between the clean pre-editor boundary
+    // and the post-editor observation; it does not claim OS-level authorship.
+    [[nodiscard]] ReviewedSourceEditorOverlayStatus editor_overlay_status()
+            const;
     [[nodiscard]] const std::filesystem::path& checkout_path() const;
     [[nodiscard]] std::uintmax_t checkout_device() const;
     [[nodiscard]] std::uintmax_t checkout_inode() const;
+    void require_unchanged_checkout_identity() const;
+    int run_guarded_command(
+            const std::string& command,
+            const std::string& display_command = {}) const;
 
 private:
     friend ReviewedSourcePublicationResult
     publish_accepted_reviewed_source_checkout(
             AcceptedReviewedSourceCheckout target);
     friend ReviewedSourcePublicationResult
+    publish_accepted_reviewed_source_checkout_with_editor_overlay(
+            AcceptedReviewedSourceCheckout target,
+            ReviewedSourceEditorOverlayProof editor_overlay);
+    friend ReviewedSourcePublicationResult
     confirm_already_reviewed_source_checkout(
             AlreadyReviewedSourceCheckout target);
+    friend ReviewedSourcePublicationResult
+    confirm_already_reviewed_source_checkout_with_editor_overlay(
+            AlreadyReviewedSourceCheckout target,
+            ReviewedSourceEditorOverlayProof editor_overlay);
 
     struct State;
 
@@ -263,28 +543,52 @@ private:
             AcceptedReviewedSourceCheckout checkout,
             ReviewedSourcePublicationStatus publication_status,
             ReviewedSourceState state,
-            ReviewedSourceStateObservedRecord observed);
+            ReviewedSourceStateObservedRecord observed,
+            ReviewedSourceEditorOverlayProof editor_overlay);
     PinnedReviewedSourceBuild(
             AlreadyReviewedSourceCheckout checkout,
             ReviewedSourceState state,
-            ReviewedSourceStateObservedRecord observed);
+            ReviewedSourceStateObservedRecord observed,
+            ReviewedSourceEditorOverlayProof editor_overlay);
 
     [[nodiscard]] const State& require_state() const;
 
     std::unique_ptr<State> state_;
 };
 
+// Dynamic makepkg-boundary failure. The PinnedReviewedSourceBuild remains the
+// lease owner, but no external command is invoked when its sealed overlay no
+// longer matches.
+class ReviewedSourceBuildCheckoutReproofError final
+    : public std::runtime_error {
+public:
+    explicit ReviewedSourceBuildCheckoutReproofError(
+            TrustedGitPinnedCheckoutFailure failure);
+
+    [[nodiscard]] const TrustedGitPinnedCheckoutFailure& failure()
+            const noexcept;
+
+private:
+    TrustedGitPinnedCheckoutFailure failure_;
+};
+
 struct ReviewedSourcePublicationConflict {
     AurReviewedSourceReviewIdentity identity;
     ReviewedSourceStateStoreRead    current;
+    ReviewedSourceEditorOverlayStatus editor_overlay =
+            ReviewedSourceEditorOverlayStatus::None;
 };
 
 struct ReviewedSourcePublicationUncertain {
     ReviewedSourceStateStorePublishedUncertain store_result;
+    ReviewedSourceEditorOverlayStatus editor_overlay =
+            ReviewedSourceEditorOverlayStatus::None;
 };
 
 struct ReviewedSourcePublicationUnsafeHistory {
     ReviewedSourceStateStoreUnsafeHistory store_result;
+    ReviewedSourceEditorOverlayStatus editor_overlay =
+            ReviewedSourceEditorOverlayStatus::None;
 };
 
 enum class ReviewedSourcePublicationFailureReason {
@@ -299,6 +603,8 @@ struct ReviewedSourcePublicationFailure {
     ReviewedSourcePublicationFailureReason reason;
     std::optional<ReviewedSourceStateStoreFailure> store_failure;
     std::optional<TrustedGitPinnedCheckoutFailure> checkout_failure;
+    ReviewedSourceEditorOverlayStatus editor_overlay =
+            ReviewedSourceEditorOverlayStatus::None;
 };
 
 // A successful/confirmed state result is never rolled back merely because the
@@ -309,4 +615,6 @@ struct ReviewedSourcePostPublicationCheckoutFailure {
     ReviewedSourceState                   state;
     ReviewedSourceStateObservedRecord     observed;
     TrustedGitPinnedCheckoutFailure       checkout_failure;
+    ReviewedSourceEditorOverlayStatus     editor_overlay =
+            ReviewedSourceEditorOverlayStatus::None;
 };

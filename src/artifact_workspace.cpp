@@ -6,6 +6,7 @@
 #include "shell_words.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -41,6 +42,98 @@ constexpr char ARTIFACT_WORKSPACE_PREFIX[] = ".artifact-workspace~-";
 constexpr std::size_t ARTIFACT_DIAGNOSTIC_VALUE_LIMIT = 96;
 constexpr std::string_view MAKEPKG_PACKAGELIST_COMMAND =
         "makepkg --packagelist";
+constexpr char PRODUCTION_PACKAGELIST_CAPTURE_LEAF[] =
+        ".makepkg-packagelist~capture";
+
+std::runtime_error production_packagelist_capture_error() {
+    return std::runtime_error(localization::format_translated_message(
+            "Internal {} output capture failed.", "makepkg"));
+}
+
+class ProductionPackagelistCapture final {
+    int directory_descriptor_ = -1;
+    fs::path path_;
+    bool owns_name_ = false;
+
+public:
+    ProductionPackagelistCapture(
+            int directory_descriptor,
+            const fs::path& workspace_path)
+        : directory_descriptor_(directory_descriptor),
+          path_(workspace_path / PRODUCTION_PACKAGELIST_CAPTURE_LEAF) {
+        const int descriptor = openat(
+                directory_descriptor_,
+                PRODUCTION_PACKAGELIST_CAPTURE_LEAF,
+                O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
+                0600);
+        if(descriptor < 0) {
+            throw production_packagelist_capture_error();
+        }
+        owns_name_ = true;
+        const int mode_status = fchmod(descriptor, 0600);
+        const int close_status = close(descriptor);
+        if(mode_status != 0 || close_status != 0) {
+            throw production_packagelist_capture_error();
+        }
+    }
+
+    ProductionPackagelistCapture(
+            const ProductionPackagelistCapture&) = delete;
+    ProductionPackagelistCapture& operator=(
+            const ProductionPackagelistCapture&) = delete;
+
+    ~ProductionPackagelistCapture() noexcept {
+        if(owns_name_) {
+            static_cast<void>(unlinkat(
+                    directory_descriptor_,
+                    PRODUCTION_PACKAGELIST_CAPTURE_LEAF, 0));
+        }
+    }
+
+    const fs::path& path() const noexcept { return path_; }
+
+    std::string read_and_remove() {
+        const int descriptor = openat(
+                directory_descriptor_,
+                PRODUCTION_PACKAGELIST_CAPTURE_LEAF,
+                O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+        if(descriptor < 0) {
+            throw production_packagelist_capture_error();
+        }
+        struct stat status {};
+        if(fstat(descriptor, &status) != 0 ||
+           !S_ISREG(status.st_mode) || status.st_uid != geteuid() ||
+           status.st_nlink != 1 ||
+           (status.st_mode & 0777) != 0600) {
+            static_cast<void>(close(descriptor));
+            throw production_packagelist_capture_error();
+        }
+
+        std::string output;
+        std::array<char, 4096> buffer;
+        while(true) {
+            const ssize_t size = read(
+                    descriptor, buffer.data(), buffer.size());
+            if(size > 0) {
+                output.append(
+                        buffer.data(), static_cast<std::size_t>(size));
+                continue;
+            }
+            if(size == 0) break;
+            if(errno == EINTR) continue;
+            static_cast<void>(close(descriptor));
+            throw production_packagelist_capture_error();
+        }
+        if(close(descriptor) != 0 ||
+           unlinkat(
+                   directory_descriptor_,
+                   PRODUCTION_PACKAGELIST_CAPTURE_LEAF, 0) != 0) {
+            throw production_packagelist_capture_error();
+        }
+        owns_name_ = false;
+        return output;
+    }
+};
 
 #ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
 MultipleArtifactValidationObserverForTest
@@ -1431,6 +1524,48 @@ void require_unclaimed_artifact_pkgdest(
     require_no_inherited_pkgdest();
 }
 
+ProductionArtifactSourceTree::ProductionArtifactSourceTree(
+        ValidatedCachePath checkout,
+        std::shared_ptr<void> authority_lifetime,
+        std::function<int(const std::string&, const std::string&)>
+                guarded_command,
+        ProductionSourceBuildProvenance provenance)
+    : checkout_(std::move(checkout)),
+      authority_lifetime_(std::move(authority_lifetime)),
+      guarded_command_(std::move(guarded_command)),
+      provenance_(std::move(provenance)) {
+    if(authority_lifetime_ == nullptr || !guarded_command_ ||
+       !checkout_.exists() ||
+       !checkout_.is_directory()) {
+        throw std::logic_error(
+                "Production source tree lease binding is inconsistent.");
+    }
+}
+
+const ProductionSourceBuildProvenance&
+ProductionArtifactSourceTree::provenance() const noexcept {
+    return provenance_;
+}
+
+const ValidatedCachePath& ProductionArtifactSourceTree::checkout()
+        const noexcept {
+    return checkout_;
+}
+
+void ProductionArtifactSourceTree::require_unchanged_identity() const {
+    static_cast<void>(revalidate_trusted_cache_path(
+            checkout_, CachePathRequirement::ExistingDirectory));
+}
+
+int ProductionArtifactSourceTree::run_guarded_command(
+        const std::string& command,
+        const std::string& display_command) const {
+    require_unchanged_identity();
+    const int status = guarded_command_(command, display_command);
+    require_unchanged_identity();
+    return status;
+}
+
 ArtifactMakepkgContext::ArtifactMakepkgContext(
         RetainedTrustedCacheDirectory checkout,
         SourceBuildEnvironment command_environment,
@@ -1446,8 +1581,27 @@ ArtifactMakepkgContext::ArtifactMakepkgContext(
 }
 
 ArtifactMakepkgContext::ArtifactMakepkgContext(
+        RetainedTrustedCacheDirectory checkout,
+        ProductionArtifactSourceTree source_tree,
+        SourceBuildEnvironment command_environment,
+        SourceEnvironmentEmptyValuePolicy empty_value_policy,
+        fs::path workspace_path, std::uintmax_t workspace_device,
+        std::uintmax_t workspace_inode)
+    : checkout_(std::move(checkout)),
+      production_source_tree_(
+              std::make_unique<ProductionArtifactSourceTree>(
+                      std::move(source_tree))),
+      command_environment_(std::move(command_environment)),
+      empty_value_policy_(empty_value_policy),
+      provenance_(std::make_shared<const ArtifactMakepkgContextProvenance>()),
+      workspace_path_(std::move(workspace_path)),
+      workspace_device_(workspace_device), workspace_inode_(workspace_inode) {
+}
+
+ArtifactMakepkgContext::ArtifactMakepkgContext(
         ArtifactMakepkgContext&& other) noexcept
     : checkout_(std::move(other.checkout_)),
+      production_source_tree_(std::move(other.production_source_tree_)),
       command_environment_(std::move(other.command_environment_)),
       empty_value_policy_(other.empty_value_policy_),
       provenance_(std::move(other.provenance_)),
@@ -1460,6 +1614,9 @@ ArtifactMakepkgContext::~ArtifactMakepkgContext() noexcept = default;
 
 void ArtifactMakepkgContext::require_unchanged_checkout() const {
     checkout_.require_unchanged_identity();
+    if(production_source_tree_ != nullptr) {
+        production_source_tree_->require_unchanged_identity();
+    }
 }
 
 void ArtifactMakepkgContext::require_matching_workspace(
@@ -1507,8 +1664,20 @@ CapturedCommandResult ArtifactMakepkgContext::capture_makepkg_output(
     require_unchanged_checkout();
     FileDescriptorWorkDirGuard working_directory(checkout_.descriptor_);
     std::string command = makepkg_command(makepkg_arguments);
-    Logger::raw_cmd(command);
-    CapturedCommandResult result = capture_command_output_raw(command.c_str());
+    CapturedCommandResult result;
+    if(production_source_tree_ != nullptr) {
+        ProductionPackagelistCapture capture(
+                workspace.directory_descriptor_,
+                workspace.canonical_path());
+        result.exit_code = production_source_tree_->run_guarded_command(
+                command + " > " + shell_words::quote(
+                                         capture.path().string()),
+                command);
+        result.output = capture.read_and_remove();
+    } else {
+        Logger::raw_cmd(command);
+        result = capture_command_output_raw(command.c_str());
+    }
     require_unchanged_checkout();
     require_matching_workspace(workspace);
     return result;
@@ -1527,7 +1696,10 @@ int ArtifactMakepkgContext::run_makepkg_build_only(
     if(options.no_confirm) arguments.emplace_back("--noconfirm");
     if(options.rebuild) arguments.emplace_back("-f");
     if(options.clean_build) arguments.emplace_back("-C");
-    int exit_code = run_command(makepkg_command(arguments));
+    const std::string command = makepkg_command(arguments);
+    int exit_code = production_source_tree_ != nullptr
+            ? production_source_tree_->run_guarded_command(command)
+            : run_command(command);
     require_unchanged_checkout();
     require_matching_workspace(workspace);
     return exit_code;
@@ -1547,7 +1719,10 @@ int ArtifactMakepkgContext::run_makepkg_build_only(
     if(options.no_confirm) arguments.emplace_back("--noconfirm");
     if(options.rebuild) arguments.emplace_back("-f");
     if(options.clean_build) arguments.emplace_back("-C");
-    const int exit_code = run_command(makepkg_command(arguments));
+    const std::string command = makepkg_command(arguments);
+    const int exit_code = production_source_tree_ != nullptr
+            ? production_source_tree_->run_guarded_command(command)
+            : run_command(command);
     require_unchanged_checkout();
     require_matching_workspace(workspace);
     expected.require_matching_workspace(workspace);
@@ -1577,6 +1752,32 @@ ArtifactMakepkgContext prepare_artifact_makepkg_context(
             empty_value_policy,
             workspace.canonical_path(), workspace.device_, workspace.inode_);
     return context;
+}
+
+ArtifactMakepkgContext prepare_artifact_makepkg_context(
+        ProductionArtifactSourceTree source_tree,
+        const ArtifactWorkspace& workspace,
+        const SourceBuildEnvironment& environment,
+        SourceEnvironmentEmptyValuePolicy empty_value_policy) {
+    require_unclaimed_artifact_pkgdest(environment);
+    workspace.require_unchanged_identity();
+    if(!workspace.path().is_absolute()) {
+        throw std::logic_error(localization::translate_message(
+                "Artifact workspace path must be absolute."));
+    }
+
+    source_tree.require_unchanged_identity();
+    RetainedTrustedCacheDirectory retained_checkout =
+            retain_trusted_cache_directory(source_tree.checkout());
+    SourceBuildEnvironment command_environment = environment;
+    command_environment.ordered_assignments.push_back(
+            SourceEnvironmentAssignment{
+                    "PKGDEST", workspace.canonical_path().string()});
+    return ArtifactMakepkgContext(
+            std::move(retained_checkout), std::move(source_tree),
+            std::move(command_environment), empty_value_policy,
+            workspace.canonical_path(), workspace.device_,
+            workspace.inode_);
 }
 
 ExpectedPackageArtifactPath::ExpectedPackageArtifactPath(

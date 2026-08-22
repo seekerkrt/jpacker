@@ -778,9 +778,17 @@ int cmd_build_local(
                 provider_selection_callback(config));
         require_complete_local_build_plan(plan);
 
+        LocalSourceBuildDependencyPreparation dependency_preparation =
+                prepare_local_source_build_dependencies(
+                        plan, true, false);
+        preflight_local_source_build_dependencies(
+                dependency_preparation, config);
+
         // POLICY(#271): all option/root/metadata/plan validation precedes
-        // cache creation. Both remote dependencies and local build receive the
-        // same retained cache authority before the first transaction.
+        // cache creation. POLICY(#411): remote dependency fatal-state
+        // observation also completes before this persistent mutation. Both
+        // remote dependencies and local build then receive the same retained
+        // cache authority before the first transaction.
         const xdg_directory_safety::DirectoryCreationPrecondition
                 cache_creation_precondition =
                         [&reviewed](
@@ -798,7 +806,7 @@ int cmd_build_local(
                 cache_root.inode());
         PreparedProductionSourceBuildInvocation dependency_invocation =
                 prepare_local_source_build_dependency_invocation(
-                        plan, true, false, cache_root, config);
+                        std::move(dependency_preparation), cache_root, config);
         const PacmanDatabasePaths database_paths =
                 dependency_invocation.database_paths;
         PreparedLocalSourceBuild local_build = prepare_local_source_build(

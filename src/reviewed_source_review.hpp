@@ -24,6 +24,11 @@ inline constexpr std::uintmax_t
 inline constexpr std::size_t REVIEWED_SOURCE_AGGREGATE_RAW_PATCH_LIMIT =
         32U * 1024U * 1024U;
 
+// Filesystem overlay proof uses one fixed collision-resistant content
+// identity independently of the repository's SHA-1/SHA-256 object format.
+[[nodiscard]] std::string reviewed_source_sha256_content_identity(
+        std::string_view content);
+
 enum class ReviewedSourceReviewResourceKind {
     ReviewEntries,
     LineReviewableBlob,
