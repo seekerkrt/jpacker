@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.18)
 # caller did not define CXXFLAGS at all. Record that distinction before
 # project() initializes CMAKE_CXX_FLAGS, including an explicitly empty value.
 set(_moguet_cxxflags_defined_before_project OFF)
-if(DEFINED ENV{CXXFLAGS} OR DEFINED CMAKE_CXX_FLAGS)
+if(DEFINED ENV{CXXFLAGS} OR DEFINED CACHE{CMAKE_CXX_FLAGS})
     set(_moguet_cxxflags_defined_before_project ON)
 endif()
 
@@ -71,22 +71,112 @@ set(
     "External preprocessor flags initialized from environment CPPFLAGS"
 )
 
+function(
+    moguet_parse_external_compile_flags
+    output_variable
+    input_name
+    raw_flags
+)
+    separate_arguments(_moguet_arguments UNIX_COMMAND "${raw_flags}")
+
+    set(_moguet_pending_macro_option "")
+    foreach(_moguet_argument IN LISTS _moguet_arguments)
+        if(_moguet_argument MATCHES "^--?std=")
+            message(
+                FATAL_ERROR
+                "External ${input_name} contains a C/C++ standard selector "
+                "(-std=... or --std=...), which conflicts with Moguet's "
+                "reserved strict C++20 contract. Remove the external "
+                "standard selector."
+            )
+        endif()
+
+        if(
+            _moguet_argument MATCHES
+                "^-DMOGUET_VERSION($|[^A-Za-z0-9_])"
+            OR _moguet_argument MATCHES
+                "^-UMOGUET_VERSION($|[^A-Za-z0-9_])"
+        )
+            message(
+                FATAL_ERROR
+                "External ${input_name} defines or undefines MOGUET_VERSION, "
+                "which is reserved for the repository root VERSION file. "
+                "Remove the external MOGUET_VERSION -D or -U option."
+            )
+        endif()
+
+        if(NOT _moguet_pending_macro_option STREQUAL "")
+            if(
+                _moguet_argument MATCHES
+                    "^MOGUET_VERSION($|[^A-Za-z0-9_])"
+            )
+                message(
+                    FATAL_ERROR
+                    "External ${input_name} defines or undefines "
+                    "MOGUET_VERSION, which is reserved for the repository "
+                    "root VERSION file. Remove the external MOGUET_VERSION "
+                    "-D or -U option."
+                )
+            endif()
+            set(_moguet_pending_macro_option "")
+        endif()
+
+        if(_moguet_argument STREQUAL "-D" OR _moguet_argument STREQUAL "-U")
+            set(_moguet_pending_macro_option "${_moguet_argument}")
+        endif()
+    endforeach()
+
+    # Keep every parsed argv element in one SHELL: group so CMake's compile
+    # option de-duplication cannot collapse repeated tokens such as
+    # `-D A=1 -D B=2`. This only re-encodes argv for CMake's parser; no shell
+    # process is invoked.
+    set(_moguet_shell_group "")
+    foreach(_moguet_argument IN LISTS _moguet_arguments)
+        string(REPLACE "\\" "\\\\" _moguet_quoted "${_moguet_argument}")
+        string(REPLACE "'" "'\\''" _moguet_quoted "${_moguet_quoted}")
+        if(_moguet_shell_group STREQUAL "")
+            set(_moguet_shell_group "'${_moguet_quoted}'")
+        else()
+            string(APPEND _moguet_shell_group " '${_moguet_quoted}'")
+        endif()
+    endforeach()
+
+    if(_moguet_shell_group STREQUAL "")
+        set("${output_variable}" "" PARENT_SCOPE)
+    else()
+        # A literal semicolon must remain escaped until the SHELL: group reaches
+        # target_compile_options() as one CMake list element.
+        string(REPLACE ";" "\\;" _moguet_shell_group "${_moguet_shell_group}")
+        set(
+            "${output_variable}"
+            "SHELL:${_moguet_shell_group}"
+            PARENT_SCOPE
+        )
+    endif()
+endfunction()
+
+moguet_parse_external_compile_flags(
+    _moguet_cppflag_option_group
+    "MOGUET_CPPFLAGS (initialized from CPPFLAGS)"
+    "${MOGUET_CPPFLAGS}"
+)
+moguet_parse_external_compile_flags(
+    _moguet_cxxflag_option_group
+    "CMAKE_CXX_FLAGS (including CXXFLAGS initialization)"
+    "${CMAKE_CXX_FLAGS}"
+)
+
 add_library(moguet_external_cppflags INTERFACE)
-if(NOT MOGUET_CPPFLAGS STREQUAL "")
+if(NOT _moguet_cppflag_option_group STREQUAL "")
     target_compile_options(
         moguet_external_cppflags
         INTERFACE
-        "SHELL:${MOGUET_CPPFLAGS}"
+        "${_moguet_cppflag_option_group}"
     )
 endif()
 
 if(NOT DEFINED MOGUET_ENABLE_DEFAULT_COMPILE_OPTIONS)
-    if(
-        _moguet_cxxflags_defined_before_project
-        OR NOT CMAKE_CXX_FLAGS STREQUAL ""
-        OR NOT CMAKE_BUILD_TYPE STREQUAL ""
-        OR CMAKE_CONFIGURATION_TYPES
-    )
+    if(_moguet_cxxflags_defined_before_project)
         set(_moguet_enable_default_compile_options OFF)
     else()
         set(_moguet_enable_default_compile_options ON)
@@ -131,16 +221,6 @@ target_include_directories(
     "${TOMLPLUSPLUS_INCLUDE_DIR}"
 )
 
-# The production objects consume curl headers, but the final executable alone
-# owns the direct dynamic link. Avoid carrying CURL::libcurl through the OBJECT
-# target and then repeating it on the final link command.
-add_library(moguet_curl_compile_contract INTERFACE)
-target_include_directories(
-    moguet_curl_compile_contract
-    INTERFACE
-    ${CURL_INCLUDE_DIRS}
-)
-
 # Production compilation needs libalpm's pkg-config usage requirements, while
 # the final executable owns the real libalpm link. Keeping these separate
 # leaves future ALPM-stub test profiles free of the real library dependency.
@@ -174,11 +254,15 @@ target_link_libraries(
         moguet_external_cppflags
         moguet_build_contract
         moguet_alpm_compile_contract
-        moguet_curl_compile_contract
+        # Consume CURL::libcurl's complete compile usage requirements. The
+        # executable remains the explicit actual curl link owner below.
+        CURL::libcurl
         nlohmann_json::nlohmann_json
         moguet_toml_headers
 )
 
+# Raw TARGET_OBJECTS consumption does not transfer the OBJECT target's PRIVATE
+# curl dependency to the final link, so keep the actual linkage explicit.
 add_executable(moguet $<TARGET_OBJECTS:moguet_production_objects>)
 target_link_libraries(
     moguet
