@@ -1,4 +1,4 @@
-#include "../src/app_config.hpp"
+#include "../source/app_config.hpp"
 
 #include <exception>
 #include <iostream>

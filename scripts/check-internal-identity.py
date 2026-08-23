@@ -133,7 +133,7 @@ def read_text(path: str) -> str | None:
 def is_active_identity_path(path: str) -> bool:
     return (
         path in {".gitignore", "Makefile"}
-        or path.startswith("src/")
+        or path.startswith("source/")
         or path.startswith("tests/")
         or path.startswith("scripts/")
     )
@@ -426,15 +426,15 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
         "historical-package-fixture",
         legacy_source_archive_filename,
     ),
-    "src/app_config.cpp": allowances(
+    "source/app_config.cpp": allowances(
         "storage-path",
         rf"/etc/{legacy}/{legacy}\.conf{identity_end}",
     ),
-    "src/app_config.hpp": allowances(
+    "source/app_config.hpp": allowances(
         "storage-path",
         rf"legacy {legacy}\.conf{identity_end}",
     ),
-    "src/moguet.cpp": allowances(
+    "source/moguet.cpp": allowances(
         "storage-path",
         rf"legacy {legacy}\.conf{identity_end}",
     ),
@@ -683,7 +683,7 @@ def extract_test_hook_tokens(text: str) -> set[str]:
 
 def check_classifier_contract() -> None:
     allowed_categories = legacy_categories_for_line(
-        "src/moguet.cpp", f'legacy {LEGACY_NAME}.conf: LOGFILE=...'
+        "source/moguet.cpp", f'legacy {LEGACY_NAME}.conf: LOGFILE=...'
     )
     if allowed_categories != ["storage-path"]:
         fail("internal legacy-storage classifier self-test failed")
@@ -756,13 +756,13 @@ def check_classifier_contract() -> None:
         fail("internal historical-package-source classifier self-test failed")
 
     rejected_categories = legacy_categories_for_line(
-        "src/moguet.cpp", f'char program[] = "{LEGACY_NAME}";'
+        "source/moguet.cpp", f'char program[] = "{LEGACY_NAME}";'
     )
     if rejected_categories != [None]:
         fail("internal active-identity classifier is too broad")
 
     active_cache_categories = legacy_categories_for_line(
-        "src/trusted_cache.cpp",
+        "source/trusted_cache.cpp",
         f'return base / "{LEGACY_NAME}";',
     )
     if active_cache_categories != [None]:
@@ -959,7 +959,7 @@ def main() -> int:
                         )
                     )
 
-        if path.startswith("src/") or path in RUNTIME_AUTHORITY_PATHS:
+        if path.startswith("source/") or path in RUNTIME_AUTHORITY_PATHS:
             for line_number, line in enumerate(text.splitlines(), start=1):
                 for forbidden_path in FORBIDDEN_RUNTIME_SYSTEM_PATHS:
                     if forbidden_path in line:
@@ -1038,7 +1038,7 @@ def main() -> int:
                     continue
                 findings.append(finding_for_line(check, path, line_number, line))
 
-    identity_header = texts.get("src/application_identity.hpp", "")
+    identity_header = texts.get("source/application_identity.hpp", "")
     command_match = re.search(r'COMMAND_NAME\s*=\s*"([^"]+)"', identity_header)
     prefix_match = re.search(
         r'ENVIRONMENT_PREFIX\s*=\s*"([A-Z0-9_]+)"', identity_header
@@ -1047,7 +1047,7 @@ def main() -> int:
         findings.append(
             Finding(
                 "missing-application-identity-authority",
-                "src/application_identity.hpp",
+                "source/application_identity.hpp",
                 0,
                 "COMMAND_NAME or ENVIRONMENT_PREFIX is missing",
             )
@@ -1061,7 +1061,7 @@ def main() -> int:
             findings.append(
                 Finding(
                     "application-identity-prefix-mismatch",
-                    "src/application_identity.hpp",
+                    "source/application_identity.hpp",
                     0,
                     f"command={command_name}, prefix={environment_prefix}, "
                     f"expected={CURRENT_COMMAND}/{expected_prefix}",
@@ -1134,27 +1134,27 @@ def main() -> int:
         "is_moguet_global_option",
     )
     cli_authority_text = (
-        texts.get("src/cli_authority.hpp", "")
-        + texts.get("src/cli_parser.cpp", "")
-        + texts.get("src/cli_parser.hpp", "")
+        texts.get("source/cli_authority.hpp", "")
+        + texts.get("source/cli_parser.cpp", "")
+        + texts.get("source/cli_parser.hpp", "")
     )
     for symbol in required_internal_symbols:
         if symbol not in cli_authority_text:
             findings.append(
-                Finding("missing-moguet-internal-symbol", "src/cli_parser.cpp", 0, symbol)
+                Finding("missing-moguet-internal-symbol", "source/cli_parser.cpp", 0, symbol)
             )
 
-    moguet_source = texts.get("src/moguet.cpp", "")
+    moguet_source = texts.get("source/moguet.cpp", "")
     if 'char program[] = "moguet";' not in moguet_source:
         findings.append(
             Finding(
                 "test-argv-zero-identity",
-                "src/moguet.cpp",
+                "source/moguet.cpp",
                 0,
                 "test argv[0] must be moguet",
             )
         )
-    source_maintenance = texts.get("src/commands_source_maintenance.cpp", "")
+    source_maintenance = texts.get("source/commands_source_maintenance.cpp", "")
     cache_prompt_pattern = re.compile(
         r'"Clean \{\} build cache \(\{\}\)\?",\s*'
         r"application_identity::PROJECT_NAME,\s*"
@@ -1164,7 +1164,7 @@ def main() -> int:
         findings.append(
             Finding(
                 "moguet-cache-presentation",
-                "src/commands_source_maintenance.cpp",
+                "source/commands_source_maintenance.cpp",
                 0,
                 "Moguet cache prompt must keep the project identity as runtime data",
             )

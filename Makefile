@@ -11,7 +11,7 @@ VERSION   := $(strip $(shell cat $(VERSION_FILE) 2>/dev/null))
 ifeq ($(VERSION),)
 VERSION   := unknown
 endif
-SRC_DIR   := src
+SRC_DIR   := source
 BUILD_DIR := build
 MANPAGE_EN := man/moguet.1
 MANPAGE_EN_IN := man/moguet.1.in
@@ -1755,7 +1755,7 @@ ALL_HEAVY_DEPS := \
 	$(foreach prefix,$(HEAVY_OBJECT_PREFIXES),$($(prefix)_DEPS))
 HEAVY_LOCALIZATION_OBJECTS := \
 	$(foreach prefix,$(HEAVY_OBJECT_PREFIXES),\
-		$($(prefix)_OBJECT_DIR)/src/localization.o)
+		$($(prefix)_OBJECT_DIR)/source/localization.o)
 HEAVY_LINK_FIREWALLS := \
 	check-aur-update-command-link-firewall \
 	check-upgrade-all-command-link-firewall \
@@ -2922,7 +2922,7 @@ test-provider-selection: $(PROVIDER_SELECTION_TEST_TARGET)
 		echo "error: provider selection compiler depfile is missing" >&2; \
 		exit 1; \
 	}
-	@grep -F 'src/dependency_constraint.hpp' \
+	@grep -F 'source/dependency_constraint.hpp' \
 		"$(PROVIDER_SELECTION_DIRECT_DEPFILE)" >/dev/null || { \
 		echo "error: provider selection depfile lost transitive dependency_constraint.hpp" >&2; \
 		exit 1; \

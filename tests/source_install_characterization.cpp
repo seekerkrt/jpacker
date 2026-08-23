@@ -9,7 +9,7 @@
 // POLICY(#203,#242): production ownerのprepared invocationをdirect実行し、
 // CLI wrapperを介さずall-target collectionとshared lifecycle接続をcharacterizeする。
 #define main moguet_program_main
-#include "../src/moguet.cpp"
+#include "../source/moguet.cpp"
 #undef main
 
 #include <exception>

@@ -211,13 +211,13 @@ def main() -> int:
         ),
         (
             "stale runtime review.pkgbuild source wording",
-            "src/moguet.cpp",
+            "source/moguet.cpp",
             "Invocation-local {} / {} editor policy; not reviewed-source acceptance",
             "{} review policy",
         ),
         (
             "stale runtime review.diff source wording",
-            "src/moguet.cpp",
+            "source/moguet.cpp",
             "Repository diff / {} reviewed-source review policy; skipping does not advance reviewed state",
             "Repository update diff policy",
         ),

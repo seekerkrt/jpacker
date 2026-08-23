@@ -9,7 +9,7 @@ import sys
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
-SOURCE_ROOT = REPOSITORY_ROOT / "src"
+SOURCE_ROOT = REPOSITORY_ROOT / "source"
 POTFILES = REPOSITORY_ROOT / "po" / "POTFILES.in"
 POT = REPOSITORY_ROOT / "po" / "moguet.pot"
 
@@ -25,10 +25,10 @@ EXTRACTION_CALL = re.compile(
 # production callers. Keeping the exact source anchors here prevents a raw
 # diagnostic from silently entering or leaving the explicit internal-only set.
 INTERNAL_ONLY_ANCHORS: dict[str, tuple[str, ...]] = {
-    "src/artifact_identity_selection.cpp": (
+    "source/artifact_identity_selection.cpp": (
         "Artifact identity selection returned an incoherent result.",
     ),
-    "src/package_base_artifact_install_plan.cpp": (
+    "source/package_base_artifact_install_plan.cpp": (
         "Unknown install reason directive.",
         "Unknown installed version state.",
         "Installed package must have an existing install reason.",
@@ -40,7 +40,7 @@ INTERNAL_ONLY_ANCHORS: dict[str, tuple[str, ...]] = {
         "PackageBase install policy has an invalid PackageBase.",
         "PackageBase install policy requires at least one selected artifact.",
     ),
-    "src/source_install_preparation.cpp": (
+    "source/source_install_preparation.cpp": (
         "Production source-build work items have a partial cache authority.",
         "Production source-build selected provider is not repository-owned.",
         "Production source-build selected provider has an invalid repository name.",
@@ -57,7 +57,7 @@ INTERNAL_ONLY_ANCHORS: dict[str, tuple[str, ...]] = {
         "Production separated source-build singular identity is inconsistent for PackageBase ",
         "Production source-build invocation must contain at least one work item.",
     ),
-    "src/dependency_plan_model.cpp": (
+    "source/dependency_plan_model.cpp": (
         "Planned package target has no package role: ",
     ),
 }
@@ -67,7 +67,7 @@ INTERNAL_ONLY_ANCHORS: dict[str, tuple[str, ...]] = {
 # guards moved to the pure model owner without translating its programmer-only
 # reducer invariant.
 MIXED_INTERNAL_ONLY_EXTRACTION_COUNTS: dict[str, int] = {
-    "src/dependency_plan_model.cpp": 12,
+    "source/dependency_plan_model.cpp": 12,
 }
 
 TECHNICAL_MSGID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (

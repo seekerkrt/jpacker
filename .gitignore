@@ -12,6 +12,7 @@
 .vscode/
 
 # Arch Linux package artifacts
+/src/
 /pkg/
 *.pkg.tar.zst
 *.pkg.tar.xz

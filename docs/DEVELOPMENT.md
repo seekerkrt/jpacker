@@ -129,15 +129,15 @@ include path、link libraryは次のとおりであり、object分離後も落�
 | Target | Target固有macro | Target固有include | Link library |
 | --- | --- | --- | --- |
 | `APP_CONFIG_INTEGRATION_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_TEST_CONFIG_PATH`, `MOGUET_ENABLE_APP_CONFIG_TEST_HOOKS` | なし | `MY_LDLIBS`, `LIBALPM_LDLIBS` |
-| `AUR_RPC_VALIDATION_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_AUR_RPC_TEST_HOOKS` | `src`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
+| `AUR_RPC_VALIDATION_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_AUR_RPC_TEST_HOOKS` | `source`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
 | `CLI_LOCALIZATION_TEST_TARGET` | target専用locale directory, `MOGUET_ENABLE_TEST_OVERRIDES` | なし | `MY_LDLIBS`, `LIBALPM_LDLIBS` |
 | `TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES` | なし | `MY_LDLIBS`, `LIBALPM_LDLIBS` |
-| `UPGRADE_BASELINE_METADATA_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_TEST_CONFIG_PATH`, `MOGUET_ENABLE_APP_CONFIG_TEST_HOOKS` | `src`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
-| `SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES` | `src` | `MY_LDLIBS`, `LIBALPM_LDLIBS` |
-| `UPGRADE_ALL_COMMAND_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_TEST_CONFIG_PATH` | `src`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
-| `COMMANDS_INSPECT_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES` | `src`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
-| `COMMANDS_SYNC_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_TEST_CONFIG_PATH` | `src` | `MY_LDLIBS`, `LIBALPM_LDLIBS` |
-| `AUR_UPDATE_COMMAND_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_TEST_CONFIG_PATH` | `src`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
+| `UPGRADE_BASELINE_METADATA_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_TEST_CONFIG_PATH`, `MOGUET_ENABLE_APP_CONFIG_TEST_HOOKS` | `source`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
+| `SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES` | `source` | `MY_LDLIBS`, `LIBALPM_LDLIBS` |
+| `UPGRADE_ALL_COMMAND_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_TEST_CONFIG_PATH` | `source`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
+| `COMMANDS_INSPECT_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES` | `source`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
+| `COMMANDS_SYNC_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_TEST_CONFIG_PATH` | `source` | `MY_LDLIBS`, `LIBALPM_LDLIBS` |
+| `AUR_UPDATE_COMMAND_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_TEST_CONFIG_PATH` | `source`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
 
 stub ownershipは次のsource境界を正とする。
 
@@ -145,7 +145,7 @@ stub ownershipは次のsource境界を正とする。
   `tests/stubs/package-metadata/alpm_stub.cpp`がlibalpm ABIを所有し、`LIBALPM_LDLIBS`をlinkしない。
 - `UPGRADE_ALL_COMMAND_TEST_TARGET`では
   `tests/stubs/upgrade-all-command/operation_stub.cpp`が除外した
-  `src/upgrade_all_operation.cpp`のoperation APIを所有し、package-metadata alpm stubがlibalpm ABIを
+  `source/upgrade_all_operation.cpp`のoperation APIを所有し、package-metadata alpm stubがlibalpm ABIを
   所有する。
 - `COMMANDS_INSPECT_TEST_TARGET`では`tests/commands_inspect_aur_stub.cpp`がAUR client、
   `tests/stubs/commands-inspect/repository_query_stub.cpp`がrepository query、package-metadata alpm stubが
@@ -164,7 +164,7 @@ stub ownershipは次のsource境界を正とする。
 
 Slice 2とSlice 3で移行した上記10 targetのobject分離は次を満たす。
 
-- objectは`build/tests/obj/<binary-name>/`以下のtarget専用directoryへ置く。`src/`、`tests/`、
+- objectは`build/tests/obj/<binary-name>/`以下のtarget専用directoryへ置く。`source/`、`tests/`、
   `tests/stubs/`以下の相対pathをobject pathにも残し、同名fileの衝突を避ける。異なるtest target間で
   Make objectを直接共有しない。
 - 1 sourceにつき1回のcompile invocationとし、`-MMD -MP`でobjectと同じdirectoryへ`.d`を生成する。
@@ -192,7 +192,7 @@ objectを重量級targetや別profileと共有せず、各binaryが
 `link.signature`を所有する。
 
 - depfileは各targetと同じsource、macro、include path、compiler flagsで`-MM -MP`を実行して生成し、
-  実際に読んだproject / test-support headerだけをbinary prerequisiteへ戻す。全`src/*.hpp`を
+  実際に読んだproject / test-support headerだけをbinary prerequisiteへ戻す。全`source/*.hpp`を
   一律prerequisiteにはしない。
 - compile signatureはeffective `CXX`、compile arguments、source / fake / stub setを記録する。
   link signatureはeffective `CXX`、対象targetが実際に使う`LDFLAGS`、library、ordered build inputを
