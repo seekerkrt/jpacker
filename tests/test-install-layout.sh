@@ -121,7 +121,8 @@ assert_mode() {
 }
 
 assert_no_symlinks() {
-    first_symlink=$(find "$stage_dir" -type l -print -quit)
+    inspected_tree=${1:-$stage_dir}
+    first_symlink=$(find "$inspected_tree" -type l -print -quit)
     [ -z "$first_symlink" ] ||
         fail "staged tree contains a symbolic link: $first_symlink"
 }
@@ -381,5 +382,122 @@ assert_mode "$canonical_preference" 600
 assert_file_text "$foreign_doc" 'foreign documentation'
 assert_file_text "$foreign_license" 'foreign license'
 assert_no_symlinks
+
+# Every supported Make destination override is projected into the same CMake
+# install graph.  A second DESTDIR proves the custom layout without touching
+# the host, and the CMake manifest is then the sole uninstall path authority.
+custom_stage_dir=$stage_root/custom-root
+custom_prefix=/opt/moguet-prefix
+custom_bindir=/custom/bin
+custom_compdir=/custom/completions/bash
+custom_zshcompdir=/custom/completions/zsh
+custom_fishcompdir=/custom/completions/fish
+custom_mandir=/custom/man/en/man1
+custom_jamandir=/custom/man/ja/man1
+custom_licensedir=/custom/licenses/moguet
+custom_docdir=/custom/doc/moguet
+custom_localedir=/custom/locale
+
+run_custom_make() {
+    HOME=$test_home \
+    XDG_CONFIG_HOME=$xdg_config_home \
+    XDG_STATE_HOME=$xdg_state_home \
+    XDG_CACHE_HOME=$xdg_cache_home \
+        make -C "$repo_root" --no-print-directory \
+            PREFIX="$custom_prefix" \
+            DESTDIR="$custom_stage_dir" \
+            BINDIR="$custom_bindir" \
+            COMPDIR="$custom_compdir" \
+            ZSHCOMPDIR="$custom_zshcompdir" \
+            FISHCOMPDIR="$custom_fishcompdir" \
+            MANDIR="$custom_mandir" \
+            JAMANDIR="$custom_jamandir" \
+            LICENSEDIR="$custom_licensedir" \
+            DOCDIR="$custom_docdir" \
+            LOCALEDIR="$custom_localedir" \
+            "$@"
+}
+
+custom_binary=$custom_stage_dir$custom_bindir/$COMMAND_NAME
+custom_bash_completion=$custom_stage_dir$custom_compdir/$COMMAND_NAME
+custom_zsh_completion=$custom_stage_dir$custom_zshcompdir/_$COMMAND_NAME
+custom_fish_completion=$custom_stage_dir$custom_fishcompdir/$COMMAND_NAME.fish
+custom_english_man=$custom_stage_dir$custom_mandir/$COMMAND_NAME.1
+custom_japanese_man=$custom_stage_dir$custom_jamandir/$COMMAND_NAME.1
+custom_catalog=$custom_stage_dir$custom_localedir/ja/LC_MESSAGES/$GETTEXT_DOMAIN.mo
+custom_license_dir=$custom_stage_dir$custom_licensedir
+custom_doc_dir=$custom_stage_dir$custom_docdir
+custom_migration_dir=$custom_doc_dir/docs/migration
+
+run_custom_make install
+assert_installed_file "$repo_root/$COMMAND_NAME" "$custom_binary" 755
+assert_installed_file "$repo_root/completions/$COMMAND_NAME.bash" \
+    "$custom_bash_completion"
+assert_installed_file "$repo_root/completions/_$COMMAND_NAME" \
+    "$custom_zsh_completion"
+assert_installed_file "$repo_root/completions/$COMMAND_NAME.fish" \
+    "$custom_fish_completion"
+assert_installed_file "$repo_root/man/$COMMAND_NAME.1" "$custom_english_man"
+assert_installed_file "$repo_root/man/ja/$COMMAND_NAME.1" "$custom_japanese_man"
+assert_installed_file "$built_catalog_file" "$custom_catalog"
+assert_installed_file "$repo_root/LICENSE" "$custom_license_dir/LICENSE"
+assert_installed_file "$repo_root/LICENSES/jpacker-MIT-legacy.txt" \
+    "$custom_license_dir/jpacker-MIT-legacy.txt"
+assert_installed_file "$repo_root/LICENSES/curl.txt" \
+    "$custom_license_dir/curl.txt"
+assert_installed_file "$repo_root/LICENSES/nlohmann-json-MIT.txt" \
+    "$custom_license_dir/nlohmann-json-MIT.txt"
+assert_installed_file "$repo_root/LICENSES/tomlplusplus-MIT.txt" \
+    "$custom_license_dir/tomlplusplus-MIT.txt"
+assert_installed_file "$repo_root/LICENSES/bjoern-hoehrmann-utf8-MIT.txt" \
+    "$custom_license_dir/bjoern-hoehrmann-utf8-MIT.txt"
+assert_installed_file "$repo_root/README.md" "$custom_doc_dir/README.md"
+assert_installed_file "$repo_root/README.ja.md" "$custom_doc_dir/README.ja.md"
+assert_installed_file "$repo_root/THIRD_PARTY_NOTICES.md" \
+    "$custom_doc_dir/THIRD_PARTY_NOTICES.md"
+assert_installed_file "$repo_root/docs/LICENSING.md" \
+    "$custom_doc_dir/docs/LICENSING.md"
+assert_installed_file "$repo_root/docs/migration/v1-to-v2.md" \
+    "$custom_migration_dir/v1-to-v2.md"
+assert_installed_file "$repo_root/docs/migration/v1-to-v2.ja.md" \
+    "$custom_migration_dir/v1-to-v2.ja.md"
+
+assert_absent "$custom_stage_dir/usr/bin/$COMMAND_NAME"
+assert_absent "$custom_stage_dir/usr/share/bash-completion/completions/$COMMAND_NAME"
+assert_absent "$custom_stage_dir$custom_prefix/bin/$COMMAND_NAME"
+assert_absent "$custom_stage_dir$custom_prefix/share/man/man1/$COMMAND_NAME.1"
+assert_absent "$custom_stage_dir$custom_prefix/share/licenses/$PACKAGE_NAME/LICENSE"
+assert_absent "$custom_stage_dir$custom_prefix/share/doc/$PACKAGE_NAME/README.md"
+assert_no_symlinks "$custom_stage_dir"
+
+custom_foreign_file=$custom_doc_dir/foreign-file.keep
+printf '%s\n' 'foreign custom-layout documentation' > "$custom_foreign_file"
+run_custom_make uninstall
+
+for custom_owned_file in \
+    "$custom_binary" \
+    "$custom_bash_completion" \
+    "$custom_zsh_completion" \
+    "$custom_fish_completion" \
+    "$custom_english_man" \
+    "$custom_japanese_man" \
+    "$custom_catalog" \
+    "$custom_license_dir/LICENSE" \
+    "$custom_license_dir/jpacker-MIT-legacy.txt" \
+    "$custom_license_dir/curl.txt" \
+    "$custom_license_dir/nlohmann-json-MIT.txt" \
+    "$custom_license_dir/tomlplusplus-MIT.txt" \
+    "$custom_license_dir/bjoern-hoehrmann-utf8-MIT.txt" \
+    "$custom_doc_dir/README.md" \
+    "$custom_doc_dir/README.ja.md" \
+    "$custom_doc_dir/THIRD_PARTY_NOTICES.md" \
+    "$custom_doc_dir/docs/LICENSING.md" \
+    "$custom_migration_dir/v1-to-v2.md" \
+    "$custom_migration_dir/v1-to-v2.ja.md"
+do
+    assert_absent "$custom_owned_file"
+done
+assert_file_text "$custom_foreign_file" 'foreign custom-layout documentation'
+assert_no_symlinks "$custom_stage_dir"
 
 printf 'install-layout-test: all checks passed\n'

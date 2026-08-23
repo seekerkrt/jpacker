@@ -896,6 +896,12 @@ function(moguet_add_ctest)
         NAME "${_moguet_ctest_NAME}"
         COMMAND ${_moguet_ctest_COMMAND}
     )
+    string(SHA256 _moguet_ctest_key "${_moguet_ctest_NAME}")
+    set_property(
+        GLOBAL
+        PROPERTY "MOGUET_CTEST_TARGETS_${_moguet_ctest_key}"
+            "${_moguet_ctest_TARGETS}"
+    )
     set_tests_properties(
         "${_moguet_ctest_NAME}"
         PROPERTIES
@@ -914,6 +920,100 @@ function(moguet_add_ctest)
         MOGUET_CTEST_RUNTIME_TARGETS
         ${MOGUET_CTEST_RUNTIME_TARGETS}
         PARENT_SCOPE
+    )
+endfunction()
+
+function(moguet_add_focused_ctest_alias alias_name)
+    set(_moguet_multi_value_arguments TESTS TARGETS)
+    cmake_parse_arguments(
+        _moguet_focus
+        ""
+        ""
+        "${_moguet_multi_value_arguments}"
+        ${ARGN}
+    )
+    if(_moguet_focus_UNPARSED_ARGUMENTS)
+        message(
+            FATAL_ERROR
+            "Unexpected focused CTest alias arguments for ${alias_name}: "
+            "${_moguet_focus_UNPARSED_ARGUMENTS}"
+        )
+    endif()
+    if(NOT alias_name MATCHES "^test-[a-z0-9-]+$")
+        message(FATAL_ERROR "Invalid focused Make alias: ${alias_name}")
+    endif()
+    if(NOT _moguet_focus_TESTS)
+        message(FATAL_ERROR "Focused Make alias has no CTest: ${alias_name}")
+    endif()
+
+    set(_moguet_focus_target "moguet-focus-${alias_name}")
+    if(TARGET "${_moguet_focus_target}")
+        message(FATAL_ERROR "Duplicate focused Make alias: ${alias_name}")
+    endif()
+
+    _moguet_assert_unique_list(
+        "Focused Make alias ${alias_name} CTest list"
+        ${_moguet_focus_TESTS}
+    )
+    set(_moguet_focus_build_targets ${_moguet_focus_TARGETS})
+    set(_moguet_focus_regex_items "")
+    foreach(_moguet_focus_test IN LISTS _moguet_focus_TESTS)
+        list(
+            FIND
+            MOGUET_CTEST_NAMES
+            "${_moguet_focus_test}"
+            _moguet_focus_test_index
+        )
+        if(_moguet_focus_test_index EQUAL -1)
+            message(
+                FATAL_ERROR
+                "Focused Make alias ${alias_name} references an unknown "
+                "CTest: ${_moguet_focus_test}"
+            )
+        endif()
+
+        string(SHA256 _moguet_focus_test_key "${_moguet_focus_test}")
+        get_property(
+            _moguet_focus_test_targets
+            GLOBAL
+            PROPERTY "MOGUET_CTEST_TARGETS_${_moguet_focus_test_key}"
+        )
+        list(
+            APPEND
+            _moguet_focus_build_targets
+            ${_moguet_focus_test_targets}
+        )
+        string(
+            REPLACE
+            "."
+            "\\."
+            _moguet_focus_test_regex
+            "${_moguet_focus_test}"
+        )
+        list(APPEND _moguet_focus_regex_items "${_moguet_focus_test_regex}")
+    endforeach()
+    list(REMOVE_DUPLICATES _moguet_focus_build_targets)
+    foreach(_moguet_focus_build_target IN LISTS _moguet_focus_build_targets)
+        if(NOT TARGET "${_moguet_focus_build_target}")
+            message(
+                FATAL_ERROR
+                "Focused Make alias ${alias_name} references an unknown "
+                "build target: ${_moguet_focus_build_target}"
+            )
+        endif()
+    endforeach()
+    list(JOIN _moguet_focus_regex_items "|" _moguet_focus_regex)
+
+    add_custom_target(
+        "${_moguet_focus_target}"
+        COMMAND
+            "${CMAKE_CTEST_COMMAND}"
+            --output-on-failure
+            --tests-regex "^(${_moguet_focus_regex})$"
+        DEPENDS ${_moguet_focus_build_targets}
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        USES_TERMINAL
+        VERBATIM
     )
 endfunction()
 
@@ -1020,6 +1120,7 @@ endfunction()
 
 include("${CMAKE_CURRENT_LIST_DIR}/MoguetTestTargets.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/MoguetTestRegistrations.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/MoguetFocusedTests.cmake")
 
 foreach(
     _moguet_expected_inventory

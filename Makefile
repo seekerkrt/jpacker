@@ -18,6 +18,104 @@ BUILD_DIR := build
 CMAKE_PRODUCTION_BUILD_DIR := $(BUILD_DIR)/cmake-production
 CMAKE_CTEST_BUILD_DIR := $(BUILD_DIR)/cmake-testing
 CMAKE_CTEST_BINARY_DIR := $(CMAKE_CTEST_BUILD_DIR)/tests
+CMAKE_FOCUSED_ALIASES := \
+	test-application-identity \
+	test-interactive-confirmation \
+	test-localization \
+	test-xdg-paths \
+	test-xdg-directory-safety \
+	test-xdg-state-log \
+	test-trusted-cache \
+	test-runtime-identity \
+	test-app-config \
+	test-provider-selection \
+	test-provider-installed-state \
+	test-dependency-constraint \
+	test-package-relation \
+	test-package-relation-observation \
+	test-package-relation-assessment \
+	test-package-constraint-metadata \
+	test-aur-constraint-metadata \
+	test-root-package-candidate \
+	test-root-package-search \
+	test-root-package-selection \
+	test-root-package-route-projection \
+	test-local-package-metadata \
+	test-local-source-root \
+	test-local-dependency-plan-projection \
+	test-local-source-workspace \
+	test-local-source-build \
+	test-user-config \
+	test-package-identifier \
+	test-source-package-identity \
+	test-source-package-identity-projection \
+	test-source-package-compatibility \
+	test-reviewed-source-state \
+	test-reviewed-source-state-store \
+	test-reviewed-source-lifecycle \
+	test-reviewed-source-acceptance \
+	test-reviewed-source-pinned-build \
+	test-reviewed-source-production-connection \
+	test-reviewed-source-projection \
+	test-reviewed-source-review \
+	test-reviewed-source-patch \
+	test-reviewed-source-presentation \
+	test-reviewed-source-git \
+	test-package-metadata \
+	test-package-metadata-integration \
+	test-shell-words \
+	test-source-environment \
+	test-artifact-workspace \
+	test-multiple-artifact-workspace \
+	test-makepkg-assignment-precedence \
+	test-artifact-identity \
+	test-multiple-artifact-identity \
+	test-package-base-artifact-install-plan \
+	test-artifact-install-executor \
+	test-package-base-artifact-install-executor \
+	test-separated-source-build \
+	test-separated-package-base-source-build \
+	test-production-source-build \
+	test-process-capture \
+	test-aur-update-plan \
+	test-upgrade-all-plan \
+	test-system-source-upgrade \
+	test-aur-update-query \
+	test-aur-update-command \
+	test-upgrade-all-command \
+	test-aur-update-execution-preflight \
+	test-aur-update-execution-preflight-integration \
+	test-aur-update-execution-preparation \
+	test-aur-update-execution-runner \
+	test-aur-update-operation-result \
+	test-filtered-aur-update-operation \
+	test-upgrade-all-operation \
+	test-cli-diagnostic-model \
+	test-runtime-cli-connection \
+	test-dependency-plan-model \
+	test-build-plan-artifact-target-projection \
+	test-unified-plan-observation \
+	test-observation-contract-gate \
+	test-unified-plan-projection \
+	test-projection-fixture-gate \
+	test-unified-plan-renderer \
+	test-repository-query \
+	test-artifact-install-plan \
+	test-artifact-selection-model \
+	test-artifact-identity-selection \
+	test-conflicts-replaces \
+	test-aur-rpc-validation \
+	test-cli-parser \
+	test-dry-run-command \
+	test-commands-inspect \
+	test-commands-source-maintenance \
+	test-commands-sync \
+	test-pacman-routing \
+	test-build-cache-symlink \
+	test-source-build \
+	test-source-selection \
+	test-needed-contract \
+	test-pkgbuild-export
 CMAKE_RELEASE_CTEST_TARGETS := \
 	localization-test \
 	localization-missing-catalog-test \
@@ -189,6 +287,7 @@ CCACHE    ?=
 CXXFLAGS  ?= -O2 -pipe
 LDFLAGS   ?=
 CPPFLAGS  ?=
+export CCACHE CPPFLAGS CXXFLAGS LDFLAGS
 PKG_CONFIG ?= pkg-config
 XGETTEXT ?= xgettext
 MSGMERGE ?= msgmerge
@@ -1823,7 +1922,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(UNIFIED_PLAN_RENDERER_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all cmake-production-configure cmake-test-configure cmake-test-build cmake-release-build test-cmake test-repository test-release-compat check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-relation-link-firewall check-package-relation-observation-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-host-release test-internal-identity test-application-identity test-interactive-confirmation test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-relation test-package-relation-observation test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-source-package-identity test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-dry-run-command test-commands-inspect test-commands-source-maintenance test-commands-sync test-fixture-authority test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check release-check-exclusive install uninstall
+.PHONY: all cmake-production-configure cmake-test-configure cmake-test-build cmake-release-build test-cmake test-repository test-release-compat check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-relation-link-firewall check-package-relation-observation-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-host-release test-internal-identity test-application-identity test-interactive-confirmation test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-relation test-package-relation-observation test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-source-package-identity test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-dry-run-command test-commands-inspect test-commands-source-maintenance test-commands-sync test-fixture-authority test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check release-check-exclusive install uninstall $(CMAKE_FOCUSED_ALIASES)
 .PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: check-source-package-identity-projection-link-firewall test-source-package-identity-projection
@@ -1858,12 +1957,22 @@ all: $(TARGET) $(MANPAGES)
 
 cmake-production-configure:
 	$(CMAKE) -S . -B $(CMAKE_PRODUCTION_BUILD_DIR) \
-		-DCMAKE_INSTALL_PREFIX=$(PREFIX) \
-		-DMOGUET_LOCALE_DIRECTORY=$(LOCALEDIR) \
+		"-DCMAKE_CXX_COMPILER=$(CXX)" \
+		"-DCMAKE_INSTALL_PREFIX=$(PREFIX)" \
+		"-DCMAKE_INSTALL_BINDIR=$(BINDIR)" \
+		"-DMOGUET_INSTALL_BASH_COMPLETION_DIRECTORY=$(COMPDIR)" \
+		"-DMOGUET_INSTALL_ZSH_COMPLETION_DIRECTORY=$(ZSHCOMPDIR)" \
+		"-DMOGUET_INSTALL_FISH_COMPLETION_DIRECTORY=$(FISHCOMPDIR)" \
+		"-DMOGUET_INSTALL_MAN1_DIRECTORY=$(MANDIR)" \
+		"-DMOGUET_INSTALL_JA_MAN1_DIRECTORY=$(JAMANDIR)" \
+		"-DMOGUET_INSTALL_LICENSE_DIRECTORY=$(LICENSEDIR)" \
+		"-DMOGUET_INSTALL_DOCUMENT_DIRECTORY=$(DOCDIR)" \
+		"-DMOGUET_LOCALE_DIRECTORY=$(LOCALEDIR)" \
 		-DBUILD_TESTING=OFF
 
 cmake-test-configure:
 	$(CMAKE) -S . -B $(CMAKE_CTEST_BUILD_DIR) \
+		"-DCMAKE_CXX_COMPILER=$(CXX)" \
 		-DBUILD_TESTING=ON
 
 cmake-test-build: cmake-test-configure
@@ -1875,6 +1984,16 @@ cmake-release-build: cmake-test-configure
 
 test-cmake: cmake-test-build
 	$(CTEST) --test-dir $(CMAKE_CTEST_BUILD_DIR) --output-on-failure
+
+# CMake owns the focused target/CTest mapping.  This frontend intentionally
+# carries no source closure, compile definition, include path, or link recipe.
+$(CMAKE_FOCUSED_ALIASES): cmake-test-configure
+	$(CMAKE) --build $(CMAKE_CTEST_BUILD_DIR) \
+		--target moguet-focus-$@
+
+check-reviewed-source-pinned-build-authority: cmake-test-configure
+	$(CMAKE) --build $(CMAKE_CTEST_BUILD_DIR) \
+		--target moguet-focus-test-reviewed-source-pinned-build
 
 check-localization-config:
 	@case '$(LOCALEDIR)' in \
@@ -1929,6 +2048,9 @@ check-libalpm:
 		exit 1; \
 	}
 
+# The legacy Make C++ graph remains as Slice 5 deletion material, but no
+# production or test frontend may instantiate these recipes after Slice 4.
+ifeq (legacy-cpp-build-authority-disabled,legacy-cpp-build-authority-enabled)
 $(OBJS) $(LIBALPM_BUILD_TARGETS): | check-libalpm check-localization-config
 $(BUILD_DIR)/localization.o $(LIBALPM_BUILD_TARGETS): $(LOCALIZATION_CONFIG_HEADER)
 $(APP_CONFIG_MODULE_TEST_TARGET) $(PROVIDER_SELECTION_TEST_TARGET): $(LOCALIZATION_CONFIG_HEADER)
@@ -2301,6 +2423,13 @@ ifeq ($(filter clean,$(MAKECMDGOALS)),)
 -include $(wildcard $(NON_HEAVY_DEPFILES))
 endif
 
+endif
+
+$(TARGET): cmake-production-configure
+	+$(CMAKE) --build $(CMAKE_PRODUCTION_BUILD_DIR) --target moguet
+	$(CMAKE) -E copy_if_different \
+		$(CMAKE_PRODUCTION_BUILD_DIR)/moguet $(TARGET)
+
 $(MANPAGE_EN): $(MANPAGE_EN_IN) $(VERSION_FILE)
 	@echo ":: Generating $@ (v$(VERSION))"
 	sed 's/@VERSION@/$(VERSION)/g' $(MANPAGE_EN_IN) > $@
@@ -2400,6 +2529,8 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -f $(TARGET)
 
+# Target-local legacy recipes are retained only as dormant Slice 5 material.
+ifeq (legacy-cpp-build-authority-disabled,legacy-cpp-build-authority-enabled)
 $(APPLICATION_IDENTITY_TEST_TARGET): $(APPLICATION_IDENTITY_TEST_SRCS) $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling application identity test binary"
@@ -2902,12 +3033,17 @@ $(PACKAGE_METADATA_INTEGRATION_TEST_TARGET): $(PACKAGE_METADATA_INTEGRATION_TEST
 	@echo ":: Compiling package metadata integration test binary"
 	$(call compile_non_heavy_test,PACKAGE_METADATA_INTEGRATION)
 
+endif
+
 test-internal-identity: $(MANPAGES)
 	python3 scripts/check-internal-identity.py
 
 test-cli-localization-surface: check-pot $(POT_FILE) $(POTFILES_FILE) scripts/check-cli-localization-surface.py
 	python3 scripts/check-cli-localization-surface.py
 
+# Slice 4 keeps these declarations for Slice 5 removal, but they must no
+# longer create an active Make-owned C++ compile/link or runtime path.
+ifeq (legacy-cpp-focused-authority-disabled,legacy-cpp-focused-authority-enabled)
 test-application-identity: $(APPLICATION_IDENTITY_TEST_TARGET)
 	$(abspath $(APPLICATION_IDENTITY_TEST_TARGET)) "$(VERSION)"
 
@@ -2924,6 +3060,8 @@ test-localization: check-catalogs $(LOCALIZATION_TEST_TARGET) $(LOCALIZATION_MIS
 		"$(MSGFMT)" \
 		$(abspath $(CLI_LOCALIZATION_TEST_TARGET))
 
+endif
+
 test-catalog-metadata-gate: $(PO_DIR)/ja.po $(POT_FILE) $(LINGUAS_FILE) $(POTFILES_FILE)
 	sh tests/test-catalog-metadata-gate.sh \
 		"$(MAKE)" \
@@ -2934,6 +3072,7 @@ test-catalog-metadata-gate: $(PO_DIR)/ja.po $(POT_FILE) $(LINGUAS_FILE) $(POTFIL
 		"$(MSGFMT)" \
 		"$(MSGGREP)"
 
+ifeq (legacy-cpp-focused-authority-disabled,legacy-cpp-focused-authority-enabled)
 test-xdg-paths: $(XDG_PATHS_TEST_TARGET)
 	$(abspath $(XDG_PATHS_TEST_TARGET))
 
@@ -3580,9 +3719,12 @@ check-multiple-artifact-identity-link-firewall:
 test-multiple-artifact-identity: check-multiple-artifact-identity-link-firewall $(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET)
 	$(abspath $(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET))
 
+endif
+
 test-artifact-identity-real-pacman:
 	sh tests/test-artifact-identity-real-pacman.sh
 
+ifeq (legacy-cpp-focused-authority-disabled,legacy-cpp-focused-authority-enabled)
 check-package-base-artifact-install-plan-link-firewall:
 	@echo ":: Checking PackageBase artifact install reason plan link firewall"
 	@set -e; for source in $(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_ALLOWED_PRODUCTION_TEST_SRCS); do \
@@ -4144,6 +4286,8 @@ check-artifact-identity-selection-link-firewall:
 test-artifact-identity-selection: check-artifact-identity-selection-link-firewall $(ARTIFACT_IDENTITY_SELECTION_TEST_TARGET)
 	$(abspath $(ARTIFACT_IDENTITY_SELECTION_TEST_TARGET))
 
+endif
+
 test-command-stub-contract:
 	sh tests/test-command-stub-contract.sh
 
@@ -4154,6 +4298,7 @@ test-markdown-links:
 	sh tests/test-markdown-links.sh \
 		$(abspath scripts/check-markdown-links.sh)
 
+ifeq (legacy-cpp-focused-authority-disabled,legacy-cpp-focused-authority-enabled)
 test-conflicts-replaces: $(TEST_TARGET)
 	sh tests/test-conflicts-replaces.sh $(abspath $(TEST_TARGET))
 
@@ -4172,6 +4317,8 @@ test-dry-run-command: $(TEST_TARGET) $(AUR_RPC_VALIDATION_TEST_TARGET)
 		$(abspath $(TEST_TARGET)) \
 		$(abspath $(AUR_RPC_VALIDATION_TEST_TARGET))
 
+endif
+
 test-completion-schema: scripts/generate_completions.py tests/test-completion-schema-validator.py
 	PYTHONDONTWRITEBYTECODE=1 python3 tests/test-completion-schema-validator.py
 
@@ -4184,6 +4331,7 @@ test-public-documentation: cmake-release-build check-completion-freshness test-c
 		$(abspath $(CMAKE_CTEST_BINARY_DIR)/moguet-cli-localization-test)
 	bash tests/test-static-completion.sh $(abspath $(BASH_COMPLETION))
 
+ifeq (legacy-cpp-focused-authority-disabled,legacy-cpp-focused-authority-enabled)
 test-commands-inspect: $(COMMANDS_INSPECT_TEST_TARGET) $(MO_FILES)
 	sh tests/test-commands-inspect.sh $(abspath $(COMMANDS_INSPECT_TEST_TARGET))
 
@@ -4199,6 +4347,8 @@ test-commands-source-maintenance: $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET)
 test-commands-sync: check-commands-sync-link-firewall $(COMMANDS_SYNC_TEST_TARGET)
 	sh tests/test-commands-sync.sh $(abspath $(COMMANDS_SYNC_TEST_TARGET))
 
+endif
+
 test-fixture-authority:
 	sh tests/test-fixture-authority.sh
 
@@ -4208,6 +4358,7 @@ test-live-contract:
 test-run-with-pty:
 	sh tests/test-run-with-pty.sh
 
+ifeq (legacy-cpp-focused-authority-disabled,legacy-cpp-focused-authority-enabled)
 test-pacman-routing: $(TEST_TARGET)
 	sh tests/test-pacman-routing.sh $(abspath $(TEST_TARGET))
 
@@ -4229,12 +4380,15 @@ test-source-build: $(AUR_RPC_VALIDATION_TEST_TARGET) $(UPGRADE_BASELINE_METADATA
 test-source-selection: $(AUR_RPC_VALIDATION_TEST_TARGET)
 	sh tests/test-source-selection.sh $(abspath $(AUR_RPC_VALIDATION_TEST_TARGET))
 
+endif
+
 test-install-layout: $(TARGET) $(MANPAGES) $(COMPLETION_FILES) $(PROJECT_LICENSE_FILES) $(COMPLIANCE_DOC_FILES) $(PUBLIC_DOC_FILES)
 	sh tests/test-install-layout.sh
 
 test-package-transition: $(TARGET) $(MANPAGES) $(COMPLETION_FILES) $(PROJECT_LICENSE_FILES) $(COMPLIANCE_DOC_FILES) $(PUBLIC_DOC_FILES)
 	sh tests/test-package-transition.sh
 
+ifeq (legacy-cpp-focused-authority-disabled,legacy-cpp-focused-authority-enabled)
 # POLICY(#352): --needed CLI characterization keeps every production TU while
 # strict repository discovery reads a case-local libalpm snapshot.
 test-needed-contract: $(AUR_RPC_VALIDATION_TEST_TARGET)
@@ -4242,6 +4396,8 @@ test-needed-contract: $(AUR_RPC_VALIDATION_TEST_TARGET)
 
 test-pkgbuild-export: $(TEST_TARGET)
 	sh tests/test-pkgbuild-export.sh $(abspath $(TEST_TARGET))
+
+endif
 
 test-container:
 	@set -eu; \
@@ -4353,48 +4509,9 @@ install: check-completion-freshness $(TARGET) $(MANPAGES) $(COMPLETION_FILES) $(
 	@echo ":: Installing canonical CMake payload..."
 	DESTDIR="$(DESTDIR)" $(CMAKE) --install $(CMAKE_PRODUCTION_BUILD_DIR)
 
-uninstall: check-localization-config
-	@echo ":: Removing binary..."
-	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
-
-	@echo ":: Removing message catalogs..."
-	@set -e; for locale in $(LINGUAS); do \
-		rm -f "$(DESTDIR)$(LOCALEDIR)/$$locale/LC_MESSAGES/$(GETTEXT_DOMAIN).mo"; \
-		rmdir "$(DESTDIR)$(LOCALEDIR)/$$locale/LC_MESSAGES" 2>/dev/null || true; \
-		rmdir "$(DESTDIR)$(LOCALEDIR)/$$locale" 2>/dev/null || true; \
-	done
-
-	@echo ":: Removing bash completion..."
-	rm -f $(DESTDIR)$(COMPDIR)/moguet
-
-	@echo ":: Removing zsh completion..."
-	rm -f $(DESTDIR)$(ZSHCOMPDIR)/_moguet
-
-	@echo ":: Removing fish completion..."
-	rm -f $(DESTDIR)$(FISHCOMPDIR)/moguet.fish
-
-	@echo ":: Removing English and Japanese man pages..."
-	rm -f $(DESTDIR)$(MANDIR)/moguet.1
-	rm -f $(DESTDIR)$(JAMANDIR)/moguet.1
-
-	@echo ":: Removing license files..."
-	rm -f $(DESTDIR)$(LICENSEDIR)/LICENSE
-	rm -f $(DESTDIR)$(LICENSEDIR)/jpacker-MIT-legacy.txt
-	rm -f $(DESTDIR)$(LICENSEDIR)/curl.txt
-	rm -f $(DESTDIR)$(LICENSEDIR)/nlohmann-json-MIT.txt
-	rm -f $(DESTDIR)$(LICENSEDIR)/tomlplusplus-MIT.txt
-	rm -f $(DESTDIR)$(LICENSEDIR)/bjoern-hoehrmann-utf8-MIT.txt
-	@rmdir $(DESTDIR)$(LICENSEDIR) 2>/dev/null || true
-
-	@echo ":: Removing documentation..."
-	rm -f $(DESTDIR)$(DOCDIR)/README.md
-	rm -f $(DESTDIR)$(DOCDIR)/README.ja.md
-	rm -f $(DESTDIR)$(DOCDIR)/THIRD_PARTY_NOTICES.md
-	rm -f $(DESTDIR)$(DOCDIR)/docs/LICENSING.md
-	rm -f $(DESTDIR)$(DOCDIR)/docs/migration/v1-to-v2.md
-	rm -f $(DESTDIR)$(DOCDIR)/docs/migration/v1-to-v2.ja.md
-	@rmdir $(DESTDIR)$(DOCDIR)/docs/migration 2>/dev/null || true
-	@rmdir $(DESTDIR)$(DOCDIR)/docs 2>/dev/null || true
-	@rmdir $(DESTDIR)$(DOCDIR) 2>/dev/null || true
+uninstall: cmake-production-configure
+	@echo ":: Removing canonical CMake payload..."
+	DESTDIR="$(DESTDIR)" $(CMAKE) --build $(CMAKE_PRODUCTION_BUILD_DIR) \
+		--target uninstall
 
 -include $(DEPS)

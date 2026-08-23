@@ -605,13 +605,9 @@ moguet_add_ctest(
         ${_moguet_renderer_probe_symbols}
 )
 
-# Keep the baseline-success + ten expected-private-diagnostic compile contract
-# in its existing GNU Make authority while CTest owns invocation/reporting.
-find_program(_moguet_gnu_make_executable NAMES make gmake)
-if(NOT _moguet_gnu_make_executable)
-    message(FATAL_ERROR "GNU Make is required for the negative compile contract")
-endif()
-
+# Keep the baseline-success + ten expected-private-diagnostic contract under
+# the configured CMake compiler, launcher, and compile profile.  Files carry
+# raw external values without re-encoding semicolons through `cmake -D`.
 set(
     _moguet_negative_compile_state_dir
     "${CMAKE_CURRENT_BINARY_DIR}/moguet-negative-compile"
@@ -622,6 +618,14 @@ set(
     "${_moguet_negative_compile_state_dir}/cxx.txt"
 )
 set(
+    _moguet_negative_compile_cxx_arg1_file
+    "${_moguet_negative_compile_state_dir}/cxx-arg1.txt"
+)
+set(
+    _moguet_negative_compile_launcher_file
+    "${_moguet_negative_compile_state_dir}/launcher.txt"
+)
+set(
     _moguet_negative_compile_cppflags_file
     "${_moguet_negative_compile_state_dir}/cppflags.txt"
 )
@@ -629,7 +633,28 @@ set(
     _moguet_negative_compile_cxxflags_file
     "${_moguet_negative_compile_state_dir}/cxxflags.txt"
 )
+set(
+    _moguet_negative_compile_configuration_flags_file
+    "${_moguet_negative_compile_state_dir}/configuration-flags.txt"
+)
+set(
+    _moguet_negative_compile_project_options_file
+    "${_moguet_negative_compile_state_dir}/project-options.txt"
+)
 file(WRITE "${_moguet_negative_compile_cxx_file}" "${CMAKE_CXX_COMPILER}")
+file(
+    WRITE
+    "${_moguet_negative_compile_cxx_arg1_file}"
+    "${CMAKE_CXX_COMPILER_ARG1}"
+)
+file(WRITE "${_moguet_negative_compile_launcher_file}" "")
+foreach(_moguet_launcher_argument IN LISTS CMAKE_CXX_COMPILER_LAUNCHER)
+    file(
+        APPEND
+        "${_moguet_negative_compile_launcher_file}"
+        "${_moguet_launcher_argument}\n"
+    )
+endforeach()
 file(
     WRITE
     "${_moguet_negative_compile_cppflags_file}"
@@ -640,24 +665,96 @@ file(
     "${_moguet_negative_compile_cxxflags_file}"
     "${CMAKE_CXX_FLAGS}"
 )
+set(_moguet_negative_compile_configuration_flags "")
+if(NOT CMAKE_BUILD_TYPE STREQUAL "")
+    string(
+        TOUPPER
+        "${CMAKE_BUILD_TYPE}"
+        _moguet_negative_compile_configuration
+    )
+    set(
+        _moguet_negative_compile_configuration_flags
+        "${CMAKE_CXX_FLAGS_${_moguet_negative_compile_configuration}}"
+    )
+endif()
+file(
+    WRITE
+    "${_moguet_negative_compile_configuration_flags_file}"
+    "${_moguet_negative_compile_configuration_flags}"
+)
+
+if(NOT CMAKE_CXX20_STANDARD_COMPILE_OPTION)
+    message(
+        FATAL_ERROR
+        "The configured compiler has no strict C++20 compile option"
+    )
+endif()
+set(
+    _moguet_negative_compile_project_options
+    "${CMAKE_CXX20_STANDARD_COMPILE_OPTION}"
+    -Wall
+    -Wextra
+)
+if(
+    MOGUET_ENABLE_DEFAULT_COMPILE_OPTIONS
+    AND CMAKE_CXX_FLAGS STREQUAL ""
+    AND CMAKE_BUILD_TYPE STREQUAL ""
+    AND NOT CMAKE_CONFIGURATION_TYPES
+)
+    list(
+        APPEND
+        _moguet_negative_compile_project_options
+        -O2
+        -pipe
+    )
+endif()
+list(
+    APPEND
+    _moguet_negative_compile_project_options
+    "-DMOGUET_VERSION=\"${MOGUET_VERSION}\""
+    "-I${MOGUET_GENERATED_INCLUDE_DIR}"
+    "-I${CMAKE_CURRENT_SOURCE_DIR}/source"
+)
+file(WRITE "${_moguet_negative_compile_project_options_file}" "")
+foreach(
+    _moguet_negative_compile_project_option
+    IN LISTS _moguet_negative_compile_project_options
+)
+    file(
+        APPEND
+        "${_moguet_negative_compile_project_options_file}"
+        "${_moguet_negative_compile_project_option}\n"
+    )
+endforeach()
 
 moguet_add_ctest(
     NAME build_contract.reviewed_source_authority_negative
     COMMAND
         "${CMAKE_COMMAND}"
-        "-DMOGUET_NEGATIVE_COMPILE_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-        "-DMOGUET_NEGATIVE_COMPILE_MAKE_EXECUTABLE=${_moguet_gnu_make_executable}"
+        "-DMOGUET_NEGATIVE_COMPILE_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/reviewed_source_authority_negative_test.cpp"
         "-DMOGUET_NEGATIVE_COMPILE_CXX_FILE=${_moguet_negative_compile_cxx_file}"
+        "-DMOGUET_NEGATIVE_COMPILE_CXX_ARG1_FILE=${_moguet_negative_compile_cxx_arg1_file}"
+        "-DMOGUET_NEGATIVE_COMPILE_LAUNCHER_FILE=${_moguet_negative_compile_launcher_file}"
         "-DMOGUET_NEGATIVE_COMPILE_CPPFLAGS_FILE=${_moguet_negative_compile_cppflags_file}"
         "-DMOGUET_NEGATIVE_COMPILE_CXXFLAGS_FILE=${_moguet_negative_compile_cxxflags_file}"
+        "-DMOGUET_NEGATIVE_COMPILE_CONFIGURATION_FLAGS_FILE=${_moguet_negative_compile_configuration_flags_file}"
+        "-DMOGUET_NEGATIVE_COMPILE_PROJECT_OPTIONS_FILE=${_moguet_negative_compile_project_options_file}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/MoguetNegativeCompile.cmake"
 )
 
-unset(_moguet_gnu_make_executable CACHE)
 unset(_moguet_negative_compile_state_dir)
 unset(_moguet_negative_compile_cxx_file)
+unset(_moguet_negative_compile_cxx_arg1_file)
+unset(_moguet_negative_compile_launcher_file)
 unset(_moguet_negative_compile_cppflags_file)
 unset(_moguet_negative_compile_cxxflags_file)
+unset(_moguet_negative_compile_configuration_flags)
+unset(_moguet_negative_compile_configuration)
+unset(_moguet_negative_compile_configuration_flags_file)
+unset(_moguet_negative_compile_project_options)
+unset(_moguet_negative_compile_project_option)
+unset(_moguet_negative_compile_project_options_file)
+unset(_moguet_launcher_argument)
 unset(_moguet_nm_command)
 unset(_moguet_nm_firewall_driver)
 unset(_moguet_projection_forbidden_symbol_pattern)

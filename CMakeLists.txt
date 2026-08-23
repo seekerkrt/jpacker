@@ -7,8 +7,48 @@ set(_moguet_cxxflags_defined_before_project OFF)
 if(DEFINED ENV{CXXFLAGS} OR DEFINED CACHE{CMAKE_CXX_FLAGS})
     set(_moguet_cxxflags_defined_before_project ON)
 endif()
+set(_moguet_cxxflags_environment_defined OFF)
+if(DEFINED ENV{CXXFLAGS})
+    set(_moguet_cxxflags_environment_defined ON)
+endif()
 
 project(Moguet LANGUAGES CXX)
+
+# CMake uses CXXFLAGS and LDFLAGS only to initialize a new cache.  The Make
+# and PKGBUILD frontends reuse persistent trees, so an explicitly exported
+# value (including an empty one) is the current invocation's authority.
+if(DEFINED ENV{CXXFLAGS})
+    set(
+        CMAKE_CXX_FLAGS
+        "$ENV{CXXFLAGS}"
+        CACHE STRING
+        "Flags used by the CXX compiler during all build types"
+        FORCE
+    )
+endif()
+if(DEFINED ENV{LDFLAGS})
+    set(
+        CMAKE_EXE_LINKER_FLAGS
+        "$ENV{LDFLAGS}"
+        CACHE STRING
+        "Flags used by the linker during all executable builds"
+        FORCE
+    )
+endif()
+if(DEFINED ENV{CCACHE})
+    separate_arguments(
+        _moguet_cxx_compiler_launcher
+        UNIX_COMMAND
+        "$ENV{CCACHE}"
+    )
+    set(
+        CMAKE_CXX_COMPILER_LAUNCHER
+        "${_moguet_cxx_compiler_launcher}"
+        CACHE STRING
+        "Launcher used for Moguet C++ compilation"
+        FORCE
+    )
+endif()
 
 include(CTest)
 include(GNUInstallDirs)
@@ -146,16 +186,25 @@ endif()
 
 add_custom_target(moguet_catalogs ALL DEPENDS ${MOGUET_CATALOG_FILES})
 
-# CMake initializes CMAKE_CXX_FLAGS and the linker flag caches from CXXFLAGS
-# and LDFLAGS. It does not consume CPPFLAGS, so capture that external input
-# once with the same cache semantics. Change it in an existing tree with
-# -DMOGUET_CPPFLAGS:STRING=..., or configure a fresh tree.
-set(
-    MOGUET_CPPFLAGS
-    "$ENV{CPPFLAGS}"
-    CACHE STRING
-    "External preprocessor flags initialized from environment CPPFLAGS"
-)
+# CMake does not consume CPPFLAGS.  Match the current-invocation semantics
+# above whenever a frontend exports it, while retaining an explicit CMake
+# cache value for callers that configure without an environment value.
+if(DEFINED ENV{CPPFLAGS})
+    set(
+        MOGUET_CPPFLAGS
+        "$ENV{CPPFLAGS}"
+        CACHE STRING
+        "External preprocessor flags synchronized from CPPFLAGS"
+        FORCE
+    )
+elseif(NOT DEFINED CACHE{MOGUET_CPPFLAGS})
+    set(
+        MOGUET_CPPFLAGS
+        ""
+        CACHE STRING
+        "External preprocessor flags synchronized from CPPFLAGS"
+    )
+endif()
 
 function(
     moguet_parse_external_compile_flags
@@ -261,8 +310,13 @@ if(NOT _moguet_cppflag_option_group STREQUAL "")
     )
 endif()
 
-if(NOT DEFINED MOGUET_ENABLE_DEFAULT_COMPILE_OPTIONS)
-    if(_moguet_cxxflags_defined_before_project)
+if(
+    _moguet_cxxflags_environment_defined
+    OR NOT DEFINED MOGUET_ENABLE_DEFAULT_COMPILE_OPTIONS
+)
+    if(_moguet_cxxflags_environment_defined)
+        set(_moguet_enable_default_compile_options OFF)
+    elseif(_moguet_cxxflags_defined_before_project)
         set(_moguet_enable_default_compile_options OFF)
     else()
         set(_moguet_enable_default_compile_options ON)
@@ -272,6 +326,7 @@ if(NOT DEFINED MOGUET_ENABLE_DEFAULT_COMPILE_OPTIONS)
         "${_moguet_enable_default_compile_options}"
         CACHE BOOL
         "Use Moguet's -O2 and -pipe defaults for a plain developer build"
+        FORCE
     )
 endif()
 
@@ -508,25 +563,68 @@ foreach(_moguet_locale _moguet_catalog_file IN ZIP_LISTS MOGUET_LINGUAS MOGUET_C
     )
 endforeach()
 
-# Completion and locale locations intentionally retain the legacy Arch
-# package contract and therefore do not follow a non-/usr development prefix.
+set(
+    MOGUET_INSTALL_BASH_COMPLETION_DIRECTORY
+    "/usr/share/bash-completion/completions"
+    CACHE PATH
+    "Installation directory for the bash completion"
+)
+set(
+    MOGUET_INSTALL_ZSH_COMPLETION_DIRECTORY
+    "/usr/share/zsh/site-functions"
+    CACHE PATH
+    "Installation directory for the zsh completion"
+)
+set(
+    MOGUET_INSTALL_FISH_COMPLETION_DIRECTORY
+    "/usr/share/fish/vendor_completions.d"
+    CACHE PATH
+    "Installation directory for the fish completion"
+)
+set(
+    MOGUET_INSTALL_MAN1_DIRECTORY
+    "${CMAKE_INSTALL_MANDIR}/man1"
+    CACHE PATH
+    "Installation directory for the English man page"
+)
+set(
+    MOGUET_INSTALL_JA_MAN1_DIRECTORY
+    "${CMAKE_INSTALL_MANDIR}/ja/man1"
+    CACHE PATH
+    "Installation directory for the Japanese man page"
+)
+set(
+    MOGUET_INSTALL_LICENSE_DIRECTORY
+    "share/licenses/moguet"
+    CACHE PATH
+    "Installation directory for Moguet license files"
+)
+set(
+    MOGUET_INSTALL_DOCUMENT_DIRECTORY
+    "share/doc/moguet"
+    CACHE PATH
+    "Installation directory for Moguet documentation"
+)
+
+# Completion and locale defaults intentionally retain the legacy Arch package
+# contract and therefore do not follow a non-/usr development prefix.  The
+# cache variables keep Make destination overrides inside this install graph.
 install(
     FILES completions/moguet.bash
-    DESTINATION "/usr/share/bash-completion/completions"
+    DESTINATION "${MOGUET_INSTALL_BASH_COMPLETION_DIRECTORY}"
     RENAME moguet
 )
 install(
     FILES completions/_moguet
-    DESTINATION "/usr/share/zsh/site-functions"
+    DESTINATION "${MOGUET_INSTALL_ZSH_COMPLETION_DIRECTORY}"
 )
 install(
     FILES completions/moguet.fish
-    DESTINATION "/usr/share/fish/vendor_completions.d"
+    DESTINATION "${MOGUET_INSTALL_FISH_COMPLETION_DIRECTORY}"
 )
-install(FILES man/moguet.1 DESTINATION "${CMAKE_INSTALL_MANDIR}/man1")
-install(FILES man/ja/moguet.1 DESTINATION "${CMAKE_INSTALL_MANDIR}/ja/man1")
+install(FILES man/moguet.1 DESTINATION "${MOGUET_INSTALL_MAN1_DIRECTORY}")
+install(FILES man/ja/moguet.1 DESTINATION "${MOGUET_INSTALL_JA_MAN1_DIRECTORY}")
 
-set(MOGUET_INSTALL_LICENSE_DIRECTORY "share/licenses/moguet")
 install(
     FILES
         LICENSE
@@ -538,7 +636,6 @@ install(
     DESTINATION "${MOGUET_INSTALL_LICENSE_DIRECTORY}"
 )
 
-set(MOGUET_INSTALL_DOCUMENT_DIRECTORY "share/doc/moguet")
 install(
     FILES
         README.md
@@ -555,6 +652,19 @@ install(
         docs/migration/v1-to-v2.md
         docs/migration/v1-to-v2.ja.md
     DESTINATION "${MOGUET_INSTALL_DOCUMENT_DIRECTORY}/docs/migration"
+)
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/MoguetUninstall.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/MoguetUninstall.cmake"
+    @ONLY
+)
+add_custom_target(
+    uninstall
+    COMMAND
+        "${CMAKE_COMMAND}"
+        -P "${CMAKE_CURRENT_BINARY_DIR}/MoguetUninstall.cmake"
+    COMMENT "Removing files recorded by the canonical CMake install manifest"
 )
 
 if(BUILD_TESTING)
