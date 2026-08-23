@@ -18,6 +18,7 @@ RUN . /tmp/moguet-live-aur/load-case.sh \
     && pacman -Syu --needed --noconfirm \
         acl \
         base-devel \
+        cmake \
         curl \
         git \
         libarchive \

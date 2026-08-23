@@ -11,6 +11,7 @@ endif()
 project(Moguet LANGUAGES CXX)
 
 include(CTest)
+include(GNUInstallDirs)
 
 include(cmake/MoguetSources.cmake)
 
@@ -61,6 +62,89 @@ configure_file(
     "${MOGUET_GENERATED_INCLUDE_DIR}/localization_config.hpp"
     @ONLY
 )
+
+# Production catalogs are runtime artifacts, not test fixtures.  Keep their
+# build and install graph available even when package builds disable CTest.
+find_program(MOGUET_MSGFMT_EXECUTABLE NAMES msgfmt)
+if(NOT MOGUET_MSGFMT_EXECUTABLE)
+    message(FATAL_ERROR "msgfmt is required to build the message catalogs")
+endif()
+
+function(moguet_add_catalog output_file input_file check_format)
+    get_filename_component(_moguet_catalog_directory "${output_file}" DIRECTORY)
+    set(_moguet_catalog_temporary_file "${output_file}.tmp")
+    if(check_format)
+        set(
+            _moguet_msgfmt_options
+            --check
+            --check-format
+            --check-domain
+        )
+    else()
+        set(_moguet_msgfmt_options --check-header --check-domain)
+    endif()
+
+    add_custom_command(
+        OUTPUT "${output_file}"
+        COMMAND
+            "${CMAKE_COMMAND}" -E make_directory
+            "${_moguet_catalog_directory}"
+        COMMAND
+            "${CMAKE_COMMAND}" -E rm -f
+            "${_moguet_catalog_temporary_file}"
+        COMMAND
+            "${MOGUET_MSGFMT_EXECUTABLE}"
+            ${_moguet_msgfmt_options}
+            "--output-file=${_moguet_catalog_temporary_file}"
+            "${input_file}"
+        COMMAND
+            "${CMAKE_COMMAND}" -E rename
+            "${_moguet_catalog_temporary_file}"
+            "${output_file}"
+        DEPENDS "${input_file}"
+        COMMENT "Compiling message catalog ${input_file}"
+        VERBATIM
+    )
+endfunction()
+
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/po/LINGUAS" MOGUET_LINGUAS)
+list(FILTER MOGUET_LINGUAS EXCLUDE REGEX "^[ \t]*(#|$)")
+if(NOT MOGUET_LINGUAS)
+    message(FATAL_ERROR "po/LINGUAS must declare at least one locale")
+endif()
+
+set(MOGUET_CATALOG_FILES "")
+foreach(_moguet_locale IN LISTS MOGUET_LINGUAS)
+    string(STRIP "${_moguet_locale}" _moguet_locale)
+    if(NOT _moguet_locale MATCHES "^[A-Za-z0-9_.@-]+$")
+        message(FATAL_ERROR "Invalid locale token in po/LINGUAS: ${_moguet_locale}")
+    endif()
+
+    set(_moguet_catalog_source "${CMAKE_CURRENT_SOURCE_DIR}/po/${_moguet_locale}.po")
+    if(NOT EXISTS "${_moguet_catalog_source}")
+        message(FATAL_ERROR "Missing catalog source: ${_moguet_catalog_source}")
+    endif()
+
+    set(
+        _moguet_catalog_file
+        "${CMAKE_CURRENT_BINARY_DIR}/locale/${_moguet_locale}/LC_MESSAGES/moguet.mo"
+    )
+    moguet_add_catalog(
+        "${_moguet_catalog_file}"
+        "${_moguet_catalog_source}"
+        TRUE
+    )
+    list(APPEND MOGUET_CATALOG_FILES "${_moguet_catalog_file}")
+    if(_moguet_locale STREQUAL "ja")
+        set(MOGUET_JA_CATALOG "${_moguet_catalog_file}")
+    endif()
+endforeach()
+
+if(NOT MOGUET_JA_CATALOG)
+    message(FATAL_ERROR "po/LINGUAS must retain the supported ja catalog")
+endif()
+
+add_custom_target(moguet_catalogs ALL DEPENDS ${MOGUET_CATALOG_FILES})
 
 # CMake initializes CMAKE_CXX_FLAGS and the linker flag caches from CXXFLAGS
 # and LDFLAGS. It does not consume CPPFLAGS, so capture that external input
@@ -413,6 +497,64 @@ target_link_libraries(
     PRIVATE
         CURL::libcurl
         PkgConfig::ALPM
+)
+add_dependencies(moguet moguet_catalogs)
+
+install(TARGETS moguet RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+foreach(_moguet_locale _moguet_catalog_file IN ZIP_LISTS MOGUET_LINGUAS MOGUET_CATALOG_FILES)
+    install(
+        FILES "${_moguet_catalog_file}"
+        DESTINATION "${MOGUET_LOCALE_DIRECTORY}/${_moguet_locale}/LC_MESSAGES"
+    )
+endforeach()
+
+# Completion and locale locations intentionally retain the legacy Arch
+# package contract and therefore do not follow a non-/usr development prefix.
+install(
+    FILES completions/moguet.bash
+    DESTINATION "/usr/share/bash-completion/completions"
+    RENAME moguet
+)
+install(
+    FILES completions/_moguet
+    DESTINATION "/usr/share/zsh/site-functions"
+)
+install(
+    FILES completions/moguet.fish
+    DESTINATION "/usr/share/fish/vendor_completions.d"
+)
+install(FILES man/moguet.1 DESTINATION "${CMAKE_INSTALL_MANDIR}/man1")
+install(FILES man/ja/moguet.1 DESTINATION "${CMAKE_INSTALL_MANDIR}/ja/man1")
+
+set(MOGUET_INSTALL_LICENSE_DIRECTORY "share/licenses/moguet")
+install(
+    FILES
+        LICENSE
+        LICENSES/jpacker-MIT-legacy.txt
+        LICENSES/curl.txt
+        LICENSES/nlohmann-json-MIT.txt
+        LICENSES/tomlplusplus-MIT.txt
+        LICENSES/bjoern-hoehrmann-utf8-MIT.txt
+    DESTINATION "${MOGUET_INSTALL_LICENSE_DIRECTORY}"
+)
+
+set(MOGUET_INSTALL_DOCUMENT_DIRECTORY "share/doc/moguet")
+install(
+    FILES
+        README.md
+        README.ja.md
+        THIRD_PARTY_NOTICES.md
+    DESTINATION "${MOGUET_INSTALL_DOCUMENT_DIRECTORY}"
+)
+install(
+    FILES docs/LICENSING.md
+    DESTINATION "${MOGUET_INSTALL_DOCUMENT_DIRECTORY}/docs"
+)
+install(
+    FILES
+        docs/migration/v1-to-v2.md
+        docs/migration/v1-to-v2.ja.md
+    DESTINATION "${MOGUET_INSTALL_DOCUMENT_DIRECTORY}/docs/migration"
 )
 
 if(BUILD_TESTING)

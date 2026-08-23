@@ -248,6 +248,10 @@ FINAL_REPOSITORY_TOKEN_COUNTS = {
 
 
 ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
+    "CMakeLists.txt": allowances(
+        "historical-license-file",
+        historical_license_filename,
+    ),
     "AGENTS.md": allowances(
         "legacy-storage-path",
         legacy_etc_path,

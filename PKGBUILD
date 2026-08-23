@@ -22,7 +22,7 @@ depends=('curl' 'git' 'libalpm.so' 'libarchive' 'nano' 'pacman' 'sudo')
 # makepkg assumes base-devel is already installed. Its current members provide
 # gettext and pkgconf, while git is already a runtime dependency. Only
 # additional build-time packages belong in this metadata.
-makedepends=('nlohmann-json' 'tomlplusplus')
+makedepends=('cmake' 'nlohmann-json' 'tomlplusplus')
 
 # Moguet and jpacker v1.16.0 have disjoint package payloads. Do not add
 # provides/conflicts/replaces: there is no jpacker command alias, coexistence
@@ -44,12 +44,14 @@ pkgver() {
 }
 
 build() {
-    # git cloneされたディレクトリに入る
-    cd "$_srcname"
-    make
+    cmake -S "$_srcname" -B build \
+        -DCMAKE_BUILD_TYPE=None \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DMOGUET_LOCALE_DIRECTORY=/usr/share/locale \
+        -DBUILD_TESTING=OFF
+    cmake --build build
 }
 
 package() {
-    cd "$_srcname"
-    make PREFIX=/usr DESTDIR="$pkgdir" install
+    DESTDIR="$pkgdir" cmake --install build
 }

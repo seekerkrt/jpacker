@@ -235,13 +235,18 @@ exec "$1"
         sh "$<TARGET_FILE:makepkg-assignment-precedence-test>"
 )
 
+set(
+    MOGUET_PRODUCTION_SOURCE_BUILD_TEST_ROOT
+    "${CMAKE_CURRENT_BINARY_DIR}/tests/production-source-build-preferences"
+)
+file(MAKE_DIRECTORY "${MOGUET_PRODUCTION_SOURCE_BUILD_TEST_ROOT}/home")
 moguet_add_ctest(
     NAME cpp.production_source_build
     TARGETS production-source-build-test
     COMMAND "$<TARGET_FILE:production-source-build-test>"
     ENVIRONMENT
-        "XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/tests/production-source-build-preferences/config"
-        "HOME=${CMAKE_CURRENT_BINARY_DIR}/tests/production-source-build-preferences/home"
+        "XDG_CONFIG_HOME=${MOGUET_PRODUCTION_SOURCE_BUILD_TEST_ROOT}/config"
+        "HOME=${MOGUET_PRODUCTION_SOURCE_BUILD_TEST_ROOT}/home"
 )
 
 moguet_add_ctest(

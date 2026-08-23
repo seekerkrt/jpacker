@@ -34,7 +34,7 @@ set(
 )
 set(
     MOGUET_TEST_JA_CATALOG
-    "${MOGUET_TEST_CATALOG_DIR}/ja/LC_MESSAGES/moguet.mo"
+    "${MOGUET_JA_CATALOG}"
 )
 set(
     MOGUET_TEST_ZZ_CATALOG
@@ -45,64 +45,12 @@ set(
     "${MOGUET_TEST_CATALOG_DIR}/broken/LC_MESSAGES/moguet.mo"
 )
 
-find_program(MOGUET_MSGFMT_EXECUTABLE NAMES msgfmt)
-if(NOT MOGUET_MSGFMT_EXECUTABLE)
-    message(FATAL_ERROR "msgfmt is required to build the C++ test catalogs")
-endif()
-
-function(
-    _moguet_add_test_catalog
-    output_file
-    input_file
-    check_format
-)
-    get_filename_component(_moguet_catalog_directory "${output_file}" DIRECTORY)
-    set(_moguet_catalog_temporary_file "${output_file}.tmp")
-    if(check_format)
-        set(
-            _moguet_msgfmt_options
-            --check
-            --check-format
-            --check-domain
-        )
-    else()
-        set(_moguet_msgfmt_options --check-header --check-domain)
-    endif()
-
-    add_custom_command(
-        OUTPUT "${output_file}"
-        COMMAND
-            "${CMAKE_COMMAND}" -E make_directory
-            "${_moguet_catalog_directory}"
-        COMMAND
-            "${CMAKE_COMMAND}" -E rm -f
-            "${_moguet_catalog_temporary_file}"
-        COMMAND
-            "${MOGUET_MSGFMT_EXECUTABLE}"
-            ${_moguet_msgfmt_options}
-            "--output-file=${_moguet_catalog_temporary_file}"
-            "${input_file}"
-        COMMAND
-            "${CMAKE_COMMAND}" -E rename
-            "${_moguet_catalog_temporary_file}"
-            "${output_file}"
-        DEPENDS "${input_file}"
-        COMMENT "Compiling test catalog ${input_file}"
-        VERBATIM
-    )
-endfunction()
-
-_moguet_add_test_catalog(
-    "${MOGUET_TEST_JA_CATALOG}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/po/ja.po"
-    TRUE
-)
-_moguet_add_test_catalog(
+moguet_add_catalog(
     "${MOGUET_TEST_ZZ_CATALOG}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/localization/zz.po"
     TRUE
 )
-_moguet_add_test_catalog(
+moguet_add_catalog(
     "${MOGUET_TEST_BROKEN_CATALOG}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/localization/invalid-format.po"
     FALSE
@@ -110,10 +58,10 @@ _moguet_add_test_catalog(
 add_custom_target(
     moguet_test_catalogs ALL
     DEPENDS
-        "${MOGUET_TEST_JA_CATALOG}"
         "${MOGUET_TEST_ZZ_CATALOG}"
         "${MOGUET_TEST_BROKEN_CATALOG}"
 )
+add_dependencies(moguet_test_catalogs moguet_catalogs)
 
 function(_moguet_normalize_source_path output_variable input_path)
     if(input_path MATCHES "^\\$<")

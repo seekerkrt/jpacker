@@ -13,6 +13,7 @@ RUN pacman-key --init \
     && pacman -Syu --needed --noconfirm \
         base-devel \
         bash \
+        cmake \
         curl \
         fish \
         git \
@@ -77,7 +78,7 @@ RUN bsdtar -cf \
 RUN set -eu; \
     printf '%s\n' ':: Arch validation environment'; \
     sed -n '1,8p' /etc/os-release; \
-    command -v g++ make makepkg pacman pkg-config msgfmt python3 bash zsh fish \
+    command -v cmake ctest g++ make makepkg pacman pkg-config msgfmt python3 bash zsh fish \
         localedef script bsdtar readelf >/dev/null; \
     test "$(LC_ALL=en_US.UTF-8 locale charmap)" = UTF-8; \
     pkg-config --exists libalpm; \
