@@ -10,6 +10,8 @@ endif()
 
 project(Moguet LANGUAGES CXX)
 
+include(CTest)
+
 include(cmake/MoguetSources.cmake)
 
 find_package(CURL REQUIRED)
@@ -240,33 +242,179 @@ if(ALPM_CFLAGS_OTHER)
     )
 endif()
 
-add_library(moguet_production_objects OBJECT ${MOGUET_PRODUCTION_SOURCES})
-set_target_properties(
-    moguet_production_objects
-    PROPERTIES
-        CXX_STANDARD 20
-        CXX_STANDARD_REQUIRED YES
-        CXX_EXTENSIONS NO
+# These two translation units have undefined-symbol firewalls. Keep the exact
+# objects consumed by production addressable so CTest can inspect them without
+# substituting a broad archive, a final executable, or a separately compiled
+# probe object.
+set(
+    MOGUET_UNIFIED_PLAN_PROJECTION_SOURCE
+    source/unified_plan_projection.cpp
 )
-target_link_libraries(
+set(
+    MOGUET_UNIFIED_PLAN_RENDERER_SOURCE
+    source/unified_plan_renderer.cpp
+)
+set(
+    MOGUET_ADDRESSABLE_PRODUCTION_SOURCES
+    "${MOGUET_UNIFIED_PLAN_PROJECTION_SOURCE}"
+    "${MOGUET_UNIFIED_PLAN_RENDERER_SOURCE}"
+)
+set(
+    _moguet_unique_addressable_production_sources
+    ${MOGUET_ADDRESSABLE_PRODUCTION_SOURCES}
+)
+list(REMOVE_DUPLICATES _moguet_unique_addressable_production_sources)
+list(
+    LENGTH
+    MOGUET_ADDRESSABLE_PRODUCTION_SOURCES
+    _moguet_addressable_production_source_count
+)
+list(
+    LENGTH
+    _moguet_unique_addressable_production_sources
+    _moguet_unique_addressable_production_source_count
+)
+if(
+    NOT _moguet_addressable_production_source_count EQUAL 2
+    OR NOT _moguet_addressable_production_source_count EQUAL
+        _moguet_unique_addressable_production_source_count
+)
+    message(
+        FATAL_ERROR
+        "MOGUET_ADDRESSABLE_PRODUCTION_SOURCES must contain exactly two "
+        "unique translation units"
+    )
+endif()
+foreach(
+    _moguet_addressable_production_source
+    IN LISTS MOGUET_ADDRESSABLE_PRODUCTION_SOURCES
+)
+    list(
+        FIND
+        MOGUET_PRODUCTION_SOURCES
+        "${_moguet_addressable_production_source}"
+        _moguet_addressable_production_source_index
+    )
+    if(_moguet_addressable_production_source_index EQUAL -1)
+        message(
+            FATAL_ERROR
+            "Addressable production source is absent from the canonical "
+            "manifest: ${_moguet_addressable_production_source}"
+        )
+    endif()
+endforeach()
+
+set(MOGUET_PRODUCTION_OBJECT_SOURCES ${MOGUET_PRODUCTION_SOURCES})
+list(
+    REMOVE_ITEM
+    MOGUET_PRODUCTION_OBJECT_SOURCES
+    ${MOGUET_ADDRESSABLE_PRODUCTION_SOURCES}
+)
+set(
+    _moguet_partitioned_production_sources
+    ${MOGUET_PRODUCTION_OBJECT_SOURCES}
+    ${MOGUET_ADDRESSABLE_PRODUCTION_SOURCES}
+)
+set(
+    _moguet_unique_partitioned_production_sources
+    ${_moguet_partitioned_production_sources}
+)
+list(REMOVE_DUPLICATES _moguet_unique_partitioned_production_sources)
+list(
+    LENGTH
+    _moguet_partitioned_production_sources
+    _moguet_partitioned_production_source_count
+)
+list(
+    LENGTH
+    _moguet_unique_partitioned_production_sources
+    _moguet_unique_partitioned_production_source_count
+)
+if(
+    NOT _moguet_partitioned_production_source_count EQUAL
+        _moguet_unique_partitioned_production_source_count
+)
+    message(FATAL_ERROR "Production OBJECT source partition overlaps")
+endif()
+set(_moguet_sorted_production_sources ${MOGUET_PRODUCTION_SOURCES})
+set(
+    _moguet_sorted_partitioned_production_sources
+    ${_moguet_partitioned_production_sources}
+)
+list(SORT _moguet_sorted_production_sources)
+list(SORT _moguet_sorted_partitioned_production_sources)
+if(
+    NOT "${_moguet_sorted_production_sources}" STREQUAL
+        "${_moguet_sorted_partitioned_production_sources}"
+)
+    message(
+        FATAL_ERROR
+        "Production OBJECT sources are not an exact partition of "
+        "MOGUET_PRODUCTION_SOURCES"
+    )
+endif()
+
+add_library(
     moguet_production_objects
-    PRIVATE
-        moguet_external_cppflags
-        moguet_build_contract
-        moguet_alpm_compile_contract
-        # Consume CURL::libcurl's complete compile usage requirements. The
-        # executable remains the explicit actual curl link owner below.
-        CURL::libcurl
-        nlohmann_json::nlohmann_json
-        moguet_toml_headers
+    OBJECT
+    ${MOGUET_PRODUCTION_OBJECT_SOURCES}
+)
+add_library(
+    moguet_unified_plan_projection_object
+    OBJECT
+    "${MOGUET_UNIFIED_PLAN_PROJECTION_SOURCE}"
+)
+add_library(
+    moguet_unified_plan_renderer_object
+    OBJECT
+    "${MOGUET_UNIFIED_PLAN_RENDERER_SOURCE}"
+)
+
+function(moguet_configure_production_object_target target_name)
+    set_target_properties(
+        "${target_name}"
+        PROPERTIES
+            CXX_STANDARD 20
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS NO
+    )
+    target_link_libraries(
+        "${target_name}"
+        PRIVATE
+            moguet_external_cppflags
+            moguet_build_contract
+            moguet_alpm_compile_contract
+            # Consume CURL::libcurl's complete compile usage requirements.
+            # The executable remains the explicit actual curl link owner.
+            CURL::libcurl
+            nlohmann_json::nlohmann_json
+            moguet_toml_headers
+    )
+endfunction()
+
+moguet_configure_production_object_target(moguet_production_objects)
+moguet_configure_production_object_target(
+    moguet_unified_plan_projection_object
+)
+moguet_configure_production_object_target(
+    moguet_unified_plan_renderer_object
 )
 
 # Raw TARGET_OBJECTS consumption does not transfer the OBJECT target's PRIVATE
 # curl dependency to the final link, so keep the actual linkage explicit.
-add_executable(moguet $<TARGET_OBJECTS:moguet_production_objects>)
+add_executable(
+    moguet
+    $<TARGET_OBJECTS:moguet_production_objects>
+    $<TARGET_OBJECTS:moguet_unified_plan_projection_object>
+    $<TARGET_OBJECTS:moguet_unified_plan_renderer_object>
+)
 target_link_libraries(
     moguet
     PRIVATE
         CURL::libcurl
         PkgConfig::ALPM
 )
+
+if(BUILD_TESTING)
+    include(cmake/MoguetTests.cmake)
+endif()
