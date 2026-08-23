@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.3.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-23 09:51+0900\n"
+"POT-Creation-Date: 2026-08-23 17:17+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -5203,19 +5203,22 @@ msgstr "対応する変更の前に判定済みの競合/置換ブロッカー�
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
-msgid "Prompt to review {} and {} files"
-msgstr "{}および{}の確認を促します"
+msgid "Open or edit {} and {} files for this invocation"
+msgstr "今回のinvocationで{}および{} fileを開く・編集"
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
-msgid "Skip {} and {} review"
-msgstr "{}および{}の確認を省略"
+msgid "Skip invocation-local {} and {} editing"
+msgstr "invocation-localな{}および{}編集を省略"
 
-msgid "Prompt to view repository update diffs"
-msgstr "リポジトリ更新差分の表示を促します"
+msgid "Review changes from the previous reviewed revision to the exact target"
+msgstr "前回のreviewed revisionからexact targetまでの変更を確認"
 
-msgid "Skip the repository update diff prompt"
-msgstr "リポジトリ更新差分の確認を省略"
+msgid "Advance reviewed state only after explicit acceptance"
+msgstr "explicit acceptance後だけreviewed stateを進める"
+
+msgid "Skip reviewed source changes without advancing reviewed state"
+msgstr "reviewed source changeの確認を省略し、reviewed stateを進めない"
 
 #. TRANSLATORS: pacman and makepkg are literal external-program identities.
 #, c++-format

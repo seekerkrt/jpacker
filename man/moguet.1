@@ -395,28 +395,37 @@ machine-readable plan schema is introduced.
 .
 .TP
 .B "--edit"
-Select the prompt policy for PKGBUILD and detected top-level
+Select the prompt policy for opening or editing PKGBUILD and detected top-level
 .I *.install
-review for this invocation.
+files for this invocation.
 This overrides
 .BR review.pkgbuild .
+It is invocation-local editor policy, not upstream reviewed-source acceptance,
+and cannot advance a reviewed revision.
 .
 .TP
 .B "--noedit"
-Select the skip policy for PKGBUILD and detected top-level
+Skip invocation-local PKGBUILD and detected top-level
 .I *.install
-review for this invocation.
+editing for this invocation.
+It neither accepts nor skips the separate upstream reviewed-source decision.
 It does not disable source, artifact, identity, or transaction validation.
 .
 .TP
 .B "--diff"
-Select the prompt policy for viewing repository update diffs.
+Select the prompt policy for reviewing AUR source changes from the previous
+reviewed revision to the exact fetched target. If there is no reviewed state,
+or the old baseline object is unavailable, the safe review is a full current
+tracked-file review rather than a cache-HEAD fallback.
 This overrides
 .BR review.diff .
+Only explicit acceptance after a complete review advances reviewed state.
 .
 .TP
 .B "--nodiff"
-Skip the repository update diff prompt.
+Skip the reviewed-source change review and acceptance path for this invocation.
+It does not advance reviewed state. Unsafe, future, or inconsistent state is
+still fail-closed rather than treated as missing or bypassed.
 It does not authorize discarding user modifications or destructive Git
 operations.
 .
@@ -566,6 +575,19 @@ built-in defaults -> user config -> CLI override
 .fi
 .
 .PP
+.B review.diff
+and
+.BR --diff / --nodiff
+select the AUR reviewed-source prompt policy. Skipping it never advances
+reviewed state.
+.B review.pkgbuild
+and
+.BR --edit / --noedit
+select invocation-local PKGBUILD and
+.I *.install
+editor behavior; they are not upstream review acceptance.
+.
+.PP
 A missing file is normal.
 An existing file requires integer
 .B schema_version = 1
@@ -599,6 +621,14 @@ All source-preference commands and build or upgrade readers use this authority.
 Default human-readable log.
 The fallback is
 .IR ~/.local/state/moguet/moguet.log .
+.
+.TP
+.I $XDG_STATE_HOME/moguet/reviewed-sources/aur/
+Persistent PackageBase-scoped reviewed AUR revision state.
+The fallback is
+.IR ~/.local/state/moguet/reviewed-sources/aur/ .
+It is separate from reproducible cache and survives cache deletion or
+recloning. Read-only lookup does not create the store.
 .
 .TP
 .I $XDG_CACHE_HOME/moguet/
@@ -745,6 +775,50 @@ An input failure and other actual failures are also non-zero.
 Cancellation stops work from that point onward. It does not imply that the
 whole invocation was side-effect free and does not roll back an already
 completed Git, editor, pacman, or earlier system phase.
+.
+.PP
+For AUR Git source builds, Moguet stores the last explicitly accepted exact
+upstream commit for each PackageBase. Missing state starts an initial full
+tracked-file review. A different target is reviewed from the previous reviewed
+revision, the same target needs no prompt or rewrite, and an unavailable old
+commit requires a full rebaseline review instead of a cache-HEAD fallback.
+Invalid, corrupted, or source-mismatched current state requires an explicit
+full rebind review. Future schema and unsafe or inconsistent history fail
+closed without overwrite.
+.
+.PP
+The review inventory retains every tracked added, modified, deleted, renamed,
+or type-changed file. Root PKGBUILD and top-level
+.I *.install
+files receive review-sensitive guidance, but patches, service units, helper
+scripts, local source/config files, binary changes, and other tracked content
+are not filtered out.
+.I .SRCINFO
+is lower-priority generated metadata, not source-review authority.
+.
+.PP
+Displaying a review is not acceptance. Only an explicit interactive
+.B y
+or
+.B yes
+after a complete review can advance state. A
+.BR --nodiff
+skip, review decline,
+.BR --noconfirm ,
+or non-TTY input may keep a compatibility-only build route but does not advance
+state. Cancellation, EOF, input failure, unsupported review, and unsafe or
+future state stop without advancement.
+.
+.PP
+An accepted AUR build uses the exact target OID in a detached checkout;
+mutable HEAD, branches, and remote refs are not build authority. State
+publication uses compare-and-swap semantics and does not overwrite another
+process's reviewed result. A later build or install failure does not roll back
+a correctly accepted and published revision.
+.BR --edit / --noedit
+controls an invocation-local editor overlay that is separate from the upstream
+reviewed revision. Official-repository and local PKGBUILD routes do not create
+reviewed-source state.
 .
 .PP
 Before build or install, Moguet assesses declared conflicts and replacements
@@ -913,6 +987,14 @@ Temporarily restore review and normal build defaults over user config:
 .
 .\" parity:migration
 .SH MIGRATION
+An existing Moguet AUR cache from before reviewed-source state requires no
+manual migration. No record is a normal missing state and causes one initial
+full review for the first affected PackageBase. Moguet does not invent a
+reviewed revision from legacy checkout HEAD, a branch, a remote ref, or build
+artifacts. Invalid, corrupted, source-mismatched, future, unsafe, or
+inconsistent state is not treated as missing.
+.
+.PP
 Starting with Moguet v2.0.1, Moguet does not read
 .I /etc/jpacker/jpacker.conf
 as a normal configuration layer or

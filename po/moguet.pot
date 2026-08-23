@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.3.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-23 09:51+0900\n"
+"POT-Creation-Date: 2026-08-23 17:17+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -5210,18 +5210,21 @@ msgstr ""
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
-msgid "Prompt to review {} and {} files"
+msgid "Open or edit {} and {} files for this invocation"
 msgstr ""
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
-msgid "Skip {} and {} review"
+msgid "Skip invocation-local {} and {} editing"
 msgstr ""
 
-msgid "Prompt to view repository update diffs"
+msgid "Review changes from the previous reviewed revision to the exact target"
 msgstr ""
 
-msgid "Skip the repository update diff prompt"
+msgid "Advance reviewed state only after explicit acceptance"
+msgstr ""
+
+msgid "Skip reviewed source changes without advancing reviewed state"
 msgstr ""
 
 #. TRANSLATORS: pacman and makepkg are literal external-program identities.

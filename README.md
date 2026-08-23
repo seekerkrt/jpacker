@@ -412,6 +412,42 @@ Source-build preferences are managed with multi-target `add-src`, `edit-src`,
 `del-src`, and `revert`, plus target-less `list-src`. A one-off
 `build <pkg> [V=K...]` resolves a remote package and does not save a preference.
 
+### Reviewed AUR source workflow
+
+For an AUR Git source build, Moguet keeps the last explicitly accepted exact
+upstream commit for each PackageBase in persistent XDG state. After fetch or
+clone, it pins one exact target commit. With no reviewed state—including an
+existing cache created before this workflow—the first affected PackageBase
+gets a full tracked-file review. A later target is reviewed from the previous
+reviewed revision; the same target needs no new prompt or state write. If the
+old commit object is unavailable, Moguet presents a full rebaseline review
+instead of falling back to the cache checkout. Invalid, corrupted, or
+source-mismatched state requires an explicit full rebind review; future or
+unsafe state fails closed.
+
+The review inventory covers every tracked added, modified, deleted, renamed,
+or type-changed file, not an extension allowlist. Root `PKGBUILD` and top-level
+`*.install` files receive review-sensitive guidance, while patches, service
+units, helper scripts, local source/config files, binary changes, and other
+tracked content remain visible. `.SRCINFO` stays visible as lower-priority
+generated metadata and is not a substitute for source review.
+
+`--diff` selects the reviewed-source prompt policy, but only an explicit
+interactive `y` or `yes` after a complete review advances the stored revision.
+`--nodiff`, a review decline, `--noconfirm`, or non-TTY input may retain the
+existing compatibility build behavior, but they do not advance reviewed
+state. Cancellation, EOF, input failure, an unsupported review, and unsafe or
+future state stop without advancing it.
+
+An accepted build is checked out at the exact target commit; mutable checkout
+HEAD, branches, and remote refs are not build authority. Publication uses a
+compare-and-swap guard so a concurrent review is not overwritten, and a later
+build or install failure does not roll back a correctly accepted revision.
+`--edit` / `--noedit` control invocation-local PKGBUILD and `.install` editing,
+not upstream acceptance: editor changes are a separate overlay on the reviewed
+commit. Official-repository and `build --local` routes do not create this
+state. See the [reviewed AUR source state contract](https://github.com/seekerkrt/moguet/blob/develop/docs/contracts/reviewed-source-state.md).
+
 ### Per-package build customization
 
 The existing v2.x `[V=K...]` and source-build preference forms let you adjust
@@ -525,6 +561,11 @@ The canonical CLI overrides are `--edit` / `--noedit`, `--diff` /
 Conflicting overrides fail before external mutation rather than using
 last-one-wins behavior.
 
+`review.diff` and `--diff` / `--nodiff` select the AUR reviewed-source prompt
+policy. Skipping that prompt never advances reviewed state. `review.pkgbuild`
+and `--edit` / `--noedit` select invocation-local PKGBUILD / `.install` editor
+behavior and do not act as upstream review acceptance.
+
 A missing config file is normal. An existing file must contain
 `schema_version = 1`; invalid TOML, unknown keys, type errors, invalid enum
 values, and unsupported future schema versions stop the invocation. Moguet
@@ -553,13 +594,19 @@ migrate, or remove either XDG preferences or legacy data.
 | --- | --- | --- |
 | User configuration | `$XDG_CONFIG_HOME/moguet/` | `~/.config/moguet/` |
 | Source-build preferences | `$XDG_CONFIG_HOME/moguet/source-build.d/` | `~/.config/moguet/source-build.d/` |
-| Persistent runtime state and log | `$XDG_STATE_HOME/moguet/` | `~/.local/state/moguet/` |
+| Persistent runtime state, reviewed AUR revisions, and log | `$XDG_STATE_HOME/moguet/` | `~/.local/state/moguet/` |
 | Reproducible cache | `$XDG_CACHE_HOME/moguet/` | `~/.cache/moguet/` |
 
 The default log is `moguet.log` in the state directory. Cache contents are not
 authoritative and may be regenerated; deleting cache must not delete config or
 persistent state. Directories are created only when a command needs them.
 Help and version output do not create XDG directories.
+
+Accepted AUR revisions are stored below
+`$XDG_STATE_HOME/moguet/reviewed-sources/aur/`, with the HOME fallback below
+`~/.local/state/moguet/`. They are PackageBase state, not cache metadata, and
+survive cache deletion or recloning. A read-only lookup does not create this
+store.
 
 For source-preference access, an unset or empty `XDG_CONFIG_HOME` uses the HOME
 fallback. An explicit `XDG_CONFIG_HOME` must be absolute, already exist, and
@@ -597,6 +644,13 @@ route. Operations handled entirely by pacman pass through options that Moguet
 does not consume. When Moguet takes responsibility for an AUR or source-build
 route, it preserves only options with an explicitly defined equivalent and
 fails before mutation for the rest.
+
+No manual migration is required for an AUR cache created before reviewed-source
+state existed. The absence of a record is normal and causes one initial full
+review for the first affected PackageBase. Moguet never invents a reviewed
+revision from the legacy checkout HEAD, branch, remote ref, or build artifacts.
+Invalid, corrupted, source-mismatched, future, or unsafe state is not treated
+as missing and remains fail-closed according to the reviewed-source contract.
 
 Moguet does not read `/etc/jpacker/jpacker.conf` as a normal config layer or
 use `/etc/jpacker/package.build/` as a source-preference fallback. It does not

@@ -159,6 +159,7 @@ PackageBaseはclone / fetch / build repositoryの単位であり、package name�
 | Behavior / safety contract | User-visible compatibility summary | Normative contract |
 | --- | --- | --- |
 | common source-aware identity | package child、PackageBase、source、revision、release、architectureを別fieldで保持するinternal foundation。既存routeを置換せず、incomplete evidenceをcomplete identityへ推測しない | [source-aware package identity](contracts/source-package-identity.md) |
+| reviewed AUR source state | AUR PackageBaseごとにexplicit accept済みexact revisionを保持し、previous reviewed revisionからexact targetまでをreviewする。skipではstateを進めず、accepted targetだけをpinned build authorityにする | [reviewed AUR source state](contracts/reviewed-source-state.md) |
 | PackageBase / child selection | PackageBase単位でbuildするが、installするのはsource-build upper projectionが要求しmetadata identityで選択したchildだけ。sibling / debugは暗黙installしない | [PackageBase / required-child selection](contracts/packagebase-child-selection.md) |
 | separated source-build `--rmdeps` | source-buildではownershipを証明できないためmutation前に拒否。pacman-onlyではMoguetが消費するが作用させず、pacmanへ転送しない | [source-build `--rmdeps`](contracts/source-build-rmdeps.md) |
 | XDG cache cutover | trusted root、filesystem identity、symlink、root escape、legacy cache非変更を守る。implementation moduleは固定しない | [XDG cache safety](contracts/xdg-cache-safety.md) |
@@ -168,12 +169,65 @@ PackageBaseはclone / fetch / build repositoryの単位であり、package name�
 | root package selection | `-S --select`だけが対話root selection。`-Ss`は非対話search。候補が1件でもdefault選択せず、source identityを保持する | [root package selection](contracts/root-package-selection.md) |
 | local PKGBUILD | `build --local <directory>`を明示入口とし、local treeをAUR rootへfallbackせず、metadata / source identity / artifactをfail closedで検証するproduction接続済みroute | [local PKGBUILD](contracts/local-pkgbuild.md) |
 
+<a id="compat-reviewed-source-state"></a>
+## Reviewed AUR source state compatibility
+
+AUR Git source-buildでは、最後に利用者が明示acceptしたcomplete commit OIDをPackageBase単位で
+XDG stateへ保持する。fetch / clone後にexact targetをpinし、reviewed continuationのreview、
+acceptance、detached checkout、state publication、build continuationへ同じOIDを渡す。cache
+checkoutのHEAD、branch、`origin/<branch>`等のmutable refをreview baselineやreviewed build
+authorityとして再利用しない。
+
+reviewed stateがない場合はempty treeからexact targetまでのinitial full review、valid baselineが
+targetと異なる場合はprevious reviewed revisionからexact targetまでのupdate review、同じ場合は
+prompt / rewriteなしのalready-reviewed continuationとなる。baseline objectが利用不能ならcache HEADへ
+fallbackせずfull rebaseline reviewを行う。current-schemaのinvalid / corrupted / source-mismatched
+stateはreason付きfull rebind reviewを要求し、unsupported future schema、unsafe history、store /
+observation failureはoverwriteせずfail closedとする。
+
+review inventoryはAUR Git treeのtracked file全体であり、added / modified / deleted / renamed /
+type-changedを保持する。root `PKGBUILD`とtop-level `*.install`をreview-sensitiveとして強調するが、
+patch、service unit、helper script、config / local source、binary / non-text change等をextensionで除外
+しない。`.SRCINFO`はgenerated metadataとして表示に残すが、source-review authorityにはしない。
+
+review表示とacceptanceは別eventである。defaultなしのinteractive promptへ明示入力した`y` /
+`yes`だけがstate advancementを許可する。`--nodiff`、review decline、safe default No、
+`--noconfirm`、non-TTYはreviewed authorityを作らず、compatibility buildを継続し得る場合もstateを
+進めない。q-family、EOF、input failure、materialization / presentation failure、manual inspection
+required、review-sensitive source unrenderable等のstop outcomeではbuildへ進まない。unsafe / future /
+inconsistent stateをcompatibility routeで迂回しない。
+
+compatibility-only buildはreviewed authorityを持たず、legacy checkout continuationをreview済みまたは
+pinned reviewed buildとして表示しない。この経路からreviewed revision provenanceやstate publicationを
+作らない。
+
+state publicationはreview開始時のexact record identityとraw contentsをguardにするCAS semanticsを
+持つ。並行processが別targetへ進めたstateをstale writerが上書きせず、same exact targetだけを
+idempotent successとして扱う。acceptance後もexact checkout、editor boundary、既存preflightを
+完了してからmakepkg前にpublishする。正常にpublishしたreviewed revisionは、後続build / install /
+cleanup failureでrollbackしない。reviewed、built、installed outcomeは別々に表示する。
+
+`--edit` / `--noedit`と`review.pkgbuild`はinvocation-localなPKGBUILD / detected top-level
+`*.install` editor policyであり、upstream reviewed-source acceptanceではない。editor changeは
+reviewed exact commit上のoverlayとしてcurrent buildにだけ作用し、persistent reviewed revision、
+将来invocationのpatch、generic source identityへ昇格しない。
+
+Issue #411より前から存在するAUR cacheにmanual migrationは不要である。reviewed stateが本当に
+存在しない状態だけをnormalな`Missing`として扱い、最初に対象となるPackageBaseを一度full review
+する。legacy checkout HEAD、branch、remote ref、artifactからreviewed revisionを捏造しない。
+Invalid / Corrupted / SourceMismatch / UnsupportedFutureやunsafe stateをMissingへ丸めない。
+
+official repository source-buildとlocal PKGBUILD routeはreviewed-source stateをread / writeしない。
+official routeはconfigured repository / libalpm snapshot、local routeはuser-owned filesystem /
+content provenanceをそれぞれ維持する。詳細は
+[reviewed AUR source state contract](contracts/reviewed-source-state.md)を正本とする。
+
 <a id="compat-common-source-identity"></a>
 ## Common source-aware identity compatibility
 
 Issue #355のcommon identityは、後続profile / snapshot / patch workflow向けのinternal foundationであり、現時点のpublic CLIやproduction selection / build / install semanticsを変更しない。package child、PackageBase、repository / AUR / local source、source location、source revision、package release、architectureを別fieldで保持し、package名またはderived string keyへflattenしない。
 
-current repository / AUR modelはexact source commitを保持しないためrevisionは`Unknown`であり、known commitとして推測しない。current local routeはGit repositoryをauthorityにせずfilesystem / content provenanceを使うためrevisionは`Inapplicable`である。`Unknown`、`Absent`、`Unavailable`、`Inapplicable`をknown matchやabsenceへ丸めない。
+Issue #355のgeneric current repository / AUR modelはexact source commitを保持しないためrevisionは`Unknown`であり、known commitとして推測しない。Issue #411のreviewed-source lifecycleはAUR review / build用のexact OIDを別のpersistent / capability authorityとして保持するが、そのOIDをgeneric `source_package_identity_projection`へ注入して`Known`へ昇格させない。generic source identity projectionとreviewed-source persistent / build authorityは同じものではない。current local routeはGit repositoryをauthorityにせずfilesystem / content provenanceを使うためrevisionは`Inapplicable`である。`Unknown`、`Absent`、`Unavailable`、`Inapplicable`をknown matchやabsenceへ丸めない。
 
 repository root candidateはPackageBaseを、actual artifactはPackageBase / sourceを単体では保持しない。internal read-only adapterは既存typed contextと相関できる場合だけcomplete common identityを返し、filename、package name、URL leaf、canonical source keyから不足fieldを逆算しない。PackageBaseを持たないrepository root、source contextを持たないartifact、installed-only dependency等はtyped failureであり、partial identityを公開しない。
 
@@ -297,8 +351,9 @@ pacmanへ直接委譲する経路では、Moguetが明示的に消費しないpa
 
 ### Moguet固有 option
 
-- `--noedit`: PKGBUILD / `.install` review / edit promptを省略する。
-- `--nodiff`: cache repository update後のdiff promptを省略する。
+- `--edit` / `--noedit`: PKGBUILD / detected top-level `.install`のinvocation-local editor prompt policyを選ぶ。upstream reviewed-source acceptanceではない。
+- `--diff`: previous reviewed revisionからexact targetまでのreviewed source change、またはinitial / rebaseline full reviewのprompt policyを選ぶ。state advancementには別のexplicit acceptanceが必要である。
+- `--nodiff`: reviewed source changeのreview / acceptance導線を省略し、reviewed stateを進めない。
 - `--rebuild`: build-only makepkgの`-f`へ変換する。
 - `--cleanbuild`: build-only makepkgの`-C`へ変換する。
 - `--rmdeps`: source-buildでは下記contractに従い拒否し、pacman-onlyでは消費する。

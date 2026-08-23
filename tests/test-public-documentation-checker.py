@@ -14,8 +14,10 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 
 from check_public_documentation import (  # noqa: E402
+    check_reviewed_source_documentation,
     exact_man_public_surface,
     expected_surface,
+    reviewed_source_documentation_contracts,
 )
 from generate_completions import load_schema  # noqa: E402
 
@@ -57,6 +59,48 @@ def expect_rejected(label: str, text: str, schema, expected) -> None:
                 exact_man_public_surface(path, expected, schema)
         except SystemExit as error:
             if error.code == 1 and "public-documentation-check:" in diagnostic.getvalue():
+                print(f"  ok: rejected {label}")
+                return
+            fail(f"{label} returned unexpected status {error.code!r}")
+    fail(f"{label} unexpectedly passed")
+
+
+def copy_reviewed_source_documentation_fixture(directory: str) -> Path:
+    fixture_root = Path(directory)
+    for source in reviewed_source_documentation_contracts(REPOSITORY_ROOT):
+        relative = source.relative_to(REPOSITORY_ROOT)
+        destination = fixture_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            source.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    return fixture_root
+
+
+def expect_reviewed_source_documentation_rejected(
+    label: str,
+    relative_path: str,
+    old: str,
+    new: str,
+) -> None:
+    with tempfile.TemporaryDirectory(
+        prefix="moguet-reviewed-doc-checker-"
+    ) as directory:
+        fixture_root = copy_reviewed_source_documentation_fixture(directory)
+        path = fixture_root / relative_path
+        path.write_text(
+            replace_once(path.read_text(encoding="utf-8"), old, new),
+            encoding="utf-8",
+        )
+        diagnostic = io.StringIO()
+        try:
+            with redirect_stderr(diagnostic):
+                check_reviewed_source_documentation(fixture_root)
+        except SystemExit as error:
+            if (
+                error.code == 1
+                and "public-documentation-check:" in diagnostic.getvalue()
+            ):
                 print(f"  ok: rejected {label}")
                 return
             fail(f"{label} returned unexpected status {error.code!r}")
@@ -109,9 +153,47 @@ def main() -> int:
     for label, mutated in mutations:
         expect_rejected(label, mutated, schema, expected)
 
+    with tempfile.TemporaryDirectory(
+        prefix="moguet-reviewed-doc-checker-"
+    ) as directory:
+        check_reviewed_source_documentation(
+            copy_reviewed_source_documentation_fixture(directory)
+        )
+
+    reviewed_source_mutations = (
+        (
+            "missing legacy-cache migration contract",
+            "README.md",
+            "No manual migration is required",
+            "Manual migration may be required",
+        ),
+        (
+            "generic identity promoted from Unknown",
+            "docs/contracts/source-package-identity.md",
+            "common projectionの`Unknown`を`Known`へ昇格させたりしない",
+            "common projectionを`Known`へ昇格させる",
+        ),
+        (
+            "missing reviewed-state CAS contract",
+            "docs/contracts/reviewed-source-state.md",
+            "CAS semantics",
+            "last-writer-wins semantics",
+        ),
+        (
+            "obsolete completion wording",
+            "completions/descriptions/en.json",
+            "Review changes from the previous reviewed revision to the exact target",
+            "Prompt to view repository update diffs",
+        ),
+    )
+    for label, relative_path, old, new in reviewed_source_mutations:
+        expect_reviewed_source_documentation_rejected(
+            label, relative_path, old, new
+        )
+
     print(
         "public-documentation-checker-test: "
-        f"{len(mutations) + 1} scenarios passed"
+        f"{len(mutations) + len(reviewed_source_mutations) + 2} scenarios passed"
     )
     return 0
 

@@ -855,20 +855,24 @@ void print_help() {
             cli_option_syntax(OptionId::Edit),
             localization::format_translated_message(
                     // TRANSLATORS: PKGBUILD and .install are literal artifact names.
-                    "Prompt to review {} and {} files", "PKGBUILD", ".install"));
+                    "Open or edit {} and {} files for this invocation",
+                    "PKGBUILD", ".install"));
     print_help_entry(
             cli_option_syntax(OptionId::NoEdit),
             localization::format_translated_message(
                     // TRANSLATORS: PKGBUILD and .install are literal artifact names.
-                    "Skip {} and {} review", "PKGBUILD", ".install"));
+                    "Skip invocation-local {} and {} editing",
+                    "PKGBUILD", ".install"));
     print_help_entry(
             cli_option_syntax(OptionId::Diff),
             localization::translate_message(
-                    "Prompt to view repository update diffs"));
+                    "Review changes from the previous reviewed revision to the exact target"));
+    print_help_continuation(localization::translate_message(
+            "Advance reviewed state only after explicit acceptance"));
     print_help_entry(
             cli_option_syntax(OptionId::NoDiff),
             localization::translate_message(
-                    "Skip the repository update diff prompt"));
+                    "Skip reviewed source changes without advancing reviewed state"));
     print_help_entry(
             cli_option_syntax(OptionId::NoConfirm),
             localization::format_translated_message(

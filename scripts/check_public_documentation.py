@@ -635,12 +635,12 @@ def assert_document_contract(
     forbidden = [fragment for fragment in forbidden_fragments if fragment in text]
     if missing:
         fail(
-            f"{path.relative_to(REPOSITORY_ROOT)} is missing required contract text: "
+            f"{shown_path(path)} is missing required contract text: "
             + ", ".join(repr(fragment) for fragment in missing)
         )
     if forbidden:
         fail(
-            f"{path.relative_to(REPOSITORY_ROOT)} retains obsolete contract text: "
+            f"{shown_path(path)} retains obsolete contract text: "
             + ", ".join(repr(fragment) for fragment in forbidden)
         )
 
@@ -721,6 +721,166 @@ def check_package_relation_documentation() -> None:
     }
     for path, required in contracts.items():
         assert_document_contract(path, required, obsolete)
+
+
+def reviewed_source_documentation_contracts(
+    repository_root: Path,
+) -> dict[Path, tuple[tuple[str, ...], tuple[str, ...]]]:
+    obsolete_help = (
+        "Prompt to review {} and {} files",
+        "Skip {} and {} review",
+        "Prompt to review PKGBUILD and .install files",
+        "Skip PKGBUILD and .install review",
+        "Prompt to view repository update diffs",
+        "Skip the repository update diff prompt",
+    )
+    return {
+        repository_root / "README.md": (
+            (
+                "last explicitly accepted exact upstream commit for each PackageBase",
+                "existing cache created before this workflow",
+                "full tracked-file review",
+                "previous reviewed revision",
+                "only an explicit interactive `y` or `yes`",
+                "do not advance reviewed state",
+                "compare-and-swap guard",
+                "separate overlay on the reviewed commit",
+                "Official-repository and `build --local` routes do not create this state",
+                "No manual migration is required",
+                "never invents a reviewed revision from the legacy checkout HEAD",
+            ),
+            (),
+        ),
+        repository_root / "README.ja.md": (
+            (
+                "最後に明示acceptしたexact upstream commitをPackageBaseごと",
+                "このworkflowより前から存在するcache",
+                "tracked file全体をfull review",
+                "previous reviewed revision",
+                "interactive `y` / `yes`を明示入力した場合だけ",
+                "reviewed stateは進めません",
+                "compare-and-swap guard",
+                "reviewed commit上の別overlay",
+                "official repositoryと`build --local` routeはこのstateを作りません",
+                "手動migrationは不要",
+                "legacy checkout HEAD、branch、remote ref、build artifactからreviewed revisionを捏造しません",
+            ),
+            (),
+        ),
+        repository_root / "docs/COMPATIBILITY.md": (
+            (
+                "previous reviewed revisionからexact targetまで",
+                "AUR Git treeのtracked file全体",
+                "defaultなしのinteractive promptへ明示入力した`y` / `yes`だけ",
+                "compatibility buildを継続し得る場合もstateを進めない",
+                "CAS semantics",
+                "後続build / install / cleanup failureでrollbackしない",
+                "invocation-localなPKGBUILD / detected top-level `*.install` editor policy",
+                "manual migrationは不要",
+                "legacy checkout HEAD、branch、remote ref、artifactからreviewed revisionを捏造しない",
+                "official repository source-buildとlocal PKGBUILD routeはreviewed-source stateをread / writeしない",
+                "generic source identity projectionとreviewed-source persistent / build authorityは同じものではない",
+            ),
+            (),
+        ),
+        repository_root / "docs/contracts/README.md": (
+            (
+                "[Reviewed AUR source state](reviewed-source-state.md)",
+                "PackageBase単位のexact reviewed revision",
+            ),
+            (),
+        ),
+        repository_root / "docs/contracts/reviewed-source-state.md": (
+            (
+                "Scopeとauthority",
+                "stateの単位はPackageBase",
+                "InitialFullReview",
+                "already reviewed",
+                "update review",
+                "full rebaseline review",
+                "full rebind / rebaseline review",
+                "unsupported future schema、unsafe history",
+                "review eligibilityのauthorityはAUR Git treeのtracked file全体",
+                "root `PKGBUILD`またはtop-level `*.install`",
+                "reviewのmaterialize / 表示成功とacceptanceは別event",
+                "CAS semantics",
+                "exact targetへdetached checkout",
+                "invocation-local overlay",
+                "no reviewed state -> Missing -> InitialFullReview",
+                "userによるstate file作成、cache変換、手動 migrationは不要",
+                "official repository source-buildと`build --local`",
+                "generic source identity projection != reviewed-source persistent/build authority",
+                "generic projectionを`Known`へ昇格させない",
+            ),
+            (),
+        ),
+        repository_root / "docs/contracts/source-package-identity.md": (
+            (
+                "Issue #411のreviewed-source lifecycle",
+                "generic projection inputの拡張ではない",
+                "common projectionの`Unknown`を`Known`へ昇格させたりしない",
+                "exact target OIDを保持していても、このgeneric projection ruleは変わらない",
+                "reviewed-source exact OIDの注入をgeneric projectionへ追加しない",
+            ),
+            (),
+        ),
+        repository_root / "man/moguet.1.in": (
+            (
+                "previous reviewed revision to the exact fetched target",
+                "Only explicit acceptance after a complete review advances reviewed state",
+                "does not advance reviewed state",
+                "invocation-local editor policy, not upstream reviewed-source acceptance",
+                "Persistent PackageBase-scoped reviewed AUR revision state",
+                "compare-and-swap semantics",
+                "does not roll back a correctly accepted and published revision",
+                "requires no manual migration",
+                "does not invent a reviewed revision from legacy checkout HEAD",
+            ),
+            (),
+        ),
+        repository_root / "man/ja/moguet.1.in": (
+            (
+                "previous reviewed revisionからexact fetched targetまで",
+                "explicit acceptanceだけがreviewed stateを進めます",
+                "reviewed stateを進めません",
+                "invocation-localなeditor policyであり、upstream reviewed-source acceptanceではなく",
+                "PackageBase単位のpersistent reviewed AUR revision state",
+                "compare-and-swap semantics",
+                "正常にaccept / publishしたrevisionをrollbackしません",
+                "manual migrationは不要",
+                "legacy checkout HEAD、branch、remote ref、build artifactからreviewed revisionを捏造しません",
+            ),
+            (),
+        ),
+        repository_root / "src/moguet.cpp": (
+            (
+                "Open or edit {} and {} files for this invocation",
+                "Skip invocation-local {} and {} editing",
+                "Review changes from the previous reviewed revision to the exact target",
+                "Advance reviewed state only after explicit acceptance",
+                "Skip reviewed source changes without advancing reviewed state",
+            ),
+            obsolete_help,
+        ),
+        repository_root / "completions/descriptions/en.json": (
+            (
+                "Open or edit PKGBUILD and .install files for this invocation",
+                "Skip invocation-local PKGBUILD and .install editing",
+                "Review changes from the previous reviewed revision to the exact target",
+                "Skip reviewed source changes without advancing reviewed state",
+            ),
+            obsolete_help,
+        ),
+    }
+
+
+def check_reviewed_source_documentation(
+    repository_root: Path = REPOSITORY_ROOT,
+) -> None:
+    for path, (required, forbidden) in reviewed_source_documentation_contracts(
+        repository_root
+    ).items():
+        assert_document_contract(path, required, forbidden)
 
 
 def markdown_canonical_grammar(path: Path) -> tuple[str, ...]:
@@ -860,6 +1020,7 @@ def main() -> int:
             )
 
     check_package_relation_documentation()
+    check_reviewed_source_documentation()
     check_generated_completions(schema)
     print("public-documentation-check: all checks passed")
     return 0
