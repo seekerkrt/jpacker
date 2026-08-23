@@ -636,6 +636,7 @@ void stop_for_repository_provider_transaction_failure(
 void map_source_execution_result(
         RegisteredSourceUpgradeResult& result,
         const SourceBuildExecutionResult& execution) {
+    result.production_outcome = execution.production_outcome;
     result.diagnostic = execution.diagnostic.empty()
             ? std::nullopt
             : std::optional<std::string>(execution.diagnostic);
@@ -666,6 +667,7 @@ void map_source_execution_result(
 void map_cleanup_failure(
         RegisteredSourceUpgradeResult& result,
         const SeparatedSourceBuildCleanupError& error) {
+    result.production_outcome = error.production_outcome();
     switch(error.install_outcome()) {
         case ArtifactInstallExecutionOutcome::Installed:
             result.status =
@@ -899,6 +901,25 @@ RegisteredSourceBuildFailureCategory map_registered_source_build_phase(
         return RegisteredSourceBuildFailureCategory::ArtifactValidation;
     case SeparatedPackageBaseSourceBuildFailurePhase::ArtifactIdentity:
         return RegisteredSourceBuildFailureCategory::ArtifactIdentity;
+    case SeparatedPackageBaseSourceBuildFailurePhase::InstallPreparation:
+        return RegisteredSourceBuildFailureCategory::InstallPreparation;
+    case SeparatedPackageBaseSourceBuildFailurePhase::InstallTransaction:
+        return RegisteredSourceBuildFailureCategory::InstallTransaction;
+    }
+    return RegisteredSourceBuildFailureCategory::Other;
+}
+
+RegisteredSourceBuildFailureCategory map_registered_source_build_phase(
+        SeparatedSourceBuildFailurePhase phase) noexcept {
+    switch(phase) {
+    case SeparatedSourceBuildFailurePhase::Build:
+        return RegisteredSourceBuildFailureCategory::Build;
+    case SeparatedSourceBuildFailurePhase::ArtifactValidation:
+        return RegisteredSourceBuildFailureCategory::ArtifactValidation;
+    case SeparatedSourceBuildFailurePhase::InstallPreparation:
+        return RegisteredSourceBuildFailureCategory::InstallPreparation;
+    case SeparatedSourceBuildFailurePhase::InstallTransaction:
+        return RegisteredSourceBuildFailureCategory::InstallTransaction;
     }
     return RegisteredSourceBuildFailureCategory::Other;
 }
@@ -928,8 +949,10 @@ map_registered_package_base_result(
     if(auto failure = validate_registered_package_base_result(
                completed, work_item);
        failure.has_value()) {
+        result.production_outcome = completed.production_outcome();
         return failure;
     }
+    result.production_outcome = completed.production_outcome();
     result.package_base_execution =
             RegisteredSourcePackageBaseExecutionSnapshot{
                     completed.package_base(),
@@ -964,6 +987,12 @@ void map_registered_up_to_date(
             ? std::nullopt
             : std::optional<std::string>{outcome.diagnostic};
     result.cleanup_diagnostic = std::nullopt;
+    if(outcome.source_provenance.has_value()) {
+        result.production_outcome =
+                ProductionSourceBuildStagedOutcome{
+                        .source_provenance =
+                                *outcome.source_provenance};
+    }
     result.failure_detail = std::monostate{};
 }
 
@@ -978,6 +1007,12 @@ void map_registered_unknown_skip(
             ? std::nullopt
             : std::optional<std::string>{outcome.diagnostic};
     result.cleanup_diagnostic = std::nullopt;
+    if(outcome.source_provenance.has_value()) {
+        result.production_outcome =
+                ProductionSourceBuildStagedOutcome{
+                        .source_provenance =
+                                *outcome.source_provenance};
+    }
     result.failure_detail = std::monostate{};
 }
 
@@ -991,6 +1026,7 @@ void record_registered_preparation_failure(
     result.package_state_change = PackageStateChange::Unknown;
     result.diagnostic = registered_source_build_failure_diagnostic(
             work_item, error.what());
+    result.production_outcome = error.production_outcome();
     if(const auto* selection = error.selection_failure()) {
         result.failure_detail.emplace<
                 PackageBaseArtifactIdentitySelectionFailure>(*selection);
@@ -1001,7 +1037,7 @@ void record_registered_preparation_failure(
         result.failure_detail.emplace<RegisteredSourceBuildFailureSnapshot>(
                 RegisteredSourceBuildFailureSnapshot{
                         RegisteredSourceBuildFailureCategory::Other,
-                        error.what()});
+                        error.what(), std::nullopt});
     }
 }
 
@@ -1015,10 +1051,36 @@ void record_registered_phase_failure(
     result.package_state_change = PackageStateChange::Unknown;
     result.diagnostic = registered_source_build_failure_diagnostic(
             work_item, error.what());
+    result.production_outcome = error.production_outcome();
+    if(error.package_metadata_failure().has_value()) {
+        result.failure_detail.emplace<PackageMetadataFailure>(
+                *error.package_metadata_failure());
+        return;
+    }
     result.failure_detail.emplace<RegisteredSourceBuildFailureSnapshot>(
             RegisteredSourceBuildFailureSnapshot{
                     map_registered_source_build_phase(error.phase()),
-                    error.what()});
+                    error.what(), error.reviewed_source_failure()});
+}
+
+void record_registered_singular_source_failure(
+        RegisteredSourceUpgradeResult& result,
+        const std::string& diagnostic,
+        std::optional<ProductionSourceBuildStagedOutcome>
+                production_outcome,
+        RegisteredSourceBuildFailureCategory category,
+        std::optional<ReviewedSourceProductionFailure>
+                reviewed_source_failure = std::nullopt) {
+    result.status = RegisteredSourceUpgradeStatus::Failed;
+    result.failure_kind =
+            RegisteredSourceUpgradeFailureKind::BuildOrInstallFailed;
+    result.package_state_change = PackageStateChange::Unknown;
+    result.diagnostic = diagnostic;
+    result.production_outcome = std::move(production_outcome);
+    result.failure_detail.emplace<RegisteredSourceBuildFailureSnapshot>(
+            RegisteredSourceBuildFailureSnapshot{
+                    category,
+                    diagnostic, std::move(reviewed_source_failure)});
 }
 
 void record_registered_transaction_failure(
@@ -1029,6 +1091,7 @@ void record_registered_transaction_failure(
             error.failure_kind(), error.attempts(), error.exit_code(),
             error.what()};
     result.package_transaction_failure = snapshot;
+    result.production_outcome = error.production_outcome();
     if(auto failure = validate_registered_transaction_failure(
                error, work_item);
        failure.has_value()) {
@@ -1649,6 +1712,17 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
             state.source_invocation =
                     prepare_production_source_build_invocation(
                             std::move(source_work_items), config);
+        } catch(const ReviewedSourceProductionError& error) {
+            SystemSourceUpgradeIssue issue = make_issue(
+                    SystemSourceUpgradeIssueKind::
+                            SourceInvocationPreparationFailed,
+                    SystemSourceUpgradeIssueImpact::BlocksExecution,
+                    SystemSourceUpgradePhase::Preparation,
+                    error.what());
+            issue.reviewed_source_failure = error.failure();
+            return block_preparation(
+                    std::move(state), std::move(issue), std::nullopt,
+                    RegisteredSourceUpgradeFailureKind::BuildOrInstallFailed);
         } catch(const std::exception& error) {
             SystemSourceUpgradeIssue issue = make_issue(
                     SystemSourceUpgradeIssueKind::
@@ -2412,6 +2486,34 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                 result.stopped_phase =
                         SystemSourceUpgradePhase::RegisteredSource;
                 return result;
+            } catch(const SeparatedSourceBuildPhaseError& error) {
+                record_registered_singular_source_failure(
+                        source_result, error.what(),
+                        error.production_outcome(),
+                        map_registered_source_build_phase(error.phase()));
+                if(error.package_metadata_failure().has_value()) {
+                    source_result.failure_detail.emplace<
+                            PackageMetadataFailure>(
+                            *error.package_metadata_failure());
+                }
+                add_source_diagnostic(error.what(), true);
+                result.status =
+                        SystemSourceUpgradeStatus::StoppedOnSourceFailure;
+                result.stopped_phase =
+                        SystemSourceUpgradePhase::RegisteredSource;
+                return result;
+            } catch(const ReviewedSourceProductionError& error) {
+                record_registered_singular_source_failure(
+                        source_result, error.what(),
+                        error.production_outcome(),
+                        RegisteredSourceBuildFailureCategory::Other,
+                        error.failure());
+                add_source_diagnostic(error.what(), true);
+                result.status =
+                        SystemSourceUpgradeStatus::StoppedOnSourceFailure;
+                result.stopped_phase =
+                        SystemSourceUpgradePhase::RegisteredSource;
+                return result;
             } catch(const TrustedCacheError& error) {
                 source_result.status = RegisteredSourceUpgradeStatus::Failed;
                 source_result.failure_kind =
@@ -2458,7 +2560,7 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                             RegisteredSourceBuildFailureSnapshot{
                                     RegisteredSourceBuildFailureCategory::
                                             Other,
-                                    error.what()});
+                                    error.what(), std::nullopt});
                 }
                 add_source_diagnostic(
                         source_result.diagnostic.value(), true);
@@ -2480,7 +2582,8 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                             RegisteredSourceBuildFailureSnapshot{
                                     RegisteredSourceBuildFailureCategory::
                                             Other,
-                                    unknown_source_failure_diagnostic()});
+                                    unknown_source_failure_diagnostic(),
+                                    std::nullopt});
                 }
                 add_source_diagnostic(
                         unknown_source_failure_diagnostic(), true);

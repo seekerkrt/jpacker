@@ -75,6 +75,35 @@ ConfirmationResult default_result(
 
 } // namespace
 
+ExplicitConfirmationAcceptance parse_explicit_confirmation_acceptance(
+        std::string_view input) {
+    const std::string normalized = normalize_confirmation_input(input);
+    if(normalized != "y" && normalized != "yes") {
+        throw std::logic_error(
+                "Explicit confirmation parser rejected non-positive input.");
+    }
+    return ExplicitConfirmationAcceptance(true);
+}
+
+ExplicitConfirmationAcceptance::ExplicitConfirmationAcceptance(
+        bool valid) noexcept
+    : valid_(valid) {}
+
+ExplicitConfirmationAcceptance::ExplicitConfirmationAcceptance(
+        ExplicitConfirmationAcceptance&& other) noexcept
+    : valid_(std::exchange(other.valid_, false)) {}
+
+ExplicitConfirmationAcceptance& ExplicitConfirmationAcceptance::operator=(
+        ExplicitConfirmationAcceptance&& other) noexcept {
+    if(this == &other) return *this;
+    valid_ = std::exchange(other.valid_, false);
+    return *this;
+}
+
+bool ExplicitConfirmationAcceptance::valid() const noexcept {
+    return valid_;
+}
+
 ConfirmationInputParseResult parse_confirmation_input(
         std::string_view input, ConfirmationDefault default_answer) {
     const std::string normalized = normalize_confirmation_input(input);
@@ -100,6 +129,26 @@ ConfirmationInputParseResult parse_confirmation_input(
        normalized == "cancel") {
         return ConfirmationCancelled{
                 ConfirmationCancellationReason::ExplicitToken};
+    }
+    return InvalidConfirmationInput{};
+}
+
+ExplicitConfirmationInputParseResult parse_explicit_confirmation_input(
+        std::string_view input) {
+    const ConfirmationInputParseResult parsed = parse_confirmation_input(
+            input, ConfirmationDefault::None);
+    if(const auto* accepted = std::get_if<ConfirmationAccepted>(&parsed)) {
+        if(accepted->origin != ConfirmationDecisionOrigin::ExplicitToken) {
+            throw std::logic_error(
+                    "No-default explicit confirmation invariant failed.");
+        }
+        return parse_explicit_confirmation_acceptance(input);
+    }
+    if(const auto* declined = std::get_if<ConfirmationDeclined>(&parsed)) {
+        return *declined;
+    }
+    if(const auto* cancelled = std::get_if<ConfirmationCancelled>(&parsed)) {
+        return *cancelled;
     }
     return InvalidConfirmationInput{};
 }
@@ -174,6 +223,61 @@ ConfirmationResult request_confirmation(
         if(const auto* accepted =
                    std::get_if<ConfirmationAccepted>(&parsed)) {
             return *accepted;
+        }
+        if(const auto* declined =
+                   std::get_if<ConfirmationDeclined>(&parsed)) {
+            return *declined;
+        }
+        if(const auto* cancelled =
+                   std::get_if<ConfirmationCancelled>(&parsed)) {
+            return *cancelled;
+        }
+
+        Logger::warn(localization::translate_message(
+                "Please answer yes, no, or cancel."));
+    }
+}
+
+ExplicitConfirmationResult request_explicit_confirmation(
+        const std::string& question, bool no_confirm) {
+    return request_explicit_confirmation(
+            question, no_confirm, isatty(STDIN_FILENO) != 0,
+            std::cin, std::cout);
+}
+
+ExplicitConfirmationResult request_explicit_confirmation(
+        const std::string& question, bool no_confirm,
+        bool is_interactive_input, std::istream& input, std::ostream& output) {
+    if(no_confirm) {
+        return ConfirmationUnavailable{
+                ConfirmationUnavailableReason::NoConfirm};
+    }
+    if(!is_interactive_input) {
+        return ConfirmationUnavailable{
+                ConfirmationUnavailableReason::NonInteractiveInput};
+    }
+
+    for(;;) {
+        // NO_TRANSLATE: This is the fixed no-default confirmation grammar.
+        output << ":: " << question << " "
+               << prompt_suffix(ConfirmationDefault::None) << " "
+               << localization::format_translated_message(
+                          "(type {} to cancel)", "q/quit/cancel")
+               << " ";
+        std::string line;
+        if(!std::getline(input, line)) {
+            if(input.eof() && !input.bad()) {
+                return ConfirmationCancelled{
+                        ConfirmationCancellationReason::EndOfInput};
+            }
+            return ConfirmationInputFailure{};
+        }
+
+        ExplicitConfirmationInputParseResult parsed =
+                parse_explicit_confirmation_input(line);
+        if(auto* accepted =
+                   std::get_if<ExplicitConfirmationAcceptance>(&parsed)) {
+            return std::move(*accepted);
         }
         if(const auto* declined =
                    std::get_if<ConfirmationDeclined>(&parsed)) {

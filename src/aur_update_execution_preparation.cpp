@@ -848,6 +848,12 @@ bool collect_work_item_drafts(
         draft.work_item.request.checkout_name = entry.package_base;
         draft.work_item.request.git_url =
                 AUR_BASE_URL + entry.package_base + ".git";
+        draft.work_item.request.aur_review_identity =
+                PackageBaseIdentity::make(
+                        PackageSourceIdentity::aur(
+                                SourceLocationIdentity::known_git_remote(
+                                        draft.work_item.request.git_url)),
+                        entry.package_base);
         draft.work_item.request.empty_value_policy =
                 SourceEnvironmentEmptyValuePolicy::Omit;
         draft.work_item.request.needed = needed;
@@ -1789,6 +1795,13 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
                 std::move(preparation.externally_satisfied_build_units),
                 std::optional<PreparedAurUpdateSourceBuildInvocation>{
                         std::move(prepared_invocation)}};
+    } catch(const ReviewedSourceProductionError& error) {
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
+                AurUpdatePreparationReason::GenericPreparationInconsistent,
+                error.what());
+        issue.reviewed_source_failure = error.failure();
+        attribute_issue_to_all_executable_targets(issue, preparation);
+        preparation.issues.push_back(std::move(issue));
     } catch(const PackageMetadataError& error) {
         AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::PacmanDatabaseUnavailable,

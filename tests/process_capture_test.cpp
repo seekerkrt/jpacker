@@ -49,6 +49,21 @@ bool write_stdout(std::string_view output) {
     return true;
 }
 
+std::optional<std::string> read_stdin() {
+    std::string input;
+    char buffer[128];
+    while(true) {
+        const ssize_t bytes_read = read(STDIN_FILENO, buffer, sizeof(buffer));
+        if(bytes_read > 0) {
+            input.append(buffer, static_cast<std::size_t>(bytes_read));
+            continue;
+        }
+        if(bytes_read == 0) return input;
+        if(errno == EINTR) continue;
+        return std::nullopt;
+    }
+}
+
 std::size_t parse_output_size(std::string_view value) {
     std::size_t output_size = 0;
     auto [end, error] = std::from_chars(
@@ -79,6 +94,10 @@ int run_child(int argc, char* argv[]) {
     if(mode == "cwd") {
         const std::string directory = fs::current_path().string();
         return write_stdout(directory) ? 0 : 125;
+    }
+    if(mode == "stdin-echo") {
+        const auto input = read_stdin();
+        return input.has_value() && write_stdout(*input) ? 0 : 125;
     }
     if(mode == "exit-23") return 23;
     if(mode == "signal-term") {
@@ -298,6 +317,36 @@ void test_explicit_working_directory_descriptor(
             fs::canonical("/tmp").string(), 0);
 }
 
+void test_explicit_standard_input_descriptor(
+        const fs::path& executable_path) {
+    int descriptors[2] = {-1, -1};
+    require(pipe2(descriptors, O_CLOEXEC) == 0,
+            "Failed to create explicit-process stdin pipe");
+    const std::string input{'b', 'e', 'f', 'o', 'r', 'e', '\0', 'a', 'f', 't', 'e', 'r'};
+    std::size_t input_offset = 0;
+    while(input_offset < input.size()) {
+        const ssize_t written = write(
+                descriptors[1], input.data() + input_offset,
+                input.size() - input_offset);
+        if(written == -1 && errno == EINTR) continue;
+        require(written > 0,
+                "Failed to write explicit-process stdin fixture");
+        input_offset += static_cast<std::size_t>(written);
+    }
+    require(close(descriptors[1]) == 0,
+            "Failed to close explicit-process stdin writer");
+
+    CapturedCommandResult result = capture_explicit_process_output_raw(
+            ExplicitProcessInvocation{
+                    executable_path.string(),
+                    {std::string(CHILD_MARKER), "stdin-echo"}, {},
+                    std::nullopt, std::nullopt, descriptors[0]});
+    require(close(descriptors[0]) == 0,
+            "Explicit process closed the caller-owned stdin descriptor");
+    require_result(
+            "explicit standard input descriptor", result, input, 0);
+}
+
 void run_tests(const fs::path& executable_path) {
     test_raw_chunk_boundaries(executable_path);
     test_raw_byte_preservation(executable_path);
@@ -306,6 +355,7 @@ void run_tests(const fs::path& executable_path) {
     test_bounded_explicit_capture(executable_path);
     test_unbounded_explicit_capture_compatibility(executable_path);
     test_explicit_working_directory_descriptor(executable_path);
+    test_explicit_standard_input_descriptor(executable_path);
 }
 
 } // namespace

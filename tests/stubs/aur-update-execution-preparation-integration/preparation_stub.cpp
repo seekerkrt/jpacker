@@ -104,6 +104,12 @@ void require_unclaimed_artifact_pkgdest(
     }
 }
 
+std::shared_ptr<ReviewedSourceFatalStatePreflightSlot>
+preflight_reviewed_source_fatal_state_for_production(
+        const SourceBuildRequest&) {
+    return nullptr;
+}
+
 void seed_production_source_build_cache(
         PreparedProductionSourceBuildInvocation& invocation,
         const ValidatedCacheRoot& cache_root) {

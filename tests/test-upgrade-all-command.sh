@@ -1274,6 +1274,27 @@ assert_exact_line \
 assert_exact_line \
     "  更新候補: 1件、blocker: 0件、要確認: 0件、失敗: 0件" \
     "$stdout_file"
+assert_contains \
+    "確認済みソースの結果（PackageBase issue-455-aur-updated）: 正確なupstream commit 4444444444444444444444444444444444444444 の更新レビューを受理しました。" \
+    "$stdout_file"
+assert_contains \
+    "確認済み状態（PackageBase issue-455-aur-updated）を世代 31として公開しました。ビルドとインストールの結果は別に報告します。" \
+    "$stdout_file"
+assert_contains \
+    "この実行内のeditor変更" "$stdout_file"
+assert_contains \
+    "正確な確認済みcommit treeそのものではありません" "$stdout_file"
+assert_contains \
+    "ビルド結果（PackageBase issue-455-aur-updated）: 成功。" \
+    "$stdout_file"
+assert_contains \
+    "インストール結果（PackageBase issue-455-aur-updated）: 成功。" \
+    "$stdout_file"
+assert_not_contains "UpdateReview" "$stdout_file"
+assert_not_contains "InvocationLocal" "$stdout_file"
+assert_not_contains "exact upstream commit" "$stdout_file"
+assert_not_contains "generation" "$stdout_file"
+assert_not_contains "invocation-local editor overlay" "$stdout_file"
 
 setup_case localized-completed-unknown completed-unknown
 LOCPATH=$locale_root \

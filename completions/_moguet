@@ -371,10 +371,10 @@ _moguet_description() {
         --help) REPLY='Show the help message and exit' ;;
         -V) REPLY='Show version information and exit' ;;
         --version) REPLY='Show version information and exit' ;;
-        --edit) REPLY='Prompt to review PKGBUILD and .install files' ;;
-        --noedit) REPLY='Skip PKGBUILD and .install review' ;;
-        --diff) REPLY='Prompt to view repository update diffs' ;;
-        --nodiff) REPLY='Skip the repository update diff prompt' ;;
+        --edit) REPLY='Open or edit PKGBUILD and .install files for this invocation' ;;
+        --noedit) REPLY='Skip invocation-local PKGBUILD and .install editing' ;;
+        --diff) REPLY='Review repository updates; for AUR, review the exact target from the previous reviewed revision or all tracked source initially' ;;
+        --nodiff) REPLY='Skip repository diff / reviewed-source review without advancing reviewed state' ;;
         --noconfirm) REPLY='Skip prompts on supported routes; forwarding remains route-owned' ;;
         --dry-run) REPLY='Observe a supported mutating operation without changing persistent state' ;;
         --build-mode=) REPLY='Select the source-build mode' ;;

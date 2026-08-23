@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.3.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-19 07:09+0900\n"
+"POT-Creation-Date: 2026-08-23 19:00+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -127,6 +127,10 @@ msgstr "{} によって同一バージョンのインストールが省略され
 #, c++-format
 msgid "Separated build/install does not support {}."
 msgstr "分離されたビルド／インストールでは {} をサポートしていません。"
+
+#, c++-format
+msgid "Internal {} output capture failed."
+msgstr "{}内部出力の取得に失敗しました。"
 
 #, c++-format
 msgid "Failed to retain the current working directory: {}"
@@ -707,6 +711,12 @@ msgstr "アーティファクトの検証に失敗しました"
 msgid "artifact identity failure"
 msgstr "アーティファクト識別情報の取得に失敗しました"
 
+msgid "install preparation failure"
+msgstr "インストール準備失敗"
+
+msgid "install transaction failure"
+msgstr "インストールトランザクション失敗"
+
 msgid "build or install failure"
 msgstr "ビルドまたはインストールに失敗しました"
 
@@ -927,6 +937,11 @@ msgstr "{} トランザクションの証拠に型付きトランザクション
 #, c++-format
 msgid "{} transaction failure detail has no attempt evidence."
 msgstr "{} トランザクションの失敗詳細に試行の証拠がありません。"
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "An unattempted {} work item unexpectedly has a production outcome."
+msgstr "未試行の{}作業項目に予期しない実行結果があります。"
 
 msgid "installed / updated"
 msgstr "インストール済み／更新済み"
@@ -4555,7 +4570,7 @@ msgstr "{}のbuild plan constraint requirement identityが変化しました。"
 
 #, c++-format
 msgid "Build plan constraint source identity is inconsistent for {}."
-msgstr "{}のbuild plan constraint source identityに整合性がありません。"
+msgstr "{}のbuild plan constraintソース識別情報に整合性がありません。"
 
 #, c++-format
 msgid "Build plan constraint evaluation is missing for {}."
@@ -4626,7 +4641,7 @@ msgid "requirements for the same candidate conflict"
 msgstr "同じcandidateへのrequirementが競合しています"
 
 msgid "provider source identities conflict"
-msgstr "provider source identityが競合しています"
+msgstr "providerのソース識別情報が競合しています"
 
 msgid "no version comparison is required"
 msgstr "version比較は不要です"
@@ -5188,19 +5203,27 @@ msgstr "対応する変更の前に判定済みの競合/置換ブロッカー�
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
-msgid "Prompt to review {} and {} files"
-msgstr "{}および{}の確認を促します"
+msgid "Open or edit {} and {} files for this invocation"
+msgstr "今回のinvocationで{}および{} fileを開く・編集"
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
-msgid "Skip {} and {} review"
-msgstr "{}および{}の確認を省略"
+msgid "Skip invocation-local {} and {} editing"
+msgstr "invocation-localな{}および{}編集を省略"
 
-msgid "Prompt to view repository update diffs"
-msgstr "リポジトリ更新差分の表示を促します"
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "Review repository updates; for {}, review the exact target"
+msgstr "リポジトリ更新を確認し、{}ではexact targetをreview"
 
-msgid "Skip the repository update diff prompt"
-msgstr "リポジトリ更新差分の確認を省略"
+msgid "Use the previous reviewed revision, or all tracked source on first review"
+msgstr "previous reviewed revisionを基準にし、初回reviewではtracked source全体をreview"
+
+msgid "Advance reviewed state only after explicit acceptance"
+msgstr "explicit acceptance後だけreviewed stateを進める"
+
+msgid "Skip repository diff / reviewed-source review without advancing reviewed state"
+msgstr "repository diff / reviewed-source reviewを省略し、reviewed stateを進めない"
 
 #. TRANSLATORS: pacman and makepkg are literal external-program identities.
 #, c++-format
@@ -5258,13 +5281,15 @@ msgstr "型付きの読み取り専用設定。ファイルがない場合は組
 msgid "Required schema version"
 msgstr "必須のスキーマバージョン"
 
-#. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
+#. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
-msgid "{} review policy"
-msgstr "{}の確認方針"
+msgid "Invocation-local {} / {} editor policy; not reviewed-source acceptance"
+msgstr "invocation-localな{} / {} editor policy。reviewed-source acceptanceではない"
 
-msgid "Repository update diff policy"
-msgstr "リポジトリ更新差分の確認方針"
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "Repository diff / {} reviewed-source review policy; skipping does not advance reviewed state"
+msgstr "repository diff / {} reviewed-source reviewの方針。skipしてもreviewed stateを進めない"
 
 msgid "Source-build mode"
 msgstr "ソースビルドモード"
@@ -6144,6 +6169,449 @@ msgstr "警告: プロバイダー候補 {} のインストール状態を取得
 msgid "Repository provider capability metadata is invalid."
 msgstr "リポジトリプロバイダーのcapabilityメタデータが無効です。"
 
+msgid "Reviewed source review could not produce explicit acceptance; the build was not started."
+msgstr "確認済みソースのレビューで明示的な受諾を得られなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source content requires manual inspection; this invocation was stopped without state publication or compatibility fallback, and the build was not started."
+msgstr "確認済みソースの内容には手動確認が必要です。この呼び出しは状態公開も互換fallbackも行わず停止し、ビルドを開始しませんでした。"
+
+msgid "Review-sensitive source content could not be rendered safely; this invocation was stopped without state publication or compatibility fallback, and the build was not started."
+msgstr "レビュー上重要なソースの内容を安全に表示できませんでした。この呼び出しは状態公開も互換fallbackも行わず停止し、ビルドを開始しませんでした。"
+
+msgid "Reviewed source state uses an unsupported future schema; the build was not started."
+msgstr "確認済みソースの状態は未対応の将来スキーマを使用しています。ビルドを開始しませんでした。"
+
+msgid "Reviewed source state history is unsafe; the build was not started."
+msgstr "確認済みソースの状態履歴が安全ではないため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source state could not be read safely; the build was not started."
+msgstr "確認済みソースの状態を安全に読み取れなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source state observation was inconsistent; the build was not started."
+msgstr "確認済みソースの状態観測に整合性がないため、ビルドを開始しませんでした。"
+
+#, c++-format
+msgid "Reviewed source {} lease is already held; the build was not started."
+msgstr "確認済みソースの{}ロックは別の処理が保持中です。ビルドを開始しませんでした。"
+
+#, c++-format
+msgid "Reviewed source {} lease could not be acquired; the build was not started."
+msgstr "確認済みソースの{}ロックを取得できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source target revision resolution failed; the build was not started."
+msgstr "確認済みソースの対象リビジョンを解決できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source lifecycle planning failed; the build was not started."
+msgstr "確認済みソースのライフサイクルを計画できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source exact checkout materialization failed; the build was not started."
+msgstr "確認済みソースの完全一致チェックアウトを作成できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source review projection failed; the build was not started."
+msgstr "確認済みソースのレビュー内容を投影できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source review materialization failed; the build was not started."
+msgstr "確認済みソースのレビュー内容を具体化できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source editor overlay could not be proven; the build was not started."
+msgstr "確認済みソースのエディター差分を証明できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source checkout revalidation failed; the build was not started."
+msgstr "確認済みソースのチェックアウトを再検証できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source state publication conflicted with current state; the build was not started."
+msgstr "確認済みソースの状態公開が現在の状態と競合したため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source state publication reached a post-commit ambiguity; the build was not started, and automatic retry, rollback, and compatibility fallback are forbidden."
+msgstr "確認済みソースの状態公開はcommit後に結果を確定できない状態になりました。ビルドは開始せず、自動再試行、rollback、互換fallbackも行いません。"
+
+msgid "Reviewed source state publication encountered unsafe history; the build was not started."
+msgstr "確認済みソースの状態公開で安全でない履歴を検出したため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source state publication failed; the build was not started."
+msgstr "確認済みソースの状態を公開できなかったため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source checkout changed after state publication; the build was not started."
+msgstr "状態公開後に確認済みソースのチェックアウトが変化したため、ビルドを開始しませんでした。"
+
+#, c++-format
+msgid "Reviewed source checkout changed before {}; the build was not started."
+msgstr "{}実行前に確認済みソースのチェックアウトが変化したため、ビルドを開始しませんでした。"
+
+msgid "Reviewed source production preparation failed; the build was not started."
+msgstr "確認済みソースの実行準備に失敗したため、ビルドを開始しませんでした。"
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: {} skipped review acceptance; this invocation has compatibility-only source authority, and reviewed state was not advanced."
+msgstr "確認済みソースの結果（{} {}）: {} によりレビュー受理をスキップしました。この呼び出しには互換経路のソース権限だけがあり、確認済み状態は進めていません。"
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: {} did not create review acceptance; this invocation has compatibility-only source authority, and reviewed state was not advanced."
+msgstr "確認済みソースの結果（{} {}）: {} はレビュー受理を生成しませんでした。この呼び出しには互換経路のソース権限だけがあり、確認済み状態は進めていません。"
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: {} is non-interactive, so no review acceptance was created; this invocation has compatibility-only source authority, and reviewed state was not advanced."
+msgstr "確認済みソースの結果（{} {}）: {} が非対話のため、レビュー受理を生成しませんでした。この呼び出しには互換経路のソース権限だけがあり、確認済み状態は進めていません。"
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: review acceptance was explicitly declined; this invocation has compatibility-only source authority, and reviewed state was not advanced."
+msgstr "確認済みソースの結果（{} {}）: レビュー受理が明示的に拒否されました。この呼び出しには互換経路のソース権限だけがあり、確認済み状態は進めていません。"
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: review acceptance was declined by the safe default; this invocation has compatibility-only source authority, and reviewed state was not advanced."
+msgstr "確認済みソースの結果（{} {}）: 安全側の既定値によりレビュー受理を拒否しました。この呼び出しには互換経路のソース権限だけがあり、確認済み状態は進めていません。"
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: initial full review accepted for exact upstream commit {}."
+msgstr "確認済みソースの結果（{} {}）: 正確なupstream commit {} の初回全体レビューを受理しました。"
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: update review accepted for exact upstream commit {}."
+msgstr "確認済みソースの結果（{} {}）: 正確なupstream commit {} の更新レビューを受理しました。"
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: explicit full rebaseline accepted for exact upstream commit {}."
+msgstr "確認済みソースの結果（{} {}）: 正確なupstream commit {} への明示的な全体再ベースライン確認を受理しました。"
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: explicit rebind/rebaseline of invalid state accepted for exact upstream commit {}."
+msgstr "確認済みソースの結果（{} {}）: 不正な状態を正確なupstream commit {} へ明示的に再関連付け／再ベースライン確認するレビューを受理しました。"
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: explicit rebind/rebaseline of corrupted state accepted for exact upstream commit {}."
+msgstr "確認済みソースの結果（{} {}）: 破損した状態を正確なupstream commit {} へ明示的に再関連付け／再ベースライン確認するレビューを受理しました。"
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: explicit source-identity rebind/rebaseline accepted for exact upstream commit {}."
+msgstr "確認済みソースの結果（{} {}）: ソース識別情報を正確なupstream commit {} へ明示的に再関連付け／再ベースライン確認するレビューを受理しました。"
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: exact upstream commit {} was already reviewed; no review prompt or state rewrite occurred."
+msgstr "確認済みソースの結果（{} {}）: 正確なupstream commit {} は確認済みです。レビュープロンプトも状態の書き換えも行っていません。"
+
+#, c++-format
+msgid "Reviewed state for {} {} remains at generation {}; build and install outcomes are reported separately."
+msgstr "確認済み状態（{} {}）は世代 {}のままです。ビルドとインストールの結果は別に報告します。"
+
+#, c++-format
+msgid "Reviewed state for {} {} was published at generation {}; build and install outcomes are reported separately."
+msgstr "確認済み状態（{} {}）を世代 {}として公開しました。ビルドとインストールの結果は別に報告します。"
+
+#, c++-format
+msgid "Reviewed state for {} {} already matched the accepted target at publication; generation {} was retained and no state rewrite was needed."
+msgstr "確認済み状態（{} {}）は公開時点ですでに受理対象と一致していました。世代 {}を維持し、状態の書き換えは行っていません。"
+
+#, c++-format
+msgid "Build input for {} {} is pinned to reviewed upstream commit {} with no invocation-local editor overlay."
+msgstr "{} {} のビルド入力は確認済みupstream commit {}へ固定され、この実行内のeditor変更はありません。"
+
+#, c++-format
+msgid "Build input for {} {} includes an invocation-local editor overlay on reviewed upstream commit {}; it is not the exact reviewed commit tree."
+msgstr "{} {} のビルド入力には、確認済みupstream commit {} 上のこの実行内のeditor変更が含まれます。これは正確な確認済みcommit treeそのものではありません。"
+
+#, c++-format
+msgid "Build outcome for {} {}: not attempted."
+msgstr "ビルド結果（{} {}）: 未試行。"
+
+#, c++-format
+msgid "Build outcome for {} {}: started; completion was not proven."
+msgstr "ビルド結果（{} {}）: 開始済みですが、完了を証明できませんでした。"
+
+#, c++-format
+msgid "Build outcome for {} {}: failed."
+msgstr "ビルド結果（{} {}）: 失敗。"
+
+#, c++-format
+msgid "Build outcome for {} {}: succeeded."
+msgstr "ビルド結果（{} {}）: 成功。"
+
+#, c++-format
+msgid "Install outcome for {} {}: not attempted."
+msgstr "インストール結果（{} {}）: 未試行。"
+
+#, c++-format
+msgid "Install outcome for {} {}: started; completion was not proven."
+msgstr "インストール結果（{} {}）: 開始済みですが、完了を証明できませんでした。"
+
+#, c++-format
+msgid "Install outcome for {} {}: failed."
+msgstr "インストール結果（{} {}）: 失敗。"
+
+#, c++-format
+msgid "Install outcome for {} {}: succeeded."
+msgstr "インストール結果（{} {}）: 成功。"
+
+#, c++-format
+msgid "Build input for {} {} includes invocation-local editor changes, but no reviewed upstream authority was created."
+msgstr "{} {} のビルド入力には呼び出し内だけのeditor変更が含まれますが、確認済みupstreamの権限は生成していません。"
+
+msgid "100644 (regular file)"
+msgstr "100644（通常ファイル）"
+
+msgid "100755 (executable file)"
+msgstr "100755（実行可能ファイル）"
+
+msgid "120000 (symbolic link)"
+msgstr "120000（シンボリックリンク）"
+
+msgid "160000 (Gitlink)"
+msgstr "160000（Gitlink）"
+
+msgid "tracked source"
+msgstr "追跡対象ソース"
+
+msgid "generated metadata"
+msgstr "生成メタデータ"
+
+msgid "line-reviewable content"
+msgstr "行単位でレビュー可能な内容"
+
+msgid "content containing NUL bytes"
+msgstr "NUL byteを含む内容"
+
+msgid "Gitlink metadata"
+msgstr "Gitlinkメタデータ"
+
+msgid "complete text patch"
+msgstr "完全なtext patch"
+
+msgid "complete full text"
+msgstr "完全な全文"
+
+msgid "no content change"
+msgstr "内容変更なし"
+
+msgid "mixed text and non-text content"
+msgstr "textと非textが混在する内容"
+
+msgid "manual inspection required"
+msgstr "手動確認が必要"
+
+msgid "sensitive source cannot be rendered safely"
+msgstr "レビュー上重要なソースを安全に表示不可"
+
+msgid "ordinary"
+msgstr "通常"
+
+msgid "review-sensitive"
+msgstr "レビュー上重要"
+
+msgid "added"
+msgstr "追加"
+
+msgid "modified"
+msgstr "変更"
+
+msgid "deleted"
+msgstr "削除"
+
+msgid "renamed"
+msgstr "rename"
+
+msgid "type changed"
+msgstr "type変更"
+
+#, c++-format
+msgid "{} path: "
+msgstr "{}のpath: "
+
+msgid "none\n"
+msgstr "なし\n"
+
+#, c++-format
+msgid "{} mode: "
+msgstr "{}のmode: "
+
+#, c++-format
+msgid "{} object: "
+msgstr "{}のobject: "
+
+#, c++-format
+msgid "{} size: "
+msgstr "{}のsize: "
+
+msgid "unavailable\n"
+msgstr "利用不可\n"
+
+#, c++-format
+msgid "{} bytes\n"
+msgstr "{} byte\n"
+
+#, c++-format
+msgid "{} classification: "
+msgstr "{}の分類: "
+
+#, c++-format
+msgid "{} content kind: "
+msgstr "{}の内容種別: "
+
+#, c++-format
+msgid "  {} change marker: "
+msgstr "  {}の変更マーカー: "
+
+#, c++-format
+msgid "text (added lines: {}; deleted lines: {})"
+msgstr "text（追加行: {}; 削除行: {}）"
+
+msgid "binary"
+msgstr "binary"
+
+msgid "  change status: "
+msgstr "  変更状態: "
+
+msgid "  review readiness detail: "
+msgstr "  レビュー準備状態の詳細: "
+
+msgid "complete terminal-safe content presentation\n"
+msgstr "terminal-safeな内容表示が完了\n"
+
+msgid "WARNING: manual inspection is required; metadata alone is not a complete content review\n"
+msgstr "警告: 手動確認が必要です。メタデータだけでは内容レビューは完了しません\n"
+
+msgid "WARNING: review-sensitive source content cannot be rendered safely; metadata does not complete the review\n"
+msgstr "警告: レビュー上重要なソースの内容を安全に表示できません。メタデータだけではレビューは完了しません\n"
+
+msgid "    (empty)\n"
+msgstr "    （空）\n"
+
+msgid "    \\ No newline at end of file\n"
+msgstr "    \\ ファイル末尾に改行なし\n"
+
+msgid "  old full text:\n"
+msgstr "  旧全文:\n"
+
+msgid "  new full text:\n"
+msgstr "  新全文:\n"
+
+msgid "  verified text patch:\n"
+msgstr "  検証済みtext patch:\n"
+
+msgid "  content: content unchanged\n"
+msgstr "  内容: 変更なし\n"
+
+msgid "  metadata change: rename only (content unchanged)\n"
+msgstr "  メタデータ変更: renameのみ（内容変更なし）\n"
+
+msgid "  metadata change: mode changed (content unchanged)\n"
+msgstr "  メタデータ変更: mode変更（内容変更なし）\n"
+
+msgid "  metadata change: change type retained despite unchanged content\n"
+msgstr "  メタデータ変更: 内容が同じでも変更種別を維持\n"
+
+msgid "  content: mixed text and non-line-reviewable content; raw bytes withheld\n"
+msgstr "  内容: textと行単位でレビューできない内容が混在。raw byteは表示しません\n"
+
+msgid "  line-reviewable old content:\n"
+msgstr "  行単位でレビュー可能な旧内容:\n"
+
+msgid "  line-reviewable new content:\n"
+msgstr "  行単位でレビュー可能な新内容:\n"
+
+msgid "  content: binary/non-line-reviewable content; raw bytes withheld\n"
+msgstr "  内容: binaryまたは行単位でレビュー不可。raw byteは表示しません\n"
+
+msgid "  content: Gitlink/submodule metadata only; recursive review not performed\n"
+msgstr "  内容: Gitlink/submoduleのメタデータのみ。再帰的レビューは行いません\n"
+
+#, c++-format
+msgid "review entry {}:\n"
+msgstr "レビュー項目{}:\n"
+
+msgid "old"
+msgstr "旧"
+
+msgid "new"
+msgstr "新"
+
+msgid "  rename similarity: "
+msgstr "  rename類似度: "
+
+msgid "  review emphasis: "
+msgstr "  レビュー強調: "
+
+msgid "  presentation priority: "
+msgstr "  表示優先度: "
+
+msgid "review-sensitive\n"
+msgstr "review-sensitive\n"
+
+#, c++-format
+msgid "  review-sensitive guidance: explicitly inspect root {}/{} source content\n"
+msgstr "  レビュー要注意の案内: ルートの{}/{}ソース内容を明示的に確認してください\n"
+
+msgid "lower-priority generated metadata\n"
+msgstr "低優先度の生成メタデータ\n"
+
+msgid "  generated metadata guidance: lower emphasis; not source-review authority\n"
+msgstr "  生成メタデータの案内: 強調度は低く、source reviewのauthorityではありません\n"
+
+msgid "ordinary\n"
+msgstr "通常\n"
+
+msgid "  content representation: "
+msgstr "  内容の表示形式: "
+
+msgid "  review readiness: "
+msgstr "  レビュー準備状態: "
+
+msgid "overall review readiness: "
+msgstr "レビュー準備状態の総合結果: "
+
+#, c++-format
+msgid ""
+"\n"
+"review entry count: {}\n"
+"review entries:\n"
+msgstr ""
+"\n"
+"レビュー項目数: {}\n"
+"レビュー項目:\n"
+
+msgid "  (none)\n"
+msgstr "  （なし）\n"
+
+msgid "reviewed baseline is an ancestor of the target"
+msgstr "確認済みbaselineは対象のancestor"
+
+msgid "reviewed baseline is not an ancestor of the target"
+msgstr "確認済みbaselineは対象のancestorではない"
+
+msgid "baseline object is missing or is not a commit"
+msgstr "baseline objectが存在しないかcommitではない"
+
+msgid "review type: initial full review\n"
+msgstr "レビュー種別: 初回全体レビュー\n"
+
+msgid "target revision: "
+msgstr "対象revision: "
+
+msgid "review type: already reviewed\n"
+msgstr "レビュー種別: 確認済み\n"
+
+msgid "reviewed revision: "
+msgstr "確認済みrevision: "
+
+msgid "review result: already reviewed; no acceptance prompt is required\n"
+msgstr "レビュー結果: 確認済み。受理プロンプトは不要です\n"
+
+msgid "review type: update review\n"
+msgstr "レビュー種別: 更新レビュー\n"
+
+msgid "baseline revision: "
+msgstr "baseline revision: "
+
+msgid "history relation: "
+msgstr "履歴関係: "
+
+msgid "review type: explicit full rebaseline\n"
+msgstr "レビュー種別: 明示的な全体再ベースライン確認\n"
+
+msgid "unavailable baseline: "
+msgstr "利用できないbaseline: "
+
+msgid "baseline unavailable reason: "
+msgstr "baselineを利用できない理由: "
+
 msgid "Unsupported"
 msgstr "未対応"
 
@@ -6235,6 +6703,33 @@ msgstr "{} のビルド専用 {} 実行に失敗しました。"
 msgid "{} artifact aggregate validation failed."
 msgstr "{} アーティファクトの集約検証に失敗しました。"
 
+#. TRANSLATORS: The placeholder is the literal Arch field name
+#. "PackageBase".
+#, c++-format
+msgid "{} install-result preparation failed before package transaction."
+msgstr "パッケージトランザクションの前に{}のインストール結果準備に失敗しました。"
+
+msgid "Source-build context preparation failed with an unknown error."
+msgstr "ソースビルドの実行環境準備が不明なエラーで失敗しました。"
+
+msgid "Source-build artifact-list query failed with an unknown error."
+msgstr "ソースビルドのアーティファクト一覧取得が不明なエラーで失敗しました。"
+
+#. TRANSLATORS: The placeholder is the literal command
+#. name "makepkg".
+#, c++-format
+msgid "The build-only {} execution failed with an unknown error."
+msgstr "ビルド専用の{}実行が不明なエラーで失敗しました。"
+
+msgid "Built package artifact validation failed with an unknown error."
+msgstr "ビルド済みパッケージのアーティファクト検証が不明なエラーで失敗しました。"
+
+msgid "Package install preparation failed with an unknown error."
+msgstr "パッケージのインストール準備が不明なエラーで失敗しました。"
+
+msgid "Package install transaction failed with an unknown error."
+msgstr "パッケージのインストールトランザクションが不明なエラーで失敗しました。"
+
 msgid "Prepared source-build execution capability is invalid or test-only."
 msgstr "準備済みソースビルドの実行capabilityが無効か、テスト専用です。"
 
@@ -6281,6 +6776,21 @@ msgstr "{}/{}のレビューを省略します（{}）。"
 msgid "Edit install script {}?"
 msgstr "インストールスクリプト {} を編集しますか？"
 
+msgid "Accept this explicit reviewed-source full rebaseline?"
+msgstr "確認済みソースの明示的な全体再ベースライン確認を受理しますか？"
+
+msgid "Accept this explicit rebind/rebaseline of invalid reviewed state?"
+msgstr "不正な確認済み状態の明示的な再関連付け／再ベースライン確認を受理しますか？"
+
+msgid "Accept this explicit rebind/rebaseline of corrupted reviewed state?"
+msgstr "破損した確認済み状態の明示的な再関連付け／再ベースライン確認を受理しますか？"
+
+msgid "Accept this explicit reviewed-source identity rebind/rebaseline?"
+msgstr "確認済みソース識別情報の明示的な再関連付け／再ベースライン確認を受理しますか？"
+
+msgid "Accept this reviewed upstream revision?"
+msgstr "この確認済みupstream revisionを受理しますか？"
+
 #, c++-format
 msgid "{} was updated by the system transaction ({} -> {}); rebuilding the preferred source package."
 msgstr "{}はシステムトランザクションで更新されました（{} -> {}）。優先ソースパッケージを再ビルドします。"
@@ -6312,6 +6822,13 @@ msgstr "リポジトリを更新しています..."
 msgid "Failed to fetch updates."
 msgstr "更新を取得できませんでした。"
 
+msgid "Cloning repository..."
+msgstr "リポジトリを clone しています..."
+
+#, c++-format
+msgid "Failed to clone {}"
+msgstr "{} を clone できませんでした"
+
 #, c++-format
 msgid "Detected branch: {}"
 msgstr "検出したブランチ: {}"
@@ -6325,13 +6842,6 @@ msgstr "既存のキャッシュリポジトリで更新が検出されました
 
 msgid "Failed to reset repository."
 msgstr "リポジトリをリセットできませんでした。"
-
-msgid "Cloning repository..."
-msgstr "リポジトリを clone しています..."
-
-#, c++-format
-msgid "Failed to clone {}"
-msgstr "{} を clone できませんでした"
 
 #, c++-format
 msgid "Unable to determine update status from {} for {}."
@@ -6468,6 +6978,14 @@ msgstr "{} のソースビルドにおける子パッケージの結果に、不
 msgid "{} unselected artifact identity is incoherent for presentation."
 msgstr "{} の未選択アーティファクト識別情報は、表示に必要な整合性を満たしていません。"
 
+#, c++-format
+msgid "Install Error: {}"
+msgstr "インストールエラー: {}"
+
+#, c++-format
+msgid "Source-build Error: {}"
+msgstr "ソースビルドエラー: {}"
+
 msgid "Cannot seed cache for an empty source-build invocation."
 msgstr "空のソースビルド呼び出しに対してキャッシュを準備できません。"
 
@@ -6535,6 +7053,9 @@ msgstr "対象パッケージ: {}"
 #, c++-format
 msgid "Failed while building/installing {} {} ({}): {}"
 msgstr "{} {}（{}）のビルドまたはインストール中に失敗しました: {}"
+
+msgid "Source-build work item failed with an unknown error."
+msgstr "ソースビルド作業項目が不明なエラーで失敗しました。"
 
 #, c++-format
 msgid "Failed to expand variables for {}: {}"
@@ -7581,7 +8102,7 @@ msgid "local source {} (node type: {}; device: {}; inode: {}; {}: {})"
 msgstr "ローカルソース {}（ノード種別: {}、デバイス: {}、inode: {}、{}: {}）"
 
 msgid "A remote source build unit is missing its source identity key."
-msgstr "remote source-build単位にsource identity keyがありません。"
+msgstr "remote source-build単位にソース識別キーがありません。"
 
 msgid "A remote source build unit is missing its requested package identity."
 msgstr "remote source-build単位にrequested package identityがありません。"
@@ -7720,7 +8241,7 @@ msgid "A local source metadata stale reason is not supported by the renderer."
 msgstr "local source metadataのstale reasonはrendererでサポートされていません。"
 
 msgid "A local metadata blocker is missing its source identity."
-msgstr "local metadata blockerにsource identityがありません。"
+msgstr "local metadata blockerにソース識別情報がありません。"
 
 #, c++-format
 msgid "local metadata evaluation required ({}); source: {}; stale reasons: {}"
@@ -8470,6 +8991,13 @@ msgid "Unknown state log error code."
 msgstr "不明な状態ログエラーコードです。"
 
 #, c++-format
+#~ msgid "{} review policy"
+#~ msgstr "{}の確認方針"
+
+#~ msgid "Repository update diff policy"
+#~ msgstr "リポジトリ更新差分の確認方針"
+
+#, c++-format
 #~ msgid "Operation {} requires exactly one {} package target."
 #~ msgstr "操作 {} には {} パッケージ対象をちょうど1つ指定する必要があります。"
 
@@ -8619,10 +9147,6 @@ msgstr "不明な状態ログエラーコードです。"
 #, c++-format
 #~ msgid "The {} phase is {} without a typed reason."
 #~ msgstr "{}段階は型付きの理由がないまま{}になっています。"
-
-#, c++-format
-#~ msgid "{} phase: {}"
-#~ msgstr "{}段階: {}"
 
 #, c++-format
 #~ msgid "{} target: {}: {}"

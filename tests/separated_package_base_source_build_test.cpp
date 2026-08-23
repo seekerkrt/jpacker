@@ -356,6 +356,7 @@ struct LifecycleScenario {
     int               install_exit_code = 0;
     const char*       expected_reason_option = nullptr;
     bool              throw_during_install = false;
+    bool              replace_workspace_after_build = false;
     bool              replace_workspace_after_install = false;
 
     fs::path              expected_checkout_path;
@@ -629,6 +630,18 @@ void observe_run_command() {
         if(scenario.build_hook_behavior ==
            BuildHookBehavior::ThrowAfterOutput) {
             throw BuildRunnerTestError();
+        }
+        if(scenario.replace_workspace_after_build) {
+            scenario.displaced_workspace_path = fs::path(
+                    scenario.workspace_path.string() +
+                    ".build-succeeded-before-revalidation");
+            fs::rename(
+                    scenario.workspace_path,
+                    scenario.displaced_workspace_path);
+            fs::create_directory(scenario.workspace_path);
+            fs::permissions(
+                    scenario.workspace_path, fs::perms::owner_all,
+                    fs::perm_options::replace);
         }
         return;
     }
@@ -1179,11 +1192,21 @@ void test_identity_and_metadata_failures(
         try {
             static_cast<void>(execute_scenario(environment, scenario));
             throw std::runtime_error("Metadata failure was not reported.");
-        } catch(const PackageMetadataError& error) {
+        } catch(const SeparatedPackageBaseSourceBuildPhaseError& error) {
             expect(
-                    error.failure().code ==
-                            PackageMetadataErrorCode::QueryFailed,
-                    "Metadata typed error code differs");
+                    error.phase() ==
+                                    SeparatedPackageBaseSourceBuildFailurePhase::
+                                            InstallPreparation &&
+                            error.package_metadata_failure().has_value() &&
+                            error.package_metadata_failure()->code ==
+                                    PackageMetadataErrorCode::QueryFailed &&
+                            error.production_outcome().has_value() &&
+                            error.production_outcome()->build_outcome ==
+                                    ProductionSourceBuildCommandOutcome::
+                                            Succeeded &&
+                            error.production_outcome()->install_outcome ==
+                                    ProductionSourceInstallOutcome::Failed,
+                    "Metadata failure lost typed staged outcome");
         }
         expect(
                 metadata_stub::release_call_count() == 1 &&
@@ -1223,6 +1246,14 @@ void test_transaction_failures_have_no_public_result(
                             error.package_base() == PACKAGE_BASE &&
                             error.exit_code() == std::optional<int>{73},
                     "pacman nonzero typed failure differs");
+            expect(
+                    error.production_outcome().has_value() &&
+                            error.production_outcome()->build_outcome ==
+                                    ProductionSourceBuildCommandOutcome::
+                                            Succeeded &&
+                            error.production_outcome()->install_outcome ==
+                                    ProductionSourceInstallOutcome::Failed,
+                    "pacman nonzero lost successful build/failed install outcome");
             expect(
                     error.attempts().size() == 2 &&
                             error.attempts()[0].identity.package_name ==
@@ -1457,6 +1488,68 @@ void test_build_and_validation_failures_retain_diagnostics(
     }
 }
 
+void test_status_zero_post_build_revalidation_retains_succeeded_outcome(
+        const TemporaryTestEnvironment& environment) {
+    LifecycleScenario scenario;
+    scenario.required_targets = {target("postcheck-child")};
+    scenario.produced_artifacts = {artifact("postcheck-child")};
+    scenario.identity_query_count = 0;
+    scenario.expect_install = false;
+    scenario.replace_workspace_after_build = true;
+    activate_scenario(scenario, environment);
+
+    bool failure_reported = false;
+    try {
+        static_cast<void>(execute_scenario(environment, scenario));
+    } catch(const SeparatedPackageBaseSourceBuildPhaseError& error) {
+        failure_reported = true;
+        expect(
+                error.phase() ==
+                                SeparatedPackageBaseSourceBuildFailurePhase::
+                                        Build &&
+                        error.production_outcome().has_value() &&
+                        error.production_outcome()->build_outcome ==
+                                ProductionSourceBuildCommandOutcome::
+                                        Succeeded &&
+                        error.production_outcome()->install_outcome ==
+                                ProductionSourceInstallOutcome::
+                                        NotAttempted,
+                "PackageBase status-zero post-build revalidation lost staged success");
+        try {
+            error.rethrow_failure();
+            throw std::runtime_error(
+                    "PackageBase post-build revalidation lost its typed cause");
+        } catch(const ProductionSourceBuildPostCommandRevalidationError&
+                        post_command_error) {
+            expect(
+                    post_command_error.command_exit_status() == 0,
+                    "PackageBase post-build revalidation changed makepkg status");
+            bool nested_failure_retained = false;
+            try {
+                post_command_error.rethrow_failure();
+            } catch(const std::exception&) {
+                nested_failure_retained = true;
+            }
+            expect(
+                    nested_failure_retained,
+                    "PackageBase post-build revalidation lost identity failure");
+        }
+    }
+    expect(
+            failure_reported,
+            "PackageBase status-zero post-build revalidation returned success");
+    expect(
+            scenario.identity_calls == 0 && scenario.install_calls == 0 &&
+                    metadata_stub::initialize_call_count() == 0,
+            "PackageBase post-build revalidation crossed a later boundary");
+    expect(
+            fs::is_regular_file(
+                    scenario.displaced_workspace_path /
+                    scenario.produced_artifacts.front().leaf_name),
+            "PackageBase post-build revalidation lost its built artifact");
+    finish_scenario(scenario);
+}
+
 template <typename Callable>
 void run_case(const std::string& name, Callable&& callable) {
     std::forward<Callable>(callable)();
@@ -1500,6 +1593,10 @@ int main() {
         });
         run_case("build and validation diagnostic retention", [&]() {
             test_build_and_validation_failures_retain_diagnostics(environment);
+        });
+        run_case("status-zero post-build revalidation", [&]() {
+            test_status_zero_post_build_revalidation_retains_succeeded_outcome(
+                    environment);
         });
     } catch(const std::exception& error) {
         std::cerr << "separated PackageBase source-build test failed: "

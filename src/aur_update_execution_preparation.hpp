@@ -81,6 +81,8 @@ struct AurUpdatePreparationIssue {
     std::optional<BuildPlanArtifactTargetProjectionIssue>
             build_plan_projection_issue;
     std::string                            diagnostic;
+    std::optional<ReviewedSourceProductionFailure>
+            reviewed_source_failure;
 };
 
 // strict readerが返したwarningを、read順と対象attributionごとowned valueへ写す。

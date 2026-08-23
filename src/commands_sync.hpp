@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -51,6 +52,26 @@ struct RootPackageInstallPreparationIssue {
     std::optional<RootPackageSelectionCancellationReason>
             selection_cancellation_reason = std::nullopt;
     std::string diagnostic;
+    std::optional<ReviewedSourceProductionFailure>
+            reviewed_source_failure;
+
+    RootPackageInstallPreparationIssue() = default;
+    RootPackageInstallPreparationIssue(
+            RootPackageInstallPreparationIssueKind value_kind,
+            std::optional<RootPackageSelectionInputGate> value_input_gate,
+            std::optional<RootPackageSelectionUnavailableReason>
+                    value_unavailable_reason,
+            std::optional<RootPackageSelectionCancellationReason>
+                    value_cancellation_reason,
+            std::string value_diagnostic,
+            std::optional<ReviewedSourceProductionFailure>
+                    value_reviewed_source_failure = std::nullopt)
+        : kind(value_kind), input_gate(value_input_gate),
+          selection_unavailable_reason(value_unavailable_reason),
+          selection_cancellation_reason(value_cancellation_reason),
+          diagnostic(std::move(value_diagnostic)),
+          reviewed_source_failure(
+                  std::move(value_reviewed_source_failure)) {}
 };
 
 using RootPackageInstallPreparationFailureDetail = std::variant<
@@ -122,6 +143,22 @@ struct SyncInstallPreparationIssue {
     std::optional<RootTargetIdentity> root;
     std::optional<std::string> option;
     std::string diagnostic;
+    std::optional<ReviewedSourceProductionFailure>
+            reviewed_source_failure;
+
+    SyncInstallPreparationIssue() = default;
+    SyncInstallPreparationIssue(
+            SyncInstallPreparationIssueKind value_kind,
+            std::optional<RootTargetIdentity> value_root,
+            std::optional<std::string> value_option,
+            std::string value_diagnostic,
+            std::optional<ReviewedSourceProductionFailure>
+                    value_reviewed_source_failure = std::nullopt)
+        : kind(value_kind), root(std::move(value_root)),
+          option(std::move(value_option)),
+          diagnostic(std::move(value_diagnostic)),
+          reviewed_source_failure(
+                  std::move(value_reviewed_source_failure)) {}
 };
 
 struct SyncRepositoryMetadataReadFailure {

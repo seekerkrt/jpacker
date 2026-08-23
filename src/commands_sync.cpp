@@ -256,6 +256,10 @@ int execute_sync_source_build_invocation(
         execute_prepared_source_build_invocation(
                 std::move(invocation), config);
         return 0;
+    } catch(const ProductionSourceBuildInvocationError& error) {
+        Logger::error(
+                format_production_source_build_invocation_failure(error));
+        return 1;
     } catch(const SeparatedPackageBaseSourceBuildCleanupError& error) {
         // Direct source routeは利用者がretained workspaceを手動確認できる
         // 既存contractを維持する。AUR update resultのpath firewallとは別境界。
@@ -303,7 +307,7 @@ SyncInstallPreparationIssue make_sync_install_issue(
         std::optional<std::string> option = std::nullopt) {
     return SyncInstallPreparationIssue{
             kind, std::move(root), std::move(option),
-            std::move(diagnostic)};
+            std::move(diagnostic), std::nullopt};
 }
 
 void present_loaded_source_preference(
@@ -701,7 +705,8 @@ RootPackageInstallPreparation prepare_root_package_install(
         Logger::error(diagnostic);
         return issue_failure(RootPackageInstallPreparationIssue{
                 RootPackageInstallPreparationIssueKind::EmptyQuery,
-                std::nullopt, std::nullopt, std::nullopt, diagnostic});
+                std::nullopt, std::nullopt, std::nullopt, diagnostic,
+                std::nullopt});
     }
     if(config.rm_deps || parsed.cli_overrides.rm_deps) {
         // TRANSLATORS: The placeholder is the literal CLI option --rmdeps.
@@ -712,7 +717,8 @@ RootPackageInstallPreparation prepare_root_package_install(
         return issue_failure(RootPackageInstallPreparationIssue{
                 RootPackageInstallPreparationIssueKind::
                         RemoveDependenciesUnsupported,
-                std::nullopt, std::nullopt, std::nullopt, diagnostic});
+                std::nullopt, std::nullopt, std::nullopt, diagnostic,
+                std::nullopt});
     }
 
     // POLICY(#217): gate must be observable before official/AUR candidate query.
@@ -723,7 +729,7 @@ RootPackageInstallPreparation prepare_root_package_install(
                 input_gate);
         return issue_failure(RootPackageInstallPreparationIssue{
                 RootPackageInstallPreparationIssueKind::InputGateUnavailable,
-                input_gate, std::nullopt, std::nullopt, {}});
+                input_gate, std::nullopt, std::nullopt, {}, std::nullopt});
     }
 
     RootPackageSearchResult search_result = search_root_package_candidates(
@@ -767,7 +773,7 @@ RootPackageInstallPreparation prepare_root_package_install(
                             RootPackageInstallPreparationIssueKind::
                                     SelectionUnavailable,
                             std::nullopt, unavailable->reason, std::nullopt,
-                            diagnostic});
+                            diagnostic, std::nullopt});
             failure.discovery_snapshot.emplace(std::move(*snapshot));
             return failure;
         }
@@ -796,7 +802,8 @@ RootPackageInstallPreparation prepare_root_package_install(
                                 : std::optional<RootPackageSelectionInputGate>{
                                           RootPackageSelectionInputGate::
                                                   NoConfirm},
-                        unavailable->reason, std::nullopt, {}});
+                        unavailable->reason, std::nullopt, {},
+                        std::nullopt});
         failure.discovery_snapshot.emplace(std::move(*snapshot));
         return failure;
     }
@@ -814,7 +821,7 @@ RootPackageInstallPreparation prepare_root_package_install(
                         RootPackageInstallPreparationIssueKind::
                                 SelectionCancelled,
                         std::nullopt, std::nullopt, cancelled->reason,
-                        diagnostic});
+                        diagnostic, std::nullopt});
         failure.discovery_snapshot.emplace(std::move(*snapshot));
         return failure;
     }
@@ -847,9 +854,9 @@ RootPackageInstallPreparation prepare_root_package_install(
         RootPackageInstallPreparationFailure failure = issue_failure(
                 RootPackageInstallPreparationIssue{
                         RootPackageInstallPreparationIssueKind::
-                                SourceOptionsWithoutAurTarget,
+                        SourceOptionsWithoutAurTarget,
                         std::nullopt, std::nullopt, std::nullopt,
-                        diagnostic});
+                        diagnostic, std::nullopt});
         failure.discovery_snapshot.emplace(std::move(*snapshot));
         failure.routing_projection.emplace(projection);
         return failure;
@@ -897,7 +904,7 @@ RootPackageInstallPreparation prepare_root_package_install(
                         RootPackageInstallPreparationIssueKind::
                                 BuildPlanPreparationFailed,
                         std::nullopt, std::nullopt, std::nullopt,
-                        error.what()});
+                        error.what(), std::nullopt});
         failure.discovery_snapshot =
                 std::move(prepared.discovery_snapshot);
         failure.routing_projection =
@@ -915,6 +922,22 @@ RootPackageInstallPreparation prepare_root_package_install(
         prepared.source_invocation =
                 prepare_production_source_build_invocation(
                         std::move(work_items), config);
+    } catch(const ReviewedSourceProductionError& error) {
+        Logger::error(error.what());
+        RootPackageInstallPreparationIssue issue{
+                RootPackageInstallPreparationIssueKind::
+                        SourceWorkPreparationFailed,
+                std::nullopt, std::nullopt, std::nullopt, error.what(),
+                std::nullopt};
+        issue.reviewed_source_failure = error.failure();
+        RootPackageInstallPreparationFailure failure = issue_failure(
+                std::move(issue));
+        failure.discovery_snapshot =
+                std::move(prepared.discovery_snapshot);
+        failure.routing_projection =
+                std::move(prepared.routing_projection);
+        failure.aur_build_plan.emplace(std::move(plan));
+        return failure;
     } catch(const std::exception& error) {
         Logger::error(error.what());
         RootPackageInstallPreparationFailure failure = issue_failure(
@@ -922,7 +945,7 @@ RootPackageInstallPreparation prepare_root_package_install(
                         RootPackageInstallPreparationIssueKind::
                                 SourceWorkPreparationFailed,
                         std::nullopt, std::nullopt, std::nullopt,
-                        error.what()});
+                        error.what(), std::nullopt});
         failure.discovery_snapshot =
                 std::move(prepared.discovery_snapshot);
         failure.routing_projection =
@@ -1440,6 +1463,13 @@ SyncInstallPreparation prepare_sync_install(
             source_invocation.emplace(
                     prepare_production_source_build_invocation(
                             std::move(source_work_items), config));
+        } catch(const ReviewedSourceProductionError& error) {
+            SyncInstallPreparationIssue issue = make_sync_install_issue(
+                    SyncInstallPreparationIssueKind::
+                            SourceWorkPreparationFailed,
+                    error.what());
+            issue.reviewed_source_failure = error.failure();
+            return fail(std::move(issue));
         } catch(const std::exception& error) {
             return fail(make_sync_install_issue(
                     SyncInstallPreparationIssueKind::

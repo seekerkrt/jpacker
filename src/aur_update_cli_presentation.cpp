@@ -2,8 +2,11 @@
 
 #include "aur_update_operation_result.hpp"
 #include "localization.hpp"
+#include "reviewed_source_production_failure.hpp"
+#include "reviewed_source_production_outcome.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -60,9 +63,13 @@ std::string metadata_error_label(PackageMetadataErrorCode code) {
             "Unknown package metadata failure code."));
 }
 
-std::string source_build_failure_label(
-        AurUpdateSourceBuildFailureCategory category) {
-    switch(category) {
+std::string source_build_failure_summary(
+        const AurUpdateSourceBuildFailureSnapshot& failure) {
+    if(failure.reviewed_source_failure.has_value()) {
+        return reviewed_source_production_failure_diagnostic(
+                *failure.reviewed_source_failure);
+    }
+    switch(failure.category) {
     case AurUpdateSourceBuildFailureCategory::Build:
         return localization::translate_message("source build failure");
     case AurUpdateSourceBuildFailureCategory::ArtifactValidation:
@@ -70,6 +77,12 @@ std::string source_build_failure_label(
                 "artifact validation failure");
     case AurUpdateSourceBuildFailureCategory::ArtifactIdentity:
         return localization::translate_message("artifact identity failure");
+    case AurUpdateSourceBuildFailureCategory::InstallPreparation:
+        return localization::translate_message(
+                "install preparation failure");
+    case AurUpdateSourceBuildFailureCategory::InstallTransaction:
+        return localization::translate_message(
+                "install transaction failure");
     case AurUpdateSourceBuildFailureCategory::Other:
         return localization::translate_message("build or install failure");
     }
@@ -230,7 +243,7 @@ std::string failure_detail_summary(
                 } else if constexpr(std::is_same_v<
                                             Failure,
                                             AurUpdateSourceBuildFailureSnapshot>) {
-                    return source_build_failure_label(failure.category);
+                    return source_build_failure_summary(failure);
                 } else if constexpr(std::is_same_v<
                                             Failure,
                                             AurUpdatePackageTransactionFailureSnapshot>) {
@@ -522,6 +535,18 @@ void require_coherent_work_item(
                 "AUR"));
     }
 
+    if(work_item.status == AurUpdateWorkItemExecutionStatus::NotAttempted &&
+       work_item.production_outcome.has_value()) {
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: AUR is a runtime project identity.
+                "An unattempted {} work item unexpectedly has a production outcome.",
+                "AUR"));
+    }
+    if(work_item.production_outcome.has_value()) {
+        static_cast<void>(format_production_source_build_staged_outcome(
+                work_item.package_base, *work_item.production_outcome));
+    }
+
     static_cast<void>(failure_detail_summary(
             work_item.failure_kind, &work_item.failure_detail));
 }
@@ -607,6 +632,16 @@ void append_work_item_presentation(
         AurUpdateCliPresentation& presentation,
         const AurUpdateWorkItemExecutionResult& work_item) {
     require_coherent_work_item(work_item);
+    if(work_item.production_outcome.has_value()) {
+        ReviewedSourceProductionOutcomePresentation reviewed =
+                format_production_source_build_staged_outcome(
+                        work_item.package_base,
+                        *work_item.production_outcome);
+        presentation.summary_lines.insert(
+                presentation.summary_lines.end(),
+                std::make_move_iterator(reviewed.info_lines.begin()),
+                std::make_move_iterator(reviewed.info_lines.end()));
+    }
     if(!is_ordinary_singular_success(work_item)) {
         presentation.summary_lines.push_back(
                 localization::format_translated_message(

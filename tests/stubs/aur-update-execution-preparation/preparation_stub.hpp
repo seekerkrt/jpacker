@@ -37,11 +37,15 @@ void fail_supported_options_guard(std::string diagnostic);
 void fail_pkgdest_guard_on_call(
         std::size_t one_based_call_index,
         std::string diagnostic);
+void fail_reviewed_state_preflight_on_call(
+        std::size_t one_based_call_index,
+        std::string diagnostic);
 
 const std::vector<std::string>& strict_preference_read_history();
 const std::vector<bool>& supported_options_guard_history();
 const std::vector<SourceBuildEnvironment>& pkgdest_guard_history();
 std::size_t database_call_count();
+std::size_t reviewed_state_preflight_call_count();
 const std::vector<Event>& event_history();
 
 } // namespace aur_update_execution_preparation_test_stub

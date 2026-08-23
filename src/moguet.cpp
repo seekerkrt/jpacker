@@ -855,20 +855,28 @@ void print_help() {
             cli_option_syntax(OptionId::Edit),
             localization::format_translated_message(
                     // TRANSLATORS: PKGBUILD and .install are literal artifact names.
-                    "Prompt to review {} and {} files", "PKGBUILD", ".install"));
+                    "Open or edit {} and {} files for this invocation",
+                    "PKGBUILD", ".install"));
     print_help_entry(
             cli_option_syntax(OptionId::NoEdit),
             localization::format_translated_message(
                     // TRANSLATORS: PKGBUILD and .install are literal artifact names.
-                    "Skip {} and {} review", "PKGBUILD", ".install"));
+                    "Skip invocation-local {} and {} editing",
+                    "PKGBUILD", ".install"));
     print_help_entry(
             cli_option_syntax(OptionId::Diff),
-            localization::translate_message(
-                    "Prompt to view repository update diffs"));
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the AUR project identity.
+                    "Review repository updates; for {}, review the exact target",
+                    "AUR"));
+    print_help_continuation(localization::translate_message(
+            "Use the previous reviewed revision, or all tracked source on first review"));
+    print_help_continuation(localization::translate_message(
+            "Advance reviewed state only after explicit acceptance"));
     print_help_entry(
             cli_option_syntax(OptionId::NoDiff),
             localization::translate_message(
-                    "Skip the repository update diff prompt"));
+                    "Skip repository diff / reviewed-source review without advancing reviewed state"));
     print_help_entry(
             cli_option_syntax(OptionId::NoConfirm),
             localization::format_translated_message(
@@ -938,11 +946,15 @@ void print_help() {
     print_help_entry(
             "review.pkgbuild = prompt|skip",
             localization::format_translated_message(
-                    // TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
-                    "{} review policy", "PKGBUILD"));
+                    // TRANSLATORS: PKGBUILD and .install are literal artifact names.
+                    "Invocation-local {} / {} editor policy; not reviewed-source acceptance",
+                    "PKGBUILD", ".install"));
     print_help_entry(
             "review.diff = prompt|skip",
-            localization::translate_message("Repository update diff policy"));
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the AUR project identity.
+                    "Repository diff / {} reviewed-source review policy; skipping does not advance reviewed state",
+                    "AUR"));
     print_help_entry(
             "build.mode = normal|rebuild|clean",
             localization::translate_message("Source-build mode"));

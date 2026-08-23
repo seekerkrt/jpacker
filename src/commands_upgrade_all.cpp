@@ -10,6 +10,7 @@
 #include "logging.hpp"
 #include "operation_state_model.hpp"
 #include "presentation_projection.hpp"
+#include "reviewed_source_production_outcome.hpp"
 #include "runtime_diagnostic.hpp"
 #include "upgrade_all_operation.hpp"
 
@@ -1404,6 +1405,24 @@ void print_system_warnings(
     }
 }
 
+void print_system_reviewed_source_outcomes(
+        const SystemSourceUpgradeResult& result) {
+    for(const RegisteredSourceUpgradeResult& source :
+        result.registered_source_results) {
+        if(!source.production_outcome.has_value()) continue;
+        const std::string& package_base =
+                source.resolved_package_base.has_value()
+                ? *source.resolved_package_base
+                : source.preference_package_name;
+        ReviewedSourceProductionOutcomePresentation presentation =
+                format_production_source_build_staged_outcome(
+                        package_base, *source.production_outcome);
+        for(const std::string& line : presentation.info_lines) {
+            std::cout << line << std::endl;
+        }
+    }
+}
+
 void print_system_failures(const SystemSourceUpgradeResult& result) {
     if(result.system.diagnostic.has_value() &&
        !result.system.diagnostic->empty()) {
@@ -1932,6 +1951,12 @@ void print_operation_result(const UpgradeAllOperationResult& result) {
     // remain orthogonal. Normal items are aggregated before attention detail.
     print_upgrade_all_summary(
             operation_state, phase_observations, runtime_presentation);
+    print_system_reviewed_source_outcomes(result.system_source);
+    if(presentation != nullptr) {
+        for(const std::string& line : presentation->summary_lines) {
+            std::cout << line << std::endl;
+        }
+    }
     print_upgrade_all_attention(runtime_presentation);
     print_duplicate_exclusions(result);
     print_external_satisfaction(result);

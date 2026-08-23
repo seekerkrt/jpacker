@@ -2,6 +2,7 @@
 #include "upgrade_all_operation.hpp"
 
 #include <array>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <limits>
@@ -19,6 +20,29 @@
 namespace {
 
 struct UnknownFixtureException {};
+
+ProductionSourceBuildProvenance localized_reviewed_source_provenance() {
+    ProductionSourceBuildProvenance provenance;
+    provenance.review_status = ProductionSourceReviewStatus::Reviewed;
+    provenance.editor_overlay =
+            ReviewedSourceEditorOverlayStatus::InvocationLocal;
+    provenance.reviewed_upstream_base_revision =
+            SourceRevisionIdentity::git_commit(
+                    "4444444444444444444444444444444444444444");
+    provenance.publication_status =
+            ReviewedSourcePublicationStatus::Published;
+    provenance.reviewed_outcome =
+            ProductionReviewedSourceOutcome::UpdateReview;
+    provenance.reviewed_state_generation = 31;
+    return provenance;
+}
+
+ProductionSourceBuildStagedOutcome localized_reviewed_source_outcome() {
+    return ProductionSourceBuildStagedOutcome{
+            localized_reviewed_source_provenance(),
+            ProductionSourceBuildCommandOutcome::Succeeded,
+            ProductionSourceInstallOutcome::Succeeded};
+}
 
 std::string current_scenario() {
     const char* value = std::getenv("MOGUET_TEST_UPGRADE_ALL_SCENARIO");
@@ -1314,6 +1338,15 @@ UpgradeAllOperationResult make_issue_455_aur_changed_result() {
             make_aur_target(
                     "issue-455-aur-updated",
                     AurUpdateOperationTargetStatus::Updated));
+    AurUpdateWorkItemExecutionResult work_item = make_work_item_result(
+            0,
+            "issue-455-aur-updated",
+            AurUpdateWorkItemExecutionStatus::Updated,
+            AurUpdateWorkItemFailureKind::None,
+            std::nullopt);
+    work_item.production_outcome = localized_reviewed_source_outcome();
+    result.aur.operation_result->reduced_operation_result.
+            execution_work_items.push_back(std::move(work_item));
     return result;
 }
 

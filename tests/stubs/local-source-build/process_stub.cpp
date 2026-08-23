@@ -113,3 +113,10 @@ int run_command(const std::string& command) {
     if(expected.hook != nullptr) expected.hook();
     return expected.run_exit_code;
 }
+
+int run_command_with_parent_independent_lifetime_guard(
+        const std::string& command,
+        int,
+        const std::string&) {
+    return run_command(command);
+}

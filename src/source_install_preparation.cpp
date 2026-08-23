@@ -231,15 +231,35 @@ void require_static_production_source_build_work_item(
                    identity.requested_child() ||
            work_item.required_targets.front().desired_reason !=
                    DesiredInstallReason::Explicit ||
+           work_item.request.aur_review_identity.has_value() ||
            work_item.configured_repository_order !=
                    exact.configured_repository_order ||
            !work_item.uses_system_update_baseline) {
             throw std::logic_error(
                     "Repository source-build work item does not match its exact repository identity.");
         }
-    } else if(work_item.repository_identity.has_value()) {
-        throw std::logic_error(
-                "AUR BuildPlan source-build work item contains a repository identity.");
+    } else {
+        if(work_item.repository_identity.has_value()) {
+            throw std::logic_error(
+                    "AUR BuildPlan source-build work item contains a repository identity.");
+        }
+        if(!work_item.request.aur_review_identity.has_value()) {
+            throw std::logic_error(
+                    "AUR BuildPlan source-build work item has no reviewed PackageBase identity.");
+        }
+        const PackageBaseIdentity& identity =
+                work_item.request.aur_review_identity.value();
+        const SourceLocationIdentity& location =
+                identity.source().location();
+        if(identity.source().kind() != PackageSourceKind::Aur ||
+           location.kind() != SourceLocationKind::GitRemote ||
+           location.state() != SourceLocationState::Known ||
+           location.value() == nullptr ||
+           *location.value() != work_item.request.git_url ||
+           identity.package_base() != work_item.request.checkout_name) {
+            throw std::logic_error(
+                    "AUR BuildPlan source-build work item does not match its reviewed PackageBase identity.");
+        }
     }
 }
 
@@ -291,6 +311,15 @@ PreparedProductionSourceBuildInvocation prepare_production_source_build_invocati
     for(const auto& work_item : work_items) {
         require_static_production_source_build_work_item(work_item);
     }
+    for(auto& work_item : work_items) {
+        if(work_item.request.reviewed_state_preflight) {
+            throw std::logic_error(
+                    "Production source-build work item already contains a reviewed-state preflight observation.");
+        }
+        work_item.request.reviewed_state_preflight =
+                preflight_reviewed_source_fatal_state_for_production(
+                        work_item.request);
+    }
 
     // Explicit build/sync routeがnetwork前に準備済みならcapabilityを保持する。
     // Update preparationはfilesystem mutationを行わず、execution ownerがactivateする。
@@ -304,6 +333,35 @@ PreparedProductionSourceBuildInvocation prepare_production_source_build_invocati
             std::move(selected_repository_providers),
             std::move(database_paths),
             std::move(supplied_cache_root)};
+}
+
+void preflight_local_source_build_dependencies(
+        LocalSourceBuildDependencyPreparation& preparation,
+        const AppConfig& config) {
+    // POLICY(#411): local metadata/planはread-onlyで先行できるが、remote AUR
+    // dependencyのfatal stateはpersistent cache作成より前に全件観測する。
+    require_supported_separated_install_options(config.rm_deps);
+    require_unclaimed_artifact_pkgdest(SourceBuildEnvironment{});
+    for(const auto& work_item : preparation.remote_work_items_) {
+        require_unclaimed_artifact_pkgdest(
+                work_item.request.custom_environment);
+    }
+    for(const auto& work_item : preparation.remote_work_items_) {
+        require_static_production_source_build_work_item(work_item);
+    }
+    for(auto& work_item : preparation.remote_work_items_) {
+        if(work_item.request.reviewed_state_preflight) {
+            throw std::logic_error(
+                    "Local dependency work item already contains a reviewed-state preflight observation.");
+        }
+        work_item.request.reviewed_state_preflight =
+                preflight_reviewed_source_fatal_state_for_production(
+                        work_item.request);
+        if(!work_item.request.reviewed_state_preflight) {
+            throw std::logic_error(
+                    "Local dependency work item did not produce an AUR reviewed-state preflight observation.");
+        }
+    }
 }
 
 PreparedProductionSourceBuildInvocation
@@ -321,6 +379,12 @@ prepare_local_source_build_dependency_invocation(
     }
     for(const auto& work_item : preparation.remote_work_items_) {
         require_static_production_source_build_work_item(work_item);
+    }
+    for(const auto& work_item : preparation.remote_work_items_) {
+        if(!work_item.request.reviewed_state_preflight) {
+            throw std::logic_error(
+                    "Local dependency work item has no reviewed-state preflight observation.");
+        }
     }
 
     std::vector<ProvidedDependency> selected_repository_providers;

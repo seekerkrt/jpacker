@@ -166,6 +166,8 @@ struct SystemSourceUpgradeIssue {
             cache_preparation_failure;
     std::optional<TrustedCacheFailure> trusted_cache_failure;
     std::string diagnostic;
+    std::optional<ReviewedSourceProductionFailure>
+            reviewed_source_failure;
 };
 
 // Prepared source invocation内のactual work itemから、source identityと
@@ -377,6 +379,8 @@ enum class RegisteredSourceBuildFailureCategory {
     Build,
     ArtifactValidation,
     ArtifactIdentity,
+    InstallPreparation,
+    InstallTransaction,
     Other,
 };
 
@@ -384,6 +388,8 @@ struct RegisteredSourceBuildFailureSnapshot {
     RegisteredSourceBuildFailureCategory category =
             RegisteredSourceBuildFailureCategory::Other;
     std::string diagnostic;
+    std::optional<ReviewedSourceProductionFailure>
+            reviewed_source_failure;
 };
 
 struct RegisteredSourcePackageTransactionFailureSnapshot {
@@ -444,6 +450,8 @@ struct RegisteredSourceUpgradeResult {
     PackageStateChange package_state_change = PackageStateChange::NoChange;
     std::optional<std::string> diagnostic;
     std::optional<std::string> cleanup_diagnostic;
+    std::optional<ProductionSourceBuildStagedOutcome>
+            production_outcome;
     std::optional<RegisteredSourcePackageBaseExecutionSnapshot>
             package_base_execution;
     // correlation failure時もsafe attempt evidenceを別slotで保持する。

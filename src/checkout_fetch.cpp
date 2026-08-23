@@ -4,6 +4,7 @@
 #include "localization.hpp"
 #include "package_identifier.hpp"
 #include "persistent_checkout.hpp"
+#include "reviewed_source_pinned_build.hpp"
 #include "trusted_git.hpp"
 #include "trusted_cache.hpp"
 
@@ -57,6 +58,9 @@ void fetch_persistent_checkout(
                     std::nullopt});
         }
         require_safe_persistent_checkout_descendants(repo_path);
+        ReviewedSourcePackageBaseLease lease =
+                acquire_reviewed_source_package_base_lease(
+                        retain_trusted_cache_directory(repo_path));
 
         // POLICY: fetch command は既存 clone で git fetch まで。worktree update/pull/reset/build/install はしない。
         std::string current_url;
@@ -82,16 +86,19 @@ void fetch_persistent_checkout(
                 "Fetching {}...", package_base));
         repo_path = revalidate_trusted_cache_path(
                 repo_path, CachePathRequirement::ExistingDirectory);
+        lease.require_unchanged_identity();
         require_safe_persistent_checkout_descendants(repo_path);
         WorkDirGuard wd_repo(repo_path);
         ScopedPrivateUmask private_umask;
-        if(trusted_git_fetch_origin(repo_path, expected_remote_url) != 0) {
+        if(trusted_git_fetch_origin(
+                   repo_path, expected_remote_url, lease) != 0) {
             // TRANSLATORS: The placeholder is a PackageBase identity.
             throw std::runtime_error(localization::format_translated_message(
                     "Failed to fetch {}.", package_base));
         }
         repo_path = revalidate_trusted_cache_path(
                 repo_path, CachePathRequirement::ExistingDirectory);
+        lease.require_unchanged_identity();
         require_safe_persistent_checkout_descendants(repo_path);
         return;
     }
@@ -102,11 +109,14 @@ void fetch_persistent_checkout(
     revalidate_trusted_cache_path(repo_path, CachePathRequirement::Missing);
     ValidatedCachePath clone_path = create_trusted_cache_directory(
             cache_root, package_base);
+    ReviewedSourcePackageBaseLease lease =
+            acquire_reviewed_source_package_base_lease(
+                    retain_trusted_cache_directory(clone_path));
     WorkDirGuard    wd_cache(cache_root);
     DirCleanupGuard cleanup_guard(clone_path);
     ScopedPrivateUmask private_umask;
     if(trusted_git_clone_persistent_checkout(
-               clone_path, expected_remote_url) != 0) {
+               clone_path, expected_remote_url, lease) != 0) {
         // TRANSLATORS: The placeholder is a PackageBase identity.
         throw std::runtime_error(localization::format_translated_message(
                 "Failed to clone {}.", package_base));
@@ -135,6 +145,7 @@ void fetch_persistent_checkout(
     }
     cloned_path = revalidate_trusted_cache_path(
             clone_path, CachePathRequirement::ExistingDirectory);
+    lease.require_unchanged_identity();
     require_safe_persistent_checkout_descendants(cloned_path);
     cleanup_guard.commit();
 }

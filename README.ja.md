@@ -369,6 +369,38 @@ source-build preferenceはmulti-targetの`add-src`、`edit-src`、`del-src`、`r
 target-lessの`list-src`で管理します。一時的な`build <pkg> [V=K...]`はremote packageを
 解決し、preferenceを保存しません。
 
+### Reviewed AUR source workflow
+
+AUR Git source buildでは、最後に明示acceptしたexact upstream commitをPackageBaseごとの
+persistent XDG stateとして保持します。fetch / clone後は1つのexact target commitをpinします。
+このworkflowより前から存在するcacheを含め、reviewed stateがなければ、最初に対象となる
+PackageBaseのtracked file全体をfull reviewします。後続targetはprevious reviewed revisionから
+reviewし、同じtargetなら新しいpromptもstate writeも不要です。old commit objectが利用できない
+場合、cache checkoutへfallbackせずfull rebaseline reviewを提示します。invalid、corrupted、
+source-mismatched stateにはexplicitなfull rebind reviewが必要で、future / unsafe stateは
+fail-closedで停止します。
+
+review inventoryはextension allowlistではなく、全tracked fileのadd、modify、delete、rename、
+type changeを扱います。root `PKGBUILD`とtop-level `*.install`にはreview-sensitive guidanceを
+付けますが、patch、service unit、helper script、local source / config、binary change、その他の
+tracked contentも表示します。`.SRCINFO`はlower-priorityなgenerated metadataとして残し、
+source reviewの代用にはしません。
+
+`--diff`はreviewed-source prompt policyを選びますが、completeなreview後にinteractive
+`y` / `yes`を明示入力した場合だけ保存revisionを進めます。`--nodiff`、review decline、
+`--noconfirm`、non-TTY inputでは既存のcompatibility build behaviorを維持し得ますが、reviewed
+stateは進めません。cancellation、EOF、input failure、unsupported review、unsafe / future stateは、
+stateを進めず停止します。
+
+accept済みbuildはexact target commitへcheckoutし、mutableなcheckout HEAD、branch、remote refを
+build authorityにしません。publicationはcompare-and-swap guardを使い、並行processのreviewを
+上書きしません。後続build / install failureでも、正常にacceptされたrevisionをrollbackしません。
+`--edit` / `--noedit`はinvocation-localなPKGBUILD / `.install`編集を制御するもので、upstream
+acceptanceではありません。editor changeはreviewed commit上の別overlayです。official repository
+と`build --local` routeはこのstateを作りません。詳細は
+[reviewed AUR source state contract](https://github.com/seekerkrt/moguet/blob/develop/docs/contracts/reviewed-source-state.md)を
+参照してください。
+
 ### Package単位のbuild customization
 
 既存v2.xの`[V=K...]`とsource-build preferenceを使うと、system-wideな
@@ -476,6 +508,11 @@ canonical CLI overrideは`--edit` / `--noedit`、`--diff` / `--nodiff`、
 build modeのcompatibility aliasです。conflicting overrideはlast-one-winsにせず、
 external mutation前に失敗します。
 
+`review.diff`と`--diff` / `--nodiff`はAUR reviewed-source prompt policyを選びます。
+promptをskipしてもreviewed stateは進みません。`review.pkgbuild`と`--edit` / `--noedit`は
+invocation-localなPKGBUILD / `.install` editor behaviorを選び、upstream review acceptanceには
+なりません。
+
 config fileがない状態は正常です。fileが存在する場合は`schema_version = 1`が必須で、
 invalid TOML、unknown key、type error、invalid enum、未対応future schema versionは
 invocationを停止します。Moguetはfileを自動作成・rewrite・migrationせず、
@@ -502,12 +539,17 @@ legacy dataもcreate、migrate、removeしません。
 | --- | --- | --- |
 | user config | `$XDG_CONFIG_HOME/moguet/` | `~/.config/moguet/` |
 | source-build preference | `$XDG_CONFIG_HOME/moguet/source-build.d/` | `~/.config/moguet/source-build.d/` |
-| 永続runtime stateとlog | `$XDG_STATE_HOME/moguet/` | `~/.local/state/moguet/` |
+| 永続runtime state、reviewed AUR revision、log | `$XDG_STATE_HOME/moguet/` | `~/.local/state/moguet/` |
 | 再生成可能cache | `$XDG_CACHE_HOME/moguet/` | `~/.cache/moguet/` |
 
 default logはstate directory内の`moguet.log`です。cacheはauthorityではなく再生成可能で、
 cache削除によってconfigやpersistent stateを失ってはいけません。directoryはcommandが
 必要としたときだけ作成し、help / version表示では作成しません。
+
+accept済みAUR revisionは`$XDG_STATE_HOME/moguet/reviewed-sources/aur/`以下へ保存し、
+HOME fallbackでは`~/.local/state/moguet/`以下を使います。これはcache metadataではなく
+PackageBase stateであり、cache削除やreclone後も保持します。read-only lookupはstoreを
+作成しません。
 
 source-preference accessでは、`XDG_CONFIG_HOME`がunsetまたはemptyならHOME fallbackを
 使います。明示的な`XDG_CONFIG_HOME`はabsoluteで、既存かつownership、type、permissionの
@@ -541,6 +583,12 @@ Moguetはpacman-firstですが、すべてのsource-build routeで完全なpacma
 pacmanだけで完結するoperationはMoguetが消費しないoptionをpass-throughします。AUR /
 source-build routeをMoguetが所有する場合は、対応関係を明示したoptionだけを保持し、
 意味を維持できないものはmutation前に拒否します。
+
+reviewed-source stateが存在する前からのAUR cacheに手動migrationは不要です。recordがない状態は
+正常で、最初に対象となるPackageBaseを一度initial full reviewします。legacy checkout HEAD、
+branch、remote ref、build artifactからreviewed revisionを捏造しません。invalid、corrupted、
+source-mismatched、future、unsafe stateをmissingとして扱わず、reviewed-source contractに従って
+fail-closedを維持します。
 
 Moguetは`/etc/jpacker/jpacker.conf`を通常config layerとして読まず、
 `/etc/jpacker/package.build/`をsource-preference fallbackとして使用しません。

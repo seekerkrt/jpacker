@@ -20,6 +20,9 @@ constexpr std::string_view CONFIG_FILE_NAME = "config.toml";
 constexpr std::string_view DEFAULT_LOG_FILE_SUFFIX = ".log";
 constexpr std::string_view SOURCE_PREFERENCE_DIRECTORY_NAME =
         "source-build.d";
+constexpr std::string_view REVIEWED_SOURCE_STATE_DIRECTORY_NAME =
+        "reviewed-sources";
+constexpr std::string_view REVIEWED_SOURCE_STATE_AUR_DIRECTORY_NAME = "aur";
 
 struct ResolvedBaseDirectory {
     fs::path                 directory;
@@ -260,6 +263,20 @@ DirectoryCreationBoundary make_source_preference_creation_boundary(
             std::move(base_directory.creatable_components)};
 }
 
+DirectoryCreationBoundary make_reviewed_source_state_creation_boundary(
+        ResolvedBaseDirectory base_directory,
+        const std::string& application_component) {
+    base_directory.creatable_components.push_back(application_component);
+    base_directory.creatable_components.push_back(
+            std::string(REVIEWED_SOURCE_STATE_DIRECTORY_NAME));
+    base_directory.creatable_components.push_back(
+            std::string(REVIEWED_SOURCE_STATE_AUR_DIRECTORY_NAME));
+    return DirectoryCreationBoundary{
+            base_directory.source, std::move(base_directory.directory),
+            std::move(base_directory.existing_anchor),
+            std::move(base_directory.creatable_components)};
+}
+
 std::optional<std::string> process_environment_value(const char* name) {
     const char* value = std::getenv(name);
     if(value == nullptr) return std::nullopt;
@@ -337,6 +354,22 @@ SourcePreferencePaths resolve_source_preference(
                     std::move(config_base), application_component)};
 }
 
+ReviewedSourceStatePaths resolve_reviewed_source_state(
+        const EnvironmentSnapshot& environment) {
+    ResolvedBaseDirectory state_base = resolve_base_directory(
+            environment.xdg_state_home, environment.home,
+            DirectoryKind::State, fs::path(".local") / "state");
+    const std::string application_component(application_identity::XDG_IDENTITY);
+    const fs::path directory =
+            state_base.directory / application_component /
+            std::string(REVIEWED_SOURCE_STATE_DIRECTORY_NAME) /
+            std::string(REVIEWED_SOURCE_STATE_AUR_DIRECTORY_NAME);
+    return ReviewedSourceStatePaths{
+            directory,
+            make_reviewed_source_state_creation_boundary(
+                    std::move(state_base), application_component)};
+}
+
 StatePaths resolve_state(const EnvironmentSnapshot& environment) {
     ResolvedBaseDirectory state_base = resolve_base_directory(
             environment.xdg_state_home, environment.home,
@@ -393,6 +426,16 @@ SourcePreferencePaths resolve_source_preference_process_environment() {
             .home = process_environment_value("HOME"),
     };
     return resolve_source_preference(environment);
+}
+
+ReviewedSourceStatePaths resolve_reviewed_source_state_process_environment() {
+    const EnvironmentSnapshot environment{
+            .xdg_config_home = std::nullopt,
+            .xdg_state_home = process_environment_value("XDG_STATE_HOME"),
+            .xdg_cache_home = std::nullopt,
+            .home = process_environment_value("HOME"),
+    };
+    return resolve_reviewed_source_state(environment);
 }
 
 StatePaths resolve_state_process_environment() {

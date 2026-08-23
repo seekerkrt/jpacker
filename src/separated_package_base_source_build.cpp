@@ -159,11 +159,13 @@ std::string preparation_failure_diagnostic(
 PackageBaseSourceBuildExecutionResult::
         PackageBaseSourceBuildExecutionResult(
                 std::string package_base,
+                ProductionSourceBuildStagedOutcome production_outcome,
                 std::vector<PackageBaseSourceBuildSelectedResult>
                         selected_children,
                 std::vector<ArtifactPackageIdentity> unselected_artifacts)
         noexcept
     : package_base_(std::move(package_base)),
+      production_outcome_(std::move(production_outcome)),
       selected_children_(std::move(selected_children)),
       unselected_artifacts_(std::move(unselected_artifacts)) {
 }
@@ -171,6 +173,27 @@ PackageBaseSourceBuildExecutionResult::
 const std::string&
 PackageBaseSourceBuildExecutionResult::package_base() const noexcept {
     return package_base_;
+}
+
+const ProductionSourceBuildStagedOutcome&
+PackageBaseSourceBuildExecutionResult::production_outcome()
+        const noexcept {
+    return production_outcome_;
+}
+
+const ProductionSourceBuildProvenance&
+PackageBaseSourceBuildExecutionResult::source_provenance() const noexcept {
+    return production_outcome_.source_provenance;
+}
+
+ProductionSourceBuildCommandOutcome
+PackageBaseSourceBuildExecutionResult::build_outcome() const noexcept {
+    return production_outcome_.build_outcome;
+}
+
+ProductionSourceInstallOutcome
+PackageBaseSourceBuildExecutionResult::install_outcome() const noexcept {
+    return production_outcome_.install_outcome;
 }
 
 const std::vector<PackageBaseSourceBuildSelectedResult>&
@@ -221,8 +244,19 @@ PackageBaseSourceBuildExecutionResult::release_unselected_artifacts()
 SeparatedPackageBaseSourceBuildPhaseError::
         SeparatedPackageBaseSourceBuildPhaseError(
                 SeparatedPackageBaseSourceBuildFailurePhase phase,
-                const std::string& diagnostic)
-    : std::runtime_error(diagnostic), phase_(phase) {
+                const std::string& diagnostic,
+                std::optional<ReviewedSourceProductionFailure>
+                        reviewed_source_failure,
+                std::optional<PackageMetadataFailure>
+                        package_metadata_failure,
+                std::optional<ProductionSourceBuildStagedOutcome>
+                        production_outcome,
+                std::exception_ptr failure_exception)
+    : std::runtime_error(diagnostic), phase_(phase),
+      reviewed_source_failure_(std::move(reviewed_source_failure)),
+      package_metadata_failure_(std::move(package_metadata_failure)),
+      production_outcome_(std::move(production_outcome)),
+      failure_exception_(std::move(failure_exception)) {
 }
 
 SeparatedPackageBaseSourceBuildFailurePhase
@@ -230,11 +264,32 @@ SeparatedPackageBaseSourceBuildPhaseError::phase() const noexcept {
     return phase_;
 }
 
+const std::optional<ReviewedSourceProductionFailure>&
+SeparatedPackageBaseSourceBuildPhaseError::reviewed_source_failure()
+        const noexcept {
+    return reviewed_source_failure_;
+}
+
+const std::optional<PackageMetadataFailure>&
+SeparatedPackageBaseSourceBuildPhaseError::package_metadata_failure()
+        const noexcept {
+    return package_metadata_failure_;
+}
+
+const std::optional<ProductionSourceBuildStagedOutcome>&
+SeparatedPackageBaseSourceBuildPhaseError::production_outcome()
+        const noexcept {
+    return production_outcome_;
+}
+
 SeparatedPackageBaseSourceBuildPreparationError::
         SeparatedPackageBaseSourceBuildPreparationError(
                 PackageBaseArtifactInstallPreparationFailure failure,
-                const std::string& diagnostic)
-    : std::runtime_error(diagnostic), failure_(std::move(failure)) {
+                const std::string& diagnostic,
+                std::optional<ProductionSourceBuildStagedOutcome>
+                        production_outcome)
+    : std::runtime_error(diagnostic), failure_(std::move(failure)),
+      production_outcome_(std::move(production_outcome)) {
 }
 
 const PackageBaseArtifactInstallPreparationFailure&
@@ -252,6 +307,12 @@ const MixedPackageBaseInstallReasonUnsupported*
 SeparatedPackageBaseSourceBuildPreparationError::mixed_reason_failure()
         const noexcept {
     return failure_.mixed_reason_failure();
+}
+
+const std::optional<ProductionSourceBuildStagedOutcome>&
+SeparatedPackageBaseSourceBuildPreparationError::production_outcome()
+        const noexcept {
+    return production_outcome_;
 }
 
 SeparatedPackageBaseSourceBuildCleanupError::
@@ -281,16 +342,23 @@ execute_separated_package_base_source_build(
     require_unclaimed_artifact_pkgdest(request.source_environment);
     require_valid_set_request(request);
 
+    ProductionSourceBuildStagedOutcome production_outcome{
+            .source_provenance = request.source_tree.provenance()};
     ArtifactWorkspace workspace = create_artifact_workspace(
             std::move(request.artifact_root));
     notify_workspace_created_for_test(workspace.path());
-
     ArtifactMakepkgContext makepkg_context = [&]() {
         try {
             return prepare_artifact_makepkg_context(
-                    request.checkout, workspace,
+                    std::move(request.source_tree), workspace,
                     request.source_environment,
                     request.empty_value_policy);
+        } catch(const ReviewedSourceProductionError& error) {
+            workspace.retain_for_diagnostics();
+            throw SeparatedPackageBaseSourceBuildPhaseError(
+                    SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                    error.what(), error.failure(), std::nullopt,
+                    production_outcome);
         } catch(...) {
             workspace.retain_for_diagnostics();
             throw SeparatedPackageBaseSourceBuildPhaseError(
@@ -299,12 +367,19 @@ execute_separated_package_base_source_build(
                             // TRANSLATORS: The placeholder is the literal Arch
                             // field name "PackageBase".
                             "{} source-build context preparation failed.",
-                            "PackageBase"));
+                            "PackageBase"),
+                    std::nullopt, std::nullopt, production_outcome);
         }
     }();
     ExpectedPackageArtifactSet expected = [&]() {
         try {
             return query_makepkg_packagelist_set(workspace, makepkg_context);
+        } catch(const ReviewedSourceProductionError& error) {
+            workspace.retain_for_diagnostics();
+            throw SeparatedPackageBaseSourceBuildPhaseError(
+                    SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                    error.what(), error.failure(), std::nullopt,
+                    production_outcome);
         } catch(...) {
             workspace.retain_for_diagnostics();
             throw SeparatedPackageBaseSourceBuildPhaseError(
@@ -314,7 +389,8 @@ execute_separated_package_base_source_build(
                             // Arch field name "PackageBase" and command name
                             // "makepkg".
                             "{} {} artifact-list query failed.",
-                            "PackageBase", "makepkg"));
+                            "PackageBase", "makepkg"),
+                    std::nullopt, std::nullopt, production_outcome);
         }
     }();
 
@@ -324,9 +400,29 @@ execute_separated_package_base_source_build(
             .clean_build = options.clean_build,
     };
     int build_exit_code = 0;
+    production_outcome.build_outcome =
+            ProductionSourceBuildCommandOutcome::Started;
     try {
         build_exit_code = makepkg_context.run_makepkg_build_only(
                 workspace, expected, makepkg_options);
+    } catch(const ProductionSourceBuildPostCommandRevalidationError& error) {
+        workspace.retain_for_diagnostics();
+        // Only an acquired zero status advances the staged build dimension;
+        // pre-command and unknown-status failures remain Started.
+        if(error.command_exit_status() == 0) {
+            production_outcome.build_outcome =
+                    ProductionSourceBuildCommandOutcome::Succeeded;
+        }
+        throw SeparatedPackageBaseSourceBuildPhaseError(
+                SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                error.what(), std::nullopt, std::nullopt,
+                production_outcome, std::current_exception());
+    } catch(const ReviewedSourceProductionError& error) {
+        workspace.retain_for_diagnostics();
+        throw SeparatedPackageBaseSourceBuildPhaseError(
+                SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                error.what(), error.failure(), std::nullopt,
+                production_outcome);
     } catch(...) {
         workspace.retain_for_diagnostics();
         throw SeparatedPackageBaseSourceBuildPhaseError(
@@ -335,21 +431,27 @@ execute_separated_package_base_source_build(
                         // TRANSLATORS: The placeholders are the literal Arch
                         // field name "PackageBase" and command name "makepkg".
                         "The {} build-only {} execution failed.",
-                        "PackageBase", "makepkg"));
+                        "PackageBase", "makepkg"),
+                std::nullopt, std::nullopt, production_outcome);
     }
 
     // LANDMINE(#268): command statusやaggregate validationより先にretainする。
     // build phaseへ入った後の全failureはfresh workspaceを診断用に残す。
     workspace.retain_for_diagnostics();
     if(build_exit_code != 0) {
+        production_outcome.build_outcome =
+                ProductionSourceBuildCommandOutcome::Failed;
         throw SeparatedPackageBaseSourceBuildPhaseError(
                 SeparatedPackageBaseSourceBuildFailurePhase::Build,
                 localization::format_translated_message(
                         // TRANSLATORS: The first placeholder is the literal
                         // command name "makepkg"; the second is its exit code.
                         "The build-only {} command failed with exit code {}.",
-                        "makepkg", build_exit_code));
+                        "makepkg", build_exit_code),
+                std::nullopt, std::nullopt, production_outcome);
     }
+    production_outcome.build_outcome =
+            ProductionSourceBuildCommandOutcome::Succeeded;
 
     ValidatedPackageArtifactSet artifacts = [&]() {
         try {
@@ -363,9 +465,12 @@ execute_separated_package_base_source_build(
                             // TRANSLATORS: The placeholder is the literal Arch
                             // field name "PackageBase".
                             "{} artifact aggregate validation failed.",
-                            "PackageBase"));
+                            "PackageBase"),
+                    std::nullopt, std::nullopt, production_outcome);
         }
     }();
+    production_outcome.install_outcome =
+            ProductionSourceInstallOutcome::Started;
     PackageBaseArtifactInstallPreparationResult preparation = [&]() {
         try {
             return prepare_package_base_artifact_install(
@@ -374,11 +479,19 @@ execute_separated_package_base_source_build(
                     ArtifactInstallPreparationOptions{
                             options.needed, options.rm_deps},
                     request.database_paths);
-        } catch(const PackageMetadataError&) {
+        } catch(const PackageMetadataError& error) {
             artifacts.retain_workspace_for_diagnostics();
-            throw;
+            production_outcome.install_outcome =
+                    ProductionSourceInstallOutcome::Failed;
+            throw SeparatedPackageBaseSourceBuildPhaseError(
+                    SeparatedPackageBaseSourceBuildFailurePhase::
+                            InstallPreparation,
+                    error.what(), std::nullopt, error.failure(),
+                    production_outcome);
         } catch(...) {
             artifacts.retain_workspace_for_diagnostics();
+            production_outcome.install_outcome =
+                    ProductionSourceInstallOutcome::Failed;
             throw SeparatedPackageBaseSourceBuildPhaseError(
                     SeparatedPackageBaseSourceBuildFailurePhase::
                             ArtifactIdentity,
@@ -386,59 +499,97 @@ execute_separated_package_base_source_build(
                             // TRANSLATORS: The placeholder is the literal Arch
                             // field name "PackageBase".
                             "{} artifact identity or validation failed before install preparation.",
-                            "PackageBase"));
+                            "PackageBase"),
+                    std::nullopt, std::nullopt, production_outcome);
         }
     }();
     if(!preparation.is_prepared()) {
         if(preparation.prepared() != nullptr ||
            preparation.failure() == nullptr) {
-            throw std::logic_error(localization::format_translated_message(
-                    // TRANSLATORS: The placeholder is the literal Arch field
-                    // name "PackageBase".
-                    "{} artifact install preparation result is incoherent.",
-                    "PackageBase"));
+            production_outcome.install_outcome =
+                    ProductionSourceInstallOutcome::Failed;
+            throw SeparatedPackageBaseSourceBuildPhaseError(
+                    SeparatedPackageBaseSourceBuildFailurePhase::
+                            InstallPreparation,
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholder is the literal Arch field
+                            // name "PackageBase".
+                            "{} artifact install preparation result is incoherent.",
+                            "PackageBase"),
+                    std::nullopt, std::nullopt, production_outcome);
         }
         artifacts.retain_workspace_for_diagnostics();
         PackageBaseArtifactInstallPreparationFailure failure =
                 *preparation.failure();
         const std::string diagnostic =
                 preparation_failure_diagnostic(failure);
+        production_outcome.install_outcome =
+                ProductionSourceInstallOutcome::Failed;
         throw SeparatedPackageBaseSourceBuildPreparationError(
-                std::move(failure), diagnostic);
+                std::move(failure), diagnostic, production_outcome);
     }
     if(preparation.prepared() == nullptr ||
        preparation.failure() != nullptr) {
-        throw std::logic_error(localization::format_translated_message(
-                // TRANSLATORS: The placeholder is the literal Arch field name
-                // "PackageBase".
-                "{} artifact install preparation result is incoherent.",
-                "PackageBase"));
+        production_outcome.install_outcome =
+                ProductionSourceInstallOutcome::Failed;
+        throw SeparatedPackageBaseSourceBuildPhaseError(
+                SeparatedPackageBaseSourceBuildFailurePhase::
+                        InstallPreparation,
+                localization::format_translated_message(
+                        // TRANSLATORS: The placeholder is the literal Arch field name
+                        // "PackageBase".
+                        "{} artifact install preparation result is incoherent.",
+                        "PackageBase"),
+                std::nullopt, std::nullopt, production_outcome);
     }
 
     PreparedPackageBaseArtifactInstall& prepared =
             *preparation.prepared();
     // Transaction前にはprivate draftとpromotion用capacityだけを確定する。
     // ordinary failureではpublic child success resultを一件も生成しない。
-    PackageBaseSourceBuildResultDraft result_draft =
-            snapshot_result_draft(prepared);
+    PackageBaseSourceBuildResultDraft result_draft = [&]() {
+        try {
+            return snapshot_result_draft(prepared);
+        } catch(...) {
+            production_outcome.install_outcome =
+                    ProductionSourceInstallOutcome::Failed;
+            throw SeparatedPackageBaseSourceBuildPhaseError(
+                    SeparatedPackageBaseSourceBuildFailurePhase::
+                            InstallPreparation,
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholder is the literal Arch field name
+                            // "PackageBase".
+                            "{} install-result preparation failed before package transaction.",
+                            "PackageBase"),
+                    std::nullopt, std::nullopt, production_outcome);
+        }
+    }();
     PackageBaseArtifactInstallExecutionResult execution_result = [&]() {
         try {
             return execute_prepared_package_base_artifact_install(
                     prepared,
                     ArtifactInstallExecutionOptions{options.no_confirm});
-        } catch(const PackageBaseArtifactInstallTransactionError&) {
+        } catch(PackageBaseArtifactInstallTransactionError& error) {
+            production_outcome.install_outcome =
+                    ProductionSourceInstallOutcome::Failed;
+            error.attach_production_outcome(production_outcome);
             throw;
         } catch(...) {
+            production_outcome.install_outcome =
+                    ProductionSourceInstallOutcome::Failed;
             throw SeparatedPackageBaseSourceBuildPhaseError(
                     SeparatedPackageBaseSourceBuildFailurePhase::
-                            ArtifactValidation,
+                            InstallTransaction,
                     localization::format_translated_message(
                             // TRANSLATORS: The placeholder is the literal Arch
                             // field name "PackageBase".
                             "Prepared {} artifact install failed validation before transaction.",
-                            "PackageBase"));
+                            "PackageBase"),
+                    std::nullopt, std::nullopt, production_outcome);
         }
     }();
+    production_outcome.install_outcome =
+            ProductionSourceInstallOutcome::Succeeded;
 
     // Transaction成功後はallocationなしのmoveだけでpublic resultへ昇格する。
     std::string executed_package_base =
@@ -450,6 +601,7 @@ execute_separated_package_base_source_build(
             result_draft, std::move(executed_selected));
     PackageBaseSourceBuildExecutionResult result(
             std::move(executed_package_base),
+            production_outcome,
             std::move(result_draft.promoted_selected),
             std::move(result_draft.promoted_unselected));
 

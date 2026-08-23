@@ -1751,7 +1751,8 @@ void test_source_failure_and_route_preflight_subtypes() {
             std::nullopt,
             std::nullopt,
             std::nullopt,
-            "system/source diagnostic"};
+            "system/source diagnostic",
+            std::nullopt};
     const UpgradeAllOperationIssue upgrade_issue{
             UpgradeAllOperationIssueKind::AurQueryFailed,
             UpgradeAllOperationPhase::AurQuery,

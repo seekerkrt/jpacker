@@ -12,6 +12,7 @@
 #include "package_identifier.hpp"
 #include "process.hpp"
 #include "repository_query.hpp"
+#include "reviewed_source_production_outcome.hpp"
 #include "separated_source_build.hpp"
 #include "source_build.hpp"
 #include "source_install_internal.hpp"
@@ -151,6 +152,15 @@ std::string aur_git_url_for_package_base(const std::string& package_base) {
     return AUR_BASE_URL + package_base + ".git";
 }
 
+PackageBaseIdentity aur_review_identity_for_package_base(
+        const std::string& package_base) {
+    const std::string remote = aur_git_url_for_package_base(package_base);
+    return PackageBaseIdentity::make(
+            PackageSourceIdentity::aur(
+                    SourceLocationIdentity::known_git_remote(remote)),
+            package_base);
+}
+
 void add_selected_repository_provider(
         std::vector<ProvidedDependency>& providers,
         const ProvidedDependency& provider) {
@@ -215,6 +225,8 @@ ProductionSourceBuildWorkItem make_aur_source_build_work_item(
     }
     work_item.request.checkout_name = unit.package_base;
     work_item.request.git_url = aur_git_url_for_package_base(unit.package_base);
+    work_item.request.aur_review_identity =
+            aur_review_identity_for_package_base(unit.package_base);
     work_item.request.custom_environment = std::move(environment);
     work_item.request.needed = needed;
     work_item.required_targets = unit.required_targets;
@@ -342,6 +354,11 @@ ProductionSourceBuildWorkItem make_direct_source_build_work_item(
     work_item.request.package_name = source.requested_name();
     work_item.request.checkout_name = source.package_base();
     work_item.request.git_url = source.git_url();
+    if(source.source_kind() == SourceBuildSourceKind::Aur) {
+        work_item.request.aur_review_identity =
+                aur_review_identity_for_package_base(
+                        source.package_base());
+    }
     work_item.request.custom_environment = std::move(environment);
     work_item.request.empty_value_policy = empty_value_policy;
     work_item.request.only_if_updated = only_if_updated;
@@ -482,7 +499,86 @@ void present_package_base_result(
     }
 }
 
+void present_production_source_build_outcome(
+        const std::string& package_base,
+        const ProductionSourceBuildStagedOutcome& outcome) {
+    ReviewedSourceProductionOutcomePresentation presentation =
+            format_production_source_build_staged_outcome(
+                    package_base, outcome);
+    for(const std::string& line : presentation.info_lines) {
+        Logger::info(line);
+    }
+}
+
+void present_production_source_build_outcome(
+        const std::string& package_base,
+        const std::optional<ProductionSourceBuildStagedOutcome>& outcome) {
+    if(outcome.has_value()) {
+        present_production_source_build_outcome(package_base, *outcome);
+    }
+}
+
 } // namespace
+
+bool ProductionSourceBuildInvocationResult::is_success() const noexcept {
+    return std::all_of(
+            work_items.begin(), work_items.end(),
+            [](const ProductionSourceBuildWorkItemOutcome& work_item) {
+                return work_item.status ==
+                        ProductionSourceBuildWorkItemStatus::Succeeded;
+            });
+}
+
+ProductionSourceBuildInvocationError::
+        ProductionSourceBuildInvocationError(
+                ProductionSourceBuildInvocationResult result,
+                std::size_t failed_work_item_index,
+                const std::string& diagnostic)
+    : std::runtime_error(diagnostic), result_(std::move(result)),
+      failed_work_item_index_(failed_work_item_index) {
+    if(failed_work_item_index_ >= result_.work_items.size() ||
+       result_.work_items[failed_work_item_index_].status !=
+               ProductionSourceBuildWorkItemStatus::Failed ||
+       !result_.work_items[failed_work_item_index_].failure_stage.has_value() ||
+       result_.work_items[failed_work_item_index_].failure_exception ==
+               nullptr) {
+        throw std::logic_error(
+                "Production source-build invocation failure is incoherent.");
+    }
+}
+
+ProductionSourceBuildFailureStage
+ProductionSourceBuildInvocationError::failure_stage() const {
+    return *result_.work_items[failed_work_item_index_].failure_stage;
+}
+
+void ProductionSourceBuildInvocationError::rethrow_failure() const {
+    std::rethrow_exception(
+            result_.work_items[failed_work_item_index_].failure_exception);
+}
+
+std::string format_production_source_build_invocation_failure(
+        const ProductionSourceBuildInvocationError& error) {
+    switch(error.failure_stage()) {
+    case ProductionSourceBuildFailureStage::Review:
+        return error.what();
+    case ProductionSourceBuildFailureStage::Build:
+    case ProductionSourceBuildFailureStage::ArtifactValidation:
+        return localization::format_translated_message(
+                "Build Error: {}", error.what());
+    case ProductionSourceBuildFailureStage::InstallPreparation:
+    case ProductionSourceBuildFailureStage::InstallTransaction:
+        return localization::format_translated_message(
+                "Install Error: {}", error.what());
+    case ProductionSourceBuildFailureStage::Cleanup:
+        return error.what();
+    case ProductionSourceBuildFailureStage::Other:
+        return localization::format_translated_message(
+                "Source-build Error: {}", error.what());
+    }
+    throw std::logic_error(
+            "Production source-build failure stage is unknown.");
+}
 
 LocalSourceBuildDependencyPreparation::
         LocalSourceBuildDependencyPreparation(
@@ -981,6 +1077,8 @@ prepare_package_base_source_build_work_item_typed(
                 work_item.request, work_item.request.checkout_name,
                 update_policy, require_prepared_cache_root(work_item),
                 config);
+    } catch(const ReviewedSourceProductionError&) {
+        throw;
     } catch(const TrustedCacheError&) {
         throw;
     } catch(const ConfirmationOperationStopped&) {
@@ -1011,6 +1109,7 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
+    require_static_production_source_build_work_item(work_item);
     const RequiredPackageArtifactTarget& target =
             require_singular_required_package_target(work_item);
     if(work_item.required_target_provenance ==
@@ -1030,6 +1129,10 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
                 work_item.request, require_prepared_cache_root(work_item),
                 target.desired_reason,
                 database_paths, config);
+    } catch(const ReviewedSourceProductionError&) {
+        throw;
+    } catch(const SeparatedSourceBuildPhaseError&) {
+        throw;
     } catch(const SeparatedSourceBuildCleanupError&) {
         // POLICY(#242): install成功後cleanup失敗の型とdiagnosticをgeneric
         // build/install failureへflattenしない。
@@ -1061,9 +1164,17 @@ execute_prepared_source_build_work_item(
                     work_item, database_paths, config));
 }
 
-void execute_prepared_source_build_invocation(
+ProductionSourceBuildInvocationResult execute_prepared_source_build_invocation(
         PreparedProductionSourceBuildInvocation invocation,
         const AppConfig& config) {
+    ProductionSourceBuildInvocationResult aggregate;
+    aggregate.work_items.reserve(invocation.work_items.size());
+    for(const ProductionSourceBuildWorkItem& work_item :
+        invocation.work_items) {
+        ProductionSourceBuildWorkItemOutcome outcome;
+        outcome.package_base = work_item.request.checkout_name;
+        aggregate.work_items.push_back(std::move(outcome));
+    }
     activate_production_source_build_cache(invocation);
     SelectedRepositoryProviderTransactionResult provider_transaction =
             execute_selected_repository_provider_transaction(
@@ -1074,23 +1185,190 @@ void execute_prepared_source_build_invocation(
                         localization::translate_message(
                                 "Failed to install selected repository providers.")));
     }
-    for(const auto& work_item : invocation.work_items) {
+    for(std::size_t index = 0; index < invocation.work_items.size();
+        ++index) {
+        const ProductionSourceBuildWorkItem& work_item =
+                invocation.work_items[index];
+        ProductionSourceBuildWorkItemOutcome& work_item_outcome =
+                aggregate.work_items[index];
+        auto stop_with_failure = [&aggregate, &work_item_outcome, index](
+                                         ProductionSourceBuildFailureStage
+                                                 failure_stage,
+                                         std::optional<
+                                                 ProductionSourceBuildStagedOutcome>
+                                                 production_outcome,
+                                         const std::string& diagnostic) {
+            work_item_outcome.status =
+                    ProductionSourceBuildWorkItemStatus::Failed;
+            work_item_outcome.production_outcome =
+                    std::move(production_outcome);
+            work_item_outcome.failure_stage = failure_stage;
+            work_item_outcome.diagnostic = diagnostic;
+            work_item_outcome.failure_exception =
+                    std::current_exception();
+            throw ProductionSourceBuildInvocationError(
+                    std::move(aggregate), index, diagnostic);
+        };
         if(work_item.artifact_lifecycle_intent ==
            ArtifactLifecycleIntent::PackageBaseSet) {
             try {
                 PackageBaseSourceBuildExecutionResult result =
                         execute_prepared_package_base_source_build_work_item_typed(
                                 work_item, invocation.database_paths, config);
+                work_item_outcome.status =
+                        ProductionSourceBuildWorkItemStatus::Succeeded;
+                work_item_outcome.production_outcome =
+                        result.production_outcome();
+                present_production_source_build_outcome(
+                        result.package_base(),
+                        result.production_outcome());
                 present_package_base_result(work_item, result);
             } catch(const SeparatedPackageBaseSourceBuildCleanupError& error) {
                 // Transaction完了済みのchild outcomeを失わず表示し、
-                // callerがcleanup failureを成功と扱わないようtypedで再throwする。
+                // callerがcleanup failureを成功と扱わないようaggregateへ保持する。
+                present_production_source_build_outcome(
+                        error.result().package_base(),
+                        error.result().production_outcome());
                 present_package_base_result(work_item, error.result());
-                throw;
+                stop_with_failure(
+                        ProductionSourceBuildFailureStage::Cleanup,
+                        error.result().production_outcome(),
+                        error.what());
+            } catch(const SeparatedPackageBaseSourceBuildPhaseError& error) {
+                present_production_source_build_outcome(
+                        work_item.request.checkout_name,
+                        error.production_outcome());
+                ProductionSourceBuildFailureStage failure_stage =
+                        ProductionSourceBuildFailureStage::Other;
+                switch(error.phase()) {
+                case SeparatedPackageBaseSourceBuildFailurePhase::Build:
+                    failure_stage =
+                            error.reviewed_source_failure().has_value()
+                            ? ProductionSourceBuildFailureStage::Review
+                            : ProductionSourceBuildFailureStage::Build;
+                    break;
+                case SeparatedPackageBaseSourceBuildFailurePhase::
+                        ArtifactValidation:
+                case SeparatedPackageBaseSourceBuildFailurePhase::
+                        ArtifactIdentity:
+                    failure_stage = ProductionSourceBuildFailureStage::
+                            ArtifactValidation;
+                    break;
+                case SeparatedPackageBaseSourceBuildFailurePhase::
+                        InstallPreparation:
+                    failure_stage = ProductionSourceBuildFailureStage::
+                            InstallPreparation;
+                    break;
+                case SeparatedPackageBaseSourceBuildFailurePhase::
+                        InstallTransaction:
+                    failure_stage = ProductionSourceBuildFailureStage::
+                            InstallTransaction;
+                    break;
+                }
+                stop_with_failure(
+                        failure_stage, error.production_outcome(),
+                        error.what());
+            } catch(const SeparatedPackageBaseSourceBuildPreparationError&
+                            error) {
+                present_production_source_build_outcome(
+                        work_item.request.checkout_name,
+                        error.production_outcome());
+                stop_with_failure(
+                        ProductionSourceBuildFailureStage::
+                                InstallPreparation,
+                        error.production_outcome(), error.what());
+            } catch(const PackageBaseArtifactInstallTransactionError& error) {
+                present_production_source_build_outcome(
+                        work_item.request.checkout_name,
+                        error.production_outcome());
+                stop_with_failure(
+                        ProductionSourceBuildFailureStage::
+                                InstallTransaction,
+                        error.production_outcome(), error.what());
+            } catch(const ReviewedSourceProductionError& error) {
+                present_production_source_build_outcome(
+                        work_item.request.checkout_name,
+                        error.production_outcome());
+                stop_with_failure(
+                        ProductionSourceBuildFailureStage::Review,
+                        error.production_outcome(), error.what());
+            } catch(const std::exception& error) {
+                stop_with_failure(
+                        ProductionSourceBuildFailureStage::Other,
+                        std::nullopt, error.what());
+            } catch(...) {
+                stop_with_failure(
+                        ProductionSourceBuildFailureStage::Other,
+                        std::nullopt,
+                        localization::translate_message(
+                                "Source-build work item failed with an unknown error."));
             }
         } else {
-            execute_prepared_source_build_work_item(
-                    work_item, invocation.database_paths, config);
+            try {
+                SourceBuildExecutionResult result =
+                        execute_prepared_source_build_work_item_typed(
+                                work_item, invocation.database_paths,
+                                config);
+                work_item_outcome.status =
+                        ProductionSourceBuildWorkItemStatus::Succeeded;
+                work_item_outcome.production_outcome =
+                        result.production_outcome;
+                present_production_source_build_outcome(
+                        work_item.request.checkout_name,
+                        result.production_outcome);
+            } catch(const SeparatedSourceBuildPhaseError& error) {
+                present_production_source_build_outcome(
+                        work_item.request.checkout_name,
+                        error.production_outcome());
+                ProductionSourceBuildFailureStage failure_stage =
+                        ProductionSourceBuildFailureStage::Other;
+                switch(error.phase()) {
+                case SeparatedSourceBuildFailurePhase::Build:
+                    failure_stage =
+                            ProductionSourceBuildFailureStage::Build;
+                    break;
+                case SeparatedSourceBuildFailurePhase::ArtifactValidation:
+                    failure_stage = ProductionSourceBuildFailureStage::
+                            ArtifactValidation;
+                    break;
+                case SeparatedSourceBuildFailurePhase::InstallPreparation:
+                    failure_stage = ProductionSourceBuildFailureStage::
+                            InstallPreparation;
+                    break;
+                case SeparatedSourceBuildFailurePhase::InstallTransaction:
+                    failure_stage = ProductionSourceBuildFailureStage::
+                            InstallTransaction;
+                    break;
+                }
+                stop_with_failure(
+                        failure_stage, error.production_outcome(),
+                        error.what());
+            } catch(const SeparatedSourceBuildCleanupError& error) {
+                present_production_source_build_outcome(
+                        work_item.request.checkout_name,
+                        error.production_outcome());
+                stop_with_failure(
+                        ProductionSourceBuildFailureStage::Cleanup,
+                        error.production_outcome(), error.what());
+            } catch(const ReviewedSourceProductionError& error) {
+                present_production_source_build_outcome(
+                        work_item.request.checkout_name,
+                        error.production_outcome());
+                stop_with_failure(
+                        ProductionSourceBuildFailureStage::Review,
+                        error.production_outcome(), error.what());
+            } catch(const std::exception& error) {
+                stop_with_failure(
+                        ProductionSourceBuildFailureStage::Other,
+                        std::nullopt, error.what());
+            } catch(...) {
+                stop_with_failure(
+                        ProductionSourceBuildFailureStage::Other,
+                        std::nullopt,
+                        localization::translate_message(
+                                "Source-build work item failed with an unknown error."));
+            }
         }
     }
+    return aggregate;
 }

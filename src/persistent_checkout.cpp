@@ -140,7 +140,8 @@ void require_safe_checkout_status(
 OpenedCheckoutEntry open_safe_checkout_entry(
         int parent_descriptor, const fs::path& inspection_path,
         CheckoutEntryRequirement requirement,
-        TrustedCacheErrorCode missing_code) {
+        TrustedCacheErrorCode missing_code,
+        bool require_regular_file_read_access = false) {
     struct stat named_status {};
     if(fstatat(
                parent_descriptor, inspection_path.c_str(), &named_status,
@@ -162,7 +163,12 @@ OpenedCheckoutEntry open_safe_checkout_entry(
     if(S_ISDIR(named_status.st_mode)) {
         how.flags |= O_RDONLY | O_DIRECTORY;
     } else {
-        how.flags |= O_PATH;
+        // LANDMINE(#411): a regular file can be replaced by a FIFO between
+        // metadata inspection and open. Nonblocking open lets the identity/type
+        // revalidation reject that race without waiting for a writer.
+        how.flags |= require_regular_file_read_access
+                ? O_RDONLY | O_NONBLOCK
+                : O_PATH;
     }
     how.resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV;
     const int descriptor = static_cast<int>(syscall(
@@ -303,7 +309,8 @@ constexpr std::size_t MAX_GIT_METADATA_DEPTH = 128;
 void require_safe_git_metadata_entry(
         int parent_descriptor, const fs::path& name,
         CheckoutEntryRequirement requirement, std::size_t depth,
-        const fs::path& relative_path) {
+        const fs::path& relative_path,
+        bool require_regular_file_read_access) {
     if(depth > MAX_GIT_METADATA_DEPTH) {
         throw_descendant_error(TrustedCacheErrorCode::ChildEscape);
     }
@@ -316,7 +323,8 @@ void require_safe_git_metadata_entry(
 
     OpenedCheckoutEntry opened = open_safe_checkout_entry(
             parent_descriptor, name, requirement,
-            TrustedCacheErrorCode::ConcurrentReplacement);
+            TrustedCacheErrorCode::ConcurrentReplacement,
+            require_regular_file_read_access);
     if(S_ISREG(opened.status.st_mode)) {
         revalidate_named_checkout_entry(
                 parent_descriptor, name, opened.status, requirement);
@@ -329,7 +337,8 @@ void require_safe_git_metadata_entry(
         require_safe_git_metadata_entry(
                 opened.descriptor.value, child_name,
                 CheckoutEntryRequirement::DirectoryOrRegularFile,
-                depth + 1, relative_path / child_name);
+                depth + 1, relative_path / child_name,
+                require_regular_file_read_access);
     }
     if(directory_entry_names(opened.descriptor.value, opened.status) != names) {
         throw_descendant_error(
@@ -385,13 +394,16 @@ bool has_safe_git_directory(int checkout_descriptor) {
     return true;
 }
 
-void require_safe_git_directory(int checkout_descriptor) {
+void require_safe_git_directory(
+        int checkout_descriptor,
+        bool require_regular_file_read_access = false) {
     if(!has_safe_git_directory(checkout_descriptor)) {
         throw_descendant_error(TrustedCacheErrorCode::NotDirectory);
     }
     require_safe_git_metadata_entry(
             checkout_descriptor, ".git",
-            CheckoutEntryRequirement::Directory, 0, fs::path());
+            CheckoutEntryRequirement::Directory, 0, fs::path(),
+            require_regular_file_read_access);
 }
 
 void require_safe_artifact(
@@ -489,6 +501,24 @@ bool has_safe_persistent_checkout_git_directory(const ValidatedCachePath& checko
     return result;
 }
 
+void require_safe_persistent_checkout_git_metadata(
+        const ValidatedCachePath& checkout) {
+    RetainedTrustedCacheDirectory directory =
+            retain_trusted_cache_directory(checkout);
+    require_safe_git_directory(
+            PersistentCheckoutDirectoryAccess::descriptor(directory));
+    directory.require_unchanged_identity();
+}
+
+void require_readable_persistent_checkout_git_metadata(
+        const ValidatedCachePath& checkout) {
+    RetainedTrustedCacheDirectory directory =
+            retain_trusted_cache_directory(checkout);
+    require_safe_git_directory(
+            PersistentCheckoutDirectoryAccess::descriptor(directory), true);
+    directory.require_unchanged_identity();
+}
+
 std::vector<std::filesystem::path> require_safe_persistent_checkout_descendants(
         const ValidatedCachePath& checkout) {
     RetainedTrustedCacheDirectory directory =
@@ -500,6 +530,40 @@ std::vector<std::filesystem::path> require_safe_persistent_checkout_descendants(
     std::vector<fs::path> scripts = find_install_scripts(descriptor);
     directory.require_unchanged_identity();
     return scripts;
+}
+
+PersistentCheckoutReviewOverrides observe_persistent_checkout_review_overrides(
+        const ValidatedCachePath& checkout) {
+    RetainedTrustedCacheDirectory directory =
+            retain_trusted_cache_directory(checkout);
+    const int descriptor =
+            PersistentCheckoutDirectoryAccess::descriptor(directory);
+    require_safe_git_directory(descriptor);
+
+    const auto exists = [descriptor](const char* relative_path) {
+        struct stat status {};
+        if(fstatat(
+                   descriptor, relative_path, &status,
+                   AT_SYMLINK_NOFOLLOW) == 0) {
+            return true;
+        }
+        const int metadata_error = errno;
+        if(metadata_error == ENOENT || metadata_error == ENOTDIR) return false;
+        throw_descendant_error(
+                is_permission_error(metadata_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
+    };
+
+    const bool attributes_before = exists(".git/info/attributes");
+    const bool grafts_before = exists(".git/info/grafts");
+    require_safe_git_directory(descriptor);
+    PersistentCheckoutReviewOverrides overrides{
+            attributes_before || exists(".git/info/attributes"),
+            grafts_before || exists(".git/info/grafts")};
+    directory.require_unchanged_identity();
+    return overrides;
 }
 
 void require_safe_persistent_checkout_review_targets(

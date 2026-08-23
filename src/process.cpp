@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <climits>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -13,10 +14,14 @@
 #include <exception>
 #include <fcntl.h>
 #include <memory>
+#include <sys/prctl.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
+
+extern char** environ;
 
 namespace {
 
@@ -306,6 +311,176 @@ bool has_embedded_nul(const std::string& value) noexcept {
     return value.find('\0') != std::string::npos;
 }
 
+[[noreturn]] void exec_explicit_process_child(
+        const ExplicitProcessInvocation& invocation,
+        std::vector<char*>& argument_vector,
+        std::vector<char*>& environment_vector,
+        const int output_pipe[2],
+        bool capture_standard_output,
+        bool suppress_standard_output,
+        bool suppress_standard_error,
+        const CommandSignalState& signal_state,
+        std::optional<int> inherited_lifetime_guard_fd = std::nullopt) {
+    if(sigaction(SIGINT, &signal_state.original_sigint, nullptr) == -1 ||
+       sigaction(SIGQUIT, &signal_state.original_sigquit, nullptr) == -1 ||
+       sigprocmask(
+               SIG_SETMASK, &signal_state.original_mask, nullptr) == -1) {
+        _exit(127);
+    }
+
+    if(invocation.working_directory_fd.has_value() &&
+       fchdir(*invocation.working_directory_fd) == -1) {
+        _exit(127);
+    }
+
+    if(invocation.standard_input_fd.has_value()) {
+        const int source_fd = *invocation.standard_input_fd;
+        if(source_fd == STDIN_FILENO) {
+            // LANDMINE: dup2(0, 0) does not clear an inherited CLOEXEC bit.
+            const int descriptor_flags = fcntl(STDIN_FILENO, F_GETFD);
+            if(descriptor_flags == -1 ||
+               fcntl(
+                       STDIN_FILENO, F_SETFD,
+                       descriptor_flags & ~FD_CLOEXEC) == -1) {
+                _exit(127);
+            }
+        } else if(dup2(source_fd, STDIN_FILENO) == -1) {
+            _exit(127);
+        } else if(source_fd > STDERR_FILENO) {
+            static_cast<void>(close(source_fd));
+        }
+    }
+
+    if(capture_standard_output) {
+        static_cast<void>(close(output_pipe[0]));
+        if(dup2(output_pipe[1], STDOUT_FILENO) == -1) _exit(127);
+        static_cast<void>(close(output_pipe[1]));
+    }
+
+    if(suppress_standard_output || suppress_standard_error) {
+        const int null_descriptor = open("/dev/null", O_WRONLY | O_CLOEXEC);
+        if(null_descriptor < 0) _exit(127);
+        const auto redirect_to_null = [null_descriptor](int target) {
+            if(null_descriptor == target) {
+                const int flags = fcntl(target, F_GETFD);
+                return flags != -1 &&
+                       fcntl(target, F_SETFD, flags & ~FD_CLOEXEC) != -1;
+            }
+            return dup2(null_descriptor, target) != -1;
+        };
+        if(suppress_standard_output &&
+           !redirect_to_null(STDOUT_FILENO)) _exit(127);
+        if(suppress_standard_error &&
+           !redirect_to_null(STDERR_FILENO)) _exit(127);
+        if(null_descriptor != STDOUT_FILENO &&
+           null_descriptor != STDERR_FILENO) {
+            static_cast<void>(close(null_descriptor));
+        }
+    }
+
+    if(inherited_lifetime_guard_fd.has_value()) {
+        const int guard_descriptor = *inherited_lifetime_guard_fd;
+        const int descriptor_flags = fcntl(guard_descriptor, F_GETFD);
+        if(descriptor_flags == -1 ||
+           fcntl(
+                   guard_descriptor, F_SETFD,
+                   descriptor_flags & ~FD_CLOEXEC) == -1) {
+            _exit(127);
+        }
+    }
+
+    execve(
+            invocation.executable.c_str(), argument_vector.data(),
+            environment_vector.data());
+    _exit(127);
+}
+
+bool close_descriptor_range(
+        unsigned int first, unsigned int last) noexcept {
+    if(first > last) return true;
+#ifdef SYS_close_range
+    long result;
+    do {
+        result = syscall(SYS_close_range, first, last, 0U);
+    } while(result == -1 && errno == EINTR);
+    return result == 0;
+#else
+    static_cast<void>(first);
+    static_cast<void>(last);
+    return false;
+#endif
+}
+
+bool close_supervisor_descriptors_except(int preserved_descriptor) noexcept {
+    if(preserved_descriptor < 3) return false;
+    if(preserved_descriptor > 3 &&
+       !close_descriptor_range(
+               3U, static_cast<unsigned int>(preserved_descriptor - 1))) {
+        return false;
+    }
+    if(preserved_descriptor < INT_MAX &&
+       !close_descriptor_range(
+               static_cast<unsigned int>(preserved_descriptor + 1),
+               UINT_MAX)) {
+        return false;
+    }
+    return true;
+}
+
+[[noreturn]] void supervise_explicit_process_lifetime(
+        const ExplicitProcessInvocation& invocation,
+        std::vector<char*>& argument_vector,
+        std::vector<char*>& environment_vector,
+        bool suppress_standard_output,
+        bool suppress_standard_error,
+        const CommandSignalState& signal_state) {
+    const int guard_descriptor =
+            *invocation.parent_independent_lifetime_guard_fd;
+    int supervisor_guard;
+    do {
+        supervisor_guard =
+                fcntl(guard_descriptor, F_DUPFD_CLOEXEC, 3);
+    } while(supervisor_guard == -1 && errno == EINTR);
+    if(supervisor_guard == -1 ||
+       !close_supervisor_descriptors_except(supervisor_guard) ||
+       prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) == -1) {
+        _exit(127);
+    }
+
+    const pid_t mutator_pid = fork();
+    if(mutator_pid == -1) _exit(127);
+    if(mutator_pid == 0) {
+        const int no_output_pipe[2] = {-1, -1};
+        exec_explicit_process_child(
+                invocation, argument_vector, environment_vector,
+                no_output_pipe, false, suppress_standard_output,
+                suppress_standard_error, signal_state, supervisor_guard);
+    }
+
+    // The supervisor and actual mutator tree retain the same open-file-
+    // description. If either side dies independently, the other keeps the
+    // guard. A descendant that outlives its expected Git parent intentionally
+    // keeps the guard fail-closed until it exits; the subreaper prevents normal
+    // completion from returning while such a descendant remains.
+    int root_status = 0;
+    bool root_reaped = false;
+    while(true) {
+        int descendant_status = 0;
+        const pid_t waited = waitpid(-1, &descendant_status, 0);
+        if(waited > 0) {
+            if(waited == mutator_pid) {
+                root_status = descendant_status;
+                root_reaped = true;
+            }
+            continue;
+        }
+        if(waited == -1 && errno == EINTR) continue;
+        if(waited == -1 && errno == ECHILD) break;
+        _exit(127);
+    }
+    _exit(root_reaped ? decode_process_status(root_status) : 127);
+}
+
 CapturedCommandResult execute_explicit_process(
         const ExplicitProcessInvocation& invocation,
         bool capture_standard_output,
@@ -322,6 +497,17 @@ CapturedCommandResult execute_explicit_process(
         const std::size_t separator = assignment.find('=');
         if(separator == std::string::npos || separator == 0 ||
            has_embedded_nul(assignment)) {
+            return CapturedCommandResult{};
+        }
+    }
+    if(invocation.parent_independent_lifetime_guard_fd.has_value()) {
+        const int guard_descriptor =
+                *invocation.parent_independent_lifetime_guard_fd;
+        if(capture_standard_output ||
+           invocation.working_directory_fd.has_value() ||
+           invocation.standard_input_fd.has_value() ||
+           guard_descriptor < 0 ||
+           fcntl(guard_descriptor, F_GETFD) == -1) {
             return CapturedCommandResult{};
         }
     }
@@ -365,50 +551,17 @@ CapturedCommandResult execute_explicit_process(
         return CapturedCommandResult{};
     }
     if(child_pid == 0) {
-        if(sigaction(SIGINT, &signal_state.original_sigint, nullptr) == -1 ||
-           sigaction(SIGQUIT, &signal_state.original_sigquit, nullptr) == -1 ||
-           sigprocmask(
-                   SIG_SETMASK, &signal_state.original_mask, nullptr) == -1) {
-            _exit(127);
+        if(invocation.parent_independent_lifetime_guard_fd.has_value()) {
+            supervise_explicit_process_lifetime(
+                    invocation, argument_vector, environment_vector,
+                    suppress_standard_output, suppress_standard_error,
+                    signal_state);
         }
-
-        if(invocation.working_directory_fd.has_value() &&
-           fchdir(*invocation.working_directory_fd) == -1) {
-            _exit(127);
-        }
-
-        if(capture_standard_output) {
-            static_cast<void>(close(output_pipe[0]));
-            if(dup2(output_pipe[1], STDOUT_FILENO) == -1) _exit(127);
-            static_cast<void>(close(output_pipe[1]));
-        }
-
-        if(suppress_standard_output || suppress_standard_error) {
-            const int null_descriptor =
-                    open("/dev/null", O_WRONLY | O_CLOEXEC);
-            if(null_descriptor < 0) _exit(127);
-            const auto redirect_to_null = [null_descriptor](int target) {
-                if(null_descriptor == target) {
-                    const int flags = fcntl(target, F_GETFD);
-                    return flags != -1 &&
-                           fcntl(target, F_SETFD, flags & ~FD_CLOEXEC) != -1;
-                }
-                return dup2(null_descriptor, target) != -1;
-            };
-            if(suppress_standard_output &&
-               !redirect_to_null(STDOUT_FILENO)) _exit(127);
-            if(suppress_standard_error &&
-               !redirect_to_null(STDERR_FILENO)) _exit(127);
-            if(null_descriptor != STDOUT_FILENO &&
-               null_descriptor != STDERR_FILENO) {
-                static_cast<void>(close(null_descriptor));
-            }
-        }
-
-        execve(
-                invocation.executable.c_str(), argument_vector.data(),
-                environment_vector.data());
-        _exit(127);
+        exec_explicit_process_child(
+                invocation, argument_vector, environment_vector,
+                output_pipe, capture_standard_output,
+                suppress_standard_output, suppress_standard_error,
+                signal_state);
     }
 
     if(output_pipe[1] >= 0) static_cast<void>(close(output_pipe[1]));
@@ -514,6 +667,25 @@ int command_status(const std::string& cmd) {
 int run_command(const std::string& cmd) {
     Logger::raw_cmd(cmd);
     return command_status(cmd);
+}
+
+int run_command_with_parent_independent_lifetime_guard(
+        const std::string& command,
+        int lifetime_guard_fd,
+        const std::string& display_command) {
+    Logger::raw_cmd(display_command.empty() ? command : display_command);
+    std::vector<std::string> environment;
+    for(char** current = ::environ;
+        current != nullptr && *current != nullptr; ++current) {
+        environment.emplace_back(*current);
+    }
+    ExplicitProcessInvocation invocation;
+    invocation.executable = "/bin/sh";
+    invocation.arguments = {"-c", command};
+    invocation.environment = std::move(environment);
+    invocation.parent_independent_lifetime_guard_fd =
+            lifetime_guard_fd;
+    return run_explicit_process(invocation);
 }
 
 int run_command_with_stdin_fd(const std::string& command, int source_fd) {

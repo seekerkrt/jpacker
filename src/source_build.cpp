@@ -8,6 +8,10 @@
 #include "package_identifier.hpp"
 #include "persistent_checkout.hpp"
 #include "process.hpp"
+#include "reviewed_source_acceptance.hpp"
+#include "reviewed_source_lifecycle.hpp"
+#include "reviewed_source_pinned_build.hpp"
+#include "reviewed_source_trusted_review.hpp"
 #include "runtime_diagnostic.hpp"
 #include "separated_package_base_source_build.hpp"
 #include "separated_source_build.hpp"
@@ -21,13 +25,17 @@
 #include <exception>
 #include <fcntl.h>
 #include <filesystem>
+#include <functional>
+#include <iostream>
 #include <linux/openat2.h>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <type_traits>
 #include <unistd.h>
 #include <utility>
 #include <variant>
@@ -36,7 +44,7 @@
 namespace fs = std::filesystem;
 
 struct PreparedSourceBuildExecutionCapabilities {
-    ValidatedCachePath checkout;
+    ProductionArtifactSourceTree source_tree;
     ValidatedPrivateCacheRoot artifact_root;
     bool rebuild = false;
     bool clean_build = false;
@@ -44,12 +52,12 @@ struct PreparedSourceBuildExecutionCapabilities {
 
 struct SourceBuildPreparationAccess {
     static PreparedSourceBuildNeedsBuild make(
-            ValidatedCachePath checkout,
+            ProductionArtifactSourceTree source_tree,
             ValidatedPrivateCacheRoot artifact_root,
             bool rebuild,
             bool clean_build) noexcept {
         return PreparedSourceBuildNeedsBuild(
-                std::move(checkout), std::move(artifact_root), rebuild,
+                std::move(source_tree), std::move(artifact_root), rebuild,
                 clean_build);
     }
 };
@@ -57,20 +65,139 @@ struct SourceBuildPreparationAccess {
 struct SourceBuildPreparedExecutionAccess {
     static PreparedSourceBuildExecutionCapabilities consume(
             PreparedSourceBuildNeedsBuild prepared) {
-        if(!prepared.checkout_.has_value() ||
+        if(!prepared.source_tree_.has_value() ||
            !prepared.artifact_root_.has_value()) {
             throw std::logic_error(localization::translate_message(
                     "Prepared source-build execution capability is invalid or test-only."));
         }
         return PreparedSourceBuildExecutionCapabilities{
-                std::move(prepared.checkout_.value()),
+                std::move(prepared.source_tree_.value()),
                 std::move(prepared.artifact_root_.value()),
                 prepared.rebuild_,
                 prepared.clean_build_};
     }
 };
 
+class ReviewedSourceFatalStatePreflightSlot final {
+    std::optional<ReviewedSourceFatalStatePreflight> observation_;
+
+    explicit ReviewedSourceFatalStatePreflightSlot(
+            ReviewedSourceFatalStatePreflight observation) noexcept
+        : observation_(std::move(observation)) {}
+
+    friend std::shared_ptr<ReviewedSourceFatalStatePreflightSlot>
+    preflight_reviewed_source_fatal_state_for_production(
+            const SourceBuildRequest& request);
+    friend SourceBuildPreparationOutcome prepare_source_build_for_execution(
+            const SourceBuildRequest& request,
+            const std::string& display_name,
+            SourceBuildUpdatePolicy update_policy,
+            const ValidatedCacheRoot& cache_root,
+            const AppConfig& config);
+};
+
+ProductionArtifactSourceTree
+make_unreviewed_production_artifact_source_tree(
+        ValidatedCachePath checkout,
+        ReviewedSourcePackageBaseLease lease,
+        ProductionSourceReviewStatus review_status,
+        ReviewedSourceEditorOverlayStatus editor_overlay,
+        std::optional<ReviewedSourceCompatibilityBuildReason>
+                compatibility_reason) {
+    if(!lease.valid() || lease.device() != checkout.device() ||
+       lease.inode() != checkout.inode() ||
+       review_status == ProductionSourceReviewStatus::Reviewed ||
+       (review_status ==
+                ProductionSourceReviewStatus::CompatibilityWithoutReview) !=
+               compatibility_reason.has_value()) {
+        throw std::logic_error(
+                "Unreviewed production source authority is inconsistent.");
+    }
+    auto authority =
+            std::make_shared<ReviewedSourcePackageBaseLease>(
+                    std::move(lease));
+    ProductionSourceBuildProvenance provenance;
+    provenance.review_status = review_status;
+    provenance.editor_overlay = editor_overlay;
+    provenance.compatibility_reason = std::move(compatibility_reason);
+    return ProductionArtifactSourceTree(
+            std::move(checkout), authority,
+            [authority](
+                    const std::string& command,
+                    const std::string& display_command) {
+                try {
+                    return authority->run_guarded_command(
+                            command, display_command);
+                } catch(const ReviewedSourceBuildCheckoutReproofError&
+                                error) {
+                    throw ReviewedSourceProductionError(
+                            ReviewedSourceProductionFailure{
+                                    ReviewedSourceProductionFailureStage::
+                                            BuildBoundaryRevalidation,
+                                    ReviewedSourceProductionFailureReason::
+                                            BuildBoundaryRevalidationFailure,
+                                    error.failure()});
+                }
+            },
+            std::move(provenance));
+}
+
+ProductionArtifactSourceTree
+make_reviewed_production_artifact_source_tree(
+        ValidatedCachePath checkout,
+        PinnedReviewedSourceBuild reviewed,
+        ProductionReviewedSourceOutcome reviewed_outcome,
+        std::optional<ReviewedSourceAbnormalStateReason>
+                abnormal_state_reason) {
+    if(!reviewed.valid() || reviewed.checkout_device() != checkout.device() ||
+       reviewed.checkout_inode() != checkout.inode() ||
+       (reviewed_outcome ==
+                ProductionReviewedSourceOutcome::
+                        AbnormalStateRebindFullReview) !=
+               abnormal_state_reason.has_value()) {
+        throw std::logic_error(
+                "Reviewed production source authority is inconsistent.");
+    }
+    ProductionSourceBuildProvenance provenance;
+    provenance.review_status = ProductionSourceReviewStatus::Reviewed;
+    provenance.editor_overlay = reviewed.editor_overlay_status();
+    provenance.reviewed_upstream_base_revision =
+            reviewed.reviewed_upstream_base_revision();
+    provenance.publication_status = reviewed.publication_status();
+    provenance.reviewed_outcome = reviewed_outcome;
+    provenance.abnormal_state_reason = abnormal_state_reason;
+    provenance.reviewed_state_generation =
+            reviewed.published_record().generation;
+    auto authority =
+            std::make_shared<PinnedReviewedSourceBuild>(
+                    std::move(reviewed));
+    return ProductionArtifactSourceTree(
+            std::move(checkout), authority,
+            [authority](
+                    const std::string& command,
+                    const std::string& display_command) {
+                return authority->run_guarded_command(
+                        command, display_command);
+            },
+            std::move(provenance));
+}
+
 namespace {
+
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_PRODUCTION_TEST_HOOKS
+ReviewedSourceBeforePublicationHookForTest
+        g_reviewed_source_before_publication_hook;
+
+void notify_reviewed_source_before_publication_for_test() {
+    ReviewedSourceBeforePublicationHookForTest hook =
+            std::exchange(
+                    g_reviewed_source_before_publication_hook, nullptr);
+    if(hook != nullptr) hook();
+}
+#else
+void notify_reviewed_source_before_publication_for_test() {
+}
+#endif
 
 struct MakepkgBuildOptions {
     bool rebuild = false;
@@ -165,10 +292,12 @@ SourceBuildExecutionResult source_build_result_from_artifact_outcome(
     switch(outcome) {
         case ArtifactInstallExecutionOutcome::Installed:
             return SourceBuildExecutionResult{
-                    SourceBuildExecutionStatus::Installed, std::nullopt, {}};
+                    SourceBuildExecutionStatus::Installed, std::nullopt, {},
+                    std::nullopt};
         case ArtifactInstallExecutionOutcome::SkippedAsNeeded:
             return SourceBuildExecutionResult{
-                    SourceBuildExecutionStatus::SkippedAsNeeded, std::nullopt, {}};
+                    SourceBuildExecutionStatus::SkippedAsNeeded,
+                    std::nullopt, {}, std::nullopt};
     }
     throw std::logic_error(localization::translate_message(
             "Unknown artifact install execution outcome."));
@@ -317,9 +446,10 @@ void log_review_targets(const fs::path& pkg_dir, const std::vector<fs::path>& in
             "Review directory: {}", pkg_dir.string()));
 }
 
-void review_build_files(
+bool review_build_files(
         const ValidatedCachePath& checkout,
-        const AppConfig& config) {
+        const AppConfig& config,
+        const std::function<int(const std::string&)>& run_checkout_command) {
     const fs::path& pkg_dir = checkout.canonical_path();
     std::vector<fs::path> install_scripts =
             require_safe_persistent_checkout_descendants(checkout);
@@ -329,12 +459,12 @@ void review_build_files(
         Logger::info(localization::format_translated_message(
                 "Skipping {}/{} review ({}).",
                 "PKGBUILD", ".install", "--noedit"));
-        return;
+        return false;
     }
 
     log_review_targets(pkg_dir, install_scripts);
 
-    bool edited = false;
+    bool editor_invoked = false;
 
     // TRANSLATORS: The placeholder is the literal PKGBUILD artifact name.
     const std::string edit_pkgbuild_question =
@@ -346,12 +476,13 @@ void review_build_files(
     if(std::holds_alternative<ConfirmationAccepted>(
                edit_pkgbuild_confirmation)) {
         require_safe_persistent_checkout_review_targets(checkout, install_scripts);
-        if(run_command(build_editor_command(config.editor, "PKGBUILD")) != 0) {
+        if(run_checkout_command(
+                   build_editor_command(config.editor, "PKGBUILD")) != 0) {
             throw std::runtime_error(localization::translate_message(
                     "Editor failed."));
         }
         require_safe_persistent_checkout_review_targets(checkout, install_scripts);
-        edited = true;
+        editor_invoked = true;
     } else if(!std::holds_alternative<ConfirmationDeclined>(
                       edit_pkgbuild_confirmation)) {
         DiagnosticIdentity identity;
@@ -371,12 +502,14 @@ void review_build_files(
         if(std::holds_alternative<ConfirmationAccepted>(
                    edit_install_confirmation)) {
             require_safe_persistent_checkout_review_targets(checkout, install_scripts);
-            if(run_command(build_editor_command(config.editor, install_script)) != 0) {
+            if(run_checkout_command(
+                       build_editor_command(
+                               config.editor, install_script)) != 0) {
                 throw std::runtime_error(localization::translate_message(
                         "Editor failed."));
             }
             require_safe_persistent_checkout_review_targets(checkout, install_scripts);
-            edited = true;
+            editor_invoked = true;
         } else if(!std::holds_alternative<ConfirmationDeclined>(
                           edit_install_confirmation)) {
             DiagnosticIdentity identity;
@@ -389,19 +522,568 @@ void review_build_files(
 
     // LANDMINE(#197): editor はreview対象を置換できるため、review開始時の検証結果を持ち越さない。
     require_safe_persistent_checkout_review_targets(checkout, install_scripts);
-    if(edited) {
+    return editor_invoked;
+}
+
+void confirm_after_build_file_edit(
+        const fs::path& checkout_path,
+        const AppConfig& config,
+        bool editor_invoked) {
+    if(editor_invoked) {
         ConfirmationResult proceed_confirmation = request_confirmation(
                 localization::translate_message("Proceed with build?"),
                 ConfirmationDefault::Yes, config.no_confirm);
         if(!std::holds_alternative<ConfirmationAccepted>(
                    proceed_confirmation)) {
             DiagnosticIdentity identity;
-            identity.canonical_source_identity = pkg_dir.string();
+            identity.canonical_source_identity = checkout_path.string();
             stop_after_confirmation(
                     std::move(proceed_confirmation),
                     DiagnosticPhase::Preflight, std::move(identity));
         }
     }
+}
+
+ReviewedSourcePackageBaseLease acquire_package_base_lease(
+        const ValidatedCachePath& checkout,
+        bool reviewed_source) {
+    try {
+        return acquire_reviewed_source_package_base_lease(
+                retain_trusted_cache_directory(checkout));
+    } catch(const std::system_error& error) {
+        if(!reviewed_source) throw;
+        const int lock_error = error.code().value();
+        ReviewedSourcePinnedCheckoutFailure failure{
+                lock_error == EWOULDBLOCK || lock_error == EAGAIN
+                        ? ReviewedSourcePinnedCheckoutFailureReason::
+                                  LeaseContended
+                        : ReviewedSourcePinnedCheckoutFailureReason::
+                                  LeaseUnavailable,
+                error.code(), std::nullopt, std::nullopt};
+        throw ReviewedSourceProductionError(
+                ReviewedSourceProductionFailure{
+                        ReviewedSourceProductionFailureStage::
+                                LeaseAcquisition,
+                        lock_error == EWOULDBLOCK || lock_error == EAGAIN
+                                ? ReviewedSourceProductionFailureReason::
+                                          LeaseContended
+                                : ReviewedSourceProductionFailureReason::
+                                          LeaseUnavailable,
+                        std::move(failure)});
+    }
+}
+
+ReviewedSourceProductionFailureReason fatal_production_reason(
+        ReviewedSourceFatalStateReason reason) noexcept {
+    switch(reason) {
+    case ReviewedSourceFatalStateReason::UnsupportedFuture:
+        return ReviewedSourceProductionFailureReason::UnsupportedFuture;
+    case ReviewedSourceFatalStateReason::UnsafeHistory:
+        return ReviewedSourceProductionFailureReason::UnsafeHistory;
+    case ReviewedSourceFatalStateReason::StoreFailure:
+        return ReviewedSourceProductionFailureReason::StateStoreFailure;
+    case ReviewedSourceFatalStateReason::InconsistentStoreObservation:
+        return ReviewedSourceProductionFailureReason::
+                InconsistentStateObservation;
+    }
+    return ReviewedSourceProductionFailureReason::
+            InconsistentStateObservation;
+}
+
+struct ProductionReviewedSourceOutcomeSnapshot {
+    ProductionReviewedSourceOutcome outcome =
+            ProductionReviewedSourceOutcome::InitialFullReview;
+    std::optional<ReviewedSourceAbnormalStateReason> abnormal_state_reason;
+};
+
+ProductionReviewedSourceOutcomeSnapshot production_reviewed_source_outcome(
+        const ReviewedSourceIntegrationLifecycle& lifecycle) {
+    if(std::holds_alternative<ReviewedSourceLifecycleInitialFullReview>(
+               lifecycle)) {
+        return {ProductionReviewedSourceOutcome::InitialFullReview,
+                std::nullopt};
+    }
+    if(std::holds_alternative<ReviewedSourceLifecycleUpdateReview>(
+               lifecycle)) {
+        return {ProductionReviewedSourceOutcome::UpdateReview,
+                std::nullopt};
+    }
+    if(std::holds_alternative<
+               ReviewedSourceLifecycleRebaselineFullReview>(lifecycle)) {
+        return {ProductionReviewedSourceOutcome::RebaselineFullReview,
+                std::nullopt};
+    }
+    if(const auto* abnormal = std::get_if<
+               ReviewedSourceLifecycleAbnormalStateRebindFullReview>(
+               &lifecycle)) {
+        return {
+                ProductionReviewedSourceOutcome::
+                        AbnormalStateRebindFullReview,
+                abnormal->reason};
+    }
+    if(std::holds_alternative<ReviewedSourceLifecycleAlreadyReviewed>(
+               lifecycle)) {
+        return {ProductionReviewedSourceOutcome::AlreadyReviewed,
+                std::nullopt};
+    }
+    throw std::logic_error(
+            "Reviewed production success contains a fatal lifecycle.");
+}
+
+template<typename Detail>
+[[noreturn]] void stop_reviewed_source_route(
+        ReviewedSourceProductionFailureStage stage,
+        ReviewedSourceProductionFailureReason reason,
+        Detail detail) {
+    throw ReviewedSourceProductionError(
+            ReviewedSourceProductionFailure{
+                    stage, reason, std::move(detail)});
+}
+
+[[noreturn]] void stop_reviewed_source_operation(
+        const ReviewedSourceOperationStop& stop,
+        ReviewedSourceProductionFailureStage stage) {
+    switch(stop.reason()) {
+    case ReviewedSourceOperationStopReason::ExplicitCancellation:
+        throw ConfirmationOperationStopped(
+                ConfirmationCancelled{
+                        ConfirmationCancellationReason::ExplicitToken});
+    case ReviewedSourceOperationStopReason::EndOfInput:
+        throw ConfirmationOperationStopped(
+                ConfirmationCancelled{
+                        ConfirmationCancellationReason::EndOfInput});
+    case ReviewedSourceOperationStopReason::InputFailure:
+        throw ConfirmationOperationStopped(ConfirmationInputFailure{});
+    default:
+        if(stop.fatal_state_failure().has_value()) {
+            stop_reviewed_source_route(
+                    stage,
+                    fatal_production_reason(
+                            stop.fatal_state_failure()->reason),
+                    *stop.fatal_state_failure());
+        }
+        stop_reviewed_source_route(
+                stage,
+                ReviewedSourceProductionFailureReason::
+                        ReviewOperationStopped,
+                stop);
+    }
+}
+
+struct AurCompatibilityCheckout {
+    ReviewedSourcePackageBaseLease lease;
+    ReviewedSourceCompatibilityBuildReason reason;
+};
+
+using AurCheckoutAuthority = std::variant<
+        AurCompatibilityCheckout,
+        AcceptedReviewedSourceCheckout,
+        AlreadyReviewedSourceCheckout>;
+
+ReviewedSourceCompatibilityBuildReason review_bypass_reason(
+        const AppConfig& config) {
+    if(config.user_config.review.diff == ReviewPolicy::Skip) {
+        return ReviewedSourceCompatibilityBuildReason::NoDiff;
+    }
+    if(config.no_confirm) {
+        return ReviewedSourceCompatibilityBuildReason::NoConfirm;
+    }
+    return ReviewedSourceCompatibilityBuildReason::NonInteractiveInput;
+}
+
+bool should_run_reviewed_source_route(const AppConfig& config) noexcept {
+    return config.user_config.review.diff == ReviewPolicy::Prompt &&
+           !config.no_confirm && isatty(STDIN_FILENO) == 1;
+}
+
+std::string reviewed_source_acceptance_question(
+        const ReviewedSourceIntegrationLifecycle& lifecycle) {
+    if(std::holds_alternative<
+               ReviewedSourceLifecycleRebaselineFullReview>(lifecycle)) {
+        return localization::translate_message(
+                "Accept this explicit reviewed-source full rebaseline?");
+    }
+    if(const auto* abnormal = std::get_if<
+               ReviewedSourceLifecycleAbnormalStateRebindFullReview>(
+               &lifecycle)) {
+        switch(abnormal->reason) {
+        case ReviewedSourceAbnormalStateReason::Invalid:
+            return localization::translate_message(
+                    "Accept this explicit rebind/rebaseline of invalid reviewed state?");
+        case ReviewedSourceAbnormalStateReason::Corrupted:
+            return localization::translate_message(
+                    "Accept this explicit rebind/rebaseline of corrupted reviewed state?");
+        case ReviewedSourceAbnormalStateReason::SourceMismatch:
+            return localization::translate_message(
+                    "Accept this explicit reviewed-source identity rebind/rebaseline?");
+        }
+        throw std::logic_error(
+                "Reviewed source abnormal state reason is unknown.");
+    }
+    return localization::translate_message(
+            "Accept this reviewed upstream revision?");
+}
+
+AurCheckoutAuthority prepare_aur_checkout_authority(
+        const SourceBuildRequest& request,
+        const ValidatedCachePath& checkout,
+        const std::string& branch,
+        ReviewedSourcePackageBaseLease lease,
+        ReviewedSourceFatalStatePreflight fatal_preflight,
+        const AppConfig& config) {
+    if(!request.aur_review_identity.has_value()) {
+        throw std::logic_error(
+                "AUR source-build request has no reviewed PackageBase identity.");
+    }
+    if(!should_run_reviewed_source_route(config)) {
+        return AurCompatibilityCheckout{
+                std::move(lease), review_bypass_reason(config)};
+    }
+
+    TrustedGitCommitResolutionResult target_result =
+            trusted_git_resolve_remote_commit(
+                    checkout, request.git_url, branch);
+    if(auto* failure = std::get_if<TrustedGitReviewFailure>(
+               &target_result)) {
+        stop_reviewed_source_route(
+                ReviewedSourceProductionFailureStage::TargetResolution,
+                ReviewedSourceProductionFailureReason::
+                        TargetResolutionFailure,
+                std::move(*failure));
+    }
+    AurReviewedSourceReviewIdentity identity =
+            AurReviewedSourceReviewIdentity::make(
+                    request.aur_review_identity.value(),
+                    std::get<SourceRevisionIdentity>(
+                            std::move(target_result)));
+
+    ReviewedSourceLifecyclePlanResult lifecycle =
+            plan_reviewed_source_lifecycle_from_preflight(
+                    identity, std::move(fatal_preflight));
+    if(auto* stop = std::get_if<ReviewedSourceOperationStop>(&lifecycle)) {
+        stop_reviewed_source_operation(
+                *stop,
+                ReviewedSourceProductionFailureStage::LifecyclePlanning);
+    }
+    if(auto* already = std::get_if<
+               ReviewedSourceAlreadyReviewedContinue>(&lifecycle)) {
+        AlreadyReviewedSourceCheckoutResult materialized =
+                materialize_already_reviewed_source_checkout_with_lease(
+                        std::move(*already), std::move(lease));
+        if(auto* failure = std::get_if<
+                   ReviewedSourcePinnedCheckoutFailure>(&materialized)) {
+            ReviewedSourceProductionFailureReason reason =
+                    ReviewedSourceProductionFailureReason::
+                            ExactCheckoutFailure;
+            if(failure->reason ==
+               ReviewedSourcePinnedCheckoutFailureReason::LeaseContended) {
+                reason = ReviewedSourceProductionFailureReason::
+                        LeaseContended;
+            } else if(
+                    failure->reason ==
+                    ReviewedSourcePinnedCheckoutFailureReason::
+                            LeaseUnavailable) {
+                reason = ReviewedSourceProductionFailureReason::
+                        LeaseUnavailable;
+            }
+            stop_reviewed_source_route(
+                    ReviewedSourceProductionFailureStage::
+                            ExactCheckoutMaterialization,
+                    reason, std::move(*failure));
+        }
+        return std::get<AlreadyReviewedSourceCheckout>(
+                std::move(materialized));
+    }
+
+    ReviewedSourceReviewRequirement requirement = std::move(
+            std::get<ReviewedSourceReviewRequirement>(lifecycle));
+    std::optional<SourceRevisionIdentity> baseline;
+    if(requirement.baseline() != nullptr) {
+        baseline = *requirement.baseline();
+    }
+    TrustedGitAurReviewedSourceProjectionResult projection =
+            trusted_git_project_aur_reviewed_source(
+                    checkout, requirement.identity(), std::move(baseline));
+    if(auto* failure = std::get_if<TrustedGitReviewFailure>(&projection)) {
+        stop_reviewed_source_route(
+                ReviewedSourceProductionFailureStage::ReviewProjection,
+                ReviewedSourceProductionFailureReason::
+                        ReviewProjectionFailure,
+                std::move(*failure));
+    }
+    TrustedGitAurReviewedSourceMaterializationResult materialized_review =
+            trusted_git_materialize_aur_reviewed_source_review(
+                    checkout,
+                    std::get<TrustedAurReviewedSourceProjection>(
+                            std::move(projection)));
+    if(auto* failure = std::get_if<TrustedGitReviewFailure>(
+               &materialized_review)) {
+        stop_reviewed_source_route(
+                ReviewedSourceProductionFailureStage::
+                        ReviewMaterialization,
+                ReviewedSourceProductionFailureReason::
+                        ReviewMaterializationFailure,
+                std::move(*failure));
+    }
+    if(auto* failure = std::get_if<ReviewedSourceReviewFailure>(
+               &materialized_review)) {
+        stop_reviewed_source_route(
+                ReviewedSourceProductionFailureStage::
+                        ReviewMaterialization,
+                ReviewedSourceProductionFailureReason::
+                        ReviewMaterializationFailure,
+                std::move(*failure));
+    }
+    ReviewedSourceVerifiedLifecycleResult verified =
+            bind_reviewed_source_verified_review(
+                    std::move(requirement),
+                    std::get<TrustedAurReviewedSourceReview>(
+                            std::move(materialized_review)));
+    if(auto* stop = std::get_if<ReviewedSourceOperationStop>(&verified)) {
+        stop_reviewed_source_operation(
+                *stop,
+                ReviewedSourceProductionFailureStage::ReviewBinding);
+    }
+    PresentedReviewedSourceTargetResult presented =
+            present_reviewed_source_target(
+                    std::get<ReviewedSourceVerifiedLifecycleTarget>(
+                            std::move(verified)),
+                    std::cout);
+    if(auto* stop = std::get_if<ReviewedSourceOperationStop>(&presented)) {
+        stop_reviewed_source_operation(
+                *stop,
+                ReviewedSourceProductionFailureStage::Presentation);
+    }
+
+    const PresentedReviewedSourceTarget& presented_target =
+            std::get<PresentedReviewedSourceTarget>(presented);
+    const std::string acceptance_question =
+            reviewed_source_acceptance_question(
+                    presented_target.lifecycle());
+    ExplicitConfirmationResult confirmation = request_explicit_confirmation(
+            acceptance_question, false);
+    ReviewedSourceAcceptanceDisposition disposition =
+            decide_reviewed_source_acceptance(
+                    std::get<PresentedReviewedSourceTarget>(
+                            std::move(presented)),
+                    std::move(confirmation));
+    if(auto* accepted =
+               std::get_if<AcceptedReviewedSourceTarget>(&disposition)) {
+        AcceptedReviewedSourceCheckoutResult exact =
+                materialize_accepted_reviewed_source_checkout_with_lease(
+                        std::move(*accepted), std::move(lease));
+        if(!std::holds_alternative<AcceptedReviewedSourceCheckout>(exact)) {
+            auto failure = std::get<ReviewedSourcePinnedCheckoutFailure>(
+                    std::move(exact));
+            ReviewedSourceProductionFailureReason reason =
+                    ReviewedSourceProductionFailureReason::
+                            ExactCheckoutFailure;
+            if(failure.reason ==
+               ReviewedSourcePinnedCheckoutFailureReason::LeaseContended) {
+                reason = ReviewedSourceProductionFailureReason::
+                        LeaseContended;
+            } else if(
+                    failure.reason ==
+                    ReviewedSourcePinnedCheckoutFailureReason::
+                            LeaseUnavailable) {
+                reason = ReviewedSourceProductionFailureReason::
+                        LeaseUnavailable;
+            }
+            stop_reviewed_source_route(
+                    ReviewedSourceProductionFailureStage::
+                            ExactCheckoutMaterialization,
+                    reason, std::move(failure));
+        }
+        return std::get<AcceptedReviewedSourceCheckout>(std::move(exact));
+    }
+    if(auto* compatibility = std::get_if<
+               ReviewedSourceCompatibilityBuildWithoutReview>(
+                       &disposition)) {
+        return AurCompatibilityCheckout{
+                std::move(lease), compatibility->reason()};
+    }
+    stop_reviewed_source_operation(
+            std::get<ReviewedSourceOperationStop>(disposition),
+            ReviewedSourceProductionFailureStage::Acceptance);
+}
+
+ReviewedSourceEditorBoundaryResult begin_aur_editor_boundary(
+        const AurCheckoutAuthority& authority) {
+    return std::visit(
+            [](const auto& checkout) -> ReviewedSourceEditorBoundaryResult {
+                using Checkout = std::decay_t<decltype(checkout)>;
+                if constexpr(std::is_same_v<
+                                     Checkout,
+                                     AurCompatibilityCheckout>) {
+                    throw std::logic_error(
+                            "Compatibility checkout has no reviewed editor boundary.");
+                } else {
+                    return begin_reviewed_source_editor_boundary(checkout);
+                }
+            },
+            authority);
+}
+
+ReviewedSourceEditorOverlayProofResult seal_aur_editor_boundary(
+        const AurCheckoutAuthority& authority,
+        ReviewedSourceEditorBoundary boundary,
+        bool editor_invoked) {
+    return std::visit(
+            [&boundary, editor_invoked](const auto& checkout) mutable
+                    -> ReviewedSourceEditorOverlayProofResult {
+                using Checkout = std::decay_t<decltype(checkout)>;
+                if constexpr(std::is_same_v<
+                                     Checkout,
+                                     AurCompatibilityCheckout>) {
+                    throw std::logic_error(
+                            "Compatibility checkout cannot seal reviewed editor overlay authority.");
+                } else if(editor_invoked) {
+                    return seal_reviewed_source_editor_overlay(
+                            checkout, std::move(boundary));
+                } else {
+                    return seal_reviewed_source_no_editor_overlay(
+                            checkout, std::move(boundary));
+                }
+            },
+            authority);
+}
+
+ProductionArtifactSourceTree finalize_aur_checkout_authority(
+        AurCheckoutAuthority authority,
+        const ValidatedCachePath& checkout,
+        std::optional<ReviewedSourceEditorOverlayProof> editor_overlay,
+        bool editor_invoked) {
+    if(auto* compatibility =
+               std::get_if<AurCompatibilityCheckout>(&authority)) {
+        if(editor_overlay.has_value()) {
+            throw std::logic_error(
+                    "Compatibility checkout received reviewed overlay authority.");
+        }
+        return make_unreviewed_production_artifact_source_tree(
+                checkout, std::move(compatibility->lease),
+                ProductionSourceReviewStatus::CompatibilityWithoutReview,
+                editor_invoked
+                        ? ReviewedSourceEditorOverlayStatus::InvocationLocal
+                        : ReviewedSourceEditorOverlayStatus::None,
+                compatibility->reason);
+    }
+
+    if(!editor_overlay.has_value()) {
+        ReviewedSourceEditorBoundaryResult boundary =
+                begin_aur_editor_boundary(authority);
+        if(auto* failure = std::get_if<ReviewedSourcePublicationFailure>(
+                   &boundary)) {
+            stop_reviewed_source_route(
+                    ReviewedSourceProductionFailureStage::
+                            EditorOverlayObservation,
+                    ReviewedSourceProductionFailureReason::
+                            OverlayObservationFailure,
+                    std::move(*failure));
+        }
+        ReviewedSourceEditorOverlayProofResult sealed =
+                seal_aur_editor_boundary(
+                        authority,
+                        std::get<ReviewedSourceEditorBoundary>(
+                                std::move(boundary)),
+                        false);
+        if(auto* failure = std::get_if<ReviewedSourcePublicationFailure>(
+                   &sealed)) {
+            stop_reviewed_source_route(
+                    ReviewedSourceProductionFailureStage::
+                            EditorOverlayObservation,
+                    ReviewedSourceProductionFailureReason::
+                            OverlayObservationFailure,
+                    std::move(*failure));
+        }
+        editor_overlay.emplace(
+                std::get<ReviewedSourceEditorOverlayProof>(
+                        std::move(sealed)));
+    }
+
+    const ProductionReviewedSourceOutcomeSnapshot reviewed_outcome =
+            std::visit(
+                    [](const auto& checkout)
+                            -> ProductionReviewedSourceOutcomeSnapshot {
+                        using Checkout = std::decay_t<decltype(checkout)>;
+                        if constexpr(std::is_same_v<
+                                             Checkout,
+                                             AurCompatibilityCheckout>) {
+                            throw std::logic_error(
+                                    "Compatibility checkout has no reviewed outcome.");
+                        } else {
+                            return production_reviewed_source_outcome(
+                                    checkout.lifecycle());
+                        }
+                    },
+                    authority);
+
+    notify_reviewed_source_before_publication_for_test();
+
+    ReviewedSourcePublicationResult publication =
+            std::holds_alternative<AcceptedReviewedSourceCheckout>(authority)
+            ? publish_accepted_reviewed_source_checkout_with_editor_overlay(
+                      std::get<AcceptedReviewedSourceCheckout>(
+                              std::move(authority)),
+                      std::move(editor_overlay.value()))
+            : confirm_already_reviewed_source_checkout_with_editor_overlay(
+                      std::get<AlreadyReviewedSourceCheckout>(
+                              std::move(authority)),
+                      std::move(editor_overlay.value()));
+    if(auto* pinned =
+               std::get_if<PinnedReviewedSourceBuild>(&publication)) {
+        return make_reviewed_production_artifact_source_tree(
+                checkout, std::move(*pinned), reviewed_outcome.outcome,
+                reviewed_outcome.abnormal_state_reason);
+    }
+    if(std::holds_alternative<ReviewedSourcePublicationUncertain>(
+               publication)) {
+        stop_reviewed_source_route(
+                ReviewedSourceProductionFailureStage::StatePublication,
+                ReviewedSourceProductionFailureReason::PublishedUncertain,
+                std::get<ReviewedSourcePublicationUncertain>(
+                        std::move(publication)));
+    }
+    if(std::holds_alternative<
+               ReviewedSourcePostPublicationCheckoutFailure>(publication)) {
+        stop_reviewed_source_route(
+                ReviewedSourceProductionFailureStage::
+                        PostPublicationCheckoutRevalidation,
+                ReviewedSourceProductionFailureReason::
+                        PostPublicationCheckoutFailure,
+                std::get<ReviewedSourcePostPublicationCheckoutFailure>(
+                        std::move(publication)));
+    }
+    if(std::holds_alternative<ReviewedSourcePublicationConflict>(
+               publication)) {
+        stop_reviewed_source_route(
+                ReviewedSourceProductionFailureStage::StatePublication,
+                ReviewedSourceProductionFailureReason::
+                        PublicationConflict,
+                std::get<ReviewedSourcePublicationConflict>(
+                        std::move(publication)));
+    }
+    if(std::holds_alternative<ReviewedSourcePublicationUnsafeHistory>(
+               publication)) {
+        stop_reviewed_source_route(
+                ReviewedSourceProductionFailureStage::StatePublication,
+                ReviewedSourceProductionFailureReason::
+                        PublicationUnsafeHistory,
+                std::get<ReviewedSourcePublicationUnsafeHistory>(
+                        std::move(publication)));
+    }
+    ReviewedSourcePublicationFailure failure =
+            std::get<ReviewedSourcePublicationFailure>(
+                    std::move(publication));
+    stop_reviewed_source_route(
+            ReviewedSourceProductionFailureStage::StatePublication,
+            failure.reason ==
+                            ReviewedSourcePublicationFailureReason::
+                                    CheckoutRevalidationFailed
+                    ? ReviewedSourceProductionFailureReason::
+                              CheckoutRevalidationFailure
+                    : ReviewedSourceProductionFailureReason::
+                              PublicationFailure,
+            std::move(failure));
 }
 
 std::optional<std::string> read_nofollow_regular_file(
@@ -595,8 +1277,8 @@ MakepkgBuildOptions resolve_makepkg_build_options(
 }
 
 struct PreparedSourceBuildCheckout {
-    ValidatedCachePath    checkout;
-    MakepkgBuildOptions   makepkg_options;
+    ProductionArtifactSourceTree source_tree;
+    MakepkgBuildOptions           makepkg_options;
 };
 
 using SourceBuildCheckoutPreparation =
@@ -610,6 +1292,8 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
         const std::string& display_name,
         SourceBuildUpdatePolicy update_policy,
         const ValidatedCacheRoot& build_root,
+        std::optional<ReviewedSourceFatalStatePreflight>
+                reviewed_state_preflight,
         const AppConfig& config) {
     require_valid_package_name(request.checkout_name);
     if(update_policy == SourceBuildUpdatePolicy::OnlyIfUpdated &&
@@ -626,6 +1310,10 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
             build_root, request.checkout_name,
             CachePathRequirement::ExistingOrMissing);
 
+    bool existed_before_update = false;
+    std::optional<ReviewedSourcePackageBaseLease> package_base_lease;
+    std::string branch;
+
     {
         WorkDirGuard wd(build_root);
         bool         needs_clone = true;
@@ -633,6 +1321,8 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
         if(pkg_path.exists() && pkg_path.is_directory() &&
            has_safe_persistent_checkout_git_directory(pkg_path)) {
             require_safe_persistent_checkout_descendants(pkg_path);
+            package_base_lease.emplace(acquire_package_base_lease(
+                    pkg_path, request.aur_review_identity.has_value()));
             {
                 WorkDirGuard wd_repo(pkg_path);
                 std::string current_url =
@@ -642,6 +1332,7 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                             "Remote URL mismatch. Re-cloning..."));
                 } else {
                     needs_clone = false;
+                    existed_before_update = true;
                 }
             }
 
@@ -655,7 +1346,8 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                 {
                     ScopedPrivateUmask private_umask;
                     if(trusted_git_fetch_origin(
-                               pkg_path, request.git_url) != 0) {
+                               pkg_path, request.git_url,
+                               package_base_lease.value()) != 0) {
                         throw std::runtime_error(localization::translate_message(
                                 "Failed to fetch updates."));
                     }
@@ -665,83 +1357,36 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                 // branch検出を含む後続git commandへ進む前にauthorityを失効させる。
                 pkg_path = revalidate_trusted_cache_path(
                         pkg_path, CachePathRequirement::ExistingDirectory);
-                require_safe_persistent_checkout_descendants(pkg_path);
-
-                std::string branch = trusted_git_detect_remote_branch(
-                        pkg_path, request.git_url);
-                // TRANSLATORS: The placeholder is a literal Git branch name.
-                Logger::info(localization::format_translated_message(
-                        "Detected branch: {}", branch));
-
-                if(config.user_config.review.diff == ReviewPolicy::Prompt) {
-                    int diff_ret = trusted_git_diff_quiet(
-                            pkg_path, request.git_url, branch);
-                    if(diff_ret > 1) {
-                        throw std::runtime_error(localization::translate_message(
-                                "Failed to compare repository changes."));
-                    }
-                    if(diff_ret == 1) {
-                        log_update_diff_guidance(
-                                pkg_path, request.git_url, branch);
-                        ConfirmationResult diff_confirmation =
-                                request_confirmation(
-                                        localization::format_translated_message(
-                                                "Updates were detected in the existing cache repository. View the {} diff?",
-                                                "Git"),
-                                        ConfirmationDefault::No,
-                                        config.no_confirm);
-                        if(std::holds_alternative<ConfirmationAccepted>(
-                                   diff_confirmation)) {
-                            static_cast<void>(trusted_git_show_diff(
-                                    pkg_path, request.git_url, branch));
-                        } else if(!std::holds_alternative<
-                                          ConfirmationDeclined>(
-                                          diff_confirmation)) {
-                            DiagnosticIdentity identity;
-                            identity.requested_package =
-                                    request.package_name;
-                            identity.package_base = request.checkout_name;
-                            stop_after_confirmation(
-                                    std::move(diff_confirmation),
-                                    DiagnosticPhase::Fetch,
-                                    std::move(identity));
-                        }
-                    }
-                }
-
-                // LANDMINE: reset は build/install 経路だけで許可する。fetch 経路へ持ち込まない。
-                pkg_path = revalidate_trusted_cache_path(
-                        pkg_path, CachePathRequirement::ExistingDirectory);
-                require_safe_persistent_checkout_descendants(pkg_path);
-                {
-                    ScopedPrivateUmask private_umask;
-                    if(trusted_git_reset_hard(
-                               pkg_path, request.git_url, branch) != 0) {
-                        throw std::runtime_error(
-                                localization::translate_message(
-                                        "Failed to reset repository."));
-                    }
-                }
-                pkg_path = revalidate_trusted_cache_path(
-                        pkg_path, CachePathRequirement::ExistingDirectory);
+                package_base_lease->require_unchanged_identity();
                 require_safe_persistent_checkout_descendants(pkg_path);
             }
         }
 
         if(needs_clone) {
             if(pkg_path.exists()) {
+                if(pkg_path.is_directory() &&
+                   !package_base_lease.has_value()) {
+                    package_base_lease.emplace(
+                            acquire_package_base_lease(
+                                    pkg_path,
+                                    request.aur_review_identity.has_value()));
+                }
                 // POLICY(#175): remote mismatch/non-repository cleanup is limited to the validated cache entry.
                 remove_trusted_cache_path(pkg_path);
+                package_base_lease.reset();
             }
             pkg_path = create_trusted_cache_directory(
                     build_root, request.checkout_name);
+            package_base_lease.emplace(acquire_package_base_lease(
+                    pkg_path, request.aur_review_identity.has_value()));
             Logger::info(localization::translate_message(
                     "Cloning repository..."));
             DirCleanupGuard cleanup_guard(pkg_path);
             {
                 ScopedPrivateUmask private_umask;
                 if(trusted_git_clone_persistent_checkout(
-                           pkg_path, request.git_url) != 0) {
+                           pkg_path, request.git_url,
+                           package_base_lease.value()) != 0) {
                     // TRANSLATORS: The placeholder is a package checkout name.
                     throw std::runtime_error(localization::format_translated_message(
                             "Failed to clone {}",
@@ -772,12 +1417,143 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
             }
             pkg_path = revalidate_trusted_cache_path(
                     pkg_path, CachePathRequirement::ExistingDirectory);
+            package_base_lease->require_unchanged_identity();
             require_safe_persistent_checkout_descendants(pkg_path);
             cleanup_guard.commit();
         }
+
+        if(!package_base_lease.has_value()) {
+            throw std::logic_error(
+                    "Source checkout has no PackageBase lease.");
+        }
+        pkg_path = revalidate_trusted_cache_path(
+                pkg_path, CachePathRequirement::ExistingDirectory);
+        package_base_lease->require_unchanged_identity();
+        require_safe_persistent_checkout_descendants(pkg_path);
+        const bool needs_branch = existed_before_update ||
+                (request.aur_review_identity.has_value() &&
+                 should_run_reviewed_source_route(config));
+        if(needs_branch) {
+            WorkDirGuard wd_repo(pkg_path);
+            branch = trusted_git_detect_remote_branch(
+                    pkg_path, request.git_url);
+            // TRANSLATORS: The placeholder is a literal Git branch name.
+            Logger::info(localization::format_translated_message(
+                    "Detected branch: {}", branch));
+        }
+    }
+
+    std::optional<AurCheckoutAuthority> aur_authority;
+    if(request.aur_review_identity.has_value()) {
+        if(!reviewed_state_preflight.has_value()) {
+            throw std::logic_error(
+                    "AUR source-build preparation lost reviewed-state preflight authority.");
+        }
+        aur_authority.emplace(prepare_aur_checkout_authority(
+                request, pkg_path, branch,
+                std::move(package_base_lease.value()),
+                std::move(reviewed_state_preflight.value()),
+                config));
+        package_base_lease.reset();
+    } else if(reviewed_state_preflight.has_value()) {
+        throw std::logic_error(
+                "Non-AUR source-build preparation received reviewed-state preflight authority.");
+    }
+
+    const bool uses_legacy_checkout = !aur_authority.has_value() ||
+            std::holds_alternative<AurCompatibilityCheckout>(
+                    aur_authority.value());
+    std::optional<WorkDirGuard> legacy_workdir;
+    if(uses_legacy_checkout) legacy_workdir.emplace(pkg_path);
+    if(uses_legacy_checkout && existed_before_update &&
+       config.user_config.review.diff == ReviewPolicy::Prompt &&
+       !aur_authority.has_value()) {
+        int diff_ret = trusted_git_diff_quiet(
+                pkg_path, request.git_url, branch);
+        if(diff_ret > 1) {
+            throw std::runtime_error(localization::translate_message(
+                    "Failed to compare repository changes."));
+        }
+        if(diff_ret == 1) {
+            log_update_diff_guidance(
+                    pkg_path, request.git_url, branch);
+            ConfirmationResult diff_confirmation = request_confirmation(
+                    localization::format_translated_message(
+                            "Updates were detected in the existing cache repository. View the {} diff?",
+                            "Git"),
+                    ConfirmationDefault::No, config.no_confirm);
+            if(std::holds_alternative<ConfirmationAccepted>(
+                       diff_confirmation)) {
+                static_cast<void>(trusted_git_show_diff(
+                        pkg_path, request.git_url, branch));
+            } else if(!std::holds_alternative<ConfirmationDeclined>(
+                              diff_confirmation)) {
+                DiagnosticIdentity identity;
+                identity.requested_package = request.package_name;
+                identity.package_base = request.checkout_name;
+                stop_after_confirmation(
+                        std::move(diff_confirmation), DiagnosticPhase::Fetch,
+                        std::move(identity));
+            }
+        }
+    }
+
+    if(uses_legacy_checkout && existed_before_update) {
+        // LANDMINE: reset is build/install-only. Compatibility continuation
+        // never receives reviewed/pinned authority.
+        pkg_path = revalidate_trusted_cache_path(
+                pkg_path, CachePathRequirement::ExistingDirectory);
+        const ReviewedSourcePackageBaseLease& checkout_lease =
+                aur_authority.has_value()
+                ? std::get<AurCompatibilityCheckout>(
+                          aur_authority.value())
+                          .lease
+                : package_base_lease.value();
+        checkout_lease.require_unchanged_identity();
+        require_safe_persistent_checkout_descendants(pkg_path);
+        {
+            ScopedPrivateUmask private_umask;
+            if(trusted_git_reset_hard(
+                       pkg_path, request.git_url, branch,
+                       checkout_lease) != 0) {
+                throw std::runtime_error(localization::translate_message(
+                        "Failed to reset repository."));
+            }
+        }
+        pkg_path = revalidate_trusted_cache_path(
+                pkg_path, CachePathRequirement::ExistingDirectory);
+        if(aur_authority.has_value()) {
+            std::get<AurCompatibilityCheckout>(aur_authority.value())
+                    .lease.require_unchanged_identity();
+        } else {
+            package_base_lease->require_unchanged_identity();
+        }
+        require_safe_persistent_checkout_descendants(pkg_path);
     }
 
     MakepkgBuildOptions makepkg_options;
+    bool editor_invoked = false;
+    std::optional<ReviewedSourceEditorOverlayProof> editor_overlay;
+    const auto run_checkout_command =
+            [&aur_authority, &package_base_lease](
+                    const std::string& command) {
+        if(aur_authority.has_value()) {
+            return std::visit(
+                    [&command](const auto& authority) {
+                        if constexpr(std::is_same_v<
+                                             std::decay_t<
+                                                     decltype(authority)>,
+                                             AurCompatibilityCheckout>) {
+                            return authority.lease.run_guarded_command(
+                                    command);
+                        } else {
+                            return authority.run_guarded_command(command);
+                        }
+                    },
+                    aur_authority.value());
+        }
+        return package_base_lease->run_guarded_command(command);
+    };
     {
         pkg_path = revalidate_trusted_cache_path(
                 pkg_path, CachePathRequirement::ExistingDirectory);
@@ -789,12 +1565,30 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                     request.package_name, ".",
                     request.installed_snapshot.value(), request.update_baseline);
             if(update_check == UpdateCheckResult::UpToDate) {
+                std::optional<ProductionSourceBuildProvenance> provenance;
+                if(aur_authority.has_value()) {
+                    ProductionArtifactSourceTree source_tree =
+                            finalize_aur_checkout_authority(
+                                    std::move(aur_authority.value()),
+                                    pkg_path, std::nullopt, false);
+                    provenance = source_tree.provenance();
+                } else {
+                    ProductionArtifactSourceTree source_tree =
+                            make_unreviewed_production_artifact_source_tree(
+                                    pkg_path,
+                                    std::move(package_base_lease.value()),
+                                    ProductionSourceReviewStatus::
+                                            NotApplicable,
+                                    ReviewedSourceEditorOverlayStatus::None);
+                    provenance = source_tree.provenance();
+                }
                 static_cast<void>(revalidate_trusted_cache_path(
                         pkg_path, CachePathRequirement::ExistingDirectory));
                 return SourceBuildUpToDate{
                         up_to_date_diagnostic(
                                 request.package_name,
-                                request.installed_snapshot->installed_version.value())};
+                                request.installed_snapshot->installed_version.value()),
+                        std::move(provenance)};
             }
             if(update_check == UpdateCheckResult::Unknown) {
                 // TRANSLATORS: The placeholders are the literal .SRCINFO file name and a package name.
@@ -836,7 +1630,7 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                             CachePathRequirement::ExistingDirectory));
                     return SourceBuildUpdateStatusUnknownSkipped{
                             reason,
-                            std::move(diagnostic)};
+                            std::move(diagnostic), std::nullopt};
                 }
                 if(!std::holds_alternative<ConfirmationAccepted>(
                            continue_confirmation)) {
@@ -851,7 +1645,51 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
             }
         }
 
-        review_build_files(pkg_path, config);
+        std::optional<ReviewedSourceEditorBoundary> editor_boundary;
+        if(aur_authority.has_value() &&
+           !std::holds_alternative<AurCompatibilityCheckout>(
+                   aur_authority.value())) {
+            ReviewedSourceEditorBoundaryResult boundary =
+                    begin_aur_editor_boundary(aur_authority.value());
+            if(auto* failure =
+                       std::get_if<ReviewedSourcePublicationFailure>(
+                               &boundary)) {
+                stop_reviewed_source_route(
+                        ReviewedSourceProductionFailureStage::
+                                EditorOverlayObservation,
+                        ReviewedSourceProductionFailureReason::
+                                OverlayObservationFailure,
+                        std::move(*failure));
+            }
+            editor_boundary.emplace(
+                    std::get<ReviewedSourceEditorBoundary>(
+                            std::move(boundary)));
+        }
+
+        editor_invoked = review_build_files(
+                pkg_path, config, run_checkout_command);
+        if(editor_boundary.has_value()) {
+            ReviewedSourceEditorOverlayProofResult sealed =
+                    seal_aur_editor_boundary(
+                            aur_authority.value(),
+                            std::move(editor_boundary.value()),
+                            editor_invoked);
+            if(auto* failure =
+                       std::get_if<ReviewedSourcePublicationFailure>(
+                               &sealed)) {
+                stop_reviewed_source_route(
+                        ReviewedSourceProductionFailureStage::
+                                EditorOverlayObservation,
+                        ReviewedSourceProductionFailureReason::
+                                OverlayObservationFailure,
+                        std::move(*failure));
+            }
+            editor_overlay.emplace(
+                    std::get<ReviewedSourceEditorOverlayProof>(
+                            std::move(sealed)));
+        }
+        confirm_after_build_file_edit(
+                pkg_path.canonical_path(), config, editor_invoked);
         makepkg_options = resolve_makepkg_build_options(".", config);
     }
 
@@ -872,8 +1710,19 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
     pkg_path = revalidate_trusted_cache_path(
             pkg_path, CachePathRequirement::ExistingDirectory);
     require_safe_persistent_checkout_descendants(pkg_path);
+    ProductionArtifactSourceTree source_tree = aur_authority.has_value()
+            ? finalize_aur_checkout_authority(
+                      std::move(aur_authority.value()), pkg_path,
+                      std::move(editor_overlay), editor_invoked)
+            : make_unreviewed_production_artifact_source_tree(
+                      pkg_path, std::move(package_base_lease.value()),
+                      ProductionSourceReviewStatus::NotApplicable,
+                      editor_invoked
+                              ? ReviewedSourceEditorOverlayStatus::
+                                        InvocationLocal
+                              : ReviewedSourceEditorOverlayStatus::None);
     return PreparedSourceBuildCheckout{
-            std::move(pkg_path), makepkg_options};
+            std::move(source_tree), makepkg_options};
 }
 
 void require_package_base_source_build_request(
@@ -948,12 +1797,52 @@ void require_package_base_source_build_request(
 
 } // namespace
 
+std::shared_ptr<ReviewedSourceFatalStatePreflightSlot>
+preflight_reviewed_source_fatal_state_for_production(
+        const SourceBuildRequest& request) {
+    if(!request.aur_review_identity.has_value()) return nullptr;
+
+    ReviewedSourceFatalStatePreflightResult fatal_preflight =
+            preflight_reviewed_source_fatal_state(
+                    request.aur_review_identity.value());
+    if(auto* stop = std::get_if<ReviewedSourceOperationStop>(
+               &fatal_preflight)) {
+        stop_reviewed_source_operation(
+                *stop,
+                ReviewedSourceProductionFailureStage::FatalStatePreflight);
+    }
+    return std::shared_ptr<ReviewedSourceFatalStatePreflightSlot>(
+            new ReviewedSourceFatalStatePreflightSlot(
+                    std::get<ReviewedSourceFatalStatePreflight>(
+                            std::move(fatal_preflight))));
+}
+
 SourceBuildPreparationOutcome prepare_source_build_for_execution(
         const SourceBuildRequest& request,
         const std::string& display_name,
         SourceBuildUpdatePolicy update_policy,
         const ValidatedCacheRoot& cache_root,
         const AppConfig& config) {
+    std::optional<ReviewedSourceFatalStatePreflight> reviewed_state_preflight;
+    if(request.aur_review_identity.has_value()) {
+        std::shared_ptr<ReviewedSourceFatalStatePreflightSlot> slot =
+                request.reviewed_state_preflight;
+        if(!slot) {
+            slot = preflight_reviewed_source_fatal_state_for_production(
+                    request);
+        }
+        if(!slot || !slot->observation_.has_value()) {
+            throw std::logic_error(
+                    "Reviewed source fatal-state preflight observation is missing or already consumed.");
+        }
+        reviewed_state_preflight.emplace(
+                std::move(slot->observation_.value()));
+        slot->observation_.reset();
+    } else if(request.reviewed_state_preflight) {
+        throw std::logic_error(
+                "Repository source-build request contains an AUR reviewed-state preflight observation.");
+    }
+
     // POLICY: checkoutのclone/fetch/resetより先に、artifact ownerと同じ
     // private cache contractを証明し、NeedsBuild capabilityへ一緒に保持する。
     ValidatedPrivateCacheRoot artifact_root = [&]() {
@@ -980,7 +1869,9 @@ SourceBuildPreparationOutcome prepare_source_build_for_execution(
         try {
             return prepare_source_build_checkout(
                     request, display_name, update_policy, cache_root,
-                    config);
+                    std::move(reviewed_state_preflight), config);
+        } catch(const ReviewedSourceProductionError&) {
+            throw;
         } catch(const TrustedCacheError&) {
             throw;
         } catch(const ConfirmationOperationStopped&) {
@@ -1010,10 +1901,27 @@ SourceBuildPreparationOutcome prepare_source_build_for_execution(
     PreparedSourceBuildCheckout checkout = std::move(
             std::get<PreparedSourceBuildCheckout>(checkout_preparation));
     return SourceBuildPreparationAccess::make(
-            std::move(checkout.checkout), std::move(artifact_root),
+            std::move(checkout.source_tree), std::move(artifact_root),
             checkout.makepkg_options.rebuild,
             checkout.makepkg_options.clean_build);
 }
+
+#ifdef MOGUET_ENABLE_REVIEWED_SOURCE_PRODUCTION_TEST_HOOKS
+void set_reviewed_source_before_publication_hook_for_test(
+        ReviewedSourceBeforePublicationHookForTest hook) {
+    g_reviewed_source_before_publication_hook = hook;
+}
+
+const ProductionSourceBuildProvenance&
+prepared_source_build_provenance_for_test(
+        const PreparedSourceBuildNeedsBuild& prepared) {
+    if(!prepared.source_tree_.has_value()) {
+        throw std::logic_error(
+                "Prepared source-build test capability has no source tree.");
+    }
+    return prepared.source_tree_->provenance();
+}
+#endif
 
 SourceBuildExecutionResult execute_source_build_typed(
         const SourceBuildRequest& request,
@@ -1037,26 +1945,48 @@ SourceBuildExecutionResult execute_source_build_typed(
     }();
     if(const auto* up_to_date =
                std::get_if<SourceBuildUpToDate>(&preparation)) {
-        return SourceBuildExecutionResult{
+        SourceBuildExecutionResult result{
                 SourceBuildExecutionStatus::UpToDate,
                 std::nullopt,
-                up_to_date->diagnostic};
+                up_to_date->diagnostic,
+                std::nullopt};
+        if(up_to_date->source_provenance.has_value()) {
+            result.production_outcome =
+                    ProductionSourceBuildStagedOutcome{
+                            .source_provenance =
+                                    *up_to_date->source_provenance};
+        }
+        return result;
     }
     if(const auto* skipped = std::get_if<
                SourceBuildUpdateStatusUnknownSkipped>(&preparation)) {
-        return SourceBuildExecutionResult{
+        SourceBuildExecutionResult result{
                 SourceBuildExecutionStatus::UpdateStatusUnknownSkipped,
                 skipped->reason,
-                skipped->diagnostic};
+                skipped->diagnostic,
+                std::nullopt};
+        if(skipped->source_provenance.has_value()) {
+            result.production_outcome =
+                    ProductionSourceBuildStagedOutcome{
+                            .source_provenance =
+                                    *skipped->source_provenance};
+        }
+        return result;
     }
     PreparedSourceBuildExecutionCapabilities prepared =
             SourceBuildPreparedExecutionAccess::consume(std::move(
                     std::get<PreparedSourceBuildNeedsBuild>(preparation)));
 
-    return source_build_result_from_artifact_outcome(
+    const SeparatedSourceBuildUnitOptions options{
+            .no_confirm = config.no_confirm,
+            .needed = request.needed,
+            .rm_deps = config.rm_deps,
+            .rebuild = prepared.rebuild,
+            .clean_build = prepared.clean_build};
+    SeparatedSourceBuildExecutionResult separated =
             execute_separated_source_build_unit(
                     SeparatedSourceBuildUnitRequest{
-                            std::move(prepared.checkout),
+                            std::move(prepared.source_tree),
                             std::move(prepared.artifact_root),
                             request.package_name,
                             request.checkout_name,
@@ -1064,12 +1994,13 @@ SourceBuildExecutionResult execute_source_build_typed(
                             request.custom_environment,
                             request.empty_value_policy,
                             database_paths},
-                    SeparatedSourceBuildUnitOptions{
-                            .no_confirm = config.no_confirm,
-                            .needed = request.needed,
-                            .rm_deps = config.rm_deps,
-                            .rebuild = prepared.rebuild,
-                            .clean_build = prepared.clean_build}));
+                    options);
+    SourceBuildExecutionResult result =
+            source_build_result_from_artifact_outcome(
+                    separated.install_outcome);
+    result.production_outcome =
+            std::move(separated.production_outcome);
+    return result;
 }
 
 PackageBaseSourceBuildExecutionResult
@@ -1088,7 +2019,7 @@ execute_prepared_source_build_package_base_typed(
 
     return execute_separated_package_base_source_build(
             SeparatedPackageBaseSourceBuildRequest{
-                    std::move(capabilities.checkout),
+                    std::move(capabilities.source_tree),
                     std::move(capabilities.artifact_root),
                     request.checkout_name,
                     required_targets,
@@ -1120,6 +2051,10 @@ execute_source_build_package_base_typed(
                     request, request.checkout_name,
                     SourceBuildUpdatePolicy::AlwaysBuild,
                     cache_root, config);
+        } catch(const ReviewedSourceProductionError& error) {
+            throw SeparatedPackageBaseSourceBuildPhaseError(
+                    SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                    error.what(), error.failure());
         } catch(const TrustedCacheError&) {
             throw;
         } catch(const SourceBuildPreparationError& error) {

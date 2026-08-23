@@ -46,6 +46,8 @@ enum class AurUpdateSourceBuildFailureCategory {
     Build,
     ArtifactValidation,
     ArtifactIdentity,
+    InstallPreparation,
+    InstallTransaction,
     Other,
 };
 
@@ -53,6 +55,8 @@ struct AurUpdateSourceBuildFailureSnapshot {
     AurUpdateSourceBuildFailureCategory category =
             AurUpdateSourceBuildFailureCategory::Other;
     std::string diagnostic;
+    std::optional<ReviewedSourceProductionFailure>
+            reviewed_source_failure;
 };
 
 enum class AurUpdatePackageTransactionFailureCategory {
@@ -133,6 +137,8 @@ struct AurUpdateWorkItemExecutionResult {
 
     std::vector<std::size_t>        affected_update_plan_indices;
     std::vector<RootTargetIdentity> affected_roots;
+    std::optional<ProductionSourceBuildStagedOutcome>
+            production_outcome;
 
     // child_resultsがtarget projectionのauthority。unselected artifactは
     // attributionを持たず、diagnostic/presentation snapshotに限定する。

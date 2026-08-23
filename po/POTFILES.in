@@ -43,6 +43,9 @@ src/process.cpp
 src/provider_selection.cpp
 src/provider_installed_state_presentation.cpp
 src/repository_query.cpp
+src/reviewed_source_production_failure.cpp
+src/reviewed_source_production_outcome.cpp
+src/reviewed_source_presentation.cpp
 src/runtime_diagnostic.cpp
 src/separated_package_base_source_build.cpp
 src/separated_source_build.cpp

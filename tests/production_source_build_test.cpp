@@ -125,8 +125,32 @@ std::string expect_runtime_error(
     throw std::runtime_error(context + ": expected runtime_error");
 }
 
+template <typename Callable>
+ProductionSourceBuildInvocationError expect_invocation_error(
+        Callable&& callable, const std::string& context,
+        const std::string& expected_fragment) {
+    try {
+        std::forward<Callable>(callable)();
+    } catch(const ProductionSourceBuildInvocationError& error) {
+        if(std::string(error.what()).find(expected_fragment) ==
+           std::string::npos) {
+            throw std::runtime_error(
+                    context + ": unexpected diagnostic [" + error.what() +
+                    "]");
+        }
+        return error;
+    } catch(const std::exception& error) {
+        throw std::runtime_error(
+                context + ": invocation aggregate was lost: " +
+                error.what());
+    }
+    throw std::runtime_error(
+            context + ": expected ProductionSourceBuildInvocationError");
+}
+
 struct CleanupErrorObservation {
     ArtifactInstallExecutionOutcome install_outcome;
+    ProductionSourceBuildStagedOutcome production_outcome;
     std::string                     diagnostic;
 };
 
@@ -135,9 +159,27 @@ CleanupErrorObservation expect_cleanup_error(
         Callable&& callable, const std::string& context) {
     try {
         std::forward<Callable>(callable)();
+    } catch(const ProductionSourceBuildInvocationError& error) {
+        const ProductionSourceBuildWorkItemOutcome& failed =
+                error.result().work_items.at(
+                        error.failed_work_item_index());
+        if(!failed.production_outcome.has_value()) {
+            throw std::runtime_error(
+                    context + ": cleanup aggregate lost staged outcome");
+        }
+        try {
+            error.rethrow_failure();
+        } catch(const SeparatedSourceBuildCleanupError& cleanup) {
+            return CleanupErrorObservation{
+                    cleanup.install_outcome(),
+                    *failed.production_outcome, cleanup.what()};
+        }
+        throw std::runtime_error(
+                context + ": cleanup aggregate lost typed cause");
     } catch(const SeparatedSourceBuildCleanupError& error) {
         return CleanupErrorObservation{
-                error.install_outcome(), error.what()};
+                error.install_outcome(), error.production_outcome(),
+                error.what()};
     } catch(const std::exception& error) {
         throw std::runtime_error(
                 context + ": cleanup partial-success was flattened: " +
@@ -429,10 +471,11 @@ class TemporaryProductionEnvironment final {
     fs::path                   path_;
     fs::path                   cache_root_path_;
     std::optional<std::string> previous_xdg_cache_home_;
+    std::optional<std::string> previous_xdg_state_home_;
     std::optional<std::string> previous_pkgdest_;
 
 public:
-    TemporaryProductionEnvironment()
+    explicit TemporaryProductionEnvironment(bool prepare_cache = true)
         : original_working_directory_(fs::current_path()) {
         const std::string template_text =
                 (fs::temp_directory_path() /
@@ -450,10 +493,20 @@ public:
 
         const char* previous_xdg = std::getenv("XDG_CACHE_HOME");
         if(previous_xdg != nullptr) previous_xdg_cache_home_ = previous_xdg;
+        const char* previous_xdg_state = std::getenv("XDG_STATE_HOME");
+        if(previous_xdg_state != nullptr) {
+            previous_xdg_state_home_ = previous_xdg_state;
+        }
         const char* previous_pkgdest = std::getenv("PKGDEST");
         if(previous_pkgdest != nullptr) previous_pkgdest_ = previous_pkgdest;
 
+        const fs::path state_home = path_ / "state";
+        fs::create_directory(state_home);
+        fs::permissions(
+                state_home, fs::perms::owner_all,
+                fs::perm_options::replace);
         if(setenv("XDG_CACHE_HOME", path_.c_str(), 1) != 0 ||
+           setenv("XDG_STATE_HOME", state_home.c_str(), 1) != 0 ||
            unsetenv("PKGDEST") != 0) {
             restore_environment();
             throw std::runtime_error(
@@ -463,6 +516,8 @@ public:
         try {
             xdg_paths::CachePaths cache_paths =
                     xdg_paths::resolve_cache_process_environment();
+            cache_root_path_ = cache_paths.directory;
+            if(!prepare_cache) return;
             xdg_directory_safety::PreparedDirectory cache_directory =
                     xdg_directory_safety::prepare_directory(cache_paths);
             ValidatedCacheRoot root = adopt_trusted_cache_root(
@@ -569,6 +624,13 @@ private:
         } else {
             static_cast<void>(unsetenv("XDG_CACHE_HOME"));
         }
+        if(previous_xdg_state_home_.has_value()) {
+            static_cast<void>(setenv(
+                    "XDG_STATE_HOME",
+                    previous_xdg_state_home_->c_str(), 1));
+        } else {
+            static_cast<void>(unsetenv("XDG_STATE_HOME"));
+        }
         if(previous_pkgdest_.has_value()) {
             static_cast<void>(setenv(
                     "PKGDEST", previous_pkgdest_->c_str(), 1));
@@ -608,6 +670,11 @@ ProductionSourceBuildWorkItem make_work_item(
     work_item.request.checkout_name = package_name;
     work_item.request.git_url =
             "https://aur.archlinux.org/" + package_name + ".git";
+    work_item.request.aur_review_identity = PackageBaseIdentity::make(
+            PackageSourceIdentity::aur(
+                    SourceLocationIdentity::known_git_remote(
+                            work_item.request.git_url)),
+            package_name);
     work_item.required_targets.push_back(RequiredPackageArtifactTarget{
             package_name, package_name, desired_reason});
     work_item.required_target_provenance =
@@ -628,6 +695,11 @@ ProductionSourceBuildWorkItem make_package_base_work_item(
     work_item.request.checkout_name = package_base;
     work_item.request.git_url =
             "https://aur.archlinux.org/" + package_base + ".git";
+    work_item.request.aur_review_identity = PackageBaseIdentity::make(
+            PackageSourceIdentity::aur(
+                    SourceLocationIdentity::known_git_remote(
+                            work_item.request.git_url)),
+            package_base);
     work_item.required_targets = std::move(required_targets);
     work_item.required_target_provenance =
             RequiredTargetProvenance::AurBuildPlanProjection;
@@ -860,6 +932,7 @@ struct UnitPlan {
     bool         expect_install = true;
     int          install_exit_code = 0;
     const char*  install_reason_option = nullptr;
+    bool         replace_workspace_after_build = false;
     bool         replace_workspace_after_install = false;
 };
 
@@ -1327,6 +1400,21 @@ void observe_run_command() {
                 write_file(artifact_path, "built package artifact\n");
             }
         }
+        if(unit.replace_workspace_after_build) {
+            fs::path displaced =
+                    scenario.workspace_paths.at(scenario.active_unit);
+            displaced += ".build-succeeded-before-revalidation";
+            fs::rename(
+                    scenario.workspace_paths.at(scenario.active_unit),
+                    displaced);
+            fs::create_directory(
+                    scenario.workspace_paths.at(scenario.active_unit));
+            fs::permissions(
+                    scenario.workspace_paths.at(scenario.active_unit),
+                    fs::perms::owner_all, fs::perm_options::replace);
+            scenario.displaced_workspace_paths.at(scenario.active_unit) =
+                    std::move(displaced);
+        }
         return;
     }
     if(command.starts_with("'sudo' 'pacman' '-U'")) {
@@ -1466,23 +1554,26 @@ PreparedProductionSourceBuildInvocation prepare_execution(
     return invocation;
 }
 
-void execute_invocation(
+ProductionSourceBuildInvocationResult execute_invocation(
         const PreparedProductionSourceBuildInvocation& invocation,
         ProductionScenario& scenario) {
     expect(
             fs::current_path() == scenario.caller_working_directory,
             "Production execution started from a drifted working directory");
     try {
-        execute_prepared_source_build_invocation(invocation, scenario.config);
+        ProductionSourceBuildInvocationResult result =
+                execute_prepared_source_build_invocation(
+                        invocation, scenario.config);
+        expect(
+                fs::current_path() == scenario.caller_working_directory,
+                "Production success leaked a changed working directory");
+        return result;
     } catch(...) {
         expect(
                 fs::current_path() == scenario.caller_working_directory,
                 "Production failure leaked a changed working directory");
         throw;
     }
-    expect(
-            fs::current_path() == scenario.caller_working_directory,
-            "Production success leaked a changed working directory");
 }
 
 std::optional<ArtifactInstallExecutionOutcome> execute_work_item(
@@ -1816,7 +1907,6 @@ void test_local_dependency_invocation_accepts_zero_remote_units(
         const TemporaryProductionEnvironment&) {
     process_stub::reset_process_stub();
     const AppConfig config = noninteractive_config();
-    const ValidatedCacheRoot cache_root = prepare_process_cache_root();
     LocalSourceBuildDependencyPreparation preparation =
             LocalSourceBuildDependencyPreparation::
                     make_for_production_source_build_test({}, {});
@@ -1827,6 +1917,8 @@ void test_local_dependency_invocation_accepts_zero_remote_units(
             preparation.selected_repository_providers().empty(),
             "Empty local dependency preparation unexpectedly contains a repository provider");
 
+    preflight_local_source_build_dependencies(preparation, config);
+    const ValidatedCacheRoot cache_root = prepare_process_cache_root();
     expect_database_paths();
     PreparedProductionSourceBuildInvocation invocation =
             prepare_local_source_build_dependency_invocation(
@@ -1875,7 +1967,6 @@ void test_local_dependency_invocation_executes_provider_without_aur_units(
     metadata_stub::reset_alpm_stub();
     metadata_stub::set_package_absent();
     const AppConfig config = noninteractive_config();
-    const ValidatedCacheRoot cache_root = prepare_process_cache_root();
     const ProvidedDependency first_provider = make_repository_provider(
             "extra", "local-root-provider", "virtual-local-api",
             "virtual-local-api=1", std::string("1.0-1"));
@@ -1887,6 +1978,8 @@ void test_local_dependency_invocation_executes_provider_without_aur_units(
                     make_for_production_source_build_test(
                             {}, {first_provider, duplicate_provider});
 
+    preflight_local_source_build_dependencies(preparation, config);
+    const ValidatedCacheRoot cache_root = prepare_process_cache_root();
     expect_database_paths();
     PreparedProductionSourceBuildInvocation invocation =
             prepare_local_source_build_dependency_invocation(
@@ -2058,7 +2151,37 @@ void test_selected_repository_provider_executes_before_source(
             0);
     schedule_source_unit(0);
 
-    execute_invocation(invocation, scenario);
+    const ProductionSourceBuildInvocationResult aggregate =
+            execute_invocation(invocation, scenario);
+
+    expect(
+            aggregate.work_items.size() == 1 &&
+                    aggregate.work_items.front().package_base ==
+                            invocation.work_items.front().request.
+                                    checkout_name &&
+                    aggregate.work_items.front().status ==
+                            ProductionSourceBuildWorkItemStatus::Succeeded &&
+                    aggregate.work_items.front().production_outcome.
+                                    has_value() &&
+                    aggregate.work_items.front().production_outcome->
+                                    build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded &&
+                    aggregate.work_items.front().production_outcome->
+                                    install_outcome ==
+                            ProductionSourceInstallOutcome::Succeeded &&
+                    aggregate.work_items.front().production_outcome->
+                                    source_provenance.
+                                    review_status ==
+                            ProductionSourceReviewStatus::
+                                    CompatibilityWithoutReview &&
+                    aggregate.work_items.front().production_outcome->
+                                    source_provenance.
+                                    compatibility_reason ==
+                            std::optional<
+                                    ReviewedSourceCompatibilityBuildReason>{
+                                    ReviewedSourceCompatibilityBuildReason::
+                                            NoDiff},
+            "Invocation aggregate flattened reviewed-source outcome");
     expect(
             scenario.repository_provider_query_calls == 0 &&
                     scenario.repository_provider_install_calls == 1,
@@ -2944,6 +3067,51 @@ void test_repository_work_item_static_identity_invariants() {
             "no supported artifact lifecycle intent"));
 }
 
+void test_aur_work_item_review_identity_invariants() {
+    const ProductionSourceBuildWorkItem valid = make_work_item(
+            "review-identity-root");
+    require_static_production_source_build_work_item(valid);
+
+    ProductionSourceBuildWorkItem missing = valid;
+    missing.request.aur_review_identity.reset();
+    static_cast<void>(expect_logic_error(
+            [&missing]() {
+                require_static_production_source_build_work_item(missing);
+            },
+            "AUR work item without reviewed identity",
+            "has no reviewed PackageBase identity"));
+
+    ProductionSourceBuildWorkItem mismatched_remote = valid;
+    mismatched_remote.request.aur_review_identity =
+            PackageBaseIdentity::make(
+                    PackageSourceIdentity::aur(
+                            SourceLocationIdentity::known_git_remote(
+                                    "https://aur.archlinux.org/other.git")),
+                    "review-identity-root");
+    static_cast<void>(expect_logic_error(
+            [&mismatched_remote]() {
+                require_static_production_source_build_work_item(
+                        mismatched_remote);
+            },
+            "AUR reviewed identity remote mismatch",
+            "does not match its reviewed PackageBase identity"));
+
+    ProductionSourceBuildWorkItem mismatched_base = valid;
+    mismatched_base.request.aur_review_identity =
+            PackageBaseIdentity::make(
+                    PackageSourceIdentity::aur(
+                            SourceLocationIdentity::known_git_remote(
+                                    mismatched_base.request.git_url)),
+                    "other-base");
+    static_cast<void>(expect_logic_error(
+            [&mismatched_base]() {
+                require_static_production_source_build_work_item(
+                        mismatched_base);
+            },
+            "AUR reviewed identity PackageBase mismatch",
+            "does not match its reviewed PackageBase identity"));
+}
+
 void test_set_static_preparation_accepts_split_and_multiple(
         const TemporaryProductionEnvironment& environment) {
     ProductionScenario scenario;
@@ -3558,6 +3726,26 @@ void expect_extended_work_item_outcome(
             context + ": unexpected update-status skip reason");
     expect(result.diagnostic.empty(), context + ": unexpected diagnostic");
     expect(
+            result.production_outcome.has_value() &&
+                    result.production_outcome->source_provenance.
+                                    review_status ==
+                            ProductionSourceReviewStatus::
+                                    CompatibilityWithoutReview &&
+                    result.production_outcome->source_provenance.
+                                    editor_overlay ==
+                            ReviewedSourceEditorOverlayStatus::None &&
+                    result.production_outcome->source_provenance.
+                                    compatibility_reason ==
+                            std::optional<
+                                    ReviewedSourceCompatibilityBuildReason>{
+                                    ReviewedSourceCompatibilityBuildReason::
+                                            NoDiff} &&
+                    result.production_outcome->build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded &&
+                    result.production_outcome->install_outcome ==
+                            ProductionSourceInstallOutcome::Succeeded,
+            context + ": review/build provenance was flattened");
+    expect(
             scenario.install_attempt_order ==
                     std::vector<std::string>{package_name},
             context + ": successful pacman -U was not observed");
@@ -3576,6 +3764,423 @@ void test_extended_work_item_install_outcomes(
             MetadataMode::ExistingExplicitSameVersion,
             SourceBuildExecutionStatus::SkippedAsNeeded,
             "extended --needed skip outcome");
+}
+
+void expect_review_bypass_provenance(
+        const TemporaryProductionEnvironment& environment,
+        const std::string& package_name,
+        AppConfig config,
+        ReviewedSourceCompatibilityBuildReason expected_reason,
+        const std::string& context) {
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_work_item(package_name));
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+    const SourceBuildExecutionResult result =
+            execute_work_item_typed(invocation, 0, scenario);
+    expect(
+            result.status == SourceBuildExecutionStatus::Installed &&
+                    result.production_outcome.has_value() &&
+                    result.production_outcome->source_provenance.
+                                    review_status ==
+                            ProductionSourceReviewStatus::
+                                    CompatibilityWithoutReview &&
+                    result.production_outcome->source_provenance.
+                                    compatibility_reason ==
+                            std::optional<
+                                    ReviewedSourceCompatibilityBuildReason>{
+                                    expected_reason},
+            context + ": review bypass provenance differs");
+    require_scenario_complete(scenario, 1, context);
+}
+
+void test_review_bypass_provenance(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig no_confirm = noninteractive_config();
+    no_confirm.user_config.review.diff = ReviewPolicy::Prompt;
+    no_confirm.no_confirm = true;
+    expect_review_bypass_provenance(
+            environment, "review-bypass-no-confirm", no_confirm,
+            ReviewedSourceCompatibilityBuildReason::NoConfirm,
+            "--noconfirm review bypass");
+
+    AppConfig non_tty = noninteractive_config();
+    non_tty.user_config.review.diff = ReviewPolicy::Prompt;
+    expect_review_bypass_provenance(
+            environment, "review-bypass-non-tty", non_tty,
+            ReviewedSourceCompatibilityBuildReason::NonInteractiveInput,
+            "non-TTY review bypass");
+}
+
+enum class FatalPreflightFixtureKind {
+    UnsupportedFuture,
+    UnsafeHistory,
+    StoreFailure,
+};
+
+ReviewedSourceStateStoreReadResult fatal_preflight_fixture(
+        FatalPreflightFixtureKind kind,
+        const PackageBaseIdentity& package_base) {
+    switch(kind) {
+    case FatalPreflightFixtureKind::UnsupportedFuture: {
+        const std::string document =
+                "schema_version = 2\nfuture_field = true\n";
+        ReviewedSourceStateObservation observation = std::visit(
+                [](const auto& value) -> ReviewedSourceStateObservation {
+                    return value;
+                },
+                interpret_reviewed_source_state(document, package_base));
+        return ReviewedSourceStateStoreRead{
+                std::move(observation),
+                ReviewedSourceStateObservedRecord{
+                        1, "1.toml",
+                        ReviewedSourceStateRecordIdentity{
+                                1, 2, 3, 0600, 1, 42, 4, 5, 6, 7},
+                        document}};
+    }
+    case FatalPreflightFixtureKind::UnsafeHistory:
+        return ReviewedSourceStateStoreUnsafeHistory{
+                ReviewedSourceStateStoreHistoryIssue::ForkDetected,
+                "/state/fatal-package", {"1.toml", "2-a.toml", "2-b.toml"},
+                1, 2};
+    case FatalPreflightFixtureKind::StoreFailure:
+        return ReviewedSourceStateStoreFailure{
+                ReviewedSourceStateStoreFailureKind::ReadFailed,
+                "/state/fatal-package/1.toml", std::nullopt,
+                std::nullopt, std::nullopt};
+    }
+    throw std::logic_error("Unknown fatal preflight fixture kind");
+}
+
+ReviewedSourceProductionFailureReason fatal_preflight_expected_reason(
+        FatalPreflightFixtureKind kind) {
+    switch(kind) {
+    case FatalPreflightFixtureKind::UnsupportedFuture:
+        return ReviewedSourceProductionFailureReason::UnsupportedFuture;
+    case FatalPreflightFixtureKind::UnsafeHistory:
+        return ReviewedSourceProductionFailureReason::UnsafeHistory;
+    case FatalPreflightFixtureKind::StoreFailure:
+        return ReviewedSourceProductionFailureReason::StateStoreFailure;
+    }
+    throw std::logic_error("Unknown fatal preflight expected reason");
+}
+
+void test_invocation_preflight_snapshot_is_consumed_without_reread(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items{
+            make_work_item("stable-preflight-snapshot")};
+    const PackageBaseIdentity package_base =
+            *work_items.front().request.aur_review_identity;
+    ProductionScenario scenario = make_execution_scenario(
+            environment, work_items, config);
+    set_reviewed_source_lifecycle_store_result_for_test(
+            ReviewedSourceStateStoreRead{
+                    ReviewedSourceStateMissing{}, std::nullopt});
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+
+    // This later fatal result must remain pending: execution consumes the
+    // invocation-owned Missing observation instead of reading the store again.
+    set_reviewed_source_lifecycle_store_result_for_test(
+            fatal_preflight_fixture(
+                    FatalPreflightFixtureKind::UnsupportedFuture,
+                    package_base));
+    const SourceBuildExecutionResult result = execute_work_item_typed(
+            invocation, 0, scenario);
+    expect(result.status == SourceBuildExecutionStatus::Installed,
+           "Invocation preflight snapshot was replaced before execution");
+    try {
+        static_cast<void>(
+                preflight_reviewed_source_fatal_state_for_production(
+                        invocation.work_items.front().request));
+        throw std::runtime_error(
+                "Later fatal observation was consumed by work-item execution");
+    } catch(const ReviewedSourceProductionError& error) {
+        expect(error.failure().reason ==
+                       ReviewedSourceProductionFailureReason::
+                               UnsupportedFuture,
+               "Pending fatal observation lost its typed identity");
+    }
+    require_scenario_complete(
+            scenario, 1, "invocation preflight snapshot propagation");
+}
+
+void test_local_dependency_preflight_snapshot_is_consumed_without_reread(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items{
+            make_work_item("local-stable-preflight-snapshot")};
+    const PackageBaseIdentity package_base =
+            *work_items.front().request.aur_review_identity;
+    ProductionScenario scenario = make_execution_scenario(
+            environment, work_items, config);
+    activate_scenario(scenario);
+
+    LocalSourceBuildDependencyPreparation preparation =
+            LocalSourceBuildDependencyPreparation::
+                    make_for_production_source_build_test(
+                            std::move(work_items), {});
+    set_reviewed_source_lifecycle_store_result_for_test(
+            ReviewedSourceStateStoreRead{
+                    ReviewedSourceStateMissing{}, std::nullopt});
+    preflight_local_source_build_dependencies(preparation, config);
+
+    // Cache-bound preparation and execution must retain the pre-cache Missing
+    // observation. This later fatal result must remain pending.
+    set_reviewed_source_lifecycle_store_result_for_test(
+            fatal_preflight_fixture(
+                    FatalPreflightFixtureKind::UnsupportedFuture,
+                    package_base));
+    const ValidatedCacheRoot cache_root = prepare_process_cache_root();
+    expect_database_paths();
+    PreparedProductionSourceBuildInvocation invocation =
+            prepare_local_source_build_dependency_invocation(
+                    std::move(preparation), cache_root, config);
+    expect(
+            scenario.resolver_calls == 1,
+            "Local dependency cache-bound preparation did not resolve the database snapshot once");
+    schedule_source_unit(0);
+
+    const SourceBuildExecutionResult result = execute_work_item_typed(
+            invocation, 0, scenario);
+    expect(
+            result.status == SourceBuildExecutionStatus::Installed,
+            "Local dependency preflight snapshot was replaced before execution");
+    try {
+        static_cast<void>(
+                preflight_reviewed_source_fatal_state_for_production(
+                        invocation.work_items.front().request));
+        throw std::runtime_error(
+                "Later local dependency fatal observation was consumed by execution");
+    } catch(const ReviewedSourceProductionError& error) {
+        expect(
+                error.failure().reason ==
+                        ReviewedSourceProductionFailureReason::
+                                UnsupportedFuture,
+                "Pending local dependency fatal observation lost its typed identity");
+    }
+    require_scenario_complete(
+            scenario, 1,
+            "local dependency preflight snapshot propagation");
+}
+
+void test_invocation_wide_fatal_preflight_stops_before_cache_provider_and_work_items() {
+    TemporaryProductionEnvironment environment(false);
+    const fs::path missing_cache_root =
+            environment.checkout_target_path("safe-before-fatal").parent_path();
+    expect(!fs::exists(missing_cache_root),
+           "Invocation-wide fatal preflight fixture created its cache root");
+
+    std::vector<ProductionSourceBuildWorkItem> work_items{
+            make_work_item("safe-before-fatal"),
+            make_work_item("fatal-later-target")};
+    work_items.front().selected_repository_providers.push_back(
+            make_repository_provider(
+                    "extra", "fatal-preflight-provider",
+                    "virtual-fatal-preflight",
+                    "virtual-fatal-preflight=1", std::string("1.0-1")));
+    const PackageBaseIdentity safe_identity =
+            *work_items.front().request.aur_review_identity;
+    const PackageBaseIdentity fatal_identity =
+            *work_items.back().request.aur_review_identity;
+    set_reviewed_source_lifecycle_store_result_for_test(
+            ReviewedSourceStateStoreRead{
+                    ReviewedSourceStateMissing{}, std::nullopt});
+    set_reviewed_source_lifecycle_store_result_for_test(
+            fatal_preflight_fixture(
+                    FatalPreflightFixtureKind::UnsupportedFuture,
+                    fatal_identity));
+    process_stub::reset_process_stub();
+    metadata_stub::reset_alpm_stub();
+
+    try {
+        static_cast<void>(prepare_production_source_build_invocation(
+                std::move(work_items), noninteractive_config()));
+        throw std::runtime_error(
+                "Later fatal target produced a production invocation");
+    } catch(const ReviewedSourceProductionError& error) {
+        expect(error.failure().stage ==
+                               ReviewedSourceProductionFailureStage::
+                                       FatalStatePreflight &&
+                       error.failure().reason ==
+                               ReviewedSourceProductionFailureReason::
+                                       UnsupportedFuture,
+               "Invocation-wide fatal target lost typed classification");
+    }
+
+    expect(!fs::exists(missing_cache_root) &&
+                   !fs::exists(
+                           reviewed_source_state_store_entry_path(
+                                   safe_identity)) &&
+                   !fs::exists(
+                           reviewed_source_state_store_entry_path(
+                                   fatal_identity)) &&
+                   process_stub::run_command_call_count() == 0 &&
+                   process_stub::capture_command_call_count() == 0 &&
+                   metadata_stub::initialize_call_count() == 0,
+           "Fatal preflight reached cache/provider/work-item mutation");
+}
+
+void test_all_compatibility_modes_observe_fatal_reviewed_state(
+        const TemporaryProductionEnvironment& environment) {
+    struct ModeCase {
+        std::string name;
+        AppConfig config;
+    };
+
+    AppConfig no_diff = noninteractive_config();
+    AppConfig no_confirm = noninteractive_config();
+    no_confirm.user_config.review.diff = ReviewPolicy::Prompt;
+    no_confirm.no_confirm = true;
+    AppConfig non_tty = noninteractive_config();
+    non_tty.user_config.review.diff = ReviewPolicy::Prompt;
+
+    const std::vector<ModeCase> modes{
+            {"nodiff", no_diff},
+            {"noconfirm", no_confirm},
+            {"non-tty", non_tty},
+    };
+    const std::vector<FatalPreflightFixtureKind> fatal_kinds{
+            FatalPreflightFixtureKind::UnsupportedFuture,
+            FatalPreflightFixtureKind::UnsafeHistory,
+            FatalPreflightFixtureKind::StoreFailure,
+    };
+
+    for(const ModeCase& mode : modes) {
+        for(std::size_t fatal_index = 0;
+            fatal_index < fatal_kinds.size(); ++fatal_index) {
+            const FatalPreflightFixtureKind fatal_kind =
+                    fatal_kinds[fatal_index];
+            const std::string package_name =
+                    "fatal-" + mode.name + "-" +
+                    std::to_string(fatal_index);
+            std::vector<ProductionSourceBuildWorkItem> work_items{
+                    make_work_item(package_name)};
+            const PackageBaseIdentity package_base =
+                    *work_items.front().request.aur_review_identity;
+            ProductionScenario scenario = make_execution_scenario(
+                    environment, work_items, mode.config);
+            const fs::path state_entry =
+                    reviewed_source_state_store_entry_path(package_base);
+            expect(!fs::exists(state_entry),
+                    "Fatal preflight fixture started with reviewed state");
+            activate_scenario(scenario);
+            set_reviewed_source_lifecycle_store_result_for_test(
+                    fatal_preflight_fixture(fatal_kind, package_base));
+
+            try {
+                static_cast<void>(prepare_production_source_build_invocation(
+                        std::move(work_items), mode.config));
+                throw std::runtime_error(
+                        "Fatal reviewed state produced a compatibility invocation");
+            } catch(const ReviewedSourceProductionError& error) {
+                expect(
+                        error.failure().stage ==
+                                        ReviewedSourceProductionFailureStage::
+                                                FatalStatePreflight &&
+                                error.failure().reason ==
+                                        fatal_preflight_expected_reason(
+                                                fatal_kind),
+                        "Fatal reviewed state lost typed production classification");
+                const auto* detail = std::get_if<
+                        ReviewedSourceFatalStateFailure>(
+                        &error.failure().detail);
+                expect(detail != nullptr,
+                        "Fatal reviewed state lost its store payload");
+            }
+            expect(
+                    scenario.git_reset_calls == 0 &&
+                            scenario.workspace_paths.empty() &&
+                            scenario.packagelist_calls == 0 &&
+                            scenario.build_calls == 0 &&
+                            scenario.install_calls == 0 &&
+                            !fs::exists(state_entry),
+                    "Fatal reviewed state reached reset/editor/makepkg/CAS");
+            deactivate_scenario();
+        }
+    }
+}
+
+void test_reviewed_source_failure_payload_crosses_singular_and_set_routes(
+        const TemporaryProductionEnvironment& environment) {
+    {
+        AppConfig config = noninteractive_config();
+        std::vector<ProductionSourceBuildWorkItem> work_items{
+                make_work_item("typed-lease-contention")};
+        ProductionScenario scenario = make_execution_scenario(
+                environment, work_items, config);
+        PreparedProductionSourceBuildInvocation invocation =
+                prepare_execution(std::move(work_items), scenario);
+        ReviewedSourcePackageBaseLease held =
+                acquire_reviewed_source_package_base_lease(
+                        retain_trusted_cache_directory(
+                                require_trusted_cache_path(
+                                        invocation.work_items.front()
+                                                .cache_root.value(),
+                                        invocation.work_items.front()
+                                                .request.checkout_name,
+                                        CachePathRequirement::
+                                                ExistingDirectory)));
+        static_cast<void>(held);
+        try {
+            static_cast<void>(execute_work_item_typed(
+                    invocation, 0, scenario));
+            throw std::runtime_error(
+                    "Lease contention was flattened into source execution");
+        } catch(const ReviewedSourceProductionError& error) {
+            expect(error.failure().reason ==
+                            ReviewedSourceProductionFailureReason::
+                                    LeaseContended,
+                    "Singular route lost LeaseContended classification");
+        }
+        expect(scenario.git_reset_calls == 0 &&
+                       scenario.workspace_paths.empty() &&
+                       scenario.build_calls == 0,
+               "Lease contention reached source mutation");
+        deactivate_scenario();
+    }
+
+    {
+        AppConfig config = noninteractive_config();
+        const std::string package_base_name = "typed-unsafe-set";
+        std::vector<ProductionSourceBuildWorkItem> work_items{
+                make_package_base_work_item(
+                        package_base_name,
+                        {RequiredPackageArtifactTarget{
+                                package_base_name, package_base_name,
+                                DesiredInstallReason::Explicit}})};
+        const PackageBaseIdentity package_base =
+                *work_items.front().request.aur_review_identity;
+        ProductionScenario scenario = make_execution_scenario(
+                environment, work_items, config);
+        activate_scenario(scenario);
+        set_reviewed_source_lifecycle_store_result_for_test(
+                fatal_preflight_fixture(
+                        FatalPreflightFixtureKind::UnsafeHistory,
+                        package_base));
+        try {
+            static_cast<void>(prepare_production_source_build_invocation(
+                    std::move(work_items), config));
+            throw std::runtime_error(
+                    "PackageBase unsafe history was flattened");
+        } catch(const ReviewedSourceProductionError& error) {
+            expect(error.failure().reason ==
+                           ReviewedSourceProductionFailureReason::
+                                   UnsafeHistory &&
+                           std::holds_alternative<
+                                   ReviewedSourceFatalStateFailure>(
+                                   error.failure().detail),
+                   "PackageBase route lost reviewed source failure payload");
+        }
+        expect(scenario.git_reset_calls == 0 &&
+                       scenario.workspace_paths.empty() &&
+                       scenario.build_calls == 0,
+               "PackageBase unsafe history reached source mutation");
+        deactivate_scenario();
+    }
 }
 
 void test_registered_repository_closed_preparation_outcomes(
@@ -3700,6 +4305,11 @@ void test_registered_repository_closed_preparation_outcomes(
                         config);
         expect(
                 result.package_base() == "registered-needs-build-base" &&
+                        result.source_provenance().review_status ==
+                                ProductionSourceReviewStatus::NotApplicable &&
+                        result.build_outcome() ==
+                                ProductionSourceBuildCommandOutcome::
+                                        Succeeded &&
                         result.selected_children().size() == 1 &&
                         result.selected_children().front()
                                         .identity.package_name ==
@@ -4367,6 +4977,18 @@ void test_package_base_transaction_failure_preserves_attempt_snapshot(
                         error.exit_code() == std::optional<int>{73},
                 "PackageBase production transaction failure detail differs");
         expect(
+                error.production_outcome().has_value() &&
+                        error.production_outcome()->build_outcome ==
+                                ProductionSourceBuildCommandOutcome::
+                                        Succeeded &&
+                        error.production_outcome()->install_outcome ==
+                                ProductionSourceInstallOutcome::Failed &&
+                        error.production_outcome()->source_provenance.
+                                        review_status ==
+                                ProductionSourceReviewStatus::
+                                        CompatibilityWithoutReview,
+                "PackageBase transaction failure lost staged production outcome");
+        expect(
                 error.attempts().size() == 2 &&
                         error.attempts()[0].identity.package_name ==
                                 "transaction-attempt-second" &&
@@ -4484,6 +5106,281 @@ void test_multi_unit_options_roles_and_order(
             scenario, 2, "multi-unit role/option/order projection");
 }
 
+void test_invocation_aggregate_model_retains_reviewed_compatibility_failure_and_suffix() {
+    ProductionSourceBuildProvenance reviewed;
+    reviewed.review_status = ProductionSourceReviewStatus::Reviewed;
+    reviewed.reviewed_upstream_base_revision =
+            SourceRevisionIdentity::git_commit(
+                    "1111111111111111111111111111111111111111");
+    reviewed.publication_status =
+            ReviewedSourcePublicationStatus::Published;
+    reviewed.reviewed_outcome =
+            ProductionReviewedSourceOutcome::InitialFullReview;
+    reviewed.reviewed_state_generation = 1;
+
+    ProductionSourceBuildProvenance compatibility;
+    compatibility.review_status =
+            ProductionSourceReviewStatus::CompatibilityWithoutReview;
+    compatibility.compatibility_reason =
+            ReviewedSourceCompatibilityBuildReason::NoDiff;
+
+    ProductionSourceBuildInvocationResult aggregate;
+    aggregate.work_items.resize(4);
+    aggregate.work_items[0].package_base = "aggregate-reviewed-a";
+    aggregate.work_items[0].status =
+            ProductionSourceBuildWorkItemStatus::Succeeded;
+    aggregate.work_items[0].production_outcome =
+            ProductionSourceBuildStagedOutcome{
+                    reviewed,
+                    ProductionSourceBuildCommandOutcome::Succeeded,
+                    ProductionSourceInstallOutcome::Succeeded};
+    aggregate.work_items[1].package_base = "aggregate-compatibility-b";
+    aggregate.work_items[1].status =
+            ProductionSourceBuildWorkItemStatus::Succeeded;
+    aggregate.work_items[1].production_outcome =
+            ProductionSourceBuildStagedOutcome{
+                    compatibility,
+                    ProductionSourceBuildCommandOutcome::Succeeded,
+                    ProductionSourceInstallOutcome::Succeeded};
+    aggregate.work_items[2].package_base = "aggregate-failed-c";
+    aggregate.work_items[2].status =
+            ProductionSourceBuildWorkItemStatus::Failed;
+    aggregate.work_items[2].production_outcome =
+            ProductionSourceBuildStagedOutcome{
+                    compatibility,
+                    ProductionSourceBuildCommandOutcome::Succeeded,
+                    ProductionSourceInstallOutcome::Failed};
+    aggregate.work_items[2].failure_stage =
+            ProductionSourceBuildFailureStage::InstallPreparation;
+    aggregate.work_items[2].diagnostic = "typed metadata failure";
+    aggregate.work_items[2].failure_exception = std::make_exception_ptr(
+            PackageMetadataError(PackageMetadataFailure{
+                    PackageMetadataErrorCode::QueryFailed,
+                    "typed metadata failure"}));
+    aggregate.work_items[3].package_base = "aggregate-not-attempted-d";
+
+    const ProductionSourceBuildInvocationError failure(
+            std::move(aggregate), 2, "typed metadata failure");
+    const auto& outcomes = failure.result().work_items;
+    expect(
+            outcomes.size() == 4 &&
+                    outcomes[0].status ==
+                            ProductionSourceBuildWorkItemStatus::Succeeded &&
+                    outcomes[0].production_outcome->source_provenance.
+                                    review_status ==
+                            ProductionSourceReviewStatus::Reviewed &&
+                    outcomes[1].status ==
+                            ProductionSourceBuildWorkItemStatus::Succeeded &&
+                    outcomes[1].production_outcome->source_provenance.
+                                    review_status ==
+                            ProductionSourceReviewStatus::
+                                    CompatibilityWithoutReview &&
+                    outcomes[2].status ==
+                            ProductionSourceBuildWorkItemStatus::Failed &&
+                    outcomes[2].production_outcome->build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded &&
+                    outcomes[2].production_outcome->install_outcome ==
+                            ProductionSourceInstallOutcome::Failed &&
+                    outcomes[3].status ==
+                            ProductionSourceBuildWorkItemStatus::NotAttempted &&
+                    !failure.result().is_success(),
+            "Four-entry aggregate model flattened A/B/C/D outcome");
+    try {
+        failure.rethrow_failure();
+        throw std::runtime_error(
+                "Four-entry aggregate lost typed metadata cause");
+    } catch(const PackageMetadataError& error) {
+        expect(
+                error.failure().code ==
+                        PackageMetadataErrorCode::QueryFailed,
+                "Four-entry aggregate changed typed metadata cause");
+    }
+}
+
+void test_normal_invocation_retains_completed_failure_and_suffix(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+
+    std::vector<ProductionSourceBuildWorkItem> work_items{
+            make_work_item("aggregate-reviewed-a"),
+            make_work_item("aggregate-compatibility-b"),
+            make_work_item("aggregate-failed-c"),
+            make_work_item("aggregate-not-attempted-d")};
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    scenario.units[2].install_exit_code = 73;
+
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+    const ProductionSourceBuildInvocationError failure =
+            expect_invocation_error(
+                    [&]() { execute_invocation(invocation, scenario); },
+                    "normal four-entry invocation aggregate",
+                    "pacman -U failed with exit code 73");
+
+    const auto& outcomes = failure.result().work_items;
+    expect(
+            outcomes.size() == 4 &&
+                    outcomes[0].status ==
+                            ProductionSourceBuildWorkItemStatus::Succeeded &&
+                    outcomes[0].production_outcome.has_value() &&
+                    outcomes[0].production_outcome->source_provenance.
+                                    review_status ==
+                            ProductionSourceReviewStatus::
+                                    CompatibilityWithoutReview &&
+                    outcomes[0].production_outcome->build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded &&
+                    outcomes[0].production_outcome->install_outcome ==
+                            ProductionSourceInstallOutcome::Succeeded,
+            "Normal aggregate lost completed success A");
+    expect(
+            outcomes[1].status ==
+                            ProductionSourceBuildWorkItemStatus::Succeeded &&
+                    outcomes[1].production_outcome.has_value() &&
+                    outcomes[1].production_outcome->source_provenance.
+                                    review_status ==
+                            ProductionSourceReviewStatus::
+                                    CompatibilityWithoutReview &&
+                    outcomes[1].production_outcome->source_provenance.
+                                    compatibility_reason ==
+                            std::optional<
+                                    ReviewedSourceCompatibilityBuildReason>{
+                                    ReviewedSourceCompatibilityBuildReason::
+                                            NoDiff} &&
+                    outcomes[1].production_outcome->build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded &&
+                    outcomes[1].production_outcome->install_outcome ==
+                            ProductionSourceInstallOutcome::Succeeded,
+            "Normal aggregate lost compatibility success B");
+    expect(
+            outcomes[2].status ==
+                            ProductionSourceBuildWorkItemStatus::Failed &&
+                    outcomes[2].production_outcome.has_value() &&
+                    outcomes[2].production_outcome->build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded &&
+                    outcomes[2].production_outcome->install_outcome ==
+                            ProductionSourceInstallOutcome::Failed &&
+                    outcomes[2].failure_stage ==
+                            std::optional<
+                                    ProductionSourceBuildFailureStage>{
+                                    ProductionSourceBuildFailureStage::
+                                            InstallTransaction} &&
+                    outcomes[2].failure_exception != nullptr,
+            "Normal aggregate lost typed failed outcome C");
+    expect(
+            outcomes[3].status ==
+                            ProductionSourceBuildWorkItemStatus::NotAttempted &&
+                    !outcomes[3].production_outcome.has_value() &&
+                    outcomes[3].failure_exception == nullptr &&
+                    !failure.result().is_success(),
+            "Normal aggregate lost NotAttempted suffix D");
+    expect(
+            scenario.workspace_paths.size() == 3 &&
+                    scenario.install_attempt_order ==
+                            std::vector<std::string>{
+                                    "aggregate-reviewed-a",
+                                    "aggregate-compatibility-b",
+                                    "aggregate-failed-c"},
+            "Normal aggregate executed suffix work after C");
+    require_scenario_complete(
+            scenario, 3, "normal four-entry invocation aggregate");
+}
+
+void test_normal_invocation_retains_status_zero_postcheck_and_suffix(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items{
+            make_work_item("aggregate-postcheck-a"),
+            make_work_item("aggregate-postcheck-b"),
+            make_work_item("aggregate-postcheck-c")};
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    scenario.units[1].replace_workspace_after_build = true;
+    scenario.units[1].expect_identity = false;
+    scenario.units[1].expect_install = false;
+
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+    const ProductionSourceBuildInvocationError failure =
+            expect_invocation_error(
+                    [&]() { execute_invocation(invocation, scenario); },
+                    "status-zero postcheck invocation aggregate", "identity");
+
+    const auto& outcomes = failure.result().work_items;
+    expect(
+            outcomes.size() == 3 &&
+                    failure.failed_work_item_index() == 1 &&
+                    outcomes[0].status ==
+                            ProductionSourceBuildWorkItemStatus::Succeeded &&
+                    outcomes[0].production_outcome.has_value() &&
+                    outcomes[0].production_outcome->build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded &&
+                    outcomes[0].production_outcome->install_outcome ==
+                            ProductionSourceInstallOutcome::Succeeded,
+            "Status-zero postcheck aggregate lost completed prefix A");
+    expect(
+            outcomes[1].status ==
+                            ProductionSourceBuildWorkItemStatus::Failed &&
+                    outcomes[1].production_outcome.has_value() &&
+                    outcomes[1].production_outcome->source_provenance.
+                                    review_status ==
+                            ProductionSourceReviewStatus::
+                                    CompatibilityWithoutReview &&
+                    outcomes[1].production_outcome->build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded &&
+                    outcomes[1].production_outcome->install_outcome ==
+                            ProductionSourceInstallOutcome::NotAttempted &&
+                    outcomes[1].failure_stage ==
+                            std::optional<
+                                    ProductionSourceBuildFailureStage>{
+                                    ProductionSourceBuildFailureStage::Build} &&
+                    outcomes[1].failure_exception != nullptr,
+            "Status-zero postcheck aggregate lost failed entry B");
+    expect(
+            outcomes[2].status ==
+                            ProductionSourceBuildWorkItemStatus::NotAttempted &&
+                    !outcomes[2].production_outcome.has_value() &&
+                    outcomes[2].failure_exception == nullptr,
+            "Status-zero postcheck aggregate changed NotAttempted suffix C");
+
+    bool typed_failure_retained = false;
+    try {
+        failure.rethrow_failure();
+    } catch(const SeparatedSourceBuildPhaseError& phase_error) {
+        expect(
+                phase_error.production_outcome().build_outcome ==
+                                ProductionSourceBuildCommandOutcome::
+                                        Succeeded &&
+                        phase_error.production_outcome().install_outcome ==
+                                ProductionSourceInstallOutcome::
+                                        NotAttempted,
+                "Aggregate nested phase lost status-zero staged outcome");
+        try {
+            phase_error.rethrow_failure();
+        } catch(const ProductionSourceBuildPostCommandRevalidationError&
+                        post_command_error) {
+            typed_failure_retained = true;
+            expect(
+                    post_command_error.command_exit_status() == 0,
+                    "Aggregate nested postcheck changed makepkg status");
+        }
+    }
+    expect(
+            typed_failure_retained,
+            "Status-zero postcheck aggregate lost typed failure transport");
+    expect(
+            scenario.workspace_paths.size() == 2 &&
+                    scenario.install_attempt_order ==
+                            std::vector<std::string>{
+                                    "aggregate-postcheck-a"} &&
+                    fs::is_regular_file(
+                            scenario.displaced_workspace_paths.at(1) /
+                            scenario.artifact_paths.at(1).filename()),
+            "Status-zero postcheck aggregate executed suffix or lost artifact");
+    require_scenario_complete(
+            scenario, 2, "status-zero postcheck invocation aggregate");
+}
+
 void test_build_failure_does_not_reach_sudo(
         const TemporaryProductionEnvironment& environment) {
     AppConfig config = noninteractive_config();
@@ -4498,9 +5395,28 @@ void test_build_failure_does_not_reach_sudo(
 
     PreparedProductionSourceBuildInvocation invocation = prepare_execution(
             std::move(work_items), scenario);
-    static_cast<void>(expect_runtime_error(
+    const ProductionSourceBuildInvocationError failure =
+            expect_invocation_error(
             [&]() { execute_invocation(invocation, scenario); },
-            "production build failure", "The build-only makepkg command failed with exit code 37"));
+            "production build failure",
+            "The build-only makepkg command failed with exit code 37");
+
+    expect(
+            failure.result().work_items.size() == 2 &&
+                    failure.failed_work_item_index() == 0 &&
+                    failure.result().work_items[0].status ==
+                            ProductionSourceBuildWorkItemStatus::Failed &&
+                    failure.result().work_items[0].production_outcome.
+                                    has_value() &&
+                    failure.result().work_items[0].production_outcome->
+                                    build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Failed &&
+                    failure.result().work_items[0].production_outcome->
+                                    install_outcome ==
+                            ProductionSourceInstallOutcome::NotAttempted &&
+                    failure.result().work_items[1].status ==
+                            ProductionSourceBuildWorkItemStatus::NotAttempted,
+            "Build failure aggregate lost failed/current or suffix outcome");
 
     expect(
             scenario.install_calls == 0 &&
@@ -4524,9 +5440,34 @@ void test_metadata_failure_does_not_reach_sudo(
 
     PreparedProductionSourceBuildInvocation invocation = prepare_execution(
             std::move(work_items), scenario);
-    static_cast<void>(expect_runtime_error(
+    const ProductionSourceBuildInvocationError failure =
+            expect_invocation_error(
             [&]() { execute_invocation(invocation, scenario); },
-            "production metadata failure", "Installed package query failed"));
+            "production metadata failure", "Installed package query failed");
+
+    const ProductionSourceBuildWorkItemOutcome& failed =
+            failure.result().work_items.front();
+    expect(
+            failure.failure_stage() ==
+                            ProductionSourceBuildFailureStage::
+                                    InstallPreparation &&
+                    failed.production_outcome.has_value() &&
+                    failed.production_outcome->build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded &&
+                    failed.production_outcome->install_outcome ==
+                            ProductionSourceInstallOutcome::Failed,
+            "Metadata failure lost successful build or failed install preparation");
+    try {
+        failure.rethrow_failure();
+        throw std::runtime_error(
+                "Metadata failure aggregate lost its typed cause");
+    } catch(const SeparatedSourceBuildPhaseError& error) {
+        expect(
+                error.package_metadata_failure().has_value() &&
+                        error.package_metadata_failure()->code ==
+                                PackageMetadataErrorCode::QueryFailed,
+                "Metadata failure aggregate lost PackageMetadataFailure");
+    }
 
     expect(
             scenario.install_calls == 0,
@@ -4551,9 +5492,30 @@ void test_pacman_failure_stops_later_unit(
 
     PreparedProductionSourceBuildInvocation invocation = prepare_execution(
             std::move(work_items), scenario);
-    static_cast<void>(expect_runtime_error(
+    const ProductionSourceBuildInvocationError failure =
+            expect_invocation_error(
             [&]() { execute_invocation(invocation, scenario); },
-            "production pacman failure", "pacman -U failed with exit code 73"));
+            "production pacman failure",
+            "pacman -U failed with exit code 73");
+
+    const ProductionSourceBuildWorkItemOutcome& failed =
+            failure.result().work_items.front();
+    const std::string cli_diagnostic =
+            format_production_source_build_invocation_failure(failure);
+    expect(
+            failure.result().work_items.size() == 2 &&
+                    failed.production_outcome.has_value() &&
+                    failed.production_outcome->build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded &&
+                    failed.production_outcome->install_outcome ==
+                            ProductionSourceInstallOutcome::Failed &&
+                    failure.result().work_items[1].status ==
+                            ProductionSourceBuildWorkItemStatus::NotAttempted &&
+                    cli_diagnostic.find("Install Error:") !=
+                            std::string::npos &&
+                    cli_diagnostic.find("Build Error:") ==
+                            std::string::npos,
+            "pacman failure lost staged outcome, suffix, or install CLI classification");
 
     expect(
             scenario.workspace_paths.size() == 1 &&
@@ -4584,7 +5546,11 @@ void test_cleanup_partial_success_stays_distinct_and_stops(
 
     expect(
             cleanup_error.install_outcome ==
-                    ArtifactInstallExecutionOutcome::Installed,
+                            ArtifactInstallExecutionOutcome::Installed &&
+                    cleanup_error.production_outcome.build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded &&
+                    cleanup_error.production_outcome.install_outcome ==
+                            ProductionSourceInstallOutcome::Succeeded,
             "Cleanup error lost the completed install outcome");
     expect(
             cleanup_error.diagnostic.find("Package installation succeeded") !=
@@ -4655,6 +5621,7 @@ void test_needed_same_version_cleanup_failure_preserves_no_change(
 
 int main() {
     try {
+        set_reviewed_source_lifecycle_default_missing_for_test(true);
         test_process_stub_rejects_cross_kind_reordering();
         test_build_plan_projection();
         test_local_dependency_preparation_collects_selected_repository_providers();
@@ -4663,6 +5630,7 @@ int main() {
         test_conflicting_selected_provider_identity_stops_work_item_preparation();
         test_same_package_base_projection_preserves_required_children();
         test_same_package_base_source_preference_route();
+        test_invocation_aggregate_model_retains_reviewed_compatibility_failure_and_suffix();
         test_resolved_repository_identity_and_owned_environment_preparation();
         test_resolved_repository_split_identity_and_required_target_projection();
         test_registered_source_factory_selects_route_owned_lifecycle();
@@ -4670,6 +5638,7 @@ int main() {
         test_repository_query_failure_stops_before_aur_or_mutation();
         test_confirmed_repository_not_found_allows_exact_aur_fallback();
         test_repository_work_item_static_identity_invariants();
+        test_aur_work_item_review_identity_invariants();
         {
             // Production must remain private-first even when the caller's
             // ordinary collaborative umask would make a legacy mkdir 0775.
@@ -4708,6 +5677,16 @@ int main() {
             test_database_resolver_failure_stops_all_targets(environment);
             test_work_item_typed_install_outcomes(environment);
             test_extended_work_item_install_outcomes(environment);
+            test_review_bypass_provenance(environment);
+            test_invocation_preflight_snapshot_is_consumed_without_reread(
+                    environment);
+            test_local_dependency_preflight_snapshot_is_consumed_without_reread(
+                    environment);
+            test_invocation_wide_fatal_preflight_stops_before_cache_provider_and_work_items();
+            test_all_compatibility_modes_observe_fatal_reviewed_state(
+                    environment);
+            test_reviewed_source_failure_payload_crosses_singular_and_set_routes(
+                    environment);
             test_registered_repository_closed_preparation_outcomes(
                     environment);
             test_up_to_date_outcome_and_legacy_flattening(environment);
@@ -4732,6 +5711,10 @@ int main() {
                     environment);
             test_single_aur_root_uses_shared_lifecycle(environment);
             test_multi_unit_options_roles_and_order(environment);
+            test_normal_invocation_retains_completed_failure_and_suffix(
+                    environment);
+            test_normal_invocation_retains_status_zero_postcheck_and_suffix(
+                    environment);
             test_build_failure_does_not_reach_sudo(environment);
             test_metadata_failure_does_not_reach_sudo(environment);
             test_pacman_failure_stops_later_unit(environment);

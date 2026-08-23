@@ -17,6 +17,7 @@
 #include "package_identifier.hpp"
 #include "process.hpp"
 #include "repository_query.hpp"
+#include "reviewed_source_production_outcome.hpp"
 #include "separated_source_build.hpp"
 #include "shell_words.hpp"
 #include "source_environment.hpp"
@@ -221,6 +222,24 @@ void present_registered_package_base_results(
     for(const RegisteredSourceUpgradeResult& source :
         result.registered_source_results) {
         present_registered_package_base_result(source);
+    }
+}
+
+void present_registered_reviewed_source_outcomes(
+        const SystemSourceUpgradeResult& result) {
+    for(const RegisteredSourceUpgradeResult& source :
+        result.registered_source_results) {
+        if(!source.production_outcome.has_value()) continue;
+        const std::string& package_base =
+                source.resolved_package_base.has_value()
+                ? *source.resolved_package_base
+                : source.preference_package_name;
+        ReviewedSourceProductionOutcomePresentation presentation =
+                format_production_source_build_staged_outcome(
+                        package_base, *source.production_outcome);
+        for(const std::string& line : presentation.info_lines) {
+            Logger::info(line);
+        }
     }
 }
 
@@ -778,9 +797,17 @@ int cmd_build_local(
                 provider_selection_callback(config));
         require_complete_local_build_plan(plan);
 
+        LocalSourceBuildDependencyPreparation dependency_preparation =
+                prepare_local_source_build_dependencies(
+                        plan, true, false);
+        preflight_local_source_build_dependencies(
+                dependency_preparation, config);
+
         // POLICY(#271): all option/root/metadata/plan validation precedes
-        // cache creation. Both remote dependencies and local build receive the
-        // same retained cache authority before the first transaction.
+        // cache creation. POLICY(#411): remote dependency fatal-state
+        // observation also completes before this persistent mutation. Both
+        // remote dependencies and local build then receive the same retained
+        // cache authority before the first transaction.
         const xdg_directory_safety::DirectoryCreationPrecondition
                 cache_creation_precondition =
                         [&reviewed](
@@ -798,7 +825,7 @@ int cmd_build_local(
                 cache_root.inode());
         PreparedProductionSourceBuildInvocation dependency_invocation =
                 prepare_local_source_build_dependency_invocation(
-                        plan, true, false, cache_root, config);
+                        std::move(dependency_preparation), cache_root, config);
         const PacmanDatabasePaths database_paths =
                 dependency_invocation.database_paths;
         PreparedLocalSourceBuild local_build = prepare_local_source_build(
@@ -828,10 +855,27 @@ int cmd_build_local(
         }();
         present_local_source_install_result(install_result);
         return 0;
+    } catch(const ProductionSourceBuildInvocationError& error) {
+        Logger::error(
+                format_production_source_build_invocation_failure(error));
+        return 1;
     } catch(const SeparatedPackageBaseSourceBuildCleanupError& error) {
         // Dependency executor already presents its PackageBase result; the
         // inner local-install boundary above presents the local result.
         Logger::error(error.what());
+        return 1;
+    } catch(const SeparatedPackageBaseSourceBuildPhaseError& error) {
+        if(error.reviewed_source_failure().has_value()) {
+            Logger::error(reviewed_source_production_failure_diagnostic(
+                    *error.reviewed_source_failure()));
+        } else {
+            Logger::error(localization::format_translated_message(
+                    "Build Error: {}", error.what()));
+        }
+        return 1;
+    } catch(const ReviewedSourceProductionError& error) {
+        Logger::error(reviewed_source_production_failure_diagnostic(
+                error.failure()));
         return 1;
     } catch(const LocalSourceBuildPhaseError& error) {
         // TRANSLATORS: The placeholder is a classified local source-build diagnostic.
@@ -873,14 +917,31 @@ int cmd_build(
         build_source_target(
                 invocation.package_name,
                 invocation.source_environment, config);
+    } catch(const ProductionSourceBuildInvocationError& error) {
+        Logger::error(
+                format_production_source_build_invocation_failure(error));
+        return 1;
     } catch(const SeparatedPackageBaseSourceBuildCleanupError& error) {
         // Direct buildはretained workspaceを手動確認できる既存contractを
         // 維持し、transaction成功済みcleanup failureとしてそのまま表示する。
         Logger::error(error.what());
         return 1;
+    } catch(const SeparatedPackageBaseSourceBuildPhaseError& error) {
+        if(error.reviewed_source_failure().has_value()) {
+            Logger::error(reviewed_source_production_failure_diagnostic(
+                    *error.reviewed_source_failure()));
+        } else {
+            Logger::error(localization::format_translated_message(
+                    "Build Error: {}", error.what()));
+        }
+        return 1;
     } catch(const SeparatedSourceBuildCleanupError& error) {
         // Package transactionは成功済みなので、generic Build Error prefixを付けない。
         Logger::error(error.what());
+        return 1;
+    } catch(const ReviewedSourceProductionError& error) {
+        Logger::error(reviewed_source_production_failure_diagnostic(
+                error.failure()));
         return 1;
     } catch(const ConfirmationOperationStopped&) {
         return 1;
@@ -1368,6 +1429,7 @@ int cmd_upgrade(const AppConfig& config) {
                                     preparation)),
                     config,
                     present_system_source_upgrade_event);
+    present_registered_reviewed_source_outcomes(result);
     present_registered_package_base_results(result);
     if(result.status != SystemSourceUpgradeStatus::Completed) {
         throw_system_source_upgrade_failure(result);

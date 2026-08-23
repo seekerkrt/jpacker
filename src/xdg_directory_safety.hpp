@@ -18,6 +18,7 @@ struct StateLogDirectoryAccess;
 
 struct TrustedCacheDirectoryAccess;
 struct SourcePreferenceDirectoryAccess;
+struct ReviewedSourceStateDirectoryAccess;
 
 namespace xdg_directory_safety {
 
@@ -123,11 +124,16 @@ class PreparedDirectory final {
             const xdg_paths::CachePaths& paths);
     friend PreparedDirectory prepare_directory(
             const xdg_paths::SourcePreferencePaths& paths);
+    friend PreparedDirectory prepare_directory(
+            const xdg_paths::ReviewedSourceStatePaths& paths);
+    friend std::optional<PreparedDirectory> open_existing_directory(
+            const xdg_paths::ReviewedSourceStatePaths& paths);
 
     friend struct DirectorySafetyAccess;
     friend struct xdg_state_log::StateLogDirectoryAccess;
     friend struct ::TrustedCacheDirectoryAccess;
     friend struct ::SourcePreferenceDirectoryAccess;
+    friend struct ::ReviewedSourceStateDirectoryAccess;
 
 public:
     PreparedDirectory(const PreparedDirectory&) = delete;
@@ -187,6 +193,12 @@ PreparedDirectory prepare_directory(
 std::optional<PreparedDirectory> open_existing_directory(
         const xdg_paths::SourcePreferencePaths& paths);
 
+// Reviewed-source AUR store directory。lookupはcreateせず、missingはnullopt。
+PreparedDirectory prepare_directory(
+        const xdg_paths::ReviewedSourceStatePaths& paths);
+std::optional<PreparedDirectory> open_existing_directory(
+        const xdg_paths::ReviewedSourceStatePaths& paths);
+
 #ifdef MOGUET_TEST_XDG_DIRECTORY_SAFETY_HOOKS
 enum class DirectorySafetyTestEvent {
     AfterAnchorMetadata,
@@ -236,6 +248,12 @@ PreparedDirectory prepare_directory_for_test(
         const DirectorySafetyTestOverrides& overrides);
 std::optional<PreparedDirectory> open_existing_directory_for_test(
         const xdg_paths::SourcePreferencePaths& paths,
+        const DirectorySafetyTestOverrides& overrides);
+PreparedDirectory prepare_directory_for_test(
+        const xdg_paths::ReviewedSourceStatePaths& paths,
+        const DirectorySafetyTestOverrides& overrides);
+std::optional<PreparedDirectory> open_existing_directory_for_test(
+        const xdg_paths::ReviewedSourceStatePaths& paths,
         const DirectorySafetyTestOverrides& overrides);
 #endif
 

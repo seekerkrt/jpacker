@@ -61,6 +61,23 @@ AppConfig runner_config() {
     return config;
 }
 
+ProductionSourceBuildStagedOutcome reviewed_staged_outcome(
+        ProductionSourceBuildCommandOutcome build_outcome,
+        ProductionSourceInstallOutcome install_outcome) {
+    ProductionSourceBuildProvenance provenance;
+    provenance.review_status = ProductionSourceReviewStatus::Reviewed;
+    provenance.reviewed_upstream_base_revision =
+            SourceRevisionIdentity::git_commit(
+                    "1111111111111111111111111111111111111111");
+    provenance.publication_status =
+            ReviewedSourcePublicationStatus::Published;
+    provenance.reviewed_outcome =
+            ProductionReviewedSourceOutcome::UpdateReview;
+    provenance.reviewed_state_generation = 9;
+    return ProductionSourceBuildStagedOutcome{
+            std::move(provenance), build_outcome, install_outcome};
+}
+
 RequiredPackageArtifactTarget required_target(
         const std::string& package_base,
         const std::string& package_name,
@@ -794,6 +811,38 @@ void test_selected_repository_provider_transaction_precedes_source_and_stops_fai
     execution_stub::require_script_consumed();
 }
 
+void test_later_fatal_preflight_blocks_cache_provider_and_first_work_item() {
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
+            "/fatal/root", "/fatal/database"};
+    preparation_stub::reset();
+    preparation_stub::set_database_paths(database_paths);
+    preparation_stub::fail_reviewed_state_preflight_on_call(
+            2, "scripted later reviewed-state fatal observation");
+    execution_stub::reset();
+
+    AurUpdateSourceBuildPreparation preparation =
+            prepare_aur_update_source_build_invocation(
+                    later_repository_provider_preflight(), false, config);
+    expect(!preparation.is_prepared() &&
+                   !preparation.invocation.has_value() &&
+                   preparation.issues.size() == 1 &&
+                   preparation.issues.front().reason ==
+                           AurUpdatePreparationReason::
+                                   GenericPreparationInconsistent &&
+                   preparation.issues.front().diagnostic.find(
+                           "scripted later reviewed-state fatal observation") !=
+                           std::string::npos,
+           "Later fatal preflight did not stop aggregate preparation");
+    expect(preparation_stub::reviewed_state_preflight_call_count() == 2 &&
+                   preparation_stub::database_call_count() == 0,
+           "Later fatal preflight did not precede the DB invocation snapshot");
+    expect(execution_stub::invocation_event_history().empty() &&
+                   execution_stub::call_history().empty() &&
+                   execution_stub::event_history().empty(),
+           "Later fatal preflight reached cache/provider/source execution");
+}
+
 void test_requested_split_child_size_one_is_no_change() {
     const AppConfig config = runner_config();
     const PacmanDatabasePaths database_paths{
@@ -1315,6 +1364,38 @@ void test_selection_mixed_reason_metadata_and_phase_failures_are_typed() {
                            .code == PackageMetadataErrorCode::QueryFailed,
            "Metadata failure lost its typed code");
 
+    const ProductionSourceBuildStagedOutcome staged_metadata_outcome =
+            reviewed_staged_outcome(
+                    ProductionSourceBuildCommandOutcome::Succeeded,
+                    ProductionSourceInstallOutcome::Failed);
+    const auto staged_metadata_result = run_one_multiple_failure(
+            "post-build metadata failure",
+            [metadata_failure, staged_metadata_outcome](
+                    execution_stub::ExpectedExecution expected) {
+                execution_stub::enqueue_phase_failure(
+                        std::move(expected),
+                        SeparatedPackageBaseSourceBuildFailurePhase::
+                                InstallPreparation,
+                        metadata_failure.diagnostic, std::nullopt,
+                        metadata_failure, staged_metadata_outcome);
+            });
+    const AurUpdateWorkItemExecutionResult& staged_metadata =
+            staged_metadata_result.work_item_results.front();
+    expect(
+            staged_metadata.production_outcome.has_value() &&
+                    staged_metadata.production_outcome->source_provenance.
+                                    review_status ==
+                            ProductionSourceReviewStatus::Reviewed &&
+                    staged_metadata.production_outcome->build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded &&
+                    staged_metadata.production_outcome->install_outcome ==
+                            ProductionSourceInstallOutcome::Failed &&
+                    require_failure_detail<PackageMetadataFailure>(
+                            staged_metadata,
+                            "post-build metadata failure").code ==
+                            PackageMetadataErrorCode::QueryFailed,
+            "AUR aggregate lost reviewed/build outcome or typed metadata failure");
+
     for(const auto& [phase, expected_category, diagnostic] :
         std::vector<std::tuple<
                 SeparatedPackageBaseSourceBuildFailurePhase,
@@ -1344,6 +1425,65 @@ void test_selection_mixed_reason_metadata_and_phase_failures_are_typed() {
                                .category == expected_category,
                diagnostic + ": category differs");
     }
+
+    const PackageBaseIdentity reviewed_package_base =
+            PackageBaseIdentity::make(
+                    PackageSourceIdentity::aur(
+                            SourceLocationIdentity::known_git_remote(
+                                    "https://aur.archlinux.org/split-suite.git")),
+                    "split-suite");
+    const ReviewedSourceState uncertain_state = ReviewedSourceState::make(
+            reviewed_package_base,
+            SourceRevisionIdentity::git_commit(
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+    const ReviewedSourceProductionFailure published_uncertain{
+            ReviewedSourceProductionFailureStage::StatePublication,
+            ReviewedSourceProductionFailureReason::PublishedUncertain,
+            ReviewedSourcePublicationUncertain{
+                    ReviewedSourceStateStorePublishedUncertain{
+                            uncertain_state, std::nullopt,
+                            ReviewedSourceStatePostPublicationIssue::
+                                    DirectorySyncUncertain,
+                            ReviewedSourceStateStoreFailureKind::SyncFailed,
+                            "/state/split-suite/2.toml", std::nullopt,
+                            std::nullopt}}};
+    const std::string uncertain_diagnostic =
+            "typed reviewed publication uncertainty";
+    const auto uncertain_result = run_one_multiple_failure(
+            uncertain_diagnostic,
+            [published_uncertain, uncertain_diagnostic](
+                    execution_stub::ExpectedExecution expected) {
+                execution_stub::enqueue_phase_failure(
+                        std::move(expected),
+                        SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                        uncertain_diagnostic, published_uncertain);
+            });
+    expect_typed_failure_base(
+            uncertain_result, uncertain_diagnostic,
+            uncertain_diagnostic);
+    const auto& uncertain_snapshot = require_failure_detail<
+            AurUpdateSourceBuildFailureSnapshot>(
+            uncertain_result.work_item_results.front(),
+            uncertain_diagnostic);
+    expect(uncertain_snapshot.reviewed_source_failure.has_value() &&
+                   uncertain_snapshot.reviewed_source_failure->stage ==
+                           ReviewedSourceProductionFailureStage::
+                                   StatePublication &&
+                   uncertain_snapshot.reviewed_source_failure->reason ==
+                           ReviewedSourceProductionFailureReason::
+                                   PublishedUncertain,
+           "AUR update aggregate flattened PublishedUncertain classification");
+    const auto* uncertain_detail = std::get_if<
+            ReviewedSourcePublicationUncertain>(
+            &uncertain_snapshot.reviewed_source_failure->detail);
+    const auto* expected_uncertain_detail = std::get_if<
+            ReviewedSourcePublicationUncertain>(
+            &published_uncertain.detail);
+    expect(uncertain_detail != nullptr &&
+                   expected_uncertain_detail != nullptr &&
+                   uncertain_detail->store_result ==
+                           expected_uncertain_detail->store_result,
+           "AUR update aggregate lost PublishedUncertain store payload");
 }
 
 void test_transaction_failure_has_attempts_without_child_success_and_suffix() {
@@ -1366,6 +1506,10 @@ void test_transaction_failure_has_attempts_without_child_success_and_suffix() {
                     "7.0-1",
                     DesiredInstallReason::Explicit)};
     const std::string diagnostic = "pacman transaction failed";
+    const ProductionSourceBuildStagedOutcome transaction_outcome =
+            reviewed_staged_outcome(
+                    ProductionSourceBuildCommandOutcome::Succeeded,
+                    ProductionSourceInstallOutcome::Failed);
 
     execution_stub::reset();
     execution_stub::enqueue_transaction_failure(
@@ -1386,7 +1530,9 @@ void test_transaction_failure_has_attempts_without_child_success_and_suffix() {
             PackageBaseArtifactInstallTransactionFailureKind::NonzeroExit,
             attempts,
             1,
-            diagnostic);
+            diagnostic,
+            std::nullopt,
+            transaction_outcome);
 
     const AurUpdateSourceBuildExecutionResult result =
             execute_without_escape(
@@ -1399,7 +1545,15 @@ void test_transaction_failure_has_attempts_without_child_success_and_suffix() {
     const auto& failed = result.work_item_results[0];
     expect(failed.status == AurUpdateWorkItemExecutionStatus::Failed &&
                    failed.diagnostic ==
-                           std::optional<std::string>{diagnostic},
+                           std::optional<std::string>{diagnostic} &&
+                   failed.production_outcome.has_value() &&
+                   failed.production_outcome->source_provenance.
+                                   review_status ==
+                           ProductionSourceReviewStatus::Reviewed &&
+                   failed.production_outcome->build_outcome ==
+                           ProductionSourceBuildCommandOutcome::Succeeded &&
+                   failed.production_outcome->install_outcome ==
+                           ProductionSourceInstallOutcome::Failed,
            "Transaction failure aggregate differs");
     expect_no_fabricated_child_success(failed, "transaction failure");
     expect(failed.transaction_failure.has_value() &&
@@ -1840,6 +1994,9 @@ int main() {
         run_case(
                 "selected repository provider phase transaction",
                 test_selected_repository_provider_transaction_precedes_source_and_stops_failure);
+        run_case(
+                "later fatal preflight blocks aggregate mutation",
+                test_later_fatal_preflight_blocks_cache_provider_and_first_work_item);
         run_case(
                 "requested split child size-one",
                 test_requested_split_child_size_one_is_no_change);

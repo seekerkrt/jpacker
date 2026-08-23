@@ -87,6 +87,13 @@ struct StatePaths {
     DirectoryCreationBoundary creation_boundary;
 };
 
+// AUR reviewed-source snapshot store. PackageBase leaf is owned by the
+// store, not this resolver.
+struct ReviewedSourceStatePaths {
+    std::filesystem::path directory;
+    DirectoryCreationBoundary creation_boundary;
+};
+
 struct CachePaths {
     std::filesystem::path directory;
     DirectoryCreationBoundary creation_boundary;
@@ -128,8 +135,16 @@ ConfigPaths resolve_config_process_environment();
 // Source-build preference専用adapter。XDG_CONFIG_HOME / HOMEだけをsnapshot化する。
 SourcePreferencePaths resolve_source_preference_process_environment();
 
+// Reviewed-source store consumerが無関係なconfig/cache environmentを
+// authorityへ取り込まず、state pathだけを解決するpure resolver。
+ReviewedSourceStatePaths resolve_reviewed_source_state(
+        const EnvironmentSnapshot& environment);
+
 // Default state log専用adapter。XDG_STATE_HOME / HOMEだけをsnapshot化する。
 StatePaths resolve_state_process_environment();
+
+// Reviewed-source store専用adapter。XDG_STATE_HOME / HOMEだけをsnapshot化する。
+ReviewedSourceStatePaths resolve_reviewed_source_state_process_environment();
 
 // Cache consumer専用adapter。XDG_CACHE_HOME / HOMEだけをsnapshot化する。
 CachePaths resolve_cache_process_environment();

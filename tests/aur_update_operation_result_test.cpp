@@ -204,7 +204,7 @@ AurUpdateWorkItemExecutionResult work_item_result(
         result.failure_detail.emplace<AurUpdateSourceBuildFailureSnapshot>(
                 AurUpdateSourceBuildFailureSnapshot{
                         AurUpdateSourceBuildFailureCategory::Other,
-                        "scripted work item failure"});
+                        "scripted work item failure", std::nullopt});
         result.diagnostic = "scripted work item failure";
         break;
     case AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed:
@@ -356,7 +356,8 @@ ExactReducerInput exact_reducer_input(
                     AurUpdateSourceBuildFailureSnapshot>(
                     AurUpdateSourceBuildFailureSnapshot{
                             AurUpdateSourceBuildFailureCategory::Build,
-                            "exact scripted work-item failure"});
+                            "exact scripted work-item failure",
+                            std::nullopt});
             work_item.diagnostic = "exact scripted work-item failure";
         } else if(
                 spec.status ==
@@ -1959,7 +1960,7 @@ void test_exact_failure_payload_coherence_is_typed() {
             AurUpdateSourceBuildFailureSnapshot>(
             AurUpdateSourceBuildFailureSnapshot{
                     AurUpdateSourceBuildFailureCategory::Build,
-                    "impossible success failure detail"});
+                    "impossible success failure detail", std::nullopt});
     successful.execution.work_item_results.front().transaction_failure =
             AurUpdatePackageTransactionFailureSnapshot{
                     AurUpdatePackageTransactionFailureCategory::

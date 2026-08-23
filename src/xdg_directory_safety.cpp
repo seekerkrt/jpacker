@@ -27,13 +27,16 @@ constexpr mode_t REQUIRED_OWNER_PERMISSIONS = S_IRUSR | S_IWUSR | S_IXUSR;
 constexpr mode_t FORBIDDEN_WRITE_PERMISSIONS = S_IWGRP | S_IWOTH;
 constexpr std::string_view SOURCE_PREFERENCE_DIRECTORY_NAME =
         "source-build.d";
+constexpr std::string_view REVIEWED_SOURCE_STATE_DIRECTORY_NAME =
+        "reviewed-sources";
+constexpr std::string_view REVIEWED_SOURCE_STATE_AUR_DIRECTORY_NAME = "aur";
 
 struct DirectoryRequest {
     xdg_paths::DirectoryKind directory_kind;
     const fs::path&          directory;
     const xdg_paths::DirectoryCreationBoundary& creation_boundary;
     bool derived_paths_match;
-    bool is_source_preference_directory = false;
+    std::vector<std::string> extra_managed_components;
     bool final_directory_requires_private_mode = false;
 };
 
@@ -295,7 +298,7 @@ bool is_safe_leaf_name(const std::string& component) {
 
 std::vector<std::string> expected_fallback_components(
         xdg_paths::DirectoryKind directory_kind,
-        bool is_source_preference_directory) {
+        const std::vector<std::string>& extra_managed_components) {
     const std::string application_component(application_identity::XDG_IDENTITY);
     std::vector<std::string> components;
     switch(directory_kind) {
@@ -313,21 +316,19 @@ std::vector<std::string> expected_fallback_components(
         throw std::logic_error(localization::format_translated_message(
                 "Unknown {} directory kind.", "XDG"));
     }
-    if(is_source_preference_directory) {
-        components.push_back(
-                std::string(SOURCE_PREFERENCE_DIRECTORY_NAME));
-    }
+    components.insert(
+            components.end(), extra_managed_components.begin(),
+            extra_managed_components.end());
     return components;
 }
 
 std::vector<std::string> expected_explicit_components(
-        bool is_source_preference_directory) {
+        const std::vector<std::string>& extra_managed_components) {
     std::vector<std::string> components{
             std::string(application_identity::XDG_IDENTITY)};
-    if(is_source_preference_directory) {
-        components.push_back(
-                std::string(SOURCE_PREFERENCE_DIRECTORY_NAME));
-    }
+    components.insert(
+            components.end(), extra_managed_components.begin(),
+            extra_managed_components.end());
     return components;
 }
 
@@ -363,7 +364,7 @@ void validate_creation_boundary(const DirectoryRequest& request) {
 
     fs::path reconstructed_base = boundary.existing_anchor;
     const std::size_t managed_component_count =
-            request.is_source_preference_directory ? 2 : 1;
+            1 + request.extra_managed_components.size();
     if(boundary.creatable_components.size() < managed_component_count) {
         throw_preparation_error(
                 request.directory_kind,
@@ -388,7 +389,7 @@ void validate_creation_boundary(const DirectoryRequest& request) {
         if(boundary.existing_anchor != boundary.base_directory ||
            boundary.creatable_components !=
                    expected_explicit_components(
-                           request.is_source_preference_directory)) {
+                           request.extra_managed_components)) {
             throw_preparation_error(
                     request.directory_kind,
                     PreparationStage::BoundaryValidation,
@@ -401,7 +402,7 @@ void validate_creation_boundary(const DirectoryRequest& request) {
        boundary.creatable_components !=
                expected_fallback_components(
                        request.directory_kind,
-                       request.is_source_preference_directory)) {
+                       request.extra_managed_components)) {
         throw_preparation_error(
                 request.directory_kind,
                 PreparationStage::BoundaryValidation,
@@ -1162,7 +1163,7 @@ DirectoryRequest make_request(const xdg_paths::ConfigPaths& paths) {
             xdg_paths::DirectoryKind::Config, paths.directory,
             paths.creation_boundary,
             paths.config_file == paths.directory / "config.toml",
-            false, false};
+            {}};
 }
 
 DirectoryRequest make_request(const xdg_paths::StatePaths& paths) {
@@ -1174,13 +1175,13 @@ DirectoryRequest make_request(const xdg_paths::StatePaths& paths) {
             xdg_paths::DirectoryKind::State, paths.directory,
             paths.creation_boundary,
             paths.default_log_file == expected_log_file,
-            false, false};
+            {}};
 }
 
 DirectoryRequest make_request(const xdg_paths::CachePaths& paths) {
     return DirectoryRequest{
             xdg_paths::DirectoryKind::Cache, paths.directory,
-            paths.creation_boundary, true, false, false};
+            paths.creation_boundary, true, {}};
 }
 
 DirectoryRequest make_request(
@@ -1193,7 +1194,24 @@ DirectoryRequest make_request(
             xdg_paths::DirectoryKind::Config, paths.directory,
             paths.creation_boundary,
             paths.directory == expected_directory,
-            true, true};
+            {std::string(SOURCE_PREFERENCE_DIRECTORY_NAME)},
+            true};
+}
+
+DirectoryRequest make_request(
+        const xdg_paths::ReviewedSourceStatePaths& paths) {
+    const fs::path expected_directory =
+            paths.creation_boundary.base_directory /
+            std::string(application_identity::XDG_IDENTITY) /
+            std::string(REVIEWED_SOURCE_STATE_DIRECTORY_NAME) /
+            std::string(REVIEWED_SOURCE_STATE_AUR_DIRECTORY_NAME);
+    return DirectoryRequest{
+            xdg_paths::DirectoryKind::State, paths.directory,
+            paths.creation_boundary,
+            paths.directory == expected_directory,
+            {std::string(REVIEWED_SOURCE_STATE_DIRECTORY_NAME),
+             std::string(REVIEWED_SOURCE_STATE_AUR_DIRECTORY_NAME)},
+            true};
 }
 
 } // namespace
@@ -1527,6 +1545,18 @@ std::optional<PreparedDirectory> open_existing_directory(
     return DirectorySafetyAccess::open_existing(request, nullptr);
 }
 
+PreparedDirectory prepare_directory(
+        const xdg_paths::ReviewedSourceStatePaths& paths) {
+    const DirectoryRequest request = make_request(paths);
+    return DirectorySafetyAccess::prepare(request, nullptr);
+}
+
+std::optional<PreparedDirectory> open_existing_directory(
+        const xdg_paths::ReviewedSourceStatePaths& paths) {
+    const DirectoryRequest request = make_request(paths);
+    return DirectorySafetyAccess::open_existing(request, nullptr);
+}
+
 #ifdef MOGUET_TEST_XDG_DIRECTORY_SAFETY_HOOKS
 PreparedDirectory prepare_directory_for_test(
         const xdg_paths::ConfigPaths& paths,
@@ -1554,6 +1584,19 @@ PreparedDirectory prepare_directory_for_test(
 
 std::optional<PreparedDirectory> open_existing_directory_for_test(
         const xdg_paths::SourcePreferencePaths& paths,
+        const DirectorySafetyTestOverrides& overrides) {
+    return DirectorySafetyAccess::open_existing(
+            make_request(paths), &overrides);
+}
+
+PreparedDirectory prepare_directory_for_test(
+        const xdg_paths::ReviewedSourceStatePaths& paths,
+        const DirectorySafetyTestOverrides& overrides) {
+    return DirectorySafetyAccess::prepare(make_request(paths), &overrides);
+}
+
+std::optional<PreparedDirectory> open_existing_directory_for_test(
+        const xdg_paths::ReviewedSourceStatePaths& paths,
         const DirectorySafetyTestOverrides& overrides) {
     return DirectorySafetyAccess::open_existing(
             make_request(paths), &overrides);

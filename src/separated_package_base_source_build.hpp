@@ -1,8 +1,11 @@
 #pragma once
 
 #include "package_base_artifact_install_executor.hpp"
+#include "reviewed_source_production_failure.hpp"
 #include "separated_source_build.hpp"
 
+#include <exception>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -15,7 +18,7 @@
 // 1 PackageBaseのordered required child setを一つのworkspace/transactionで扱う。
 // Artifact path、selection index、install directiveはlifecycle内部だけで生成する。
 struct SeparatedPackageBaseSourceBuildRequest {
-    ValidatedCachePath                 checkout;
+    ProductionArtifactSourceTree       source_tree;
     ValidatedPrivateCacheRoot          artifact_root;
     std::string                        package_base;
     std::vector<RequiredPackageArtifactTarget> required_targets;
@@ -35,11 +38,13 @@ struct PackageBaseSourceBuildSelectedResult {
 // selected childをrequired順、unselected outputをproduced順でowned保持する。
 class PackageBaseSourceBuildExecutionResult final {
     std::string package_base_;
+    ProductionSourceBuildStagedOutcome production_outcome_;
     std::vector<PackageBaseSourceBuildSelectedResult> selected_children_;
     std::vector<ArtifactPackageIdentity> unselected_artifacts_;
 
     PackageBaseSourceBuildExecutionResult(
             std::string package_base,
+            ProductionSourceBuildStagedOutcome production_outcome,
             std::vector<PackageBaseSourceBuildSelectedResult>
                     selected_children,
             std::vector<ArtifactPackageIdentity> unselected_artifacts)
@@ -57,6 +62,12 @@ class PackageBaseSourceBuildExecutionResult final {
             std::vector<ArtifactPackageIdentity> unselected_artifacts)
             noexcept
         : package_base_(std::move(package_base)),
+          production_outcome_({
+                  .source_provenance = {},
+                  .build_outcome =
+                          ProductionSourceBuildCommandOutcome::Succeeded,
+                  .install_outcome =
+                          ProductionSourceInstallOutcome::Succeeded}),
           selected_children_(std::move(selected_children)),
           unselected_artifacts_(std::move(unselected_artifacts)) {
     }
@@ -80,6 +91,12 @@ public:
     ~PackageBaseSourceBuildExecutionResult() = default;
 
     const std::string& package_base() const noexcept;
+    const ProductionSourceBuildStagedOutcome& production_outcome()
+            const noexcept;
+    const ProductionSourceBuildProvenance& source_provenance()
+            const noexcept;
+    ProductionSourceBuildCommandOutcome build_outcome() const noexcept;
+    ProductionSourceInstallOutcome install_outcome() const noexcept;
     const std::vector<PackageBaseSourceBuildSelectedResult>&
     selected_children() const noexcept;
     const std::vector<ArtifactPackageIdentity>&
@@ -116,6 +133,8 @@ enum class SeparatedPackageBaseSourceBuildFailurePhase {
     Build,
     ArtifactValidation,
     ArtifactIdentity,
+    InstallPreparation,
+    InstallTransaction,
 };
 
 // selection/policy、metadata、transaction、cleanupの専用型より前のphase failure。
@@ -123,6 +142,12 @@ enum class SeparatedPackageBaseSourceBuildFailurePhase {
 class SeparatedPackageBaseSourceBuildPhaseError final
     : public std::runtime_error {
     SeparatedPackageBaseSourceBuildFailurePhase phase_;
+    std::optional<ReviewedSourceProductionFailure>
+            reviewed_source_failure_;
+    std::optional<PackageMetadataFailure> package_metadata_failure_;
+    std::optional<ProductionSourceBuildStagedOutcome>
+            production_outcome_;
+    std::exception_ptr failure_exception_;
 
 #ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     struct AurUpdateRunnerTestTag {};
@@ -130,25 +155,65 @@ class SeparatedPackageBaseSourceBuildPhaseError final
     SeparatedPackageBaseSourceBuildPhaseError(
             AurUpdateRunnerTestTag,
             SeparatedPackageBaseSourceBuildFailurePhase phase,
-            const std::string& diagnostic)
-        : std::runtime_error(diagnostic), phase_(phase) {
+            const std::string& diagnostic,
+            std::optional<ReviewedSourceProductionFailure>
+                    reviewed_source_failure = std::nullopt,
+            std::optional<PackageMetadataFailure>
+                    package_metadata_failure = std::nullopt,
+            std::optional<ProductionSourceBuildStagedOutcome>
+                    production_outcome = std::nullopt)
+        : std::runtime_error(diagnostic), phase_(phase),
+          reviewed_source_failure_(
+                  std::move(reviewed_source_failure)),
+          package_metadata_failure_(
+                  std::move(package_metadata_failure)),
+          production_outcome_(std::move(production_outcome)) {
     }
 #endif
 
 public:
     SeparatedPackageBaseSourceBuildPhaseError(
             SeparatedPackageBaseSourceBuildFailurePhase phase,
-            const std::string& diagnostic);
+            const std::string& diagnostic,
+            std::optional<ReviewedSourceProductionFailure>
+                    reviewed_source_failure = std::nullopt,
+            std::optional<PackageMetadataFailure>
+                    package_metadata_failure = std::nullopt,
+            std::optional<ProductionSourceBuildStagedOutcome>
+                    production_outcome = std::nullopt,
+            std::exception_ptr failure_exception = nullptr);
 
     SeparatedPackageBaseSourceBuildFailurePhase phase() const noexcept;
+    const std::optional<ReviewedSourceProductionFailure>&
+    reviewed_source_failure() const noexcept;
+    const std::optional<PackageMetadataFailure>&
+    package_metadata_failure() const noexcept;
+    const std::optional<ProductionSourceBuildStagedOutcome>&
+    production_outcome() const noexcept;
+    void rethrow_failure() const {
+        if(failure_exception_ == nullptr) {
+            throw std::logic_error(
+                    "Separated PackageBase source-build failure has no nested exception.");
+        }
+        std::rethrow_exception(failure_exception_);
+    }
 
 #ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     static SeparatedPackageBaseSourceBuildPhaseError
     make_for_aur_update_runner_test(
             SeparatedPackageBaseSourceBuildFailurePhase phase,
-            const std::string& diagnostic) {
+            const std::string& diagnostic,
+            std::optional<ReviewedSourceProductionFailure>
+                    reviewed_source_failure = std::nullopt,
+            std::optional<PackageMetadataFailure>
+                    package_metadata_failure = std::nullopt,
+            std::optional<ProductionSourceBuildStagedOutcome>
+                    production_outcome = std::nullopt) {
         return SeparatedPackageBaseSourceBuildPhaseError(
-                AurUpdateRunnerTestTag{}, phase, diagnostic);
+                AurUpdateRunnerTestTag{}, phase, diagnostic,
+                std::move(reviewed_source_failure),
+                std::move(package_metadata_failure),
+                std::move(production_outcome));
     }
 #endif
 };
@@ -158,6 +223,8 @@ public:
 class SeparatedPackageBaseSourceBuildPreparationError final
     : public std::runtime_error {
     PackageBaseArtifactInstallPreparationFailure failure_;
+    std::optional<ProductionSourceBuildStagedOutcome>
+            production_outcome_;
 
 #ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     struct AurUpdateRunnerTestTag {};
@@ -165,15 +232,20 @@ class SeparatedPackageBaseSourceBuildPreparationError final
     SeparatedPackageBaseSourceBuildPreparationError(
             AurUpdateRunnerTestTag,
             PackageBaseArtifactInstallPreparationFailure failure,
-            const std::string& diagnostic)
-        : std::runtime_error(diagnostic), failure_(std::move(failure)) {
+            const std::string& diagnostic,
+            std::optional<ProductionSourceBuildStagedOutcome>
+                    production_outcome = std::nullopt)
+        : std::runtime_error(diagnostic), failure_(std::move(failure)),
+          production_outcome_(std::move(production_outcome)) {
     }
 #endif
 
 public:
     SeparatedPackageBaseSourceBuildPreparationError(
             PackageBaseArtifactInstallPreparationFailure failure,
-            const std::string& diagnostic);
+            const std::string& diagnostic,
+            std::optional<ProductionSourceBuildStagedOutcome>
+                    production_outcome = std::nullopt);
 
     const PackageBaseArtifactInstallPreparationFailure& failure()
             const noexcept;
@@ -181,6 +253,8 @@ public:
             const noexcept;
     const MixedPackageBaseInstallReasonUnsupported* mixed_reason_failure()
             const noexcept;
+    const std::optional<ProductionSourceBuildStagedOutcome>&
+    production_outcome() const noexcept;
 
 #ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     static SeparatedPackageBaseSourceBuildPreparationError

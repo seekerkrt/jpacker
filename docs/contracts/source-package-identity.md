@@ -9,6 +9,7 @@
 - Parent roadmap: [#344](https://github.com/seekerkrt/moguet/issues/344)
 - Prerequisites: [#217](https://github.com/seekerkrt/moguet/issues/217)、[#271](https://github.com/seekerkrt/moguet/issues/271)
 - Related contract: [PackageBase build / required-child selection](packagebase-child-selection.md)
+- Related contract: [Reviewed AUR source state](reviewed-source-state.md)
 - Related upper decisions: [decision 1](../DECISIONS.md#decision-1)、[decision 2](../DECISIONS.md#decision-2)、[decision 3](../DECISIONS.md#decision-3)、[decision 4](../DECISIONS.md#decision-4)、[decision 6](../DECISIONS.md#decision-6)、[decision 7](../DECISIONS.md#decision-7)
 
 このfoundationはinternal non-breakingであり、public profile / patch command、storage schema、source mutation、source revision queryを有効化しない。既存production modelを置換せず、既存authorityからcommon valueへのread-only projectionだけを提供する。
@@ -33,7 +34,9 @@ current `develop`では、必要なidentityはrouteごとのownerへ分散して
 | correlated artifact | `PackageBaseArtifactIdentitySelectionSuccess` | PackageBase、selected / unselected child、full version、stable artifact index | sourceはupper projectionから別途必要 |
 | relation observation | `PackageRelationObservedPackage` / `PackageRelationSourceIdentity` | repository / AUR / local source、child、optional PackageBase、version、runtime filesystem provenance | conflict/replaces観測固有であり、durable profile identityへ直接置換しない |
 
-Git checkout/fetch ownerはPackageBase、remote URL、branch / remote-refを扱うが、current production source package identityとしてexact commit object IDを保持しない。したがって、既存repository / AUR modelからのprojectionはrevisionを`Known`にしてはならない。
+Issue #355のgeneric projectionへ入力されるGit checkout / fetch modelはPackageBase、remote URL、branch / remote-refを扱うが、common source package identityとしてexact commit object IDを保持しない。したがって、既存repository / AUR modelからのgeneric projectionはrevisionを`Known`にしてはならない。
+
+Issue #411のreviewed-source lifecycleは、AUR source reviewとbuild continuationに限ってexact target OIDを別authorityとして保持する。これはgeneric projection inputの拡張ではない。reviewed-source persistent / build capabilityからexact OIDを`source_package_identity_projection`へ注入したり、common projectionの`Unknown`を`Known`へ昇格させたりしない。
 
 ## Implemented internal boundary
 
@@ -49,7 +52,7 @@ projection successはordered nonempty aggregateである。local sourceはaccept
 
 compatibility evaluatorは`ExactMatch`、`SamePackageChild`、`SamePackageBase`、`Incompatible`、`Indeterminate`を返す。source、PackageBase、child、revision、version、architectureの各dimension stateとreasonを同時に保持し、localized stringからclassificationを復元しない。
 
-これらのmoduleはproduction CLI / selection / build / install / update decisionへ接続していない。後続#356以降が参照できるstable internal boundaryであり、#355自体はpublic behaviorを追加しない。
+これらのgeneric projection / compatibility moduleはproduction CLI / selection / build / install / update decisionへ接続していない。Issue #411は`PackageBaseIdentity` / `SourceRevisionIdentity`のvalidated valueを別のreviewed-source capability内で再利用するが、generic adapter / evaluatorをproduction decisionへ接続しない。後続#356以降が参照できるstable internal boundaryであり、#355自体はpublic behaviorを追加しない。
 
 ## Contract本文（日本語normative source of truth）
 
@@ -111,7 +114,7 @@ source locationは`Known`、`Unknown`、`Unavailable`を区別する。
 
 Git commitはabbreviationではなくcomplete object IDとする。初期contractはcanonical lowercase hexadecimalのSHA-1 40桁またはSHA-256 64桁を受理し、object formatをtyped fieldとして保持する。empty、短縮、uppercase、non-hex valueはknown commitとして構築しない。
 
-current repository / AUR modelはcommitを観測していないため`Unknown`へprojectする。current local routeはGit repositoryを要求せず、PKGBUILD content / filesystem provenanceをauthorityとするため`Inapplicable`へprojectする。directory内に偶然`.git`が存在することから`Known`を推測しない。
+Issue #355のcurrent repository / AUR projection modelはcommitを観測していないため`Unknown`へprojectする。Issue #411のreviewed-source lifecycleが別boundaryでexact target OIDを保持していても、このgeneric projection ruleは変わらない。current local routeはGit repositoryを要求せず、PKGBUILD content / filesystem provenanceをauthorityとするため`Inapplicable`へprojectする。directory内に偶然`.git`が存在することから`Known`を推測しない。
 
 `Absent`、`Unknown`、`Unavailable`、`Inapplicable`はいずれもknown revision matchではない。同じstate同士のstructural equalityをpatch適用やprofile compatibilityの成功条件にしない。
 
@@ -182,18 +185,18 @@ projectionは既存ownerのauthorityを再実装しない。
 3. `BuildPlan::order` / `package_targets`だけからsource kindを逆算せず、`ResolvedDependencyCandidate`、route、local root等のauthoritative contextと相関する。
 4. artifactはrequired target / correlated selection / upper source contextを一緒に使う。filename、actual child名、full versionからPackageBaseやsourceを推測しない。
 5. derived canonical source keyをparseしてsource kind / PackageBaseへ戻さない。keyを生成したtyped source snapshotからprojectする。
-6. current repository / AUR revisionは`Unknown`、current local revisionは`Inapplicable`とし、自動commit queryをprojectionへ追加しない。
+6. current repository / AUR revisionは`Unknown`、current local revisionは`Inapplicable`とし、自動commit queryやreviewed-source exact OIDの注入をgeneric projectionへ追加しない。
 7. partial projectionをcomplete identityとして公開しない。failure armは欠けたfieldとauthorityをtyped reasonで保持する。
 
 ## Non-scope
 
 - public profile / patch command、profile schema、binding、storage、migration。
 - PKGBUILD patch生成・preview・適用、source patch、user-owned tree mutation。
-- source commitの自動取得、Git working tree update、build history database。
+- generic projectionによるsource commitの自動取得、reviewed-source authorityの取り込み、Git working tree update、build history database。
 - repository / AUR solver、package rename追跡、version solver。
 - existing root / dependency / artifact / update / relation modelの置換。
 - compatibility evaluatorのproduction decisionへの接続。
 
 ## Compatibility
 
-このfoundation自体はCLI、selection、build、install、update、output、exit status、config、filesystem layoutを変更しない。利用者向けの要約は[`COMPATIBILITY.md`のcommon identity section](../COMPATIBILITY.md#compat-common-source-identity)を参照する。
+このfoundation自体はCLI、selection、build、install、update、output、exit status、config、filesystem layoutを変更しない。Issue #411のreviewed-source exact OIDはこのgeneric foundationのrevision projectionを変更しない。利用者向けの要約は[`COMPATIBILITY.md`のcommon identity section](../COMPATIBILITY.md#compat-common-source-identity)を参照する。

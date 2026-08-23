@@ -734,6 +734,73 @@ void test_source_preference_resolver_uses_home_fallback() {
     }
 }
 
+void test_reviewed_source_state_resolver_uses_explicit_value() {
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = "relative/config-secret",
+            .xdg_state_home = "/reviewed-state/base",
+            .xdg_cache_home = "relative/cache-secret",
+            .home = "relative/unused-home",
+    };
+    const xdg_paths::ReviewedSourceStatePaths paths =
+            xdg_paths::resolve_reviewed_source_state(environment);
+
+    expect_path(
+            paths.directory,
+            "/reviewed-state/base/moguet/reviewed-sources/aur",
+            "Reviewed-source explicit directory");
+    expect_creation_boundary(
+            paths.creation_boundary,
+            xdg_paths::DirectorySource::ExplicitXdg,
+            "/reviewed-state/base", "/reviewed-state/base",
+            {"moguet", "reviewed-sources", "aur"},
+            "Reviewed-source explicit creation boundary");
+}
+
+void test_reviewed_source_state_resolver_uses_home_fallback() {
+    for(const std::optional<std::string>& xdg_state_home :
+        std::vector<std::optional<std::string>>{std::nullopt, ""}) {
+        const xdg_paths::EnvironmentSnapshot environment{
+                .xdg_config_home = "relative/config-secret",
+                .xdg_state_home = xdg_state_home,
+                .xdg_cache_home = "relative/cache-secret",
+                .home = "/reviewed-state/home",
+        };
+        const xdg_paths::ReviewedSourceStatePaths paths =
+                xdg_paths::resolve_reviewed_source_state(environment);
+
+        expect_path(
+                paths.directory,
+                "/reviewed-state/home/.local/state/moguet/reviewed-sources/aur",
+                "Reviewed-source HOME fallback directory");
+        expect_creation_boundary(
+                paths.creation_boundary,
+                xdg_paths::DirectorySource::HomeFallback,
+                "/reviewed-state/home/.local/state",
+                "/reviewed-state/home",
+                {".local", "state", "moguet", "reviewed-sources", "aur"},
+                "Reviewed-source HOME fallback creation boundary");
+    }
+}
+
+void test_reviewed_source_state_resolver_rejects_relative_xdg_value() {
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = std::nullopt,
+            .xdg_state_home = "relative/reviewed-state-secret",
+            .xdg_cache_home = std::nullopt,
+            .home = "/valid/fallback",
+    };
+    expect_resolution_error(
+            [&environment]() {
+                static_cast<void>(
+                        xdg_paths::resolve_reviewed_source_state(environment));
+            },
+            xdg_paths::DirectoryKind::State,
+            xdg_paths::EnvironmentVariable::XdgStateHome,
+            xdg_paths::ResolutionErrorCode::RelativePath,
+            "XDG_STATE_HOME must be an absolute path",
+            "relative/reviewed-state-secret");
+}
+
 void test_source_preference_resolver_rejects_relative_xdg_value() {
     const xdg_paths::EnvironmentSnapshot environment{
             .xdg_config_home = "relative/source-preference-secret",
@@ -1292,6 +1359,15 @@ int main() {
         run_case(
                 "source preference resolver rejects relative XDG value",
                 test_source_preference_resolver_rejects_relative_xdg_value);
+        run_case(
+                "reviewed-source resolver uses explicit value",
+                test_reviewed_source_state_resolver_uses_explicit_value);
+        run_case(
+                "reviewed-source resolver uses HOME fallback",
+                test_reviewed_source_state_resolver_uses_home_fallback);
+        run_case(
+                "reviewed-source resolver rejects relative XDG value",
+                test_reviewed_source_state_resolver_rejects_relative_xdg_value);
         run_case(
                 "source preference process adapter uses root context",
                 test_source_preference_process_adapter_uses_root_context);

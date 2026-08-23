@@ -25,6 +25,7 @@ class LocalSourceWorkspace;
 class PreparedCacheCleanup;
 class ValidatedCacheRoot;
 class ValidatedPrivateCacheRoot;
+class ReviewedSourcePackageBaseLease;
 struct PersistentCheckoutDirectoryAccess;
 struct LocalSourceWorkspaceCleanupAccess;
 struct TrustedCacheAccess;
@@ -265,6 +266,9 @@ class RetainedTrustedCacheDirectory final {
             const ValidatedCachePath& path);
     friend class ArtifactMakepkgContext;
     friend struct PersistentCheckoutDirectoryAccess;
+    friend ReviewedSourcePackageBaseLease
+    acquire_reviewed_source_package_base_lease(
+            RetainedTrustedCacheDirectory directory);
     friend class LocalSourceWorkspace;
     friend struct LocalSourceWorkspaceCleanupAccess;
     friend LocalSourceWorkspace materialize_local_source_workspace(
