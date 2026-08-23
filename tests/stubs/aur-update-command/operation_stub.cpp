@@ -7,12 +7,14 @@
 #include "filtered_aur_update_operation.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 // CLI command boundaryだけをdeterministicに検証するscenario-driven stub。
@@ -47,6 +49,44 @@ void append_event(const std::string& event) {
 
 const char* bool_text(bool value) {
     return value ? "true" : "false";
+}
+
+ProductionSourceBuildProvenance reviewed_source_provenance(
+        ProductionReviewedSourceOutcome outcome,
+        std::uint64_t generation,
+        ReviewedSourcePublicationStatus publication_status =
+                ReviewedSourcePublicationStatus::Published,
+        ReviewedSourceEditorOverlayStatus editor_overlay =
+                ReviewedSourceEditorOverlayStatus::None) {
+    ProductionSourceBuildProvenance provenance;
+    provenance.review_status = ProductionSourceReviewStatus::Reviewed;
+    provenance.editor_overlay = editor_overlay;
+    provenance.reviewed_upstream_base_revision =
+            SourceRevisionIdentity::git_commit(
+                    "2222222222222222222222222222222222222222");
+    provenance.publication_status = publication_status;
+    provenance.reviewed_outcome = outcome;
+    provenance.reviewed_state_generation = generation;
+    return provenance;
+}
+
+ProductionSourceBuildProvenance compatibility_source_provenance(
+        ReviewedSourceCompatibilityBuildReason reason) {
+    ProductionSourceBuildProvenance provenance;
+    provenance.review_status =
+            ProductionSourceReviewStatus::CompatibilityWithoutReview;
+    provenance.compatibility_reason = reason;
+    return provenance;
+}
+
+ProductionSourceBuildStagedOutcome production_outcome(
+        ProductionSourceBuildProvenance provenance,
+        ProductionSourceBuildCommandOutcome build_outcome =
+                ProductionSourceBuildCommandOutcome::Succeeded,
+        ProductionSourceInstallOutcome install_outcome =
+                ProductionSourceInstallOutcome::Succeeded) {
+    return ProductionSourceBuildStagedOutcome{
+            std::move(provenance), build_outcome, install_outcome};
 }
 
 std::string config_snapshot(const AppConfig& config) {
@@ -516,6 +556,17 @@ AurUpdateQueryResult query_installed_aur_updates() {
                 "failed-pkg", AurUpdateClassification::UpdateAvailable));
         return query;
     }
+    if(test_scenario == "reviewed-published-uncertain") {
+        query.plan.entries.push_back(make_plan_entry(
+                "uncertain-pkg", AurUpdateClassification::UpdateAvailable));
+        return query;
+    }
+    if(test_scenario == "reviewed-build-failure") {
+        query.plan.entries.push_back(make_plan_entry(
+                "reviewed-build-pkg",
+                AurUpdateClassification::UpdateAvailable));
+        return query;
+    }
     if(test_scenario == "provider-transaction-failure") {
         query.plan.entries.push_back(make_plan_entry(
                 "provider-pkg", AurUpdateClassification::UpdateAvailable));
@@ -824,11 +875,25 @@ execute_prepared_aur_update_source_build_invocation(
         return execution;
     }
     append_event("external git clone fixture");
+    if(scenario() == "reviewed-published-uncertain") {
+        AurUpdateSourceBuildExecutionResult execution;
+        execution.status =
+                AurUpdateInvocationExecutionStatus::StoppedOnWorkItemFailure;
+        return execution;
+    }
     append_event("external makepkg -sc fixture");
+    if(scenario() == "reviewed-build-failure") {
+        AurUpdateSourceBuildExecutionResult execution;
+        execution.status =
+                AurUpdateInvocationExecutionStatus::StoppedOnWorkItemFailure;
+        return execution;
+    }
     append_event("external sudo pacman -U fixture");
 
     AurUpdateSourceBuildExecutionResult execution;
     if(scenario() == "ordinary-execution-failure" ||
+       scenario() == "reviewed-published-uncertain" ||
+       scenario() == "reviewed-build-failure" ||
        scenario() == "partial-completion" ||
        scenario() == "transaction-failure" ||
        scenario() == "transaction-process-exception") {
@@ -910,6 +975,13 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                 package_name,
                 AurUpdateWorkItemExecutionStatus::Updated,
                 AurUpdateWorkItemFailureKind::None);
+        if(test_scenario == "all-updated") {
+            work_item.production_outcome = production_outcome(
+                    reviewed_source_provenance(
+                    ProductionReviewedSourceOutcome::InitialFullReview, 1,
+                    ReviewedSourcePublicationStatus::Published,
+                    ReviewedSourceEditorOverlayStatus::InvocationLocal));
+        }
         result.targets.front().execution_contributions.push_back(
                 make_child_contribution(
                         work_item.child_results.front(),
@@ -927,6 +999,11 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                 "no-change-pkg",
                 AurUpdateWorkItemExecutionStatus::NoChange,
                 AurUpdateWorkItemFailureKind::None);
+        work_item.production_outcome = production_outcome(
+                reviewed_source_provenance(
+                ProductionReviewedSourceOutcome::AlreadyReviewed, 4,
+                ReviewedSourcePublicationStatus::
+                        AlreadyPublishedSameTarget));
         result.targets.front().execution_contributions.push_back(
                 make_child_contribution(
                         work_item.child_results.front(),
@@ -951,6 +1028,12 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                 "alpha-pkg",
                 AurUpdateWorkItemExecutionStatus::NoChange,
                 AurUpdateWorkItemFailureKind::None));
+        result.execution_work_items[0].production_outcome =
+                production_outcome(reviewed_source_provenance(
+                        ProductionReviewedSourceOutcome::UpdateReview, 9));
+        result.execution_work_items[1].production_outcome =
+                production_outcome(compatibility_source_provenance(
+                        ReviewedSourceCompatibilityBuildReason::NoDiff));
         return result;
     }
     if(test_scenario == "split-child-success") {
@@ -1060,6 +1143,11 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
         }
         transaction.diagnostic =
                 "/private/artifacts/tx-main-4.0.0-1.pkg.tar.zst";
+        failed.production_outcome = production_outcome(
+                reviewed_source_provenance(
+                        ProductionReviewedSourceOutcome::UpdateReview, 11),
+                ProductionSourceBuildCommandOutcome::Succeeded,
+                ProductionSourceInstallOutcome::Failed);
         failed.transaction_failure = transaction;
         failed.failure_detail = transaction;
 
@@ -1279,6 +1367,59 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                 AurUpdateWorkItemExecutionStatus::Failed,
                 AurUpdateWorkItemFailureKind::BuildOrInstallFailed,
                 "fixture build or install failed");
+        return result;
+    }
+    if(test_scenario == "reviewed-published-uncertain" ||
+       test_scenario == "reviewed-build-failure") {
+        result.status = AurUpdateOperationStatus::StoppedOnWorkItemFailure;
+        result.targets.front().status = AurUpdateOperationTargetStatus::Failed;
+        const std::string package_name =
+                result.targets.front().update.installed_name;
+        AurUpdateWorkItemExecutionResult work_item = make_work_item_result(
+                0,
+                0,
+                package_name,
+                AurUpdateWorkItemExecutionStatus::Failed,
+                AurUpdateWorkItemFailureKind::BuildOrInstallFailed);
+        AurUpdateSourceBuildFailureSnapshot failure;
+        failure.category = AurUpdateSourceBuildFailureCategory::Build;
+        if(test_scenario == "reviewed-published-uncertain") {
+            failure.diagnostic =
+                    "fixture post-commit publication ambiguity";
+            failure.reviewed_source_failure =
+                    ReviewedSourceProductionFailure{
+                            ReviewedSourceProductionFailureStage::
+                                    StatePublication,
+                            ReviewedSourceProductionFailureReason::
+                                    PublishedUncertain,
+                            std::monostate{}};
+        } else {
+            failure.diagnostic =
+                    "fixture makepkg failed after reviewed publication";
+            work_item.production_outcome = production_outcome(
+                    reviewed_source_provenance(
+                            ProductionReviewedSourceOutcome::UpdateReview,
+                            12),
+                    ProductionSourceBuildCommandOutcome::Failed,
+                    ProductionSourceInstallOutcome::NotAttempted);
+        }
+        work_item.failure_detail = failure;
+        work_item.diagnostic = failure.diagnostic;
+        result.execution_work_items.push_back(std::move(work_item));
+        result.targets.front().execution_work_item_index = 0;
+        result.targets.front().execution_failure_kind =
+                AurUpdateWorkItemFailureKind::BuildOrInstallFailed;
+        result.targets.front().execution_failure_detail = failure;
+        result.targets.front().execution_diagnostic = failure.diagnostic;
+        result.targets.front().execution_contributions.push_back(
+                make_contribution(
+                        0,
+                        package_name,
+                        AurUpdateWorkItemExecutionStatus::Failed,
+                        AurUpdateWorkItemFailureKind::BuildOrInstallFailed,
+                        failure.diagnostic));
+        result.targets.front().execution_contributions.back().failure_detail =
+                failure;
         return result;
     }
     if(test_scenario == "provider-transaction-failure") {

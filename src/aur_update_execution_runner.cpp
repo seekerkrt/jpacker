@@ -229,6 +229,7 @@ AurUpdateWorkItemExecutionResult make_not_attempted_result(
             .affected_update_plan_indices =
                     attribution.affected_update_plan_indices,
             .affected_roots = attribution.affected_roots,
+            .production_outcome = std::nullopt,
             .child_results = std::move(child_results),
             .unselected_artifacts = {},
             .transaction_failure = std::nullopt,
@@ -461,6 +462,10 @@ AurUpdateSourceBuildFailureCategory map_source_build_failure_phase(
         return AurUpdateSourceBuildFailureCategory::ArtifactValidation;
     case SeparatedPackageBaseSourceBuildFailurePhase::ArtifactIdentity:
         return AurUpdateSourceBuildFailureCategory::ArtifactIdentity;
+    case SeparatedPackageBaseSourceBuildFailurePhase::InstallPreparation:
+        return AurUpdateSourceBuildFailureCategory::InstallPreparation;
+    case SeparatedPackageBaseSourceBuildFailurePhase::InstallTransaction:
+        return AurUpdateSourceBuildFailureCategory::InstallTransaction;
     }
     return AurUpdateSourceBuildFailureCategory::Other;
 }
@@ -486,6 +491,8 @@ void promote_completed_result(
         AurUpdateWorkItemExecutionResult& work_item_result,
         PackageBaseSourceBuildExecutionResult completed,
         bool cleanup_failed) {
+    work_item_result.production_outcome =
+            completed.production_outcome();
     std::vector<PackageBaseSourceBuildSelectedResult> selected_children =
             std::move(completed).release_selected_children();
     std::vector<ArtifactPackageIdentity> unselected_artifacts =
@@ -563,6 +570,7 @@ void record_preparation_failure(
     work_item_result.failure_kind =
             AurUpdateWorkItemFailureKind::BuildOrInstallFailed;
     work_item_result.diagnostic = error.what();
+    work_item_result.production_outcome = error.production_outcome();
     if(const auto* selection = error.selection_failure()) {
         work_item_result.failure_detail.emplace<
                 PackageBaseArtifactIdentitySelectionFailure>(*selection);
@@ -585,6 +593,12 @@ void record_phase_failure(
     work_item_result.failure_kind =
             AurUpdateWorkItemFailureKind::BuildOrInstallFailed;
     work_item_result.diagnostic = error.what();
+    work_item_result.production_outcome = error.production_outcome();
+    if(error.package_metadata_failure().has_value()) {
+        work_item_result.failure_detail.emplace<PackageMetadataFailure>(
+                *error.package_metadata_failure());
+        return;
+    }
     work_item_result.failure_detail.emplace<
             AurUpdateSourceBuildFailureSnapshot>(
             AurUpdateSourceBuildFailureSnapshot{
@@ -606,6 +620,7 @@ void record_transaction_failure(
     work_item_result.failure_kind =
             AurUpdateWorkItemFailureKind::BuildOrInstallFailed;
     work_item_result.transaction_failure = failure;
+    work_item_result.production_outcome = error.production_outcome();
     work_item_result.diagnostic = error.what();
     work_item_result.failure_detail.emplace<
             AurUpdatePackageTransactionFailureSnapshot>(
@@ -619,6 +634,7 @@ void retain_transaction_failure_evidence(
             AurUpdatePackageTransactionFailureSnapshot{
                     map_transaction_failure_kind(error.failure_kind()),
                     error.attempts(), error.exit_code(), error.what()};
+    work_item_result.production_outcome = error.production_outcome();
 }
 
 } // namespace
@@ -740,6 +756,8 @@ execute_prepared_aur_update_source_build_invocation(
                             production_invocation.work_items[index],
                             production_invocation.database_paths,
                             config);
+            work_item_result.production_outcome =
+                    completed.production_outcome();
             if(auto failure = validate_completed_package_base_result(
                        completed, work_item_result)) {
                 record_correlation_failure(
@@ -751,6 +769,8 @@ execute_prepared_aur_update_source_build_invocation(
             promote_completed_result(
                     work_item_result, std::move(completed), false);
         } catch(SeparatedPackageBaseSourceBuildCleanupError& error) {
+            work_item_result.production_outcome =
+                    error.result().production_outcome();
             if(auto failure = validate_completed_package_base_result(
                        error.result(), work_item_result)) {
                 record_correlation_failure(

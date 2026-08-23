@@ -61,6 +61,22 @@ int ReviewedSourcePackageBaseLease::run_guarded_command(
     return status;
 }
 
+int ReviewedSourcePackageBaseLease::run_guarded_production_command(
+        const std::string& command,
+        const std::string& display_command) const {
+    require_unchanged_identity();
+    const int status =
+            run_command_with_parent_independent_lifetime_guard(
+                    command, descriptor_, display_command);
+    try {
+        require_unchanged_identity();
+    } catch(...) {
+        throw ProductionSourceBuildPostCommandRevalidationError(
+                status, std::current_exception());
+    }
+    return status;
+}
+
 ReviewedSourcePackageBaseLease
 acquire_reviewed_source_package_base_lease(
         RetainedTrustedCacheDirectory directory) {

@@ -617,6 +617,21 @@ PackageBaseArtifactInstallTransactionError::exit_code() const noexcept {
     return exit_code_;
 }
 
+const std::optional<ProductionSourceBuildStagedOutcome>&
+PackageBaseArtifactInstallTransactionError::production_outcome()
+        const noexcept {
+    return production_outcome_;
+}
+
+void PackageBaseArtifactInstallTransactionError::attach_production_outcome(
+        ProductionSourceBuildStagedOutcome production_outcome) {
+    if(production_outcome_.has_value()) {
+        throw std::logic_error(
+                "Package transaction failure already has a production outcome.");
+    }
+    production_outcome_.emplace(std::move(production_outcome));
+}
+
 std::vector<PackageBaseArtifactInstallTransactionAttempt>
 PackageBaseArtifactInstallTransactionError::release_attempts() && noexcept {
     return std::move(attempts_);

@@ -1025,6 +1025,20 @@ assert_command "makepkg --packagelist"
 assert_command "makepkg -sc"
 assert_command_content_absent "sudo pacman -U"
 
+setup_case build-install-failure-keeps-staged-outcome
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
+export MOGUET_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING='pacman -U'
+run_fail --noedit --nodiff --noconfirm build clean-root
+assert_contains \
+    "Build outcome for PackageBase clean-root: succeeded." \
+    "$output_file"
+assert_contains \
+    "Install outcome for PackageBase clean-root: failed." \
+    "$output_file"
+assert_contains "Install Error: pacman -U failed with exit code 1." "$output_file"
+assert_not_contains "Build Error: pacman -U" "$output_file"
+assert_command_prefix_count "sudo pacman -U --noconfirm -- " 1
+
 setup_case build-cleanup-partial-success-keeps-cli-contract
 installed_after_success=$case_dir/installed-after-success
 install_success_log=$XDG_CACHE_HOME/pacman-u-success.log

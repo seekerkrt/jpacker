@@ -40,6 +40,7 @@ struct ScriptedSourceExecution {
     std::string package_base;
     std::vector<PackageBaseSourceBuildSelectedResult> selected_children;
     std::vector<ArtifactPackageIdentity> unselected_artifacts;
+    ProductionSourceBuildProvenance source_provenance;
     PackageBaseArtifactIdentitySelectionFailure selection_failure;
     MixedPackageBaseInstallReasonUnsupported mixed_reason_failure;
     SeparatedPackageBaseSourceBuildFailurePhase phase =
@@ -325,12 +326,14 @@ void enqueue_source_unknown_failure() {
 void enqueue_package_base_success(
         std::string package_base,
         std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
-        std::vector<ArtifactPackageIdentity> unselected_artifacts) {
+        std::vector<ArtifactPackageIdentity> unselected_artifacts,
+        ProductionSourceBuildProvenance source_provenance) {
     ScriptedSourceExecution execution;
     execution.kind = ScriptedSourceExecutionKind::PackageBaseSuccess;
     execution.package_base = std::move(package_base);
     execution.selected_children = std::move(selected_children);
     execution.unselected_artifacts = std::move(unselected_artifacts);
+    execution.source_provenance = std::move(source_provenance);
     g_state.source_executions.push_back(std::move(execution));
 }
 
@@ -785,9 +788,11 @@ int run_command(const std::string& command) {
 
 SeparatedSourceBuildCleanupError::SeparatedSourceBuildCleanupError(
         ArtifactInstallExecutionOutcome install_outcome,
+        ProductionSourceBuildStagedOutcome production_outcome,
         const std::string& diagnostic)
     : std::runtime_error(diagnostic),
-      install_outcome_(install_outcome) {
+      install_outcome_(install_outcome),
+      production_outcome_(std::move(production_outcome)) {
 }
 
 SourceBuildPreparationOutcome
@@ -839,7 +844,13 @@ prepare_package_base_source_build_work_item_typed(
     if(execution.kind == ScriptedSourceExecutionKind::Success) {
         if(execution.result.status == SourceBuildExecutionStatus::UpToDate) {
             SourceBuildUpToDate outcome{
-                    std::move(execution.result.diagnostic), std::nullopt};
+                    std::move(execution.result.diagnostic),
+                    execution.result.production_outcome.has_value()
+                            ? std::optional<
+                                      ProductionSourceBuildProvenance>{
+                                      execution.result.production_outcome->
+                                              source_provenance}
+                            : std::nullopt};
             g_state.source_executions.pop_front();
             return outcome;
         }
@@ -850,7 +861,13 @@ prepare_package_base_source_build_work_item_typed(
                             .value_or(
                                     SourceBuildUpdateStatusUnknownSkipReason::
                                             NoConfirm),
-                    std::move(execution.result.diagnostic), std::nullopt};
+                    std::move(execution.result.diagnostic),
+                    execution.result.production_outcome.has_value()
+                            ? std::optional<
+                                      ProductionSourceBuildProvenance>{
+                                      execution.result.production_outcome->
+                                              source_provenance}
+                            : std::nullopt};
             g_state.source_executions.pop_front();
             return outcome;
         }
@@ -934,7 +951,8 @@ execute_prepared_package_base_source_build_work_item_typed(
         return RegisteredSourcePackageBaseExecutionResult(
                 std::move(execution.package_base),
                 std::move(execution.selected_children),
-                std::move(execution.unselected_artifacts));
+                std::move(execution.unselected_artifacts),
+                std::move(execution.source_provenance));
     case ScriptedSourceExecutionKind::PackageBaseCleanupFailure:
         throw RegisteredSourcePackageBaseCleanupError(
                 RegisteredSourcePackageBaseExecutionResult(
@@ -1011,6 +1029,14 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
         case ScriptedSourceExecutionKind::CleanupFailure:
             throw SeparatedSourceBuildCleanupError(
                     execution.cleanup_outcome,
+                    ProductionSourceBuildStagedOutcome{
+                            .source_provenance = {},
+                            .build_outcome =
+                                    ProductionSourceBuildCommandOutcome::
+                                            Succeeded,
+                            .install_outcome =
+                                    ProductionSourceInstallOutcome::
+                                            Succeeded},
                     execution.diagnostic);
         case ScriptedSourceExecutionKind::UnknownFailure:
             throw UnknownSourceExecutionFailure{};

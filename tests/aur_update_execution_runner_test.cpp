@@ -61,6 +61,23 @@ AppConfig runner_config() {
     return config;
 }
 
+ProductionSourceBuildStagedOutcome reviewed_staged_outcome(
+        ProductionSourceBuildCommandOutcome build_outcome,
+        ProductionSourceInstallOutcome install_outcome) {
+    ProductionSourceBuildProvenance provenance;
+    provenance.review_status = ProductionSourceReviewStatus::Reviewed;
+    provenance.reviewed_upstream_base_revision =
+            SourceRevisionIdentity::git_commit(
+                    "1111111111111111111111111111111111111111");
+    provenance.publication_status =
+            ReviewedSourcePublicationStatus::Published;
+    provenance.reviewed_outcome =
+            ProductionReviewedSourceOutcome::UpdateReview;
+    provenance.reviewed_state_generation = 9;
+    return ProductionSourceBuildStagedOutcome{
+            std::move(provenance), build_outcome, install_outcome};
+}
+
 RequiredPackageArtifactTarget required_target(
         const std::string& package_base,
         const std::string& package_name,
@@ -1347,6 +1364,38 @@ void test_selection_mixed_reason_metadata_and_phase_failures_are_typed() {
                            .code == PackageMetadataErrorCode::QueryFailed,
            "Metadata failure lost its typed code");
 
+    const ProductionSourceBuildStagedOutcome staged_metadata_outcome =
+            reviewed_staged_outcome(
+                    ProductionSourceBuildCommandOutcome::Succeeded,
+                    ProductionSourceInstallOutcome::Failed);
+    const auto staged_metadata_result = run_one_multiple_failure(
+            "post-build metadata failure",
+            [metadata_failure, staged_metadata_outcome](
+                    execution_stub::ExpectedExecution expected) {
+                execution_stub::enqueue_phase_failure(
+                        std::move(expected),
+                        SeparatedPackageBaseSourceBuildFailurePhase::
+                                InstallPreparation,
+                        metadata_failure.diagnostic, std::nullopt,
+                        metadata_failure, staged_metadata_outcome);
+            });
+    const AurUpdateWorkItemExecutionResult& staged_metadata =
+            staged_metadata_result.work_item_results.front();
+    expect(
+            staged_metadata.production_outcome.has_value() &&
+                    staged_metadata.production_outcome->source_provenance.
+                                    review_status ==
+                            ProductionSourceReviewStatus::Reviewed &&
+                    staged_metadata.production_outcome->build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded &&
+                    staged_metadata.production_outcome->install_outcome ==
+                            ProductionSourceInstallOutcome::Failed &&
+                    require_failure_detail<PackageMetadataFailure>(
+                            staged_metadata,
+                            "post-build metadata failure").code ==
+                            PackageMetadataErrorCode::QueryFailed,
+            "AUR aggregate lost reviewed/build outcome or typed metadata failure");
+
     for(const auto& [phase, expected_category, diagnostic] :
         std::vector<std::tuple<
                 SeparatedPackageBaseSourceBuildFailurePhase,
@@ -1457,6 +1506,10 @@ void test_transaction_failure_has_attempts_without_child_success_and_suffix() {
                     "7.0-1",
                     DesiredInstallReason::Explicit)};
     const std::string diagnostic = "pacman transaction failed";
+    const ProductionSourceBuildStagedOutcome transaction_outcome =
+            reviewed_staged_outcome(
+                    ProductionSourceBuildCommandOutcome::Succeeded,
+                    ProductionSourceInstallOutcome::Failed);
 
     execution_stub::reset();
     execution_stub::enqueue_transaction_failure(
@@ -1477,7 +1530,9 @@ void test_transaction_failure_has_attempts_without_child_success_and_suffix() {
             PackageBaseArtifactInstallTransactionFailureKind::NonzeroExit,
             attempts,
             1,
-            diagnostic);
+            diagnostic,
+            std::nullopt,
+            transaction_outcome);
 
     const AurUpdateSourceBuildExecutionResult result =
             execute_without_escape(
@@ -1490,7 +1545,15 @@ void test_transaction_failure_has_attempts_without_child_success_and_suffix() {
     const auto& failed = result.work_item_results[0];
     expect(failed.status == AurUpdateWorkItemExecutionStatus::Failed &&
                    failed.diagnostic ==
-                           std::optional<std::string>{diagnostic},
+                           std::optional<std::string>{diagnostic} &&
+                   failed.production_outcome.has_value() &&
+                   failed.production_outcome->source_provenance.
+                                   review_status ==
+                           ProductionSourceReviewStatus::Reviewed &&
+                   failed.production_outcome->build_outcome ==
+                           ProductionSourceBuildCommandOutcome::Succeeded &&
+                   failed.production_outcome->install_outcome ==
+                           ProductionSourceInstallOutcome::Failed,
            "Transaction failure aggregate differs");
     expect_no_fabricated_child_success(failed, "transaction failure");
     expect(failed.transaction_failure.has_value() &&

@@ -9,6 +9,7 @@
 #include "source_build.hpp"
 #include "trusted_cache.hpp"
 
+#include <exception>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -284,6 +285,70 @@ struct PreparedProductionSourceBuildInvocation {
             local_source_authority = std::nullopt;
 };
 
+enum class ProductionSourceBuildWorkItemStatus {
+    NotAttempted,
+    Succeeded,
+    Failed,
+};
+
+enum class ProductionSourceBuildFailureStage {
+    Review,
+    Build,
+    ArtifactValidation,
+    InstallPreparation,
+    InstallTransaction,
+    Cleanup,
+    Other,
+};
+
+// Invocation entry exists before execution. Reached work advances the shared
+// staged outcome; failure_exception retains the original typed error rather
+// than reducing PackageMetadataError or transaction evidence to prose.
+struct ProductionSourceBuildWorkItemOutcome {
+    std::string package_base;
+    ProductionSourceBuildWorkItemStatus status =
+            ProductionSourceBuildWorkItemStatus::NotAttempted;
+    std::optional<ProductionSourceBuildStagedOutcome>
+            production_outcome;
+    std::optional<ProductionSourceBuildFailureStage> failure_stage;
+    std::optional<std::string> diagnostic;
+    std::exception_ptr failure_exception;
+};
+
+struct ProductionSourceBuildInvocationResult {
+    std::vector<ProductionSourceBuildWorkItemOutcome> work_items;
+
+    bool is_success() const noexcept;
+};
+
+// Normal source-build CLI preserves the complete preinitialized aggregate on
+// failure while keeping the exact typed cause available for inspection.
+class ProductionSourceBuildInvocationError final
+    : public std::runtime_error {
+    ProductionSourceBuildInvocationResult result_;
+    std::size_t failed_work_item_index_ = 0;
+
+public:
+    ProductionSourceBuildInvocationError(
+            ProductionSourceBuildInvocationResult result,
+            std::size_t failed_work_item_index,
+            const std::string& diagnostic);
+
+    const ProductionSourceBuildInvocationResult& result() const noexcept {
+        return result_;
+    }
+
+    std::size_t failed_work_item_index() const noexcept {
+        return failed_work_item_index_;
+    }
+
+    ProductionSourceBuildFailureStage failure_stage() const;
+    void rethrow_failure() const;
+};
+
+std::string format_production_source_build_invocation_failure(
+        const ProductionSourceBuildInvocationError& error);
+
 // Remote buildのroute identity、AUR plan（該当時）、cache未activateの
 // production invocationを同じowned snapshotへ束ねる。dry-run projectionは
 // このauthorityをborrowし、actual executionだけがcacheをactivateする。
@@ -389,6 +454,7 @@ struct SelectedRepositoryProviderTransactionResult {
 // layout非依存のdoubleで保持する。
 class RegisteredSourcePackageBaseExecutionResultTestDouble final {
     std::string package_base_;
+    ProductionSourceBuildStagedOutcome production_outcome_;
     std::vector<PackageBaseSourceBuildSelectedResult> selected_children_;
     std::vector<ArtifactPackageIdentity> unselected_artifacts_;
 
@@ -397,14 +463,29 @@ public:
             std::string package_base,
             std::vector<PackageBaseSourceBuildSelectedResult>
                     selected_children,
-            std::vector<ArtifactPackageIdentity> unselected_artifacts)
+            std::vector<ArtifactPackageIdentity> unselected_artifacts,
+            ProductionSourceBuildProvenance source_provenance = {})
         : package_base_(std::move(package_base)),
+          production_outcome_({
+                  .source_provenance = std::move(source_provenance),
+                  .build_outcome =
+                          ProductionSourceBuildCommandOutcome::Succeeded,
+                  .install_outcome =
+                          ProductionSourceInstallOutcome::Succeeded}),
           selected_children_(std::move(selected_children)),
           unselected_artifacts_(std::move(unselected_artifacts)) {
     }
 
     const std::string& package_base() const noexcept {
         return package_base_;
+    }
+    const ProductionSourceBuildProvenance& source_provenance()
+            const noexcept {
+        return production_outcome_.source_provenance;
+    }
+    const ProductionSourceBuildStagedOutcome& production_outcome()
+            const noexcept {
+        return production_outcome_;
     }
     const std::vector<PackageBaseSourceBuildSelectedResult>&
     selected_children() const noexcept {
@@ -439,17 +520,25 @@ class RegisteredSourcePackageBasePreparationErrorTestDouble final
             PackageBaseArtifactIdentitySelectionFailure,
             MixedPackageBaseInstallReasonUnsupported>
             failure_;
+    std::optional<ProductionSourceBuildStagedOutcome>
+            production_outcome_;
 
 public:
     RegisteredSourcePackageBasePreparationErrorTestDouble(
             PackageBaseArtifactIdentitySelectionFailure failure,
-            const std::string& diagnostic)
-        : std::runtime_error(diagnostic), failure_(std::move(failure)) {
+            const std::string& diagnostic,
+            std::optional<ProductionSourceBuildStagedOutcome>
+                    production_outcome = std::nullopt)
+        : std::runtime_error(diagnostic), failure_(std::move(failure)),
+          production_outcome_(std::move(production_outcome)) {
     }
     RegisteredSourcePackageBasePreparationErrorTestDouble(
             MixedPackageBaseInstallReasonUnsupported failure,
-            const std::string& diagnostic)
-        : std::runtime_error(diagnostic), failure_(std::move(failure)) {
+            const std::string& diagnostic,
+            std::optional<ProductionSourceBuildStagedOutcome>
+                    production_outcome = std::nullopt)
+        : std::runtime_error(diagnostic), failure_(std::move(failure)),
+          production_outcome_(std::move(production_outcome)) {
     }
 
     const PackageBaseArtifactIdentitySelectionFailure* selection_failure()
@@ -462,21 +551,52 @@ public:
         return std::get_if<
                 MixedPackageBaseInstallReasonUnsupported>(&failure_);
     }
+    const std::optional<ProductionSourceBuildStagedOutcome>&
+    production_outcome() const noexcept {
+        return production_outcome_;
+    }
 };
 
 class RegisteredSourcePackageBasePhaseErrorTestDouble final
     : public std::runtime_error {
     SeparatedPackageBaseSourceBuildFailurePhase phase_;
+    std::optional<ReviewedSourceProductionFailure>
+            reviewed_source_failure_;
+    std::optional<PackageMetadataFailure> package_metadata_failure_;
+    std::optional<ProductionSourceBuildStagedOutcome>
+            production_outcome_;
 
 public:
     RegisteredSourcePackageBasePhaseErrorTestDouble(
             SeparatedPackageBaseSourceBuildFailurePhase phase,
-            const std::string& diagnostic)
-        : std::runtime_error(diagnostic), phase_(phase) {
+            const std::string& diagnostic,
+            std::optional<ReviewedSourceProductionFailure>
+                    reviewed_source_failure = std::nullopt,
+            std::optional<PackageMetadataFailure>
+                    package_metadata_failure = std::nullopt,
+            std::optional<ProductionSourceBuildStagedOutcome>
+                    production_outcome = std::nullopt)
+        : std::runtime_error(diagnostic), phase_(phase),
+          reviewed_source_failure_(std::move(reviewed_source_failure)),
+          package_metadata_failure_(
+                  std::move(package_metadata_failure)),
+          production_outcome_(std::move(production_outcome)) {
     }
 
     SeparatedPackageBaseSourceBuildFailurePhase phase() const noexcept {
         return phase_;
+    }
+    const std::optional<ReviewedSourceProductionFailure>&
+    reviewed_source_failure() const noexcept {
+        return reviewed_source_failure_;
+    }
+    const std::optional<PackageMetadataFailure>&
+    package_metadata_failure() const noexcept {
+        return package_metadata_failure_;
+    }
+    const std::optional<ProductionSourceBuildStagedOutcome>&
+    production_outcome() const noexcept {
+        return production_outcome_;
     }
 };
 
@@ -486,6 +606,8 @@ class RegisteredSourcePackageTransactionErrorTestDouble final
     std::string package_base_;
     std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts_;
     std::optional<int> exit_code_;
+    std::optional<ProductionSourceBuildStagedOutcome>
+            production_outcome_;
 
 public:
     RegisteredSourcePackageTransactionErrorTestDouble(
@@ -494,10 +616,13 @@ public:
             std::vector<PackageBaseArtifactInstallTransactionAttempt>
                     attempts,
             std::optional<int> exit_code,
-            const std::string& diagnostic)
+            const std::string& diagnostic,
+            std::optional<ProductionSourceBuildStagedOutcome>
+                    production_outcome = std::nullopt)
         : std::runtime_error(diagnostic), failure_kind_(failure_kind),
           package_base_(std::move(package_base)),
-          attempts_(std::move(attempts)), exit_code_(exit_code) {
+          attempts_(std::move(attempts)), exit_code_(exit_code),
+          production_outcome_(std::move(production_outcome)) {
     }
 
     PackageBaseArtifactInstallTransactionFailureKind failure_kind()
@@ -513,6 +638,10 @@ public:
     }
     const std::optional<int>& exit_code() const noexcept {
         return exit_code_;
+    }
+    const std::optional<ProductionSourceBuildStagedOutcome>&
+    production_outcome() const noexcept {
+        return production_outcome_;
     }
 };
 
@@ -681,6 +810,6 @@ execute_prepared_source_build_work_item(
 
 // lifecycle intentがSetならsource-neutral set owner、それ以外はroute ownerが
 // 検証済みのsingular compatibilityへroutingする。DB snapshotを再queryしない。
-void execute_prepared_source_build_invocation(
+ProductionSourceBuildInvocationResult execute_prepared_source_build_invocation(
         PreparedProductionSourceBuildInvocation invocation,
         const AppConfig& config);

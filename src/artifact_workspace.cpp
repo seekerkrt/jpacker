@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
+#include <exception>
 #include <fcntl.h>
 #include <linux/openat2.h>
 #include <map>
@@ -1562,7 +1563,12 @@ int ProductionArtifactSourceTree::run_guarded_command(
         const std::string& display_command) const {
     require_unchanged_identity();
     const int status = guarded_command_(command, display_command);
-    require_unchanged_identity();
+    try {
+        require_unchanged_identity();
+    } catch(...) {
+        throw ProductionSourceBuildPostCommandRevalidationError(
+                status, std::current_exception());
+    }
     return status;
 }
 
@@ -1697,9 +1703,19 @@ int ArtifactMakepkgContext::run_makepkg_build_only(
     if(options.rebuild) arguments.emplace_back("-f");
     if(options.clean_build) arguments.emplace_back("-C");
     const std::string command = makepkg_command(arguments);
-    int exit_code = production_source_tree_ != nullptr
-            ? production_source_tree_->run_guarded_command(command)
-            : run_command(command);
+    if(production_source_tree_ != nullptr) {
+        const int exit_code =
+                production_source_tree_->run_guarded_command(command);
+        try {
+            require_unchanged_checkout();
+            require_matching_workspace(workspace);
+        } catch(...) {
+            throw ProductionSourceBuildPostCommandRevalidationError(
+                    exit_code, std::current_exception());
+        }
+        return exit_code;
+    }
+    const int exit_code = run_command(command);
     require_unchanged_checkout();
     require_matching_workspace(workspace);
     return exit_code;
@@ -1720,9 +1736,20 @@ int ArtifactMakepkgContext::run_makepkg_build_only(
     if(options.rebuild) arguments.emplace_back("-f");
     if(options.clean_build) arguments.emplace_back("-C");
     const std::string command = makepkg_command(arguments);
-    const int exit_code = production_source_tree_ != nullptr
-            ? production_source_tree_->run_guarded_command(command)
-            : run_command(command);
+    if(production_source_tree_ != nullptr) {
+        const int exit_code =
+                production_source_tree_->run_guarded_command(command);
+        try {
+            require_unchanged_checkout();
+            require_matching_workspace(workspace);
+            expected.require_matching_workspace(workspace);
+        } catch(...) {
+            throw ProductionSourceBuildPostCommandRevalidationError(
+                    exit_code, std::current_exception());
+        }
+        return exit_code;
+    }
+    const int exit_code = run_command(command);
     require_unchanged_checkout();
     require_matching_workspace(workspace);
     expected.require_matching_workspace(workspace);

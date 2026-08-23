@@ -5,12 +5,14 @@
 #include "trusted_git.hpp"
 
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <variant>
 
 // POLICY(#411): Slice 4B owns the production-disconnected transition from an
@@ -178,10 +180,14 @@ private:
             const TrustedGitPinnedCheckout& checkout,
             const ReviewedSourcePackageBaseLease& lease,
             const TrustedGitPinnedCheckoutOverlayObservation& expected);
+    friend class PinnedReviewedSourceBuild;
 
     ReviewedSourcePackageBaseLease(
             RetainedTrustedCacheDirectory directory,
             int descriptor) noexcept;
+    int run_guarded_production_command(
+            const std::string& command,
+            const std::string& display_command) const;
 
     RetainedTrustedCacheDirectory directory_;
     int                           descriptor_ = -1;
@@ -211,6 +217,8 @@ public:
     [[nodiscard]] const AurReviewedSourceReviewIdentity& identity() const;
     [[nodiscard]] const ReviewedSourceExpectedStateObservation&
     expected_state_observation() const;
+    [[nodiscard]] const ReviewedSourceIntegrationLifecycle& lifecycle()
+            const;
     [[nodiscard]] const std::filesystem::path& checkout_path() const;
     [[nodiscard]] std::uintmax_t checkout_device() const;
     [[nodiscard]] std::uintmax_t checkout_inode() const;
@@ -278,6 +286,8 @@ public:
     [[nodiscard]] const AurReviewedSourceReviewIdentity& identity() const;
     [[nodiscard]] const ReviewedSourceExpectedStateObservation&
     expected_state_observation() const;
+    [[nodiscard]] const ReviewedSourceIntegrationLifecycle& lifecycle()
+            const;
     [[nodiscard]] const std::filesystem::path& checkout_path() const;
     [[nodiscard]] std::uintmax_t checkout_device() const;
     [[nodiscard]] std::uintmax_t checkout_inode() const;
@@ -570,6 +580,51 @@ public:
 
 private:
     TrustedGitPinnedCheckoutFailure failure_;
+};
+
+// The external command has completed and its exact status is known, but a
+// production source-build identity check performed before returning it failed.
+// Pre-command failures never construct this transport.
+class ProductionSourceBuildPostCommandRevalidationError final
+    : public std::runtime_error {
+public:
+    ProductionSourceBuildPostCommandRevalidationError(
+            int command_exit_status,
+            std::exception_ptr failure_exception)
+        : std::runtime_error(diagnostic(failure_exception)),
+          command_exit_status_(command_exit_status),
+          failure_exception_(std::move(failure_exception)) {
+    }
+
+    [[nodiscard]] int command_exit_status() const noexcept {
+        return command_exit_status_;
+    }
+
+    void rethrow_failure() const {
+        if(failure_exception_ == nullptr) {
+            throw std::logic_error(
+                    "Post-command revalidation failure has no nested exception.");
+        }
+        std::rethrow_exception(failure_exception_);
+    }
+
+private:
+    static std::string diagnostic(
+            const std::exception_ptr& failure_exception) {
+        if(failure_exception == nullptr) {
+            return {};
+        }
+        try {
+            std::rethrow_exception(failure_exception);
+        } catch(const std::exception& error) {
+            return error.what();
+        } catch(...) {
+            return {};
+        }
+    }
+
+    int                command_exit_status_ = 0;
+    std::exception_ptr failure_exception_;
 };
 
 struct ReviewedSourcePublicationConflict {

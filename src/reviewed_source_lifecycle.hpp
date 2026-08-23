@@ -228,7 +228,9 @@ public:
     [[nodiscard]] static ReviewedSourceOperationStop fatal(
             ReviewedSourceFatalStateFailure failure) noexcept;
 
-    [[nodiscard]] ReviewedSourceOperationStopReason reason() const noexcept;
+    [[nodiscard]] ReviewedSourceOperationStopReason reason() const noexcept {
+        return reason_;
+    }
     [[nodiscard]] const std::optional<ReviewedSourceIntegrationLifecycle>&
     lifecycle() const noexcept;
     [[nodiscard]] const std::optional<ReviewedSourceFatalStateFailure>&

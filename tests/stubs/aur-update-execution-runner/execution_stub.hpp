@@ -79,7 +79,11 @@ void enqueue_phase_failure(
         SeparatedPackageBaseSourceBuildFailurePhase phase,
         std::string diagnostic,
         std::optional<ReviewedSourceProductionFailure>
-                reviewed_source_failure = std::nullopt);
+                reviewed_source_failure = std::nullopt,
+        std::optional<PackageMetadataFailure>
+                package_metadata_failure = std::nullopt,
+        std::optional<ProductionSourceBuildStagedOutcome>
+                production_outcome = std::nullopt);
 
 void enqueue_selection_failure(
         ExpectedExecution expected,
@@ -105,7 +109,9 @@ void enqueue_transaction_failure(
         std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts,
         std::optional<int> exit_code,
         std::string diagnostic,
-        std::optional<std::string> returned_package_base = std::nullopt);
+        std::optional<std::string> returned_package_base = std::nullopt,
+        std::optional<ProductionSourceBuildStagedOutcome>
+                production_outcome = std::nullopt);
 
 void enqueue_unknown_failure(ExpectedExecution expected);
 

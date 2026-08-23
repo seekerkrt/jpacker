@@ -1,5 +1,7 @@
 #include "reviewed_source_presentation.hpp"
 
+#include "localization.hpp"
+
 #include <limits>
 #include <optional>
 #include <string>
@@ -8,6 +10,10 @@
 #include <utility>
 
 namespace {
+
+constexpr std::string_view GIT_TOOL_NAME = "Git";
+constexpr std::string_view PKGBUILD_FILE_NAME = "PKGBUILD";
+constexpr std::string_view INSTALL_FILE_SUFFIX = "install";
 
 using SizeCheckResult = std::variant<
         std::uintmax_t,
@@ -210,8 +216,8 @@ void append_safe_content(
     }
 }
 
-std::optional<std::string_view> object_format_display(
-        GitObjectFormat format) noexcept {
+std::optional<std::string> object_format_display(
+        GitObjectFormat format) {
     switch(format) {
     case GitObjectFormat::Sha1:
         return "SHA-1";
@@ -221,84 +227,108 @@ std::optional<std::string_view> object_format_display(
     return std::nullopt;
 }
 
-std::optional<std::string_view> mode_display(
-        ReviewedSourceFileMode mode) noexcept {
+std::optional<std::string> mode_display(ReviewedSourceFileMode mode) {
     switch(mode) {
     case ReviewedSourceFileMode::Regular:
-        return "100644 (Regular)";
+        return localization::translate_message("100644 (regular file)");
     case ReviewedSourceFileMode::Executable:
-        return "100755 (Executable)";
+        return localization::translate_message("100755 (executable file)");
     case ReviewedSourceFileMode::SymbolicLink:
-        return "120000 (SymbolicLink)";
+        return localization::translate_message("120000 (symbolic link)");
     case ReviewedSourceFileMode::Gitlink:
-        return "160000 (Gitlink)";
+        return localization::translate_message("160000 (Gitlink)");
     }
     return std::nullopt;
 }
 
-std::optional<std::string_view> classification_display(
-        ReviewedSourceFileClassification classification) noexcept {
+std::optional<std::string> classification_display(
+        ReviewedSourceFileClassification classification) {
     switch(classification) {
     case ReviewedSourceFileClassification::TrackedSource:
-        return "TrackedSource";
+        return localization::translate_message("tracked source");
     case ReviewedSourceFileClassification::GeneratedMetadata:
-        return "GeneratedMetadata";
+        return localization::translate_message("generated metadata");
     }
     return std::nullopt;
 }
 
-std::optional<std::string_view> observation_kind_display(
-        ReviewedSourceBlobContentKind kind) noexcept {
+std::optional<std::string> observation_kind_display(
+        ReviewedSourceBlobContentKind kind) {
     switch(kind) {
     case ReviewedSourceBlobContentKind::LineReviewable:
-        return "LineReviewable";
+        return localization::translate_message("line-reviewable content");
     case ReviewedSourceBlobContentKind::ContainsNul:
-        return "ContainsNul";
+        return localization::translate_message("content containing NUL bytes");
     case ReviewedSourceBlobContentKind::Gitlink:
-        return "Gitlink";
+        return localization::translate_message("Gitlink metadata");
     }
     return std::nullopt;
 }
 
-std::optional<std::string_view> representation_display(
-        ReviewedSourceReviewRepresentation representation) noexcept {
+std::optional<std::string> representation_display(
+        ReviewedSourceReviewRepresentation representation) {
     switch(representation) {
     case ReviewedSourceReviewRepresentation::CompleteTextPatch:
-        return "CompleteTextPatch";
+        return localization::translate_message("complete text patch");
     case ReviewedSourceReviewRepresentation::CompleteFullText:
-        return "CompleteFullText";
+        return localization::translate_message("complete full text");
     case ReviewedSourceReviewRepresentation::NoContentChange:
-        return "NoContentChange";
+        return localization::translate_message("no content change");
     case ReviewedSourceReviewRepresentation::ContainsNul:
-        return "ContainsNul";
+        return localization::translate_message("content containing NUL bytes");
     case ReviewedSourceReviewRepresentation::GitlinkMetadata:
-        return "GitlinkMetadata";
+        return localization::translate_message("Gitlink metadata");
     case ReviewedSourceReviewRepresentation::MixedTextAndNonText:
-        return "MixedTextAndNonText";
+        return localization::translate_message("mixed text and non-text content");
     }
     return std::nullopt;
 }
 
-std::optional<std::string_view> readiness_display(
-        ReviewedSourceReviewReadiness readiness) noexcept {
+std::optional<std::string> readiness_display(
+        ReviewedSourceReviewReadiness readiness) {
     switch(readiness) {
     case ReviewedSourceReviewReadiness::Complete:
-        return "Complete";
+        return localization::translate_message("complete");
     case ReviewedSourceReviewReadiness::ManualInspectionRequired:
-        return "ManualInspectionRequired";
+        return localization::translate_message("manual inspection required");
     case ReviewedSourceReviewReadiness::SensitiveSourceUnrenderable:
-        return "SensitiveSourceUnrenderable";
+        return localization::translate_message(
+                "sensitive source cannot be rendered safely");
     }
     return std::nullopt;
 }
 
-std::optional<std::string_view> emphasis_display(
-        ReviewedSourceReviewEmphasis emphasis) noexcept {
+std::optional<std::string> emphasis_display(
+        ReviewedSourceReviewEmphasis emphasis) {
     switch(emphasis) {
     case ReviewedSourceReviewEmphasis::Ordinary:
-        return "Ordinary";
+        return localization::translate_message("ordinary");
     case ReviewedSourceReviewEmphasis::Sensitive:
-        return "Sensitive";
+        return localization::translate_message("review-sensitive");
+    }
+    return std::nullopt;
+}
+
+enum class ChangeStatus {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    TypeChanged,
+};
+
+std::optional<std::string> change_status_display(ChangeStatus status) {
+    switch(status) {
+    case ChangeStatus::Added:
+        return localization::translate_message("added");
+    case ChangeStatus::Modified:
+        return localization::translate_message("modified");
+    case ChangeStatus::Deleted:
+        return localization::translate_message("deleted");
+    case ChangeStatus::Renamed:
+        return localization::translate_message("renamed");
+    case ChangeStatus::TypeChanged:
+        return localization::translate_message("type changed");
     }
     return std::nullopt;
 }
@@ -307,7 +337,7 @@ struct ChangeView {
     const ReviewedSourceFileVersion* old_version = nullptr;
     const ReviewedSourceFileVersion* new_version = nullptr;
     const ReviewedSourceContentChange* content = nullptr;
-    std::string_view status;
+    ChangeStatus status = ChangeStatus::Modified;
     std::optional<std::uint8_t> rename_similarity;
 };
 
@@ -318,29 +348,32 @@ ChangeView change_view(const ReviewedSourceFileChange& change) {
                 if constexpr(std::is_same_v<Change, ReviewedSourceAdded>) {
                     return ChangeView{
                             nullptr, &value.new_version, &value.content,
-                            "Added", std::nullopt};
+                            ChangeStatus::Added, std::nullopt};
                 } else if constexpr(std::is_same_v<
                                             Change,
                                             ReviewedSourceModified>) {
                     return ChangeView{
                             &value.old_version, &value.new_version,
-                            &value.content, "Modified", std::nullopt};
+                            &value.content, ChangeStatus::Modified,
+                            std::nullopt};
                 } else if constexpr(std::is_same_v<
                                             Change,
                                             ReviewedSourceDeleted>) {
                     return ChangeView{
                             &value.old_version, nullptr, &value.content,
-                            "Deleted", std::nullopt};
+                            ChangeStatus::Deleted, std::nullopt};
                 } else if constexpr(std::is_same_v<
                                             Change,
                                             ReviewedSourceRenamed>) {
                     return ChangeView{
                             &value.old_version, &value.new_version,
-                            &value.content, "Renamed", value.similarity};
+                            &value.content, ChangeStatus::Renamed,
+                            value.similarity};
                 } else {
                     return ChangeView{
                             &value.old_version, &value.new_version,
-                            &value.content, "TypeChanged", std::nullopt};
+                            &value.content, ChangeStatus::TypeChanged,
+                            std::nullopt};
                 }
             },
             change);
@@ -348,7 +381,7 @@ ChangeView change_view(const ReviewedSourceFileChange& change) {
 
 bool append_mapped_value(
         RenderState& state,
-        const std::optional<std::string_view>& value,
+        const std::optional<std::string>& value,
         std::size_t entry_index) {
     if(!value.has_value()) {
         state.fail_inconsistent(entry_index);
@@ -381,20 +414,22 @@ void render_version_fields(
         const ReviewedSourceFileVersion* version,
         std::size_t entry_index) {
     state.append("  ", entry_index);
-    state.append(side, entry_index);
-    state.append(" path: ", entry_index);
+    state.append(localization::format_translated_message(
+                         "{} path: ", side),
+                 entry_index);
     if(version == nullptr) {
-        state.append("none\n", entry_index);
+        state.append(localization::translate_message("none\n"), entry_index);
     } else {
         state.append(version->path().escaped_display(), entry_index);
         state.append("\n", entry_index);
     }
 
     state.append("  ", entry_index);
-    state.append(side, entry_index);
-    state.append(" mode: ", entry_index);
+    state.append(localization::format_translated_message(
+                         "{} mode: ", side),
+                 entry_index);
     if(version == nullptr) {
-        state.append("none\n", entry_index);
+        state.append(localization::translate_message("none\n"), entry_index);
     } else {
         append_mapped_value(
                 state, mode_display(version->mode()), entry_index);
@@ -402,10 +437,11 @@ void render_version_fields(
     }
 
     state.append("  ", entry_index);
-    state.append(side, entry_index);
-    state.append(" object: ", entry_index);
+    state.append(localization::format_translated_message(
+                         "{} object: ", side),
+                 entry_index);
     if(version == nullptr) {
-        state.append("none\n", entry_index);
+        state.append(localization::translate_message("none\n"), entry_index);
     } else {
         append_mapped_value(
                 state,
@@ -417,22 +453,27 @@ void render_version_fields(
     }
 
     state.append("  ", entry_index);
-    state.append(side, entry_index);
-    state.append(" size: ", entry_index);
+    state.append(localization::format_translated_message(
+                         "{} size: ", side),
+                 entry_index);
     if(version == nullptr) {
-        state.append("none\n", entry_index);
+        state.append(localization::translate_message("none\n"), entry_index);
     } else if(!version->blob_size().has_value()) {
-        state.append("unavailable\n", entry_index);
+        state.append(
+                localization::translate_message("unavailable\n"),
+                entry_index);
     } else {
-        state.append_number(*version->blob_size(), entry_index);
-        state.append(" bytes\n", entry_index);
+        state.append(localization::format_translated_message(
+                             "{} bytes\n", *version->blob_size()),
+                     entry_index);
     }
 
     state.append("  ", entry_index);
-    state.append(side, entry_index);
-    state.append(" classification: ", entry_index);
+    state.append(localization::format_translated_message(
+                         "{} classification: ", side),
+                 entry_index);
     if(version == nullptr) {
-        state.append("none\n", entry_index);
+        state.append(localization::translate_message("none\n"), entry_index);
     } else {
         append_mapped_value(
                 state,
@@ -448,10 +489,11 @@ void render_observation_kind(
         const std::optional<ReviewedSourceBlobObservation>& observation,
         std::size_t entry_index) {
     state.append("  ", entry_index);
-    state.append(side, entry_index);
-    state.append(" content kind: ", entry_index);
+    state.append(localization::format_translated_message(
+                         "{} content kind: ", side),
+                 entry_index);
     if(!observation.has_value()) {
-        state.append("none\n", entry_index);
+        state.append(localization::translate_message("none\n"), entry_index);
         return;
     }
     append_mapped_value(
@@ -463,20 +505,25 @@ void render_git_marker(
         RenderState& state,
         const ReviewedSourceContentChange& content,
         std::size_t entry_index) {
-    state.append("  Git marker: ", entry_index);
+    state.append(
+            localization::format_translated_message(
+                    "  {} change marker: ", GIT_TOOL_NAME),
+            entry_index);
     std::visit(
             [&state, entry_index](const auto& value) {
                 using Content = std::decay_t<decltype(value)>;
                 if constexpr(std::is_same_v<
                                      Content,
                                      ReviewedSourceTextChange>) {
-                    state.append("Text (added lines: ", entry_index);
-                    state.append_number(value.added_lines, entry_index);
-                    state.append("; deleted lines: ", entry_index);
-                    state.append_number(value.deleted_lines, entry_index);
-                    state.append(")", entry_index);
+                    state.append(localization::format_translated_message(
+                                         "text (added lines: {}; deleted lines: {})",
+                                         value.added_lines,
+                                         value.deleted_lines),
+                                 entry_index);
                 } else {
-                    state.append("Binary", entry_index);
+                    state.append(
+                            localization::translate_message("binary"),
+                            entry_index);
                 }
             },
             content);
@@ -502,9 +549,11 @@ void render_status_summary(
         RenderState& state,
         const ChangeView& view,
         std::size_t entry_index) {
-    state.append("  status: ", entry_index);
-    state.append(view.status, entry_index);
-    if(view.status == "Renamed" && view.old_version != nullptr &&
+    state.append(localization::translate_message("  change status: "),
+                 entry_index);
+    append_mapped_value(
+            state, change_status_display(view.status), entry_index);
+    if(view.status == ChangeStatus::Renamed && view.old_version != nullptr &&
        view.new_version != nullptr) {
         state.append(" ", entry_index);
         state.append(
@@ -512,7 +561,7 @@ void render_status_summary(
         state.append(" -> ", entry_index);
         state.append(
                 view.new_version->path().escaped_display(), entry_index);
-    } else if(view.status == "TypeChanged" &&
+    } else if(view.status == ChangeStatus::TypeChanged &&
               view.old_version != nullptr && view.new_version != nullptr) {
         state.append(" ", entry_index);
         append_mapped_value(
@@ -528,21 +577,26 @@ void render_readiness_diagnostic(
         RenderState& state,
         ReviewedSourceReviewReadiness readiness,
         std::size_t entry_index) {
-    state.append("  readiness diagnostic: ", entry_index);
+    state.append(
+            localization::translate_message("  review readiness detail: "),
+            entry_index);
     switch(readiness) {
     case ReviewedSourceReviewReadiness::Complete:
         state.append(
-                "complete terminal-safe content presentation\n",
+                localization::translate_message(
+                        "complete terminal-safe content presentation\n"),
                 entry_index);
         return;
     case ReviewedSourceReviewReadiness::ManualInspectionRequired:
         state.append(
-                "WARNING: manual inspection required; metadata is not a complete content review\n",
+                localization::translate_message(
+                        "WARNING: manual inspection is required; metadata alone is not a complete content review\n"),
                 entry_index);
         return;
     case ReviewedSourceReviewReadiness::SensitiveSourceUnrenderable:
         state.append(
-                "WARNING: sensitive source content is unrenderable; metadata does not complete review\n",
+                localization::translate_message(
+                        "WARNING: review-sensitive source content cannot be rendered safely; metadata does not complete the review\n"),
                 entry_index);
         return;
     }
@@ -570,7 +624,9 @@ void render_text_content(
         char prefix,
         std::size_t entry_index) {
     if(content.lines.empty()) {
-        state.append("    (empty)\n", entry_index);
+        state.append(
+                localization::translate_message("    (empty)\n"),
+                entry_index);
         return;
     }
     for(const ReviewedSourceTextLine& line : content.lines) {
@@ -584,7 +640,8 @@ void render_text_content(
         state.append("\n", entry_index);
         if(!line.has_newline) {
             state.append(
-                    "    \\ No newline at end of file\n",
+                    localization::translate_message(
+                            "    \\ No newline at end of file\n"),
                     entry_index);
         }
     }
@@ -607,10 +664,14 @@ void render_complete_full_text(
         return;
     }
     if(old_text != nullptr) {
-        state.append("  old full text:\n", entry_index);
+        state.append(
+                localization::translate_message("  old full text:\n"),
+                entry_index);
         render_text_content(state, *old_text, '-', entry_index);
     } else {
-        state.append("  new full text:\n", entry_index);
+        state.append(
+                localization::translate_message("  new full text:\n"),
+                entry_index);
         render_text_content(state, *new_text, '+', entry_index);
     }
 }
@@ -640,7 +701,9 @@ void render_patch(
         state.fail_inconsistent(entry_index);
         return;
     }
-    state.append("  text patch:\n", entry_index);
+    state.append(
+            localization::translate_message("  verified text patch:\n"),
+            entry_index);
     for(const ReviewedSourcePatchHunk& hunk : entry.patch->hunks) {
         if(state.failed()) return;
         state.append("    @@ -", entry_index);
@@ -667,7 +730,8 @@ void render_patch(
             state.append("\n", entry_index);
             if(!line.line.has_newline) {
                 state.append(
-                        "    \\ No newline at end of file\n",
+                        localization::translate_message(
+                                "    \\ No newline at end of file\n"),
                         entry_index);
             }
         }
@@ -678,23 +742,29 @@ void render_no_content_change(
         RenderState& state,
         const ChangeView& view,
         std::size_t entry_index) {
-    state.append("  content: content unchanged\n", entry_index);
-    if(view.status == "Renamed") {
+    state.append(
+            localization::translate_message(
+                    "  content: content unchanged\n"),
+            entry_index);
+    if(view.status == ChangeStatus::Renamed) {
         state.append(
-                "  metadata change: rename only (content unchanged)\n",
+                localization::translate_message(
+                        "  metadata change: rename only (content unchanged)\n"),
                 entry_index);
     }
     if(view.old_version != nullptr && view.new_version != nullptr &&
        view.old_version->mode() != view.new_version->mode()) {
         state.append(
-                "  metadata change: mode changed (content unchanged)\n",
+                localization::translate_message(
+                        "  metadata change: mode changed (content unchanged)\n"),
                 entry_index);
     }
-    if(view.status != "Renamed" && view.old_version != nullptr &&
+    if(view.status != ChangeStatus::Renamed && view.old_version != nullptr &&
        view.new_version != nullptr &&
        view.old_version->mode() == view.new_version->mode()) {
         state.append(
-                "  metadata change: typed status retained despite unchanged content\n",
+                localization::translate_message(
+                        "  metadata change: change type retained despite unchanged content\n"),
                 entry_index);
     }
 }
@@ -704,7 +774,8 @@ void render_mixed_text(
         const ReviewedSourceReviewEntry& entry,
         std::size_t entry_index) {
     state.append(
-            "  content: mixed text and non-line-reviewable content; raw bytes withheld\n",
+            localization::translate_message(
+                    "  content: mixed text and non-line-reviewable content; raw bytes withheld\n"),
             entry_index);
     const ReviewedSourceTextContent* old_text =
             line_content(state, entry.old_observation, entry_index);
@@ -712,11 +783,17 @@ void render_mixed_text(
             line_content(state, entry.new_observation, entry_index);
     if(state.failed()) return;
     if(old_text != nullptr) {
-        state.append("  line-reviewable old content:\n", entry_index);
+        state.append(
+                localization::translate_message(
+                        "  line-reviewable old content:\n"),
+                entry_index);
         render_text_content(state, *old_text, '-', entry_index);
     }
     if(new_text != nullptr) {
-        state.append("  line-reviewable new content:\n", entry_index);
+        state.append(
+                localization::translate_message(
+                        "  line-reviewable new content:\n"),
+                entry_index);
         render_text_content(state, *new_text, '+', entry_index);
     }
 }
@@ -744,12 +821,14 @@ void render_representation(
         return;
     case ReviewedSourceReviewRepresentation::ContainsNul:
         state.append(
-                "  content: binary/non-line-reviewable content; raw bytes withheld\n",
+                localization::translate_message(
+                        "  content: binary/non-line-reviewable content; raw bytes withheld\n"),
                 entry_index);
         return;
     case ReviewedSourceReviewRepresentation::GitlinkMetadata:
         state.append(
-                "  content: gitlink/submodule metadata only; recursive review not performed\n",
+                localization::translate_message(
+                        "  content: Gitlink/submodule metadata only; recursive review not performed\n"),
                 entry_index);
         return;
     case ReviewedSourceReviewRepresentation::MixedTextAndNonText:
@@ -769,53 +848,76 @@ void render_entry(
         return;
     }
 
-    state.append("entry ", entry_index);
-    state.append_number(entry_index + 1, entry_index);
-    state.append(":\n", entry_index);
+    state.append(localization::format_translated_message(
+                         "review entry {}:\n", entry_index + 1),
+                 entry_index);
     render_status_summary(state, view, entry_index);
     render_version_fields(
-            state, "old", view.old_version, entry_index);
+            state, localization::translate_message("old"),
+            view.old_version, entry_index);
     render_version_fields(
-            state, "new", view.new_version, entry_index);
-    state.append("  rename similarity: ", entry_index);
+            state, localization::translate_message("new"),
+            view.new_version, entry_index);
+    state.append(
+            localization::translate_message("  rename similarity: "),
+            entry_index);
     if(view.rename_similarity.has_value()) {
         state.append_number(*view.rename_similarity, entry_index);
         state.append("%\n", entry_index);
     } else {
-        state.append("none\n", entry_index);
+        state.append(localization::translate_message("none\n"), entry_index);
     }
     render_git_marker(state, *view.content, entry_index);
     render_observation_kind(
-            state, "old", entry.old_observation, entry_index);
+            state, localization::translate_message("old"),
+            entry.old_observation, entry_index);
     render_observation_kind(
-            state, "new", entry.new_observation, entry_index);
+            state, localization::translate_message("new"),
+            entry.new_observation, entry_index);
 
-    state.append("  review emphasis: ", entry_index);
+    state.append(
+            localization::translate_message("  review emphasis: "),
+            entry_index);
     append_mapped_value(
             state, emphasis_display(entry.emphasis), entry_index);
     state.append("\n", entry_index);
-    state.append("  presentation priority: ", entry_index);
+    state.append(
+            localization::translate_message("  presentation priority: "),
+            entry_index);
     if(entry.emphasis == ReviewedSourceReviewEmphasis::Sensitive) {
-        state.append("Sensitive\n", entry_index);
         state.append(
-                "  sensitive guidance: explicitly inspect root PKGBUILD/install source content\n",
+                localization::translate_message("review-sensitive\n"),
+                entry_index);
+        state.append(
+                localization::format_translated_message(
+                        "  review-sensitive guidance: explicitly inspect root {}/{} source content\n",
+                        PKGBUILD_FILE_NAME, INSTALL_FILE_SUFFIX),
                 entry_index);
     } else if(all_present_versions_are_generated_metadata(view)) {
-        state.append("LowerGeneratedMetadata\n", entry_index);
         state.append(
-                "  generated metadata guidance: lower emphasis; not source-review authority\n",
+                localization::translate_message(
+                        "lower-priority generated metadata\n"),
+                entry_index);
+        state.append(
+                localization::translate_message(
+                        "  generated metadata guidance: lower emphasis; not source-review authority\n"),
                 entry_index);
     } else {
-        state.append("Ordinary\n", entry_index);
+        state.append(localization::translate_message("ordinary\n"),
+                     entry_index);
     }
 
-    state.append("  representation: ", entry_index);
+    state.append(
+            localization::translate_message("  content representation: "),
+            entry_index);
     append_mapped_value(
             state,
             representation_display(entry.representation),
             entry_index);
     state.append("\n", entry_index);
-    state.append("  readiness: ", entry_index);
+    state.append(
+            localization::translate_message("  review readiness: "),
+            entry_index);
     append_mapped_value(
             state, readiness_display(entry.readiness), entry_index);
     state.append("\n", entry_index);
@@ -827,13 +929,13 @@ void render_entry(
 void render_review_body(
         RenderState& state,
         const ReviewedSourceReviewBody& body) {
-    state.append("overall readiness: ");
+    state.append(localization::translate_message("overall review readiness: "));
     append_mapped_value(state, readiness_display(body.readiness), 0);
-    state.append("\nentry count: ");
-    state.append_number(body.entries.size());
-    state.append("\nentries:\n");
+    state.append(localization::format_translated_message(
+            "\nreview entry count: {}\nreview entries:\n",
+            body.entries.size()));
     if(body.entries.empty()) {
-        state.append("  (none)\n");
+        state.append(localization::translate_message("  (none)\n"));
         return;
     }
     for(std::size_t index = 0;
@@ -842,22 +944,25 @@ void render_review_body(
     }
 }
 
-std::optional<std::string_view> history_relation_display(
-        ReviewedSourceHistoryRelation relation) noexcept {
+std::optional<std::string> history_relation_display(
+        ReviewedSourceHistoryRelation relation) {
     switch(relation) {
     case ReviewedSourceHistoryRelation::Ancestor:
-        return "Ancestor";
+        return localization::translate_message(
+                "reviewed baseline is an ancestor of the target");
     case ReviewedSourceHistoryRelation::NonAncestor:
-        return "NonAncestor";
+        return localization::translate_message(
+                "reviewed baseline is not an ancestor of the target");
     }
     return std::nullopt;
 }
 
-std::optional<std::string_view> baseline_reason_display(
-        ReviewedSourceBaselineUnavailableReason reason) noexcept {
+std::optional<std::string> baseline_reason_display(
+        ReviewedSourceBaselineUnavailableReason reason) {
     switch(reason) {
     case ReviewedSourceBaselineUnavailableReason::MissingOrNotCommit:
-        return "MissingOrNotCommit";
+        return localization::translate_message(
+                "baseline object is missing or is not a commit");
     }
     return std::nullopt;
 }
@@ -878,36 +983,63 @@ ReviewedSourcePresentationResult render_with_limit(
                 if constexpr(std::is_same_v<
                                      Review,
                                      ReviewedSourceMaterializedInitialFullReview>) {
-                    state.append("review kind: InitialFullReview\n");
-                    render_revision(state, "target revision: ", value.target);
+                    state.append(localization::translate_message(
+                            "review type: initial full review\n"));
+                    render_revision(
+                            state,
+                            localization::translate_message(
+                                    "target revision: "),
+                            value.target);
                     render_review_body(state, value.review);
                 } else if constexpr(std::is_same_v<
                                             Review,
                                             ReviewedSourceMaterializedAlreadyReviewed>) {
-                    state.append("review kind: AlreadyReviewed\n");
+                    state.append(localization::translate_message(
+                            "review type: already reviewed\n"));
                     render_revision(
-                            state, "reviewed revision: ", value.revision);
-                    state.append("result: already reviewed\n");
+                            state,
+                            localization::translate_message(
+                                    "reviewed revision: "),
+                            value.revision);
+                    state.append(localization::translate_message(
+                            "review result: already reviewed; no acceptance prompt is required\n"));
                 } else if constexpr(std::is_same_v<
                                             Review,
                                             ReviewedSourceMaterializedUpdateReview>) {
-                    state.append("review kind: UpdateReview\n");
+                    state.append(localization::translate_message(
+                            "review type: update review\n"));
                     render_revision(
-                            state, "baseline revision: ", value.baseline);
-                    render_revision(state, "target revision: ", value.target);
-                    state.append("history relation: ");
+                            state,
+                            localization::translate_message(
+                                    "baseline revision: "),
+                            value.baseline);
+                    render_revision(
+                            state,
+                            localization::translate_message(
+                                    "target revision: "),
+                            value.target);
+                    state.append(localization::translate_message(
+                            "history relation: "));
                     append_mapped_value(
                             state,
                             history_relation_display(value.relation), 0);
                     state.append("\n");
                     render_review_body(state, value.review);
                 } else {
-                    state.append("review kind: RebaselineFullReview\n");
+                    state.append(localization::translate_message(
+                            "review type: explicit full rebaseline\n"));
                     render_revision(
-                            state, "unavailable baseline: ",
+                            state,
+                            localization::translate_message(
+                                    "unavailable baseline: "),
                             value.unavailable_baseline);
-                    render_revision(state, "target revision: ", value.target);
-                    state.append("baseline unavailable reason: ");
+                    render_revision(
+                            state,
+                            localization::translate_message(
+                                    "target revision: "),
+                            value.target);
+                    state.append(localization::translate_message(
+                            "baseline unavailable reason: "));
                     append_mapped_value(
                             state,
                             baseline_reason_display(value.reason), 0);

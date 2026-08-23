@@ -116,6 +116,10 @@ make_unreviewed_production_artifact_source_tree(
     auto authority =
             std::make_shared<ReviewedSourcePackageBaseLease>(
                     std::move(lease));
+    ProductionSourceBuildProvenance provenance;
+    provenance.review_status = review_status;
+    provenance.editor_overlay = editor_overlay;
+    provenance.compatibility_reason = std::move(compatibility_reason);
     return ProductionArtifactSourceTree(
             std::move(checkout), authority,
             [authority](
@@ -135,18 +139,22 @@ make_unreviewed_production_artifact_source_tree(
                                     error.failure()});
                 }
             },
-            ProductionSourceBuildProvenance{
-                    review_status, editor_overlay,
-                    std::move(compatibility_reason), std::nullopt,
-                    std::nullopt});
+            std::move(provenance));
 }
 
 ProductionArtifactSourceTree
 make_reviewed_production_artifact_source_tree(
         ValidatedCachePath checkout,
-        PinnedReviewedSourceBuild reviewed) {
+        PinnedReviewedSourceBuild reviewed,
+        ProductionReviewedSourceOutcome reviewed_outcome,
+        std::optional<ReviewedSourceAbnormalStateReason>
+                abnormal_state_reason) {
     if(!reviewed.valid() || reviewed.checkout_device() != checkout.device() ||
-       reviewed.checkout_inode() != checkout.inode()) {
+       reviewed.checkout_inode() != checkout.inode() ||
+       (reviewed_outcome ==
+                ProductionReviewedSourceOutcome::
+                        AbnormalStateRebindFullReview) !=
+               abnormal_state_reason.has_value()) {
         throw std::logic_error(
                 "Reviewed production source authority is inconsistent.");
     }
@@ -156,6 +164,10 @@ make_reviewed_production_artifact_source_tree(
     provenance.reviewed_upstream_base_revision =
             reviewed.reviewed_upstream_base_revision();
     provenance.publication_status = reviewed.publication_status();
+    provenance.reviewed_outcome = reviewed_outcome;
+    provenance.abnormal_state_reason = abnormal_state_reason;
+    provenance.reviewed_state_generation =
+            reviewed.published_record().generation;
     auto authority =
             std::make_shared<PinnedReviewedSourceBuild>(
                     std::move(reviewed));
@@ -281,13 +293,11 @@ SourceBuildExecutionResult source_build_result_from_artifact_outcome(
         case ArtifactInstallExecutionOutcome::Installed:
             return SourceBuildExecutionResult{
                     SourceBuildExecutionStatus::Installed, std::nullopt, {},
-                    std::nullopt,
-                    ProductionSourceBuildCommandOutcome::NotAttempted};
+                    std::nullopt};
         case ArtifactInstallExecutionOutcome::SkippedAsNeeded:
             return SourceBuildExecutionResult{
                     SourceBuildExecutionStatus::SkippedAsNeeded,
-                    std::nullopt, {}, std::nullopt,
-                    ProductionSourceBuildCommandOutcome::NotAttempted};
+                    std::nullopt, {}, std::nullopt};
     }
     throw std::logic_error(localization::translate_message(
             "Unknown artifact install execution outcome."));
@@ -580,6 +590,46 @@ ReviewedSourceProductionFailureReason fatal_production_reason(
             InconsistentStateObservation;
 }
 
+struct ProductionReviewedSourceOutcomeSnapshot {
+    ProductionReviewedSourceOutcome outcome =
+            ProductionReviewedSourceOutcome::InitialFullReview;
+    std::optional<ReviewedSourceAbnormalStateReason> abnormal_state_reason;
+};
+
+ProductionReviewedSourceOutcomeSnapshot production_reviewed_source_outcome(
+        const ReviewedSourceIntegrationLifecycle& lifecycle) {
+    if(std::holds_alternative<ReviewedSourceLifecycleInitialFullReview>(
+               lifecycle)) {
+        return {ProductionReviewedSourceOutcome::InitialFullReview,
+                std::nullopt};
+    }
+    if(std::holds_alternative<ReviewedSourceLifecycleUpdateReview>(
+               lifecycle)) {
+        return {ProductionReviewedSourceOutcome::UpdateReview,
+                std::nullopt};
+    }
+    if(std::holds_alternative<
+               ReviewedSourceLifecycleRebaselineFullReview>(lifecycle)) {
+        return {ProductionReviewedSourceOutcome::RebaselineFullReview,
+                std::nullopt};
+    }
+    if(const auto* abnormal = std::get_if<
+               ReviewedSourceLifecycleAbnormalStateRebindFullReview>(
+               &lifecycle)) {
+        return {
+                ProductionReviewedSourceOutcome::
+                        AbnormalStateRebindFullReview,
+                abnormal->reason};
+    }
+    if(std::holds_alternative<ReviewedSourceLifecycleAlreadyReviewed>(
+               lifecycle)) {
+        return {ProductionReviewedSourceOutcome::AlreadyReviewed,
+                std::nullopt};
+    }
+    throw std::logic_error(
+            "Reviewed production success contains a fatal lifecycle.");
+}
+
 template<typename Detail>
 [[noreturn]] void stop_reviewed_source_route(
         ReviewedSourceProductionFailureStage stage,
@@ -644,6 +694,34 @@ ReviewedSourceCompatibilityBuildReason review_bypass_reason(
 bool should_run_reviewed_source_route(const AppConfig& config) noexcept {
     return config.user_config.review.diff == ReviewPolicy::Prompt &&
            !config.no_confirm && isatty(STDIN_FILENO) == 1;
+}
+
+std::string reviewed_source_acceptance_question(
+        const ReviewedSourceIntegrationLifecycle& lifecycle) {
+    if(std::holds_alternative<
+               ReviewedSourceLifecycleRebaselineFullReview>(lifecycle)) {
+        return localization::translate_message(
+                "Accept this explicit reviewed-source full rebaseline?");
+    }
+    if(const auto* abnormal = std::get_if<
+               ReviewedSourceLifecycleAbnormalStateRebindFullReview>(
+               &lifecycle)) {
+        switch(abnormal->reason) {
+        case ReviewedSourceAbnormalStateReason::Invalid:
+            return localization::translate_message(
+                    "Accept this explicit rebind/rebaseline of invalid reviewed state?");
+        case ReviewedSourceAbnormalStateReason::Corrupted:
+            return localization::translate_message(
+                    "Accept this explicit rebind/rebaseline of corrupted reviewed state?");
+        case ReviewedSourceAbnormalStateReason::SourceMismatch:
+            return localization::translate_message(
+                    "Accept this explicit reviewed-source identity rebind/rebaseline?");
+        }
+        throw std::logic_error(
+                "Reviewed source abnormal state reason is unknown.");
+    }
+    return localization::translate_message(
+            "Accept this reviewed upstream revision?");
 }
 
 AurCheckoutAuthority prepare_aur_checkout_authority(
@@ -777,10 +855,13 @@ AurCheckoutAuthority prepare_aur_checkout_authority(
                 ReviewedSourceProductionFailureStage::Presentation);
     }
 
+    const PresentedReviewedSourceTarget& presented_target =
+            std::get<PresentedReviewedSourceTarget>(presented);
+    const std::string acceptance_question =
+            reviewed_source_acceptance_question(
+                    presented_target.lifecycle());
     ExplicitConfirmationResult confirmation = request_explicit_confirmation(
-            localization::translate_message(
-                    "Accept this reviewed upstream revision?"),
-            false);
+            acceptance_question, false);
     ReviewedSourceAcceptanceDisposition disposition =
             decide_reviewed_source_acceptance(
                     std::get<PresentedReviewedSourceTarget>(
@@ -919,6 +1000,23 @@ ProductionArtifactSourceTree finalize_aur_checkout_authority(
                         std::move(sealed)));
     }
 
+    const ProductionReviewedSourceOutcomeSnapshot reviewed_outcome =
+            std::visit(
+                    [](const auto& checkout)
+                            -> ProductionReviewedSourceOutcomeSnapshot {
+                        using Checkout = std::decay_t<decltype(checkout)>;
+                        if constexpr(std::is_same_v<
+                                             Checkout,
+                                             AurCompatibilityCheckout>) {
+                            throw std::logic_error(
+                                    "Compatibility checkout has no reviewed outcome.");
+                        } else {
+                            return production_reviewed_source_outcome(
+                                    checkout.lifecycle());
+                        }
+                    },
+                    authority);
+
     notify_reviewed_source_before_publication_for_test();
 
     ReviewedSourcePublicationResult publication =
@@ -934,7 +1032,8 @@ ProductionArtifactSourceTree finalize_aur_checkout_authority(
     if(auto* pinned =
                std::get_if<PinnedReviewedSourceBuild>(&publication)) {
         return make_reviewed_production_artifact_source_tree(
-                checkout, std::move(*pinned));
+                checkout, std::move(*pinned), reviewed_outcome.outcome,
+                reviewed_outcome.abnormal_state_reason);
     }
     if(std::holds_alternative<ReviewedSourcePublicationUncertain>(
                publication)) {
@@ -1850,9 +1949,13 @@ SourceBuildExecutionResult execute_source_build_typed(
                 SourceBuildExecutionStatus::UpToDate,
                 std::nullopt,
                 up_to_date->diagnostic,
-                std::nullopt,
-                ProductionSourceBuildCommandOutcome::NotAttempted};
-        result.source_provenance = up_to_date->source_provenance;
+                std::nullopt};
+        if(up_to_date->source_provenance.has_value()) {
+            result.production_outcome =
+                    ProductionSourceBuildStagedOutcome{
+                            .source_provenance =
+                                    *up_to_date->source_provenance};
+        }
         return result;
     }
     if(const auto* skipped = std::get_if<
@@ -1861,18 +1964,26 @@ SourceBuildExecutionResult execute_source_build_typed(
                 SourceBuildExecutionStatus::UpdateStatusUnknownSkipped,
                 skipped->reason,
                 skipped->diagnostic,
-                std::nullopt,
-                ProductionSourceBuildCommandOutcome::NotAttempted};
-        result.source_provenance = skipped->source_provenance;
+                std::nullopt};
+        if(skipped->source_provenance.has_value()) {
+            result.production_outcome =
+                    ProductionSourceBuildStagedOutcome{
+                            .source_provenance =
+                                    *skipped->source_provenance};
+        }
         return result;
     }
     PreparedSourceBuildExecutionCapabilities prepared =
             SourceBuildPreparedExecutionAccess::consume(std::move(
                     std::get<PreparedSourceBuildNeedsBuild>(preparation)));
 
-    const ProductionSourceBuildProvenance source_provenance =
-            prepared.source_tree.provenance();
-    SourceBuildExecutionResult result = source_build_result_from_artifact_outcome(
+    const SeparatedSourceBuildUnitOptions options{
+            .no_confirm = config.no_confirm,
+            .needed = request.needed,
+            .rm_deps = config.rm_deps,
+            .rebuild = prepared.rebuild,
+            .clean_build = prepared.clean_build};
+    SeparatedSourceBuildExecutionResult separated =
             execute_separated_source_build_unit(
                     SeparatedSourceBuildUnitRequest{
                             std::move(prepared.source_tree),
@@ -1883,15 +1994,12 @@ SourceBuildExecutionResult execute_source_build_typed(
                             request.custom_environment,
                             request.empty_value_policy,
                             database_paths},
-                    SeparatedSourceBuildUnitOptions{
-                            .no_confirm = config.no_confirm,
-                            .needed = request.needed,
-                            .rm_deps = config.rm_deps,
-                            .rebuild = prepared.rebuild,
-                            .clean_build = prepared.clean_build}));
-    result.source_provenance = source_provenance;
-    result.build_outcome =
-            ProductionSourceBuildCommandOutcome::Succeeded;
+                    options);
+    SourceBuildExecutionResult result =
+            source_build_result_from_artifact_outcome(
+                    separated.install_outcome);
+    result.production_outcome =
+            std::move(separated.production_outcome);
     return result;
 }
 

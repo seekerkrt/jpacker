@@ -260,6 +260,19 @@ std::vector<std::string> git_environment(const fs::path& home) {
     };
 }
 
+std::string shell_quote_path(const fs::path& path) {
+    std::string quoted = "'";
+    for(char character : path.string()) {
+        if(character == '\'') {
+            quoted += "'\\''";
+        } else {
+            quoted += character;
+        }
+    }
+    quoted += "'";
+    return quoted;
+}
+
 class PinnedBuildFixture final {
 public:
     explicit PinnedBuildFixture(
@@ -1314,6 +1327,62 @@ void test_makepkg_boundary_reproof_rejects_post_cas_mutation() {
     static_cast<void>(read_loaded(after, identity.target_revision()));
 }
 
+void test_status_zero_post_command_revalidation_keeps_publication() {
+    PinnedBuildFixture fixture;
+    const AurReviewedSourceReviewIdentity identity =
+            fixture.identity(fixture.first_oid());
+    AcceptedReviewedSourceCheckout exact = materialize(
+            make_initial_accepted(identity), fixture.checkout());
+    ReviewedSourceEditorBoundary boundary = begin_editor_boundary(exact);
+    ReviewedSourceEditorOverlayProof overlay = seal_no_editor_overlay(
+            exact, std::move(boundary));
+    ReviewedSourcePublicationResult published =
+            publish_accepted_reviewed_source_checkout_with_editor_overlay(
+                    std::move(exact), std::move(overlay));
+    PinnedReviewedSourceBuild pinned = take_arm<PinnedReviewedSourceBuild>(
+            published, "Clean publication did not produce pinned build");
+
+    const fs::path displaced =
+            fixture.fixture_root() / "status-zero-reviewed-checkout";
+    const std::string command =
+            "/usr/bin/mv -- " + shell_quote_path(fixture.repository()) +
+            " " + shell_quote_path(displaced) +
+            " && /usr/bin/mkdir --mode=0700 -- " +
+            shell_quote_path(fixture.repository());
+    bool failure_reported = false;
+    try {
+        static_cast<void>(pinned.run_guarded_command(command));
+    } catch(const ProductionSourceBuildPostCommandRevalidationError& error) {
+        failure_reported = true;
+        require(
+                error.command_exit_status() == 0,
+                "Reviewed post-command revalidation changed status zero");
+        bool nested_failure_retained = false;
+        try {
+            error.rethrow_failure();
+        } catch(...) {
+            nested_failure_retained = true;
+        }
+        require(
+                nested_failure_retained,
+                "Reviewed post-command revalidation lost identity failure");
+    }
+    require(
+            failure_reported,
+            "Reviewed status-zero command returned through failed revalidation");
+    require(
+            pinned.valid() &&
+                    pinned.publication_status() ==
+                            ReviewedSourcePublicationStatus::Published &&
+                    pinned.identity() == identity &&
+                    fs::is_directory(fixture.repository()) &&
+                    fs::is_regular_file(displaced / "PKGBUILD"),
+            "Reviewed status-zero failure lost publication or checkout evidence");
+    ReviewedSourceStateStoreReadResult after =
+            read_reviewed_source_state(identity.package_base());
+    static_cast<void>(read_loaded(after, identity.target_revision()));
+}
+
 void test_nested_dot_git_input_is_rejected_at_makepkg_boundary() {
     PinnedBuildFixture fixture;
     const AurReviewedSourceReviewIdentity identity =
@@ -2008,6 +2077,7 @@ int main() {
         test_embedded_repository_cannot_hide_overlay_files();
         test_special_and_oversized_overlay_entries_fail_closed();
         test_makepkg_boundary_reproof_rejects_post_cas_mutation();
+        test_status_zero_post_command_revalidation_keeps_publication();
         test_nested_dot_git_input_is_rejected_at_makepkg_boundary();
         test_future_state_is_not_overwritten();
         test_abnormal_history_uses_exact_cas_rebind();

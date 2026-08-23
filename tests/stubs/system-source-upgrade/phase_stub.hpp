@@ -129,7 +129,8 @@ void enqueue_source_unknown_failure();
 void enqueue_package_base_success(
         std::string package_base,
         std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
-        std::vector<ArtifactPackageIdentity> unselected_artifacts = {});
+        std::vector<ArtifactPackageIdentity> unselected_artifacts = {},
+        ProductionSourceBuildProvenance source_provenance = {});
 void enqueue_package_base_cleanup_failure(
         std::string package_base,
         std::vector<PackageBaseSourceBuildSelectedResult> selected_children,

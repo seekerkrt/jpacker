@@ -1218,6 +1218,7 @@ PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_build.cpp \
 	$(SRC_DIR)/reviewed_source_production_failure.cpp \
+	$(SRC_DIR)/reviewed_source_production_outcome.cpp \
 	$(SRC_DIR)/reviewed_source_package_base_lease.cpp \
 	$(SRC_DIR)/reviewed_source_pinned_build.cpp \
 	$(SRC_DIR)/reviewed_source_acceptance.cpp \
@@ -1401,6 +1402,9 @@ INTERACTIVE_CONFIRMATION_TEST_SRCS := \
 LOCALIZATION_TEST_SRCS := \
 	tests/localization_test.cpp \
 	$(SRC_DIR)/reviewed_source_production_failure.cpp \
+	$(SRC_DIR)/reviewed_source_production_outcome.cpp \
+	$(SRC_DIR)/source_package_identity.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/localization.cpp
 XDG_PATHS_TEST_SRCS := \
 	tests/xdg_paths_test.cpp \
@@ -1474,6 +1478,7 @@ REVIEWED_SOURCE_LIFECYCLE_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp
 REVIEWED_SOURCE_ACCEPTANCE_TEST_SRCS := \
 	tests/reviewed_source_acceptance_test.cpp \
+	$(SRC_DIR)/reviewed_source_production_failure.cpp \
 	$(SRC_DIR)/reviewed_source_acceptance.cpp \
 	$(SRC_DIR)/reviewed_source_lifecycle.cpp \
 	$(SRC_DIR)/reviewed_source_trusted_review.cpp \
@@ -1515,6 +1520,7 @@ REVIEWED_SOURCE_PRODUCTION_CONNECTION_TEST_SRCS := \
 	tests/reviewed_source_production_connection_test.cpp \
 	$(SRC_DIR)/source_build.cpp \
 	$(SRC_DIR)/reviewed_source_production_failure.cpp \
+	$(SRC_DIR)/reviewed_source_production_outcome.cpp \
 	$(SRC_DIR)/cache_authority.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
 	$(SRC_DIR)/reviewed_source_package_base_lease.cpp \

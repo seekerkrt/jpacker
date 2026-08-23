@@ -923,9 +923,11 @@ int run_command(const std::string& command) {
 
 SeparatedSourceBuildCleanupError::SeparatedSourceBuildCleanupError(
         ArtifactInstallExecutionOutcome install_outcome,
+        ProductionSourceBuildStagedOutcome production_outcome,
         const std::string& diagnostic)
     : std::runtime_error(diagnostic),
-      install_outcome_(install_outcome) {
+      install_outcome_(install_outcome),
+      production_outcome_(std::move(production_outcome)) {
 }
 
 SourceBuildPreparationOutcome
@@ -1130,6 +1132,14 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
         case ScriptedSourceExecutionKind::CleanupFailure:
             throw SeparatedSourceBuildCleanupError(
                     execution.cleanup_outcome,
+                    ProductionSourceBuildStagedOutcome{
+                            .source_provenance = {},
+                            .build_outcome =
+                                    ProductionSourceBuildCommandOutcome::
+                                            Succeeded,
+                            .install_outcome =
+                                    ProductionSourceInstallOutcome::
+                                            Succeeded},
                     execution.diagnostic);
         case ScriptedSourceExecutionKind::UnknownFailure:
             throw UnknownSourceExecutionFailure{};
@@ -1271,6 +1281,17 @@ PackageBaseSourceBuildExecutionResult::package_base() const noexcept {
     return package_base_;
 }
 
+const ProductionSourceBuildProvenance&
+PackageBaseSourceBuildExecutionResult::source_provenance() const noexcept {
+    return production_outcome_.source_provenance;
+}
+
+const ProductionSourceBuildStagedOutcome&
+PackageBaseSourceBuildExecutionResult::production_outcome()
+        const noexcept {
+    return production_outcome_;
+}
+
 const std::vector<PackageBaseSourceBuildSelectedResult>&
 PackageBaseSourceBuildExecutionResult::selected_children() const noexcept {
     return selected_children_;
@@ -1327,6 +1348,18 @@ SeparatedPackageBaseSourceBuildPhaseError::reviewed_source_failure()
     return reviewed_source_failure_;
 }
 
+const std::optional<PackageMetadataFailure>&
+SeparatedPackageBaseSourceBuildPhaseError::package_metadata_failure()
+        const noexcept {
+    return package_metadata_failure_;
+}
+
+const std::optional<ProductionSourceBuildStagedOutcome>&
+SeparatedPackageBaseSourceBuildPhaseError::production_outcome()
+        const noexcept {
+    return production_outcome_;
+}
+
 const PackageBaseArtifactIdentitySelectionFailure*
 PackageBaseArtifactInstallPreparationFailure::selection_failure()
         const noexcept {
@@ -1354,6 +1387,12 @@ const MixedPackageBaseInstallReasonUnsupported*
 SeparatedPackageBaseSourceBuildPreparationError::mixed_reason_failure()
         const noexcept {
     return failure_.mixed_reason_failure();
+}
+
+const std::optional<ProductionSourceBuildStagedOutcome>&
+SeparatedPackageBaseSourceBuildPreparationError::production_outcome()
+        const noexcept {
+    return production_outcome_;
 }
 
 const PackageBaseSourceBuildExecutionResult&
@@ -1384,6 +1423,21 @@ PackageBaseArtifactInstallTransactionError::attempts() const noexcept {
 const std::optional<int>&
 PackageBaseArtifactInstallTransactionError::exit_code() const noexcept {
     return exit_code_;
+}
+
+const std::optional<ProductionSourceBuildStagedOutcome>&
+PackageBaseArtifactInstallTransactionError::production_outcome()
+        const noexcept {
+    return production_outcome_;
+}
+
+void PackageBaseArtifactInstallTransactionError::attach_production_outcome(
+        ProductionSourceBuildStagedOutcome production_outcome) {
+    if(production_outcome_.has_value()) {
+        throw std::logic_error(
+                "Scripted transaction failure already has a production outcome.");
+    }
+    production_outcome_ = std::move(production_outcome);
 }
 
 std::vector<PackageBaseArtifactInstallTransactionAttempt>

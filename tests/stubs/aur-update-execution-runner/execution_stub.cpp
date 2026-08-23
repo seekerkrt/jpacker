@@ -30,6 +30,9 @@ struct ScriptedPhaseFailure {
     std::string diagnostic;
     std::optional<ReviewedSourceProductionFailure>
             reviewed_source_failure;
+    std::optional<PackageMetadataFailure> package_metadata_failure;
+    std::optional<ProductionSourceBuildStagedOutcome>
+            production_outcome;
 };
 
 struct ScriptedSelectionFailure {
@@ -57,6 +60,8 @@ struct ScriptedTransactionFailure {
     std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts;
     std::optional<int> exit_code;
     std::string        diagnostic;
+    std::optional<ProductionSourceBuildStagedOutcome>
+            production_outcome;
 };
 
 struct ScriptedUnknownFailure {};
@@ -296,12 +301,17 @@ void enqueue_phase_failure(
         SeparatedPackageBaseSourceBuildFailurePhase phase,
         std::string diagnostic,
         std::optional<ReviewedSourceProductionFailure>
-                reviewed_source_failure) {
+                reviewed_source_failure,
+        std::optional<PackageMetadataFailure> package_metadata_failure,
+        std::optional<ProductionSourceBuildStagedOutcome>
+                production_outcome) {
     enqueue(
             std::move(expected),
             ScriptedPhaseFailure{
                     phase, std::move(diagnostic),
-                    std::move(reviewed_source_failure)});
+                    std::move(reviewed_source_failure),
+                    std::move(package_metadata_failure),
+                    std::move(production_outcome)});
 }
 
 void enqueue_selection_failure(
@@ -346,7 +356,9 @@ void enqueue_transaction_failure(
         std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts,
         std::optional<int> exit_code,
         std::string diagnostic,
-        std::optional<std::string> returned_package_base) {
+        std::optional<std::string> returned_package_base,
+        std::optional<ProductionSourceBuildStagedOutcome>
+                production_outcome) {
     std::string failure_package_base = returned_package_base.has_value()
             ? std::move(*returned_package_base)
             : expected.package_base;
@@ -357,7 +369,8 @@ void enqueue_transaction_failure(
                     std::move(failure_package_base),
                     std::move(attempts),
                     exit_code,
-                    std::move(diagnostic)});
+                    std::move(diagnostic),
+                    std::move(production_outcome)});
 }
 
 void enqueue_unknown_failure(ExpectedExecution expected) {
@@ -406,6 +419,17 @@ TrustedCacheError::TrustedCacheError(TrustedCacheFailure failure)
 const std::string&
 PackageBaseSourceBuildExecutionResult::package_base() const noexcept {
     return package_base_;
+}
+
+const ProductionSourceBuildProvenance&
+PackageBaseSourceBuildExecutionResult::source_provenance() const noexcept {
+    return production_outcome_.source_provenance;
+}
+
+const ProductionSourceBuildStagedOutcome&
+PackageBaseSourceBuildExecutionResult::production_outcome()
+        const noexcept {
+    return production_outcome_;
 }
 
 const std::vector<PackageBaseSourceBuildSelectedResult>&
@@ -464,6 +488,18 @@ SeparatedPackageBaseSourceBuildPhaseError::reviewed_source_failure()
     return reviewed_source_failure_;
 }
 
+const std::optional<PackageMetadataFailure>&
+SeparatedPackageBaseSourceBuildPhaseError::package_metadata_failure()
+        const noexcept {
+    return package_metadata_failure_;
+}
+
+const std::optional<ProductionSourceBuildStagedOutcome>&
+SeparatedPackageBaseSourceBuildPhaseError::production_outcome()
+        const noexcept {
+    return production_outcome_;
+}
+
 const PackageBaseArtifactIdentitySelectionFailure*
 PackageBaseArtifactInstallPreparationFailure::selection_failure()
         const noexcept {
@@ -491,6 +527,12 @@ const MixedPackageBaseInstallReasonUnsupported*
 SeparatedPackageBaseSourceBuildPreparationError::mixed_reason_failure()
         const noexcept {
     return failure_.mixed_reason_failure();
+}
+
+const std::optional<ProductionSourceBuildStagedOutcome>&
+SeparatedPackageBaseSourceBuildPreparationError::production_outcome()
+        const noexcept {
+    return production_outcome_;
 }
 
 const PackageBaseSourceBuildExecutionResult&
@@ -521,6 +563,21 @@ PackageBaseArtifactInstallTransactionError::attempts() const noexcept {
 const std::optional<int>&
 PackageBaseArtifactInstallTransactionError::exit_code() const noexcept {
     return exit_code_;
+}
+
+const std::optional<ProductionSourceBuildStagedOutcome>&
+PackageBaseArtifactInstallTransactionError::production_outcome()
+        const noexcept {
+    return production_outcome_;
+}
+
+void PackageBaseArtifactInstallTransactionError::attach_production_outcome(
+        ProductionSourceBuildStagedOutcome production_outcome) {
+    if(production_outcome_.has_value()) {
+        throw std::logic_error(
+                "Scripted transaction failure already has a production outcome.");
+    }
+    production_outcome_ = std::move(production_outcome);
 }
 
 std::vector<PackageBaseArtifactInstallTransactionAttempt>
@@ -593,7 +650,9 @@ execute_prepared_package_base_source_build_work_item_typed(
         throw SeparatedPackageBaseSourceBuildPhaseError::
                 make_for_aur_update_runner_test(
                         phase->phase, phase->diagnostic,
-                        std::move(phase->reviewed_source_failure));
+                        std::move(phase->reviewed_source_failure),
+                        std::move(phase->package_metadata_failure),
+                        std::move(phase->production_outcome));
     }
     if(auto* selection =
                std::get_if<ScriptedSelectionFailure>(&scripted.outcome)) {
@@ -619,13 +678,20 @@ execute_prepared_package_base_source_build_work_item_typed(
     if(auto* transaction =
                std::get_if<ScriptedTransactionFailure>(&scripted.outcome)) {
         record_event(call_index, stub::EventKind::Install);
-        throw PackageBaseArtifactInstallTransactionError::
-                make_for_aur_update_runner_test(
-                        transaction->failure_kind,
-                        std::move(transaction->returned_package_base),
-                        std::move(transaction->attempts),
-                        transaction->exit_code,
-                        transaction->diagnostic);
+        PackageBaseArtifactInstallTransactionError error =
+                PackageBaseArtifactInstallTransactionError::
+                        make_for_aur_update_runner_test(
+                                transaction->failure_kind,
+                                std::move(
+                                        transaction->returned_package_base),
+                                std::move(transaction->attempts),
+                                transaction->exit_code,
+                                transaction->diagnostic);
+        if(transaction->production_outcome.has_value()) {
+            error.attach_production_outcome(
+                    std::move(*transaction->production_outcome));
+        }
+        throw error;
     }
     if(std::holds_alternative<ScriptedUnknownFailure>(scripted.outcome)) {
         throw UnknownExecutionFailure{};

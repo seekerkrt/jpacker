@@ -54,9 +54,8 @@ struct SourceBuildExecutionResult {
     std::optional<SourceBuildUpdateStatusUnknownSkipReason>
             update_status_unknown_skip_reason;
     std::string diagnostic;
-    std::optional<ProductionSourceBuildProvenance> source_provenance;
-    ProductionSourceBuildCommandOutcome build_outcome =
-            ProductionSourceBuildCommandOutcome::NotAttempted;
+    std::optional<ProductionSourceBuildStagedOutcome>
+            production_outcome;
 };
 
 // upgrade baselineの有無と、snapshot時点の未installを別状態として保持する。

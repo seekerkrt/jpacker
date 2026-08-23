@@ -199,15 +199,43 @@ stub::MetadataSessionScript metadata_session(
 
 SourceBuildExecutionResult source_execution(
         SourceBuildExecutionStatus status,
-        std::string diagnostic = {}) {
+        std::string diagnostic = {},
+        std::optional<ProductionSourceBuildProvenance>
+                source_provenance = std::nullopt) {
     SourceBuildExecutionResult result;
     result.status = status;
     result.diagnostic = std::move(diagnostic);
+    if(source_provenance.has_value()) {
+        result.production_outcome =
+                ProductionSourceBuildStagedOutcome{
+                        .source_provenance =
+                                std::move(*source_provenance),
+                        .build_outcome =
+                                status == SourceBuildExecutionStatus::Installed
+                                ? ProductionSourceBuildCommandOutcome::
+                                          Succeeded
+                                : ProductionSourceBuildCommandOutcome::
+                                          NotAttempted,
+                        .install_outcome =
+                                status == SourceBuildExecutionStatus::Installed
+                                ? ProductionSourceInstallOutcome::Succeeded
+                                : ProductionSourceInstallOutcome::
+                                          NotAttempted};
+    }
     if(status == SourceBuildExecutionStatus::UpdateStatusUnknownSkipped) {
         result.update_status_unknown_skip_reason =
                 SourceBuildUpdateStatusUnknownSkipReason::NoConfirm;
     }
     return result;
+}
+
+ProductionSourceBuildProvenance compatibility_review_provenance() {
+    ProductionSourceBuildProvenance provenance;
+    provenance.review_status =
+            ProductionSourceReviewStatus::CompatibilityWithoutReview;
+    provenance.compatibility_reason =
+            ReviewedSourceCompatibilityBuildReason::NoDiff;
+    return provenance;
 }
 
 PackageBaseSourceBuildSelectedResult selected_child(
@@ -1177,7 +1205,8 @@ void test_registered_source_provider_selection_precedes_cache_and_suppresses_aur
 
     enqueue_post_metadata({repository_source});
     stub::enqueue_source_success(source_execution(
-            SourceBuildExecutionStatus::UpToDate));
+            SourceBuildExecutionStatus::UpToDate, {},
+            compatibility_review_provenance()));
     SystemSourceUpgradeResult completed =
             execute_prepared_system_source_upgrade(
                     std::move(
@@ -1185,6 +1214,13 @@ void test_registered_source_provider_selection_precedes_cache_and_suppresses_aur
                     full_option_config(), OBSERVER);
     expect(completed.is_success(),
            "Repository-only registered-source provider selection failed");
+    expect(
+            completed.registered_source_results.front().production_outcome.
+                            has_value() &&
+                    completed.registered_source_results.front().
+                                    production_outcome->source_provenance ==
+                            compatibility_review_provenance(),
+            "Registered AUR aggregate flattened compatibility provenance");
     expect(
             fs::is_directory(selection_cache_home / "moguet"),
             "Actual registered-source execution did not activate the cache");

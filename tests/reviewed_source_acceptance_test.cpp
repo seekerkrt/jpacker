@@ -1,4 +1,5 @@
 #include "reviewed_source_acceptance.hpp"
+#include "reviewed_source_production_failure.hpp"
 
 #include <algorithm>
 #include <exception>
@@ -496,7 +497,7 @@ void test_presentation_completion_is_required_and_all_or_nothing() {
     std::string output;
     PresentedReviewedSourceTarget presented =
             present_complete_target(identity, &output);
-    require(output.find("review kind: InitialFullReview") !=
+    require(output.find("review type: initial full review") !=
                             std::string::npos &&
                     output.find(std::string(SHA1_A)) != std::string::npos,
             "Presented capability was created without complete rendered output.");
@@ -888,18 +889,22 @@ void test_manual_and_sensitive_readiness_stop_even_on_explicit_yes() {
         std::string path;
         ReviewedSourceReviewReadiness readiness;
         ReviewedSourceOperationStopReason stop_reason;
+        std::string_view expected_diagnostic;
     } cases[]{
             {"payload.bin",
              ReviewedSourceReviewReadiness::ManualInspectionRequired,
-             ReviewedSourceOperationStopReason::ManualInspectionRequired},
+             ReviewedSourceOperationStopReason::ManualInspectionRequired,
+             "requires manual inspection"},
             {"PKGBUILD",
              ReviewedSourceReviewReadiness::SensitiveSourceUnrenderable,
              ReviewedSourceOperationStopReason::
-                     SensitiveSourceUnrenderable},
+                     SensitiveSourceUnrenderable,
+             "could not be rendered safely"},
             {"example.install",
              ReviewedSourceReviewReadiness::SensitiveSourceUnrenderable,
              ReviewedSourceOperationStopReason::
-                     SensitiveSourceUnrenderable},
+                     SensitiveSourceUnrenderable,
+             "could not be rendered safely"},
     };
 
     for(const auto& test_case : cases) {
@@ -918,11 +923,25 @@ void test_manual_and_sensitive_readiness_stop_even_on_explicit_yes() {
         ReviewedSourceAcceptanceDisposition disposition =
                 decide_reviewed_source_acceptance(
                         std::move(presented), explicit_confirmation("yes"));
-        require(require_arm<ReviewedSourceOperationStop>(
+        ReviewedSourceOperationStop stop =
+                take_arm<ReviewedSourceOperationStop>(
                         disposition,
-                        "Manual/sensitive explicit yes created acceptance.")
-                                .reason() == test_case.stop_reason,
+                        "Manual/sensitive explicit yes created acceptance.");
+        require(stop.reason() == test_case.stop_reason,
                 "Manual/sensitive readiness did not stop the invocation.");
+        const std::string diagnostic =
+                reviewed_source_production_failure_diagnostic(
+                        ReviewedSourceProductionFailure{
+                                ReviewedSourceProductionFailureStage::
+                                        Acceptance,
+                                ReviewedSourceProductionFailureReason::
+                                        ReviewOperationStopped,
+                                std::move(stop)});
+        require(diagnostic.find(test_case.expected_diagnostic) !=
+                        std::string::npos &&
+                        diagnostic.find("without state publication or compatibility fallback") !=
+                                std::string::npos,
+                "Manual/sensitive STOP diagnostic was flattened.");
     }
 }
 

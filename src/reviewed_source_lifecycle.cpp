@@ -165,11 +165,6 @@ ReviewedSourceOperationStop ReviewedSourceOperationStop::fatal(
             std::move(failure));
 }
 
-ReviewedSourceOperationStopReason
-ReviewedSourceOperationStop::reason() const noexcept {
-    return reason_;
-}
-
 const std::optional<ReviewedSourceIntegrationLifecycle>&
 ReviewedSourceOperationStop::lifecycle() const noexcept {
     return lifecycle_;

@@ -298,6 +298,11 @@ AcceptedReviewedSourceCheckout::expected_state_observation() const {
     return require_state().target.expected_state_observation();
 }
 
+const ReviewedSourceIntegrationLifecycle&
+AcceptedReviewedSourceCheckout::lifecycle() const {
+    return require_state().target.lifecycle();
+}
+
 const std::filesystem::path&
 AcceptedReviewedSourceCheckout::checkout_path() const {
     return require_state().checkout.checkout_path();
@@ -411,6 +416,11 @@ AlreadyReviewedSourceCheckout::identity() const {
 const ReviewedSourceExpectedStateObservation&
 AlreadyReviewedSourceCheckout::expected_state_observation() const {
     return require_state().target.expected_state_observation();
+}
+
+const ReviewedSourceIntegrationLifecycle&
+AlreadyReviewedSourceCheckout::lifecycle() const {
+    return require_state().target.lifecycle();
 }
 
 const std::filesystem::path&
@@ -851,7 +861,7 @@ int PinnedReviewedSourceBuild::run_guarded_command(
                     throw ReviewedSourceBuildCheckoutReproofError(
                             std::move(*failure));
                 }
-                return checkout.run_guarded_command(
+                return checkout_state.lease.run_guarded_production_command(
                         command, display_command);
             },
             require_state().checkout);

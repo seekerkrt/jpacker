@@ -1,6 +1,7 @@
 #include "application_identity.hpp"
 #include "localization.hpp"
 #include "reviewed_source_production_failure.hpp"
+#include "reviewed_source_production_outcome.hpp"
 
 #include <clocale>
 #include <iostream>
@@ -92,6 +93,75 @@ int main(int argc, char* argv[]) {
                                          LeaseContended,
                                  std::monostate{}})
               << '\n';
+    ProductionSourceBuildProvenance reviewed_update;
+    reviewed_update.review_status = ProductionSourceReviewStatus::Reviewed;
+    reviewed_update.editor_overlay =
+            ReviewedSourceEditorOverlayStatus::InvocationLocal;
+    reviewed_update.reviewed_upstream_base_revision =
+            SourceRevisionIdentity::git_commit(
+                    "5555555555555555555555555555555555555555");
+    reviewed_update.publication_status =
+            ReviewedSourcePublicationStatus::Published;
+    reviewed_update.reviewed_outcome =
+            ProductionReviewedSourceOutcome::UpdateReview;
+    reviewed_update.reviewed_state_generation = 41;
+    const ReviewedSourceProductionOutcomePresentation reviewed_presentation =
+            format_reviewed_source_production_outcome(
+                    "localized-base", reviewed_update);
+    std::cout << "reviewed_update_outcome="
+              << reviewed_presentation.info_lines[0] << '\n';
+    std::cout << "reviewed_update_state="
+              << reviewed_presentation.info_lines[1] << '\n';
+    std::cout << "reviewed_update_overlay="
+              << reviewed_presentation.info_lines[2] << '\n';
+    const ReviewedSourceProductionOutcomePresentation staged_presentation =
+            format_production_source_build_staged_outcome(
+                    "localized-base",
+                    ProductionSourceBuildStagedOutcome{
+                            reviewed_update,
+                            ProductionSourceBuildCommandOutcome::Succeeded,
+                            ProductionSourceInstallOutcome::Failed});
+    std::cout << "reviewed_build_outcome="
+              << staged_presentation.info_lines[3] << '\n';
+    std::cout << "reviewed_install_outcome="
+              << staged_presentation.info_lines[4] << '\n';
+
+    ProductionSourceBuildProvenance compatibility;
+    compatibility.review_status =
+            ProductionSourceReviewStatus::CompatibilityWithoutReview;
+    compatibility.compatibility_reason =
+            ReviewedSourceCompatibilityBuildReason::NoDiff;
+    std::cout << "reviewed_compatibility="
+              << format_reviewed_source_production_outcome(
+                         "localized-base", compatibility)
+                         .info_lines.front()
+              << '\n';
+    std::string reviewed_render_kind = localization::translate_message(
+            "review type: update review\n");
+    if(!reviewed_render_kind.empty() &&
+       reviewed_render_kind.back() == '\n') {
+        reviewed_render_kind.pop_back();
+    }
+    std::cout << "reviewed_render_kind=" << reviewed_render_kind << '\n';
+    std::cout << "reviewed_render_readiness="
+              << localization::translate_message(
+                         "sensitive source cannot be rendered safely")
+              << '\n';
+    std::string reviewed_initial_kind = localization::translate_message(
+            "review type: initial full review\n");
+    if(!reviewed_initial_kind.empty() &&
+       reviewed_initial_kind.back() == '\n') {
+        reviewed_initial_kind.pop_back();
+    }
+    std::cout << "reviewed_initial_kind=" << reviewed_initial_kind << '\n';
+    std::cout << "reviewed_rebind_prompt="
+              << localization::translate_message(
+                         "Accept this explicit rebind/rebaseline of invalid reviewed state?")
+              << '\n';
+    std::cout << "reviewed_tracked_source="
+              << localization::translate_message("tracked source") << '\n';
+    std::cout << "reviewed_source_identity="
+              << localization::translate_message("source identity") << '\n';
     std::cout << "missing="
               << localization::translate_message("Missing catalog entry.")
               << '\n';

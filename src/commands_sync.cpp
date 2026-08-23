@@ -256,6 +256,10 @@ int execute_sync_source_build_invocation(
         execute_prepared_source_build_invocation(
                 std::move(invocation), config);
         return 0;
+    } catch(const ProductionSourceBuildInvocationError& error) {
+        Logger::error(
+                format_production_source_build_invocation_failure(error));
+        return 1;
     } catch(const SeparatedPackageBaseSourceBuildCleanupError& error) {
         // Direct source routeは利用者がretained workspaceを手動確認できる
         // 既存contractを維持する。AUR update resultのpath firewallとは別境界。

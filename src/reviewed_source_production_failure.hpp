@@ -1,9 +1,11 @@
 #pragma once
 
-#include "reviewed_source_pinned_build.hpp"
+#include "artifact_workspace.hpp"
 
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <variant>
 
 // Production-only classification. Stage and reason are typed authority;
@@ -85,6 +87,22 @@ public:
         return failure_;
     }
 
+    [[nodiscard]] const std::optional<ProductionSourceBuildStagedOutcome>&
+    production_outcome() const noexcept {
+        return production_outcome_;
+    }
+
+    void attach_production_outcome(
+            ProductionSourceBuildStagedOutcome production_outcome) {
+        if(production_outcome_.has_value()) {
+            throw std::logic_error(
+                    "Reviewed production failure already has a staged outcome.");
+        }
+        production_outcome_.emplace(std::move(production_outcome));
+    }
+
 private:
     ReviewedSourceProductionFailure failure_;
+    std::optional<ProductionSourceBuildStagedOutcome>
+            production_outcome_;
 };

@@ -1,6 +1,7 @@
 #include "app_config.hpp"
 #include "cache_authority.hpp"
 #include "reviewed_source_pinned_build.hpp"
+#include "reviewed_source_production_outcome.hpp"
 #include "reviewed_source_state_store.hpp"
 #include "source_build.hpp"
 #include "source_package_identity.hpp"
@@ -23,6 +24,13 @@
 #include <variant>
 #include <vector>
 
+namespace reviewed_source_production_execution_stub {
+
+void fail_next_install_transaction();
+void fail_next_package_metadata();
+
+} // namespace reviewed_source_production_execution_stub
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -33,6 +41,250 @@ constexpr std::string_view CANONICAL_REMOTE =
 
 void require(bool condition, std::string_view diagnostic) {
     if(!condition) throw std::runtime_error(std::string(diagnostic));
+}
+
+void require_contains(
+        const std::string& text,
+        std::string_view expected,
+        std::string_view diagnostic) {
+    require(text.find(expected) != std::string::npos, diagnostic);
+}
+
+ProductionSourceBuildProvenance reviewed_provenance(
+        ProductionReviewedSourceOutcome outcome,
+        ReviewedSourcePublicationStatus publication_status =
+                ReviewedSourcePublicationStatus::Published,
+        ReviewedSourceEditorOverlayStatus editor_overlay =
+                ReviewedSourceEditorOverlayStatus::None,
+        std::optional<ReviewedSourceAbnormalStateReason> abnormal_reason =
+                std::nullopt) {
+    ProductionSourceBuildProvenance provenance;
+    provenance.review_status = ProductionSourceReviewStatus::Reviewed;
+    provenance.editor_overlay = editor_overlay;
+    provenance.reviewed_upstream_base_revision =
+            SourceRevisionIdentity::git_commit(
+                    "1111111111111111111111111111111111111111");
+    provenance.publication_status = publication_status;
+    provenance.reviewed_outcome = outcome;
+    provenance.abnormal_state_reason = abnormal_reason;
+    provenance.reviewed_state_generation = 17;
+    return provenance;
+}
+
+void test_outcome_projection_matrix() {
+    struct ReviewedCase {
+        ProductionReviewedSourceOutcome outcome;
+        std::optional<ReviewedSourceAbnormalStateReason> abnormal_reason;
+        std::string_view expected;
+    };
+    for(const ReviewedCase& test_case : {
+                ReviewedCase{
+                        ProductionReviewedSourceOutcome::InitialFullReview,
+                        std::nullopt, "initial full review accepted"},
+                ReviewedCase{
+                        ProductionReviewedSourceOutcome::UpdateReview,
+                        std::nullopt, "update review accepted"},
+                ReviewedCase{
+                        ProductionReviewedSourceOutcome::
+                                RebaselineFullReview,
+                        std::nullopt, "explicit full rebaseline accepted"},
+                ReviewedCase{
+                        ProductionReviewedSourceOutcome::
+                                AbnormalStateRebindFullReview,
+                        ReviewedSourceAbnormalStateReason::Invalid,
+                        "rebind/rebaseline of invalid state"},
+                ReviewedCase{
+                        ProductionReviewedSourceOutcome::
+                                AbnormalStateRebindFullReview,
+                        ReviewedSourceAbnormalStateReason::Corrupted,
+                        "rebind/rebaseline of corrupted state"},
+                ReviewedCase{
+                        ProductionReviewedSourceOutcome::
+                                AbnormalStateRebindFullReview,
+                        ReviewedSourceAbnormalStateReason::SourceMismatch,
+                        "source-identity rebind/rebaseline"},
+        }) {
+        ReviewedSourceProductionOutcomePresentation presentation =
+                format_reviewed_source_production_outcome(
+                        "matrix-base",
+                        reviewed_provenance(
+                                test_case.outcome,
+                                ReviewedSourcePublicationStatus::Published,
+                                ReviewedSourceEditorOverlayStatus::None,
+                                test_case.abnormal_reason));
+        require(presentation.info_lines.size() == 3,
+                "Reviewed outcome projection line count differs");
+        require_contains(
+                presentation.info_lines.front(), test_case.expected,
+                "Reviewed outcome kind was flattened");
+        require_contains(
+                presentation.info_lines[1], "generation 17",
+                "Reviewed outcome lost state generation");
+    }
+
+    ReviewedSourceProductionOutcomePresentation already =
+            format_reviewed_source_production_outcome(
+                    "matrix-base",
+                    reviewed_provenance(
+                            ProductionReviewedSourceOutcome::AlreadyReviewed,
+                            ReviewedSourcePublicationStatus::
+                                    AlreadyPublishedSameTarget));
+    require_contains(
+            already.info_lines.front(), "was already reviewed",
+            "AlreadyReviewed was flattened into new acceptance");
+    require_contains(
+            already.info_lines[1], "remains at generation 17",
+            "AlreadyReviewed lost unchanged generation");
+
+    ReviewedSourceProductionOutcomePresentation raced =
+            format_reviewed_source_production_outcome(
+                    "matrix-base",
+                    reviewed_provenance(
+                            ProductionReviewedSourceOutcome::UpdateReview,
+                            ReviewedSourcePublicationStatus::
+                                    AlreadyPublishedSameTarget));
+    require_contains(
+            raced.info_lines[1],
+            "already matched the accepted target at publication",
+            "Same-target publication was flattened into a fresh write");
+
+    ReviewedSourceProductionOutcomePresentation overlay =
+            format_reviewed_source_production_outcome(
+                    "matrix-base",
+                    reviewed_provenance(
+                            ProductionReviewedSourceOutcome::UpdateReview,
+                            ReviewedSourcePublicationStatus::Published,
+                            ReviewedSourceEditorOverlayStatus::
+                                    InvocationLocal));
+    require_contains(
+            overlay.info_lines.back(),
+            "it is not the exact reviewed commit tree",
+            "Editor overlay was flattened into the reviewed commit");
+
+    struct CompatibilityCase {
+        ReviewedSourceCompatibilityBuildReason reason;
+        std::string_view expected;
+    };
+    for(const CompatibilityCase& test_case : {
+                CompatibilityCase{
+                        ReviewedSourceCompatibilityBuildReason::NoDiff,
+                        "--nodiff skipped review acceptance"},
+                CompatibilityCase{
+                        ReviewedSourceCompatibilityBuildReason::NoConfirm,
+                        "--noconfirm did not create review acceptance"},
+                CompatibilityCase{
+                        ReviewedSourceCompatibilityBuildReason::
+                                NonInteractiveInput,
+                        "stdin is non-interactive"},
+                CompatibilityCase{
+                        ReviewedSourceCompatibilityBuildReason::
+                                ExplicitReviewDecline,
+                        "review acceptance was explicitly declined"},
+                CompatibilityCase{
+                        ReviewedSourceCompatibilityBuildReason::
+                                DefaultReviewDecline,
+                        "declined by the safe default"},
+        }) {
+        ProductionSourceBuildProvenance provenance;
+        provenance.review_status =
+                ProductionSourceReviewStatus::CompatibilityWithoutReview;
+        provenance.compatibility_reason = test_case.reason;
+        ReviewedSourceProductionOutcomePresentation presentation =
+                format_reviewed_source_production_outcome(
+                        "matrix-base", provenance);
+        require(presentation.info_lines.size() == 1,
+                "Compatibility outcome projection line count differs");
+        require_contains(
+                presentation.info_lines.front(), test_case.expected,
+                "Compatibility reason was flattened");
+        require_contains(
+                presentation.info_lines.front(),
+                "reviewed state was not advanced",
+                "Compatibility outcome claimed reviewed state advance");
+    }
+}
+
+void test_failure_projection_matrix() {
+    struct FailureCase {
+        ReviewedSourceProductionFailureReason reason;
+        std::string_view expected;
+    };
+    for(const FailureCase& test_case : {
+                FailureCase{
+                        ReviewedSourceProductionFailureReason::
+                                UnsupportedFuture,
+                        "unsupported future schema"},
+                FailureCase{
+                        ReviewedSourceProductionFailureReason::UnsafeHistory,
+                        "history is unsafe"},
+                FailureCase{
+                        ReviewedSourceProductionFailureReason::
+                                StateStoreFailure,
+                        "could not be read safely"},
+                FailureCase{
+                        ReviewedSourceProductionFailureReason::
+                                InconsistentStateObservation,
+                        "observation was inconsistent"},
+                FailureCase{
+                        ReviewedSourceProductionFailureReason::LeaseContended,
+                        "lease is already held"},
+                FailureCase{
+                        ReviewedSourceProductionFailureReason::
+                                ExactCheckoutFailure,
+                        "exact checkout materialization failed"},
+                FailureCase{
+                        ReviewedSourceProductionFailureReason::
+                                PublicationConflict,
+                        "publication conflicted"},
+                FailureCase{
+                        ReviewedSourceProductionFailureReason::
+                                PublishedUncertain,
+                        "post-commit ambiguity"},
+                FailureCase{
+                        ReviewedSourceProductionFailureReason::
+                                PostPublicationCheckoutFailure,
+                        "changed after state publication"},
+        }) {
+        const std::string diagnostic =
+                reviewed_source_production_failure_diagnostic(
+                        ReviewedSourceProductionFailure{
+                                ReviewedSourceProductionFailureStage::
+                                        StatePublication,
+                                test_case.reason, std::monostate{}});
+        require_contains(
+                diagnostic, test_case.expected,
+                "Typed reviewed-source failure was flattened");
+        require_contains(
+                diagnostic, "build was not started",
+                "Reviewed-source STOP diagnostic lost build status");
+    }
+
+    for(const auto& [reason, expected] : {
+                std::pair{
+                        ReviewedSourceOperationStopReason::
+                                ManualInspectionRequired,
+                        std::string_view{"requires manual inspection"}},
+                std::pair{
+                        ReviewedSourceOperationStopReason::
+                                SensitiveSourceUnrenderable,
+                        std::string_view{"could not be rendered safely"}},
+        }) {
+        const std::string diagnostic =
+                reviewed_source_production_failure_diagnostic(
+                        ReviewedSourceProductionFailure{
+                                ReviewedSourceProductionFailureStage::
+                                        Acceptance,
+                                ReviewedSourceProductionFailureReason::
+                                        ReviewOperationStopped,
+                                ReviewedSourceOperationStop::make(reason)});
+        require_contains(
+                diagnostic, expected,
+                "Readiness STOP reason was flattened");
+        require_contains(
+                diagnostic,
+                "without state publication or compatibility fallback",
+                "Readiness STOP diagnostic allowed fallback");
+    }
 }
 
 std::string shell_quote(const fs::path& path) {
@@ -179,6 +431,8 @@ void mutate_checkout_after_publication(
 
 int main() {
     try {
+        test_outcome_projection_matrix();
+        test_failure_projection_matrix();
         TemporaryTree tree;
         const fs::path home = tree.path() / "home";
         const fs::path cache_home = tree.path() / "cache";
@@ -301,7 +555,14 @@ int main() {
                                     std::optional<
                                             ReviewedSourcePublicationStatus>{
                                             ReviewedSourcePublicationStatus::
-                                                    Published},
+                                                    Published} &&
+                            provenance.reviewed_outcome ==
+                                    std::optional<
+                                            ProductionReviewedSourceOutcome>{
+                                            ProductionReviewedSourceOutcome::
+                                                    InitialFullReview} &&
+                            provenance.reviewed_state_generation ==
+                                    std::optional<std::uint64_t>{1},
                     "Accepted review/editor provenance was flattened");
             require_loaded_state(target, 1);
             require(capture(
@@ -358,7 +619,14 @@ int main() {
                                     std::optional<
                                             ReviewedSourcePublicationStatus>{
                                             ReviewedSourcePublicationStatus::
-                                                    AlreadyPublishedSameTarget},
+                                                    AlreadyPublishedSameTarget} &&
+                            already_provenance.reviewed_outcome ==
+                                    std::optional<
+                                            ProductionReviewedSourceOutcome>{
+                                            ProductionReviewedSourceOutcome::
+                                                    AlreadyReviewed} &&
+                            already_provenance.reviewed_state_generation ==
+                                    std::optional<std::uint64_t>{1},
                     "Already-reviewed production provenance differs");
             require_loaded_state(target, 1);
             require(capture(
@@ -367,6 +635,76 @@ int main() {
                             " status --porcelain=v2 -z --untracked-files=all --ignored=matching")
                             .empty(),
                     "Already-reviewed exact checkout retained editor residue");
+        }
+
+        {
+            AppConfig late_failure_config = reviewed_config(editor);
+            late_failure_config.user_config.review.pkgbuild =
+                    ReviewPolicy::Skip;
+            reviewed_source_production_execution_stub::
+                    fail_next_install_transaction();
+            try {
+                static_cast<void>(execute_source_build_typed(
+                        request(), cache_root,
+                        DesiredInstallReason::Explicit,
+                        PacmanDatabasePaths{"/", "/var/lib/pacman"},
+                        late_failure_config));
+                throw std::runtime_error(
+                        "Reviewed pacman failure completed successfully");
+            } catch(const SeparatedSourceBuildPhaseError& error) {
+                require(
+                        error.phase() ==
+                                        SeparatedSourceBuildFailurePhase::
+                                                InstallTransaction &&
+                                error.production_outcome().source_provenance.
+                                                review_status ==
+                                        ProductionSourceReviewStatus::
+                                                Reviewed &&
+                                error.production_outcome().source_provenance.
+                                                reviewed_outcome ==
+                                        std::optional<
+                                                ProductionReviewedSourceOutcome>{
+                                                ProductionReviewedSourceOutcome::
+                                                        AlreadyReviewed} &&
+                                error.production_outcome().build_outcome ==
+                                        ProductionSourceBuildCommandOutcome::
+                                                Succeeded &&
+                                error.production_outcome().install_outcome ==
+                                        ProductionSourceInstallOutcome::Failed,
+                        "Reviewed pacman failure lost reviewed/build/install outcome");
+            }
+            require_loaded_state(target, 1);
+
+            reviewed_source_production_execution_stub::
+                    fail_next_package_metadata();
+            try {
+                static_cast<void>(execute_source_build_typed(
+                        request(), cache_root,
+                        DesiredInstallReason::Explicit,
+                        PacmanDatabasePaths{"/", "/var/lib/pacman"},
+                        late_failure_config));
+                throw std::runtime_error(
+                        "Reviewed metadata failure completed successfully");
+            } catch(const SeparatedSourceBuildPhaseError& error) {
+                require(
+                        error.phase() ==
+                                        SeparatedSourceBuildFailurePhase::
+                                                InstallPreparation &&
+                                error.package_metadata_failure().has_value() &&
+                                error.package_metadata_failure()->code ==
+                                        PackageMetadataErrorCode::QueryFailed &&
+                                error.production_outcome().source_provenance.
+                                                review_status ==
+                                        ProductionSourceReviewStatus::
+                                                Reviewed &&
+                                error.production_outcome().build_outcome ==
+                                        ProductionSourceBuildCommandOutcome::
+                                                Succeeded &&
+                                error.production_outcome().install_outcome ==
+                                        ProductionSourceInstallOutcome::Failed,
+                        "Reviewed PackageMetadataError lost typed staged outcome");
+            }
+            require_loaded_state(target, 1);
         }
 
         write_file(
@@ -546,7 +884,10 @@ int main() {
                                     PublishedUncertain &&
                     std::holds_alternative<
                             ReviewedSourcePublicationUncertain>(
-                            error.failure().detail);
+                            error.failure().detail) &&
+                    (!error.production_outcome().has_value() ||
+                     error.production_outcome()->build_outcome !=
+                             ProductionSourceBuildCommandOutcome::Succeeded);
         }
         require(publication_uncertain,
                 "PublishedUncertain was flattened in production");
@@ -604,7 +945,14 @@ int main() {
             require(provenance.review_status ==
                                     ProductionSourceReviewStatus::Reviewed &&
                             provenance.editor_overlay ==
-                                    ReviewedSourceEditorOverlayStatus::None,
+                                    ReviewedSourceEditorOverlayStatus::None &&
+                            provenance.reviewed_outcome ==
+                                    std::optional<
+                                            ProductionReviewedSourceOutcome>{
+                                            ProductionReviewedSourceOutcome::
+                                                    UpdateReview} &&
+                            provenance.reviewed_state_generation ==
+                                    std::optional<std::uint64_t>{5},
                     "No-op editor was promoted to a dirty overlay");
             require_loaded_state(no_op_editor_target, 5);
         }

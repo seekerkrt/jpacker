@@ -334,17 +334,18 @@ void test_change_types_and_sha1_metadata() {
 
     const std::string output = render_success(update_review(std::move(entries)));
     for(const std::string_view status : {
-                "status: Added", "status: Modified", "status: Deleted",
-                "status: Renamed", "status: TypeChanged"}) {
+                "change status: added", "change status: modified",
+                "change status: deleted", "change status: renamed",
+                "change status: type changed"}) {
         require_contains(output, status, "A change status was lost");
     }
     require_contains(
             output,
-            "status: Renamed \"rename-old\" -> \"rename-new\"",
+            "change status: renamed \"rename-old\" -> \"rename-new\"",
             "Exact rename paths were not retained");
     require_contains(
             output,
-            "status: TypeChanged 100644 (Regular) -> 120000 (SymbolicLink)",
+            "change status: type changed 100644 (regular file) -> 120000 (symbolic link)",
             "TypeChanged modes were not retained");
     require_contains(
             output, "rename similarity: 100%",
@@ -359,16 +360,16 @@ void test_change_types_and_sha1_metadata() {
             output, "metadata change: mode changed (content unchanged)",
             "Mode-only change was flattened to no change");
     require_contains(
-            output, "representation: CompleteTextPatch",
+            output, "content representation: complete text patch",
             "Text patch representation was not rendered");
     require_contains(
             output, "@@ -1,1 +1,1 @@",
             "Parsed patch hunk coordinates were not rendered");
     require_contains(
-            output, "Git marker: Binary",
+            output, "Git change marker: binary",
             "Git binary marker was hidden");
     require_contains(
-            output, "new content kind: LineReviewable",
+            output, "new content kind: line-reviewable content",
             "Actual content kind was hidden by the Git marker");
     require_contains(
             output, std::string("SHA-1 ") + SHA1_A,
@@ -407,13 +408,14 @@ void test_sha256_metadata_and_patch() {
             output, std::string("new object: SHA-256 ") + SHA256_B,
             "Full new SHA-256 blob OID was not rendered");
     require_contains(
-            output, "history relation: NonAncestor",
+            output,
+            "history relation: reviewed baseline is not an ancestor of the target",
             "Non-ancestor history relation was flattened");
     require_contains(
-            output, "Git marker: Binary",
+            output, "Git change marker: binary",
             "SHA-256 Git marker was lost");
     require_contains(
-            output, "representation: CompleteTextPatch",
+            output, "content representation: complete text patch",
             "SHA-256 patch representation was lost");
 }
 
@@ -586,18 +588,19 @@ void test_representation_and_readiness_diagnostics() {
     const std::string output = render_success(update_review(
             {full, patch, unchanged, binary, gitlink, mixed, sensitive}));
     for(const std::string_view representation : {
-                "CompleteTextPatch", "CompleteFullText", "NoContentChange",
-                "ContainsNul", "GitlinkMetadata", "MixedTextAndNonText"}) {
+                "complete text patch", "complete full text",
+                "no content change", "content containing NUL bytes",
+                "Gitlink metadata", "mixed text and non-text content"}) {
         require_contains(
-                output, std::string("representation: ") +
+                output, std::string("content representation: ") +
                                 std::string(representation),
                 "A representation was not rendered");
     }
     for(const std::string_view readiness : {
-                "Complete", "ManualInspectionRequired",
-                "SensitiveSourceUnrenderable"}) {
+                "complete", "manual inspection required",
+                "sensitive source cannot be rendered safely"}) {
         require_contains(
-                output, std::string("readiness: ") +
+                output, std::string("review readiness: ") +
                                 std::string(readiness),
                 "A readiness state was not rendered");
     }
@@ -606,7 +609,7 @@ void test_representation_and_readiness_diagnostics() {
             "ContainsNul diagnostic was not fixed and safe");
     require_contains(
             output,
-            "gitlink/submodule metadata only; recursive review not performed",
+            "Gitlink/submodule metadata only; recursive review not performed",
             "Gitlink diagnostic was not fixed and safe");
     require_contains(
             output,
@@ -616,13 +619,15 @@ void test_representation_and_readiness_diagnostics() {
             output, "line-reviewable old content:",
             "Safe side of mixed content was not rendered");
     require_contains(
-            output, "WARNING: manual inspection required",
+            output, "WARNING: manual inspection is required",
             "Manual readiness was visually flattened to Complete");
     require_contains(
-            output, "WARNING: sensitive source content is unrenderable",
+            output,
+            "WARNING: review-sensitive source content cannot be rendered safely",
             "Sensitive unrenderable readiness was not stronger");
     require_contains(
-            output, "overall readiness: SensitiveSourceUnrenderable",
+            output,
+            "overall review readiness: sensitive source cannot be rendered safely",
             "Aggregate readiness was not retained");
     require_contains(
             output, "new size: unavailable",
@@ -645,10 +650,10 @@ void test_path_and_emphasis_policy() {
     for(const std::string_view path : {"PKGBUILD", "foo.install"}) {
         const std::string output = render_single_path(std::string(path));
         require_contains(
-                output, "review emphasis: Sensitive",
+                output, "review emphasis: review-sensitive",
                 "Root sensitive source was not emphasized");
         require_contains(
-                output, "presentation priority: Sensitive",
+                output, "presentation priority: review-sensitive",
                 "Root sensitive priority was not rendered");
     }
     for(const std::string_view path : {
@@ -656,19 +661,19 @@ void test_path_and_emphasis_policy() {
                 "ordinary.patch"}) {
         const std::string output = render_single_path(std::string(path));
         require_contains(
-                output, "review emphasis: Ordinary",
+                output, "review emphasis: ordinary",
                 "Generic tracked path was over-emphasized");
         require_contains(
-                output, "presentation priority: Ordinary",
+                output, "presentation priority: ordinary",
                 "Generic tracked priority drifted");
     }
 
     const std::string srcinfo = render_single_path(".SRCINFO");
     require_contains(
-            srcinfo, "new classification: GeneratedMetadata",
+            srcinfo, "new classification: generated metadata",
             ".SRCINFO classification was lost");
     require_contains(
-            srcinfo, "presentation priority: LowerGeneratedMetadata",
+            srcinfo, "presentation priority: lower-priority generated metadata",
             ".SRCINFO was not lower-emphasis metadata");
     require_contains(
             srcinfo, "not source-review authority",
@@ -712,23 +717,24 @@ void test_classification_crossing_priority() {
         const std::string output = render_exact_rename(
                 std::string(old_path), std::string(new_path));
         require_contains(
-                output, "presentation priority: Ordinary",
+                output, "presentation priority: ordinary",
                 "TrackedSource side did not retain ordinary priority");
         require_not_contains(
-                output, "presentation priority: LowerGeneratedMetadata",
+                output,
+                "presentation priority: lower-priority generated metadata",
                 "GeneratedMetadata side lowered a tracked-source rename");
     }
 
     const std::string generated_only = render_single_path(".SRCINFO");
     require_contains(
             generated_only,
-            "presentation priority: LowerGeneratedMetadata",
+            "presentation priority: lower-priority generated metadata",
             "GeneratedMetadata-only entry lost lower priority");
 
     const std::string sensitive =
             render_exact_rename(".SRCINFO", "PKGBUILD");
     require_contains(
-            sensitive, "presentation priority: Sensitive",
+            sensitive, "presentation priority: review-sensitive",
             "Sensitive side did not win classification-crossing priority");
 }
 
@@ -740,7 +746,7 @@ void test_lifecycle_presentation() {
                             ReviewedSourceReviewReadiness::Complete, {}}};
     const std::string initial_output = render_success(initial);
     require_contains(
-            initial_output, "review kind: InitialFullReview",
+            initial_output, "review type: initial full review",
             "Initial review lifecycle was lost");
 
     const ReviewedSourceMaterializedReview already =
@@ -748,10 +754,10 @@ void test_lifecycle_presentation() {
                     SourceRevisionIdentity::git_commit(SHA1_A)};
     const std::string already_output = render_success(already);
     require_contains(
-            already_output, "review kind: AlreadyReviewed",
+            already_output, "review type: already reviewed",
             "AlreadyReviewed lifecycle was lost");
     require_contains(
-            already_output, "result: already reviewed",
+            already_output, "review result: already reviewed",
             "AlreadyReviewed result was not explicit");
 
     const ReviewedSourceMaterializedReview rebaseline =
@@ -763,11 +769,11 @@ void test_lifecycle_presentation() {
                             ReviewedSourceReviewReadiness::Complete, {}}};
     const std::string rebaseline_output = render_success(rebaseline);
     require_contains(
-            rebaseline_output, "review kind: RebaselineFullReview",
+            rebaseline_output, "review type: explicit full rebaseline",
             "Rebaseline lifecycle was lost");
     require_contains(
             rebaseline_output,
-            "baseline unavailable reason: MissingOrNotCommit",
+            "baseline unavailable reason: baseline object is missing or is not a commit",
             "Rebaseline reason was lost");
 }
 
@@ -926,7 +932,7 @@ void test_verified_boundary_rejects_forged_models() {
     require(materialized != nullptr,
             "Genuine 3B1 finalizer fixture failed");
     require_contains(
-            render_success(*materialized), "overall readiness: Complete",
+            render_success(*materialized), "overall review readiness: complete",
             "Genuine 3B1 finalizer result did not render");
 }
 

@@ -261,6 +261,8 @@ class PackageBaseArtifactInstallTransactionError final
     std::string                                      package_base_;
     std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts_;
     std::optional<int> exit_code_;
+    std::optional<ProductionSourceBuildStagedOutcome>
+            production_outcome_;
 
     PackageBaseArtifactInstallTransactionError(
             PackageBaseArtifactInstallTransactionFailureKind failure_kind,
@@ -309,6 +311,14 @@ public:
     const std::vector<PackageBaseArtifactInstallTransactionAttempt>&
     attempts() const noexcept;
     const std::optional<int>& exit_code() const noexcept;
+    const std::optional<ProductionSourceBuildStagedOutcome>&
+    production_outcome() const noexcept;
+
+    // Source-build aggregateだけがtransaction failureへ既に確定した
+    // staged production outcomeを付与する。artifact transaction classificationや
+    // retry/rollback authorityは変更しない。
+    void attach_production_outcome(
+            ProductionSourceBuildStagedOutcome production_outcome);
 
     std::vector<PackageBaseArtifactInstallTransactionAttempt>
     release_attempts() && noexcept;

@@ -30,7 +30,27 @@ enum class ProductionSourceReviewStatus {
 
 enum class ProductionSourceBuildCommandOutcome {
     NotAttempted,
+    Started,
+    Failed,
     Succeeded,
+};
+
+enum class ProductionSourceInstallOutcome {
+    NotAttempted,
+    Started,
+    Failed,
+    Succeeded,
+};
+
+// Reviewed-source lifecycle authorityから一方向に写したproduction outcome。
+// build/install authorityではなく、aggregate/CLIがaccepted lifecycleを
+// AlreadyReviewedやcompatibilityへflattenしないためのsnapshotである。
+enum class ProductionReviewedSourceOutcome {
+    InitialFullReview,
+    UpdateReview,
+    RebaselineFullReview,
+    AbnormalStateRebindFullReview,
+    AlreadyReviewed,
 };
 
 struct ProductionSourceBuildProvenance {
@@ -42,8 +62,26 @@ struct ProductionSourceBuildProvenance {
             compatibility_reason;
     std::optional<SourceRevisionIdentity> reviewed_upstream_base_revision;
     std::optional<ReviewedSourcePublicationStatus> publication_status;
+    std::optional<ProductionReviewedSourceOutcome> reviewed_outcome;
+    std::optional<ReviewedSourceAbnormalStateReason> abnormal_state_reason;
+    std::optional<std::uint64_t> reviewed_state_generation;
 
     bool operator==(const ProductionSourceBuildProvenance&) const = default;
+};
+
+// Review/state publication, makepkg, and package transaction are independent
+// production dimensions. A phase advances only at its own execution boundary;
+// later validation, metadata, install, or cleanup failure must not erase an
+// already completed dimension.
+struct ProductionSourceBuildStagedOutcome {
+    ProductionSourceBuildProvenance source_provenance;
+    ProductionSourceBuildCommandOutcome build_outcome =
+            ProductionSourceBuildCommandOutcome::NotAttempted;
+    ProductionSourceInstallOutcome install_outcome =
+            ProductionSourceInstallOutcome::NotAttempted;
+
+    bool operator==(const ProductionSourceBuildStagedOutcome&) const =
+            default;
 };
 
 // Remote production makepkg authority. Compatibility routes retain the same
@@ -82,7 +120,10 @@ class ProductionArtifactSourceTree final {
     friend ProductionArtifactSourceTree
     make_reviewed_production_artifact_source_tree(
             ValidatedCachePath checkout,
-            PinnedReviewedSourceBuild reviewed);
+            PinnedReviewedSourceBuild reviewed,
+            ProductionReviewedSourceOutcome reviewed_outcome,
+            std::optional<ReviewedSourceAbnormalStateReason>
+                    abnormal_state_reason);
     friend ArtifactMakepkgContext prepare_artifact_makepkg_context(
             ProductionArtifactSourceTree source_tree,
             const ArtifactWorkspace& workspace,
@@ -141,7 +182,10 @@ make_unreviewed_production_artifact_source_tree(
 [[nodiscard]] ProductionArtifactSourceTree
 make_reviewed_production_artifact_source_tree(
         ValidatedCachePath checkout,
-        PinnedReviewedSourceBuild reviewed);
+        PinnedReviewedSourceBuild reviewed,
+        ProductionReviewedSourceOutcome reviewed_outcome,
+        std::optional<ReviewedSourceAbnormalStateReason>
+                abnormal_state_reason = std::nullopt);
 
 // 一回のsource-build invocationだけが所有するfresh PKGDEST。
 // POLICY(#242): named pathだけでなくroot/workspace FDと作成時identityを保持し、
