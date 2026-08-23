@@ -373,8 +373,8 @@ _moguet_description() {
         --version) REPLY='Show version information and exit' ;;
         --edit) REPLY='Open or edit PKGBUILD and .install files for this invocation' ;;
         --noedit) REPLY='Skip invocation-local PKGBUILD and .install editing' ;;
-        --diff) REPLY='Review changes from the previous reviewed revision to the exact target' ;;
-        --nodiff) REPLY='Skip reviewed source changes without advancing reviewed state' ;;
+        --diff) REPLY='Review repository updates; for AUR, review the exact target from the previous reviewed revision or all tracked source initially' ;;
+        --nodiff) REPLY='Skip repository diff / reviewed-source review without advancing reviewed state' ;;
         --noconfirm) REPLY='Skip prompts on supported routes; forwarding remains route-owned' ;;
         --dry-run) REPLY='Observe a supported mutating operation without changing persistent state' ;;
         --build-mode=) REPLY='Select the source-build mode' ;;

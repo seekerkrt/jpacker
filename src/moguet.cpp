@@ -865,14 +865,18 @@ void print_help() {
                     "PKGBUILD", ".install"));
     print_help_entry(
             cli_option_syntax(OptionId::Diff),
-            localization::translate_message(
-                    "Review changes from the previous reviewed revision to the exact target"));
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the AUR project identity.
+                    "Review repository updates; for {}, review the exact target",
+                    "AUR"));
+    print_help_continuation(localization::translate_message(
+            "Use the previous reviewed revision, or all tracked source on first review"));
     print_help_continuation(localization::translate_message(
             "Advance reviewed state only after explicit acceptance"));
     print_help_entry(
             cli_option_syntax(OptionId::NoDiff),
             localization::translate_message(
-                    "Skip reviewed source changes without advancing reviewed state"));
+                    "Skip repository diff / reviewed-source review without advancing reviewed state"));
     print_help_entry(
             cli_option_syntax(OptionId::NoConfirm),
             localization::format_translated_message(
@@ -942,11 +946,15 @@ void print_help() {
     print_help_entry(
             "review.pkgbuild = prompt|skip",
             localization::format_translated_message(
-                    // TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
-                    "{} review policy", "PKGBUILD"));
+                    // TRANSLATORS: PKGBUILD and .install are literal artifact names.
+                    "Invocation-local {} / {} editor policy; not reviewed-source acceptance",
+                    "PKGBUILD", ".install"));
     print_help_entry(
             "review.diff = prompt|skip",
-            localization::translate_message("Repository update diff policy"));
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the AUR project identity.
+                    "Repository diff / {} reviewed-source review policy; skipping does not advance reviewed state",
+                    "AUR"));
     print_help_entry(
             "build.mode = normal|rebuild|clean",
             localization::translate_message("Source-build mode"));

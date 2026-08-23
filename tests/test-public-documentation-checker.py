@@ -14,10 +14,12 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 
 from check_public_documentation import (  # noqa: E402
+    assert_semantic_text_contract,
     check_reviewed_source_documentation,
     exact_man_public_surface,
     expected_surface,
     reviewed_source_documentation_contracts,
+    reviewed_source_runtime_help_contracts,
 )
 from generate_completions import load_schema  # noqa: E402
 
@@ -107,6 +109,34 @@ def expect_reviewed_source_documentation_rejected(
     fail(f"{label} unexpectedly passed")
 
 
+def expect_runtime_help_rejected(
+    label: str,
+    locale: str,
+    syntax: str,
+    description: str,
+) -> None:
+    contract = reviewed_source_runtime_help_contracts(locale).get(syntax)
+    if contract is None:
+        fail(f"unknown runtime-help mutation entry: {locale} {syntax}")
+    diagnostic = io.StringIO()
+    try:
+        with redirect_stderr(diagnostic):
+            assert_semantic_text_contract(
+                f"{locale} runtime help entry {syntax!r}",
+                description,
+                contract,
+            )
+    except SystemExit as error:
+        if (
+            error.code == 1
+            and "public-documentation-check:" in diagnostic.getvalue()
+        ):
+            print(f"  ok: rejected {label}")
+            return
+        fail(f"{label} returned unexpected status {error.code!r}")
+    fail(f"{label} unexpectedly passed")
+
+
 def main() -> int:
     schema = load_schema()
     expected = expected_surface(schema)
@@ -180,10 +210,28 @@ def main() -> int:
             "last-writer-wins semantics",
         ),
         (
-            "obsolete completion wording",
+            "stale runtime review.pkgbuild source wording",
+            "src/moguet.cpp",
+            "Invocation-local {} / {} editor policy; not reviewed-source acceptance",
+            "{} review policy",
+        ),
+        (
+            "stale runtime review.diff source wording",
+            "src/moguet.cpp",
+            "Repository diff / {} reviewed-source review policy; skipping does not advance reviewed state",
+            "Repository update diff policy",
+        ),
+        (
+            "completion wording without initial full review",
             "completions/descriptions/en.json",
-            "Review changes from the previous reviewed revision to the exact target",
+            "Review repository updates; for AUR, review the exact target from the previous reviewed revision or all tracked source initially",
             "Prompt to view repository update diffs",
+        ),
+        (
+            "ambiguous completion --nodiff wording",
+            "completions/descriptions/en.json",
+            "Skip repository diff / reviewed-source review without advancing reviewed state",
+            "Skip reviewed source changes",
         ),
     )
     for label, relative_path, old, new in reviewed_source_mutations:
@@ -191,9 +239,62 @@ def main() -> int:
             label, relative_path, old, new
         )
 
+    runtime_help_mutations = (
+        (
+            "stale English review.pkgbuild config wording",
+            "en",
+            "review.pkgbuild = prompt|skip",
+            "PKGBUILD review policy",
+        ),
+        (
+            "stale English review.diff config wording",
+            "en",
+            "review.diff = prompt|skip",
+            "Repository update diff policy",
+        ),
+        (
+            "ambiguous English --nodiff wording",
+            "en",
+            "--nodiff",
+            "Skip reviewed source changes",
+        ),
+        (
+            "English --diff without initial full review",
+            "en",
+            "--diff",
+            (
+                "Review repository updates; for AUR, review from the previous "
+                "reviewed revision to the exact target. Advance reviewed state "
+                "only after explicit acceptance"
+            ),
+        ),
+        (
+            "editor action described as review acceptance",
+            "en",
+            "review.pkgbuild = prompt|skip",
+            (
+                "PKGBUILD / .install editor action for this invocation is "
+                "reviewed-source acceptance"
+            ),
+        ),
+        (
+            "stale Japanese review.pkgbuild config wording",
+            "ja",
+            "review.pkgbuild = prompt|skip",
+            "PKGBUILDの確認方針",
+        ),
+    )
+    for label, locale, syntax, description in runtime_help_mutations:
+        expect_runtime_help_rejected(
+            label,
+            locale,
+            syntax,
+            description,
+        )
+
     print(
         "public-documentation-checker-test: "
-        f"{len(mutations) + len(reviewed_source_mutations) + 2} scenarios passed"
+        f"{len(mutations) + len(reviewed_source_mutations) + len(runtime_help_mutations) + 2} scenarios passed"
     )
     return 0
 

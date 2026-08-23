@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.3.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-23 17:17+0900\n"
+"POT-Creation-Date: 2026-08-23 19:00+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -5211,14 +5211,19 @@ msgstr "今回のinvocationで{}および{} fileを開く・編集"
 msgid "Skip invocation-local {} and {} editing"
 msgstr "invocation-localな{}および{}編集を省略"
 
-msgid "Review changes from the previous reviewed revision to the exact target"
-msgstr "前回のreviewed revisionからexact targetまでの変更を確認"
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "Review repository updates; for {}, review the exact target"
+msgstr "リポジトリ更新を確認し、{}ではexact targetをreview"
+
+msgid "Use the previous reviewed revision, or all tracked source on first review"
+msgstr "previous reviewed revisionを基準にし、初回reviewではtracked source全体をreview"
 
 msgid "Advance reviewed state only after explicit acceptance"
 msgstr "explicit acceptance後だけreviewed stateを進める"
 
-msgid "Skip reviewed source changes without advancing reviewed state"
-msgstr "reviewed source changeの確認を省略し、reviewed stateを進めない"
+msgid "Skip repository diff / reviewed-source review without advancing reviewed state"
+msgstr "repository diff / reviewed-source reviewを省略し、reviewed stateを進めない"
 
 #. TRANSLATORS: pacman and makepkg are literal external-program identities.
 #, c++-format
@@ -5276,13 +5281,15 @@ msgstr "型付きの読み取り専用設定。ファイルがない場合は組
 msgid "Required schema version"
 msgstr "必須のスキーマバージョン"
 
-#. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
+#. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
-msgid "{} review policy"
-msgstr "{}の確認方針"
+msgid "Invocation-local {} / {} editor policy; not reviewed-source acceptance"
+msgstr "invocation-localな{} / {} editor policy。reviewed-source acceptanceではない"
 
-msgid "Repository update diff policy"
-msgstr "リポジトリ更新差分の確認方針"
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "Repository diff / {} reviewed-source review policy; skipping does not advance reviewed state"
+msgstr "repository diff / {} reviewed-source reviewの方針。skipしてもreviewed stateを進めない"
 
 msgid "Source-build mode"
 msgstr "ソースビルドモード"
@@ -8982,6 +8989,13 @@ msgstr "{}のデフォルト状態ログを段階{}で安全に使用できま�
 
 msgid "Unknown state log error code."
 msgstr "不明な状態ログエラーコードです。"
+
+#, c++-format
+#~ msgid "{} review policy"
+#~ msgstr "{}の確認方針"
+
+#~ msgid "Repository update diff policy"
+#~ msgstr "リポジトリ更新差分の確認方針"
 
 #, c++-format
 #~ msgid "Operation {} requires exactly one {} package target."

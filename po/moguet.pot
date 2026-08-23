@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.3.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-23 17:17+0900\n"
+"POT-Creation-Date: 2026-08-23 19:00+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -5218,13 +5218,18 @@ msgstr ""
 msgid "Skip invocation-local {} and {} editing"
 msgstr ""
 
-msgid "Review changes from the previous reviewed revision to the exact target"
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "Review repository updates; for {}, review the exact target"
+msgstr ""
+
+msgid "Use the previous reviewed revision, or all tracked source on first review"
 msgstr ""
 
 msgid "Advance reviewed state only after explicit acceptance"
 msgstr ""
 
-msgid "Skip reviewed source changes without advancing reviewed state"
+msgid "Skip repository diff / reviewed-source review without advancing reviewed state"
 msgstr ""
 
 #. TRANSLATORS: pacman and makepkg are literal external-program identities.
@@ -5283,12 +5288,14 @@ msgstr ""
 msgid "Required schema version"
 msgstr ""
 
-#. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
+#. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
-msgid "{} review policy"
+msgid "Invocation-local {} / {} editor policy; not reviewed-source acceptance"
 msgstr ""
 
-msgid "Repository update diff policy"
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "Repository diff / {} reviewed-source review policy; skipping does not advance reviewed state"
 msgstr ""
 
 msgid "Source-build mode"
