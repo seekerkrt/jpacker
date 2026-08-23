@@ -293,7 +293,7 @@ def assert_surface(label: str, actual: PublicSurface, expected: PublicSurface) -
         details.append("missing options: " + format_tokens(missing_options))
     if extra_options:
         details.append("extra options: " + format_tokens(extra_options))
-    fail(f"{label} differs from src/cli_authority.hpp ({'; '.join(details)})")
+    fail(f"{label} differs from source/cli_authority.hpp ({'; '.join(details)})")
 
 
 def help_surface(path: Path, expected: PublicSurface) -> PublicSurface:
@@ -327,7 +327,7 @@ def help_surface(path: Path, expected: PublicSurface) -> PublicSurface:
 
     if unknown_tokens:
         fail(
-            f"{path} exposes tokens outside src/cli_authority.hpp: "
+            f"{path} exposes tokens outside source/cli_authority.hpp: "
             + format_tokens(unknown_tokens)
         )
     return PublicSurface(frozenset(operation_tokens), frozenset(option_tokens))
@@ -512,7 +512,7 @@ def assert_man_option_definition_projection(
     if unknown:
         fail(
             f"{shown_path(path)} PUBLIC OPTIONS contains "
-            f"tokens outside src/cli_authority.hpp: {format_tokens(unknown)}"
+            f"tokens outside source/cli_authority.hpp: {format_tokens(unknown)}"
         )
     if actual_counts != expected_counts:
         missing = expected_counts - actual_counts
@@ -576,7 +576,7 @@ def exact_man_public_surface(
     if unknown_commands:
         fail(
             f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC COMMANDS contains "
-            f"tokens outside src/cli_authority.hpp: {format_tokens(unknown_commands)}"
+            f"tokens outside source/cli_authority.hpp: {format_tokens(unknown_commands)}"
         )
     duplicate_operations = {token for token, count in operation_counts.items() if count != 1}
     if duplicate_operations:
@@ -1052,7 +1052,7 @@ def reviewed_source_documentation_contracts(
             ),
             (),
         ),
-        repository_root / "src/moguet.cpp": (
+        repository_root / "source/moguet.cpp": (
             (
                 "review.pkgbuild = prompt|skip",
                 "review.diff = prompt|skip",

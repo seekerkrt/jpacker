@@ -17,6 +17,8 @@
 /build/**
 /moguet
 /jpacker
+/src
+/src/**
 /pkg
 /pkg/**
 *.o

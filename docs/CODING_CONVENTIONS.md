@@ -20,10 +20,10 @@ transaction、互換性、project stance等の設計判断は対応する正式d
 
 ## File構成と分割
 
-現在の実装は`src/moguet.cpp`だけの単一構成ではなく、CLI、設定、package metadata、plan、source build、process実行等を責務ごとの`.hpp` / `.cpp`へ分けている。
+現在の実装は`source/moguet.cpp`だけの単一構成ではなく、CLI、設定、package metadata、plan、source build、process実行等を責務ごとの`.hpp` / `.cpp`へ分けている。
 
 - 新しい非自明な型や複数箇所から使うinterfaceは、既存moduleと同様に宣言を`.hpp`、定義を`.cpp`へ分ける。
-- entry pointとtop-level CLI wiringは`src/moguet.cpp`へ置き、domain実装を戻して肥大化させない。
+- entry pointとtop-level CLI wiringは`source/moguet.cpp`へ置き、domain実装を戻して肥大化させない。
 - 既存の責務pairへ収まる変更では、新しいgeneric moduleやwrapperを増やさない。
 - file分割そのものを目的に既存moduleを一括移動しない。
 - testは対象moduleと既存`tests/`の構成に対応させる。

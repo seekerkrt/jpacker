@@ -319,7 +319,7 @@ if grep -F 'pkgname = clean-root-cli' "$export_fixture/.SRCINFO" >/dev/null; the
 fi
 
 # VERSION is the canonical current-release input.  Every tracked production
-# file under src/ is part of the current-version semantic domain; classified
+# file under source/ is part of the current-version semantic domain; classified
 # tests and release tooling remain explicit because they can also own synthetic
 # or historical versions.  Generated man/catalog files are verified as
 # projections.
@@ -359,25 +359,25 @@ def tracked_paths(repository: Path) -> set[str]:
 def production_source_paths(
     repository: Path, repository_tracked_paths: set[str] | None
 ) -> tuple[str, ...]:
-    source_root = repository / "src"
+    source_root = repository / "source"
     if not source_root.is_dir() or source_root.is_symlink():
-        raise SystemExit("production src root is missing, non-directory, or a symlink")
+        raise SystemExit("production source root is missing, non-directory, or a symlink")
     if repository_tracked_paths is not None:
         candidates = sorted(
             relative_path
             for relative_path in repository_tracked_paths
-            if relative_path.startswith("src/")
+            if relative_path.startswith("source/")
         )
     else:
         # Docker and release source snapshots intentionally omit .git.  Their
-        # src/ tree is the exported production set, so inspect it in full.
+        # source/ tree is the exported production set, so inspect it in full.
         candidates = sorted(
             path.relative_to(repository).as_posix()
             for path in source_root.rglob("*")
             if path.is_file() or path.is_symlink()
         )
     if not candidates:
-        raise SystemExit("production src semantic domain is empty")
+        raise SystemExit("production source semantic domain is empty")
     return tuple(candidates)
 
 
@@ -436,7 +436,7 @@ if missing_or_unsafe_owners:
     )
 
 # A host checkout additionally proves that every classified or projected owner
-# is tracked.  Production src owners already come from this same complete set.
+# is tracked.  Production source owners already come from this same complete set.
 if repository_tracked_paths is not None:
     untracked_owners = sorted(owned_paths - repository_tracked_paths)
     if untracked_owners:
@@ -515,13 +515,13 @@ for catalog_name in catalog_projections:
 # Focused regression: a newly tracked production TU automatically enters the
 # semantic domain without an owner-list update.  A synthetic package release
 # with the canonical X.Y.Z prefix is not the current project version, while the
-# exact current literal in src/version_presentation.cpp is rejected.  Ignored
+# exact current literal in source/version_presentation.cpp is rejected.  Ignored
 # and untracked files do not enter the Git-owned set.
 regression_root = scratch_root / "current-version-semantic-regression"
 regression_root.mkdir()
-(regression_root / "src").mkdir()
+(regression_root / "source").mkdir()
 (regression_root / ".gitignore").write_text("ignored-current.txt\n", encoding="utf-8")
-(regression_root / "src/version_presentation.cpp").write_text(
+(regression_root / "source/version_presentation.cpp").write_text(
     f'constexpr auto package_version = "{canonical_version}-1";\n', encoding="utf-8"
 )
 (regression_root / "ignored-current.txt").write_text(
@@ -540,7 +540,7 @@ try:
     subprocess.run(
         [
             "git", "-C", str(regression_root), "add", ".gitignore",
-            "src/version_presentation.cpp",
+            "source/version_presentation.cpp",
         ],
         check=True,
         stdout=subprocess.PIPE,
@@ -550,14 +550,14 @@ except (OSError, subprocess.CalledProcessError) as error:
     raise SystemExit(f"current-version tracked-only regression setup failed: {error}")
 
 regression_tracked = tracked_paths(regression_root)
-if regression_tracked != {".gitignore", "src/version_presentation.cpp"}:
+if regression_tracked != {".gitignore", "source/version_presentation.cpp"}:
     raise SystemExit(
         f"current-version tracked-only regression has unexpected owners: {regression_tracked!r}"
     )
 regression_production_sources = production_source_paths(
     regression_root, regression_tracked
 )
-if regression_production_sources != ("src/version_presentation.cpp",):
+if regression_production_sources != ("source/version_presentation.cpp",):
     raise SystemExit(
         "new tracked production TU did not enter the current-version semantic domain"
     )
@@ -566,7 +566,7 @@ if duplicate_current_literals(
 ):
     raise SystemExit("synthetic package release was mistaken for current VERSION")
 
-(regression_root / "src/version_presentation.cpp").write_text(
+(regression_root / "source/version_presentation.cpp").write_text(
     f'constexpr auto current_version = "{canonical_version}";\n', encoding="utf-8"
 )
 if len(
@@ -575,7 +575,7 @@ if len(
     )
 ) != 1:
     raise SystemExit(
-        "tracked src/version_presentation.cpp current-version duplicate was not rejected"
+        "tracked source/version_presentation.cpp current-version duplicate was not rejected"
     )
 print("current-version production-TU counterexample: rejected")
 PY
