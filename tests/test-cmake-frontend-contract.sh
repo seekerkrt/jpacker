@@ -142,14 +142,15 @@ configure_synced_tree() {
     cxxflags=$5
     ldflags=$6
     ccache=$7
+    requested_compiler=${8:-g++}
 
-    run_compiler_preflight "$synced_tree" g++
+    run_compiler_preflight "$synced_tree" "$requested_compiler"
     CPPFLAGS=$cppflags \
     CXXFLAGS=$cxxflags \
     LDFLAGS=$ldflags \
     CCACHE=$ccache \
+    CXX=$requested_compiler \
         "$cmake_command" -S "$repo_root" -B "$synced_tree" \
-            -DCMAKE_CXX_COMPILER=g++ \
             -DCMAKE_BUILD_TYPE="$build_type" \
             -DCMAKE_INSTALL_PREFIX=/opt/moguet-contract \
             -DCMAKE_INSTALL_BINDIR=/custom/bin \
@@ -250,6 +251,66 @@ exercise_synced_tree() {
         "$synced_tree/CMakeCache.txt" MOGUET_ENABLE_DEFAULT_COMPILE_OPTIONS OFF
 }
 
+assert_synced_configuration() {
+    synced_tree=$1
+    build_testing=$2
+    build_type=$3
+
+    assert_cache_value "$synced_tree/CMakeCache.txt" BUILD_TESTING "$build_testing"
+    assert_cache_value "$synced_tree/CMakeCache.txt" CMAKE_BUILD_TYPE "$build_type"
+    assert_cache_value \
+        "$synced_tree/CMakeCache.txt" CMAKE_INSTALL_PREFIX /opt/moguet-contract
+    assert_cache_value \
+        "$synced_tree/CMakeCache.txt" CMAKE_INSTALL_BINDIR /custom/bin
+    assert_cache_value \
+        "$synced_tree/CMakeCache.txt" \
+        MOGUET_INSTALL_DOCUMENT_DIRECTORY \
+        /custom/doc/moguet
+    assert_cache_value \
+        "$synced_tree/CMakeCache.txt" MOGUET_LOCALE_DIRECTORY /custom/locale
+}
+
+reconfigure_with_equivalent_compiler() {
+    synced_tree=$1
+    build_testing=$2
+    build_type=$3
+    requested_compiler=$4
+    label=$5
+    cache_file=$synced_tree/CMakeCache.txt
+    cache_snapshot=$test_root/$label-CMakeCache.before
+    configure_log=$test_root/$label-configure.log
+    configured_compiler=$(cache_value "$cache_file" CMAKE_CXX_COMPILER)
+
+    cp "$cache_file" "$cache_snapshot"
+    if configure_synced_tree \
+        "$synced_tree" "$build_testing" "$build_type" \
+        '' '' '' '' "$requested_compiler" \
+        > "$configure_log" 2>&1
+    then
+        :
+    else
+        configure_status=$?
+        cat "$configure_log" >&2
+        fail "$label configure failed with status $configure_status"
+    fi
+
+    cmp -s "$cache_snapshot" "$cache_file" ||
+        fail "$label configure changed the stable CMake cache"
+    assert_cache_value \
+        "$cache_file" CMAKE_CXX_COMPILER "$configured_compiler"
+    assert_synced_configuration "$synced_tree" "$build_testing" "$build_type"
+    assert_not_contains \
+        "$configure_log" \
+        'You have changed variables that require your cache to be deleted.'
+    if [ "$build_testing" = ON ]; then
+        assert_contains \
+            "$configure_log" \
+            'Moguet C++ tests: targets=94/94, support=29/29, firewalls=49/49, descriptors=49/49, CTest registrations=117'
+    else
+        assert_not_contains "$configure_log" 'Moguet C++ tests:'
+    fi
+}
+
 production_tree=$test_root/production
 testing_tree=$test_root/testing
 package_tree=$test_root/package
@@ -263,23 +324,30 @@ exercise_synced_tree \
     "$package_tree" OFF None \
     moguet-uninstall-helper moguet-uninstall-helper package
 
-assert_cache_value "$production_tree/CMakeCache.txt" BUILD_TESTING OFF
-assert_cache_value "$testing_tree/CMakeCache.txt" BUILD_TESTING ON
-assert_cache_value "$package_tree/CMakeCache.txt" BUILD_TESTING OFF
-assert_cache_value "$package_tree/CMakeCache.txt" CMAKE_BUILD_TYPE None
-assert_cache_value "$package_tree/CMakeCache.txt" CMAKE_INSTALL_PREFIX /opt/moguet-contract
-assert_cache_value "$package_tree/CMakeCache.txt" CMAKE_INSTALL_BINDIR /custom/bin
-assert_cache_value \
-    "$package_tree/CMakeCache.txt" MOGUET_INSTALL_DOCUMENT_DIRECTORY /custom/doc/moguet
-assert_cache_value \
-    "$package_tree/CMakeCache.txt" MOGUET_LOCALE_DIRECTORY /custom/locale
+assert_synced_configuration "$production_tree" OFF ''
+assert_synced_configuration "$testing_tree" ON ''
+assert_synced_configuration "$package_tree" OFF None
 
-# Equivalent compiler spellings resolve to the same executable. A genuinely
-# different compiler fails before CMake can regenerate or mutate the cache.
-run_compiler_preflight "$production_tree" /usr/bin/g++
+# Equivalent compiler spellings must pass the complete preflight + configure
+# path without changing CMake's cached spelling or any frontend invariant.
 compiler_alias=$test_root/compiler-alias
 ln -s "$(command -v g++)" "$compiler_alias"
-run_compiler_preflight "$production_tree" "$compiler_alias"
+reconfigure_with_equivalent_compiler \
+    "$production_tree" OFF '' /usr/bin/g++ production-absolute-compiler
+reconfigure_with_equivalent_compiler \
+    "$production_tree" OFF '' "$compiler_alias" production-symlink-compiler
+reconfigure_with_equivalent_compiler \
+    "$testing_tree" ON '' "$compiler_alias" testing-symlink-compiler
+reconfigure_with_equivalent_compiler \
+    "$package_tree" OFF None "$compiler_alias" package-symlink-compiler
+
+if grep -F -- '-DCMAKE_CXX_COMPILER=' "$repo_root/Makefile" "$repo_root/PKGBUILD"
+then
+    fail 'a canonical frontend re-passes raw CXX as CMAKE_CXX_COMPILER'
+fi
+
+# A genuinely different compiler still fails before CMake can regenerate or
+# mutate the cache.
 
 different_compiler=$(command -v clang++ || command -v false)
 for mismatch_tree in "$production_tree" "$testing_tree" "$package_tree"
@@ -295,9 +363,8 @@ done
 
 if command -v clang++ >/dev/null 2>&1; then
     reverse_tree=$test_root/reverse-compiler
-    CPPFLAGS='' CXXFLAGS='' LDFLAGS='' CCACHE='' \
+    CPPFLAGS='' CXXFLAGS='' LDFLAGS='' CCACHE='' CXX=clang++ \
         "$cmake_command" -S "$repo_root" -B "$reverse_tree" \
-            -DCMAKE_CXX_COMPILER=clang++ \
             -DMOGUET_SYNC_EXTERNAL_BUILD_INPUTS=ON \
             -DBUILD_TESTING=OFF
     if run_compiler_preflight "$reverse_tree" g++; then

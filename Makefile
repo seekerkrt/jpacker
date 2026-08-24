@@ -1957,13 +1957,15 @@ LIBALPM_BUILD_TARGETS := \
 
 all: $(TARGET) $(MANPAGES)
 
+# CXX initializes a fresh CMake tree.  After preflight accepts an equivalent
+# spelling, an existing tree must keep its cached CMAKE_CXX_COMPILER value;
+# re-passing the raw spelling with -D would make CMake reset the cache.
 cmake-production-configure:
 	$(CMAKE) \
 		"-DMOGUET_COMPILER_PREFLIGHT_BUILD_DIR=$(CMAKE_PRODUCTION_BUILD_DIR)" \
 		"-DMOGUET_REQUESTED_CXX=$(CXX)" \
 		-P $(CMAKE_COMPILER_PREFLIGHT)
-	$(CMAKE) -S . -B $(CMAKE_PRODUCTION_BUILD_DIR) \
-		"-DCMAKE_CXX_COMPILER=$(CXX)" \
+	CXX="$(CXX)" $(CMAKE) -S . -B $(CMAKE_PRODUCTION_BUILD_DIR) \
 		"-DCMAKE_INSTALL_PREFIX=$(PREFIX)" \
 		"-DCMAKE_INSTALL_BINDIR=$(BINDIR)" \
 		"-DMOGUET_INSTALL_BASH_COMPLETION_DIRECTORY=$(COMPDIR)" \
@@ -1982,8 +1984,7 @@ cmake-test-configure:
 		"-DMOGUET_COMPILER_PREFLIGHT_BUILD_DIR=$(CMAKE_CTEST_BUILD_DIR)" \
 		"-DMOGUET_REQUESTED_CXX=$(CXX)" \
 		-P $(CMAKE_COMPILER_PREFLIGHT)
-	$(CMAKE) -S . -B $(CMAKE_CTEST_BUILD_DIR) \
-		"-DCMAKE_CXX_COMPILER=$(CXX)" \
+	CXX="$(CXX)" $(CMAKE) -S . -B $(CMAKE_CTEST_BUILD_DIR) \
 		-DMOGUET_SYNC_EXTERNAL_BUILD_INPUTS=ON \
 		-DBUILD_TESTING=ON
 

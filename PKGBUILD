@@ -50,12 +50,14 @@ build() {
         -DMOGUET_COMPILER_PREFLIGHT_BUILD_DIR=build \
         -DMOGUET_REQUESTED_CXX="$requested_cxx" \
         -P "$_srcname/cmake/MoguetCompilerPreflight.cmake"
+    # CXX initializes only a fresh cache; an existing cache keeps the compiler
+    # spelling whose executable identity the preflight already accepted.
     CPPFLAGS="${CPPFLAGS-}" \
     CXXFLAGS="${CXXFLAGS-}" \
     LDFLAGS="${LDFLAGS-}" \
     CCACHE="${CCACHE-}" \
+    CXX="$requested_cxx" \
         cmake -S "$_srcname" -B build \
-        -DCMAKE_CXX_COMPILER="$requested_cxx" \
         -DCMAKE_BUILD_TYPE=None \
         -DCMAKE_INSTALL_PREFIX=/usr \
         -DMOGUET_LOCALE_DIRECTORY=/usr/share/locale \
