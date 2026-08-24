@@ -3,6 +3,7 @@ TARGET    := moguet
 PACKAGE_NAME := moguet
 CMAKE ?= cmake
 CTEST ?= ctest
+CMAKE_COMPILER_PREFLIGHT := cmake/MoguetCompilerPreflight.cmake
 DOCKER ?= docker
 ARCH_VALIDATION_IMAGE ?= moguet-arch-validation:local
 ARCH_LIVE_VALIDATION_IMAGE ?= moguet-arch-live-validation:local
@@ -1951,11 +1952,16 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface check-completion-freshness test-completion-schema test-public-documentation
 .PHONY: test-container test-container-live test-container-live-provider test-container-live-aur test-container-live-local
 .PHONY: test-validation-status
+.PHONY: test-cmake-frontend-contract
 .PHONY: $(HEAVY_LINK_FIREWALLS)
 
 all: $(TARGET) $(MANPAGES)
 
 cmake-production-configure:
+	$(CMAKE) \
+		"-DMOGUET_COMPILER_PREFLIGHT_BUILD_DIR=$(CMAKE_PRODUCTION_BUILD_DIR)" \
+		"-DMOGUET_REQUESTED_CXX=$(CXX)" \
+		-P $(CMAKE_COMPILER_PREFLIGHT)
 	$(CMAKE) -S . -B $(CMAKE_PRODUCTION_BUILD_DIR) \
 		"-DCMAKE_CXX_COMPILER=$(CXX)" \
 		"-DCMAKE_INSTALL_PREFIX=$(PREFIX)" \
@@ -1968,11 +1974,17 @@ cmake-production-configure:
 		"-DMOGUET_INSTALL_LICENSE_DIRECTORY=$(LICENSEDIR)" \
 		"-DMOGUET_INSTALL_DOCUMENT_DIRECTORY=$(DOCDIR)" \
 		"-DMOGUET_LOCALE_DIRECTORY=$(LOCALEDIR)" \
+		-DMOGUET_SYNC_EXTERNAL_BUILD_INPUTS=ON \
 		-DBUILD_TESTING=OFF
 
 cmake-test-configure:
+	$(CMAKE) \
+		"-DMOGUET_COMPILER_PREFLIGHT_BUILD_DIR=$(CMAKE_CTEST_BUILD_DIR)" \
+		"-DMOGUET_REQUESTED_CXX=$(CXX)" \
+		-P $(CMAKE_COMPILER_PREFLIGHT)
 	$(CMAKE) -S . -B $(CMAKE_CTEST_BUILD_DIR) \
 		"-DCMAKE_CXX_COMPILER=$(CXX)" \
+		-DMOGUET_SYNC_EXTERNAL_BUILD_INPUTS=ON \
 		-DBUILD_TESTING=ON
 
 cmake-test-build: cmake-test-configure
@@ -4291,6 +4303,9 @@ endif
 test-command-stub-contract:
 	sh tests/test-command-stub-contract.sh
 
+test-cmake-frontend-contract:
+	sh tests/test-cmake-frontend-contract.sh "$(CMAKE)"
+
 test-validation-status:
 	sh tests/test-validation-status.sh
 
@@ -4472,6 +4487,7 @@ test-repository: \
 	test-internal-identity \
 	test-artifact-identity-real-pacman \
 	test-command-stub-contract \
+	test-cmake-frontend-contract \
 	test-validation-status \
 	test-markdown-links \
 	test-public-documentation \

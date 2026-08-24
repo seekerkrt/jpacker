@@ -500,4 +500,166 @@ done
 assert_file_text "$custom_foreign_file" 'foreign custom-layout documentation'
 assert_no_symlinks "$custom_stage_dir"
 
+# The native uninstall helper validates the whole manifest before unlinking and
+# anchors deletion below a nofollow-opened root.  Keep adversarial fixtures
+# separate from the canonical install tree so a failed case cannot corrupt the
+# normal-layout authority used above.
+uninstall_helper=$repo_root/build/cmake-production/moguet-uninstall-helper
+[ -x "$uninstall_helper" ] ||
+    fail "CMake uninstall helper is missing or not executable: $uninstall_helper"
+uninstall_safety_root=$stage_root/uninstall-safety
+
+run_uninstall_helper() {
+    helper_destdir=$1
+    helper_manifest=$2
+    shift 2
+    DESTDIR="$helper_destdir" "$uninstall_helper" \
+        --manifest "$helper_manifest" "$@"
+}
+
+expect_uninstall_failure() {
+    failure_label=$1
+    shift
+    if "$@"; then
+        fail "$failure_label unexpectedly succeeded"
+    fi
+}
+
+# An ancestor symlink must fail before the earlier valid manifest entry is
+# removed, and it must never reach the foreign target outside DESTDIR.
+ancestor_stage=$uninstall_safety_root/ancestor-stage
+ancestor_foreign=$uninstall_safety_root/ancestor-foreign
+ancestor_manifest=$uninstall_safety_root/ancestor-manifest.txt
+ancestor_owned=$ancestor_stage/custom/bin/moguet
+ancestor_foreign_file=$ancestor_foreign/moguet/README.md
+install -Dm644 /dev/null "$ancestor_owned"
+printf '%s\n' 'owned before ancestor failure' > "$ancestor_owned"
+install -Dm644 /dev/null "$ancestor_foreign_file"
+printf '%s\n' 'foreign ancestor target' > "$ancestor_foreign_file"
+install -d "$ancestor_stage/custom"
+ln -s "$ancestor_foreign" "$ancestor_stage/custom/doc"
+printf '%s\n' \
+    /custom/bin/moguet \
+    /custom/doc/moguet/README.md \
+    > "$ancestor_manifest"
+expect_uninstall_failure \
+    'ancestor symlink uninstall' \
+    run_uninstall_helper \
+    "$ancestor_stage" \
+    "$ancestor_manifest" \
+    --allowed-root /custom/bin \
+    --allowed-root /custom/doc/moguet
+assert_file_text "$ancestor_owned" 'owned before ancestor failure'
+assert_file_text "$ancestor_foreign_file" 'foreign ancestor target'
+
+# The manifest itself is authority only when it is a regular non-symlink.
+manifest_link_stage=$uninstall_safety_root/manifest-link-stage
+manifest_link_real=$uninstall_safety_root/manifest-link-real.txt
+manifest_link=$uninstall_safety_root/manifest-link.txt
+manifest_link_owned=$manifest_link_stage/custom/bin/moguet
+install -Dm644 /dev/null "$manifest_link_owned"
+printf '%s\n' 'owned before manifest-link failure' > "$manifest_link_owned"
+printf '%s\n' /custom/bin/moguet > "$manifest_link_real"
+ln -s "$manifest_link_real" "$manifest_link"
+expect_uninstall_failure \
+    'manifest symlink uninstall' \
+    run_uninstall_helper \
+    "$manifest_link_stage" \
+    "$manifest_link" \
+    --allowed-root /custom/bin
+assert_file_text "$manifest_link_owned" 'owned before manifest-link failure'
+
+# An empty regular manifest is not a valid uninstall authority.
+empty_manifest_stage=$uninstall_safety_root/empty-manifest-stage
+empty_manifest=$uninstall_safety_root/empty-manifest.txt
+empty_manifest_owned=$empty_manifest_stage/custom/bin/moguet
+install -Dm644 /dev/null "$empty_manifest_owned"
+printf '%s\n' 'owned before empty-manifest failure' > "$empty_manifest_owned"
+install -m644 /dev/null "$empty_manifest"
+expect_uninstall_failure \
+    'empty manifest uninstall' \
+    run_uninstall_helper \
+    "$empty_manifest_stage" \
+    "$empty_manifest" \
+    --allowed-root /custom/bin
+assert_file_text "$empty_manifest_owned" 'owned before empty-manifest failure'
+
+# A later directory entry invalidates the complete manifest before any valid
+# entry is removed.
+late_invalid_stage=$uninstall_safety_root/late-invalid-stage
+late_invalid_manifest=$uninstall_safety_root/late-invalid-manifest.txt
+late_invalid_owned=$late_invalid_stage/custom/bin/moguet
+late_invalid_directory=$late_invalid_stage/custom/doc/moguet/docs
+install -Dm644 /dev/null "$late_invalid_owned"
+printf '%s\n' 'owned before later invalid entry' > "$late_invalid_owned"
+install -d "$late_invalid_directory"
+printf '%s\n' \
+    /custom/bin/moguet \
+    /custom/doc/moguet/docs \
+    > "$late_invalid_manifest"
+expect_uninstall_failure \
+    'later invalid entry uninstall' \
+    run_uninstall_helper \
+    "$late_invalid_stage" \
+    "$late_invalid_manifest" \
+    --allowed-root /custom/bin \
+    --allowed-root /custom/doc/moguet
+assert_file_text "$late_invalid_owned" 'owned before later invalid entry'
+assert_directory "$late_invalid_directory"
+
+# Lexical traversal is rejected instead of normalized into a different path.
+traversal_stage=$uninstall_safety_root/traversal-stage
+traversal_manifest=$uninstall_safety_root/traversal-manifest.txt
+traversal_owned=$traversal_stage/custom/bin/moguet
+traversal_foreign=$traversal_stage/custom/foreign.keep
+install -Dm644 /dev/null "$traversal_owned"
+printf '%s\n' 'owned before traversal failure' > "$traversal_owned"
+install -Dm644 /dev/null "$traversal_foreign"
+printf '%s\n' 'foreign traversal target' > "$traversal_foreign"
+printf '%s\n' \
+    /custom/bin/moguet \
+    /custom/bin/../foreign.keep \
+    > "$traversal_manifest"
+expect_uninstall_failure \
+    'manifest traversal uninstall' \
+    run_uninstall_helper \
+    "$traversal_stage" \
+    "$traversal_manifest" \
+    --allowed-root /custom/bin
+assert_file_text "$traversal_owned" 'owned before traversal failure'
+assert_file_text "$traversal_foreign" 'foreign traversal target'
+
+# A final symlink is itself the payload entry. unlinkat removes that link while
+# the target outside DESTDIR remains untouched.
+final_link_stage=$uninstall_safety_root/final-link-stage
+final_link_manifest=$uninstall_safety_root/final-link-manifest.txt
+final_link_target=$uninstall_safety_root/final-link-target.keep
+final_link=$final_link_stage/custom/bin/moguet
+install -Dm644 /dev/null "$final_link_target"
+printf '%s\n' 'foreign final-link target' > "$final_link_target"
+install -d "$(dirname "$final_link")"
+ln -s "$final_link_target" "$final_link"
+printf '%s\n' /custom/bin/moguet > "$final_link_manifest"
+run_uninstall_helper \
+    "$final_link_stage" \
+    "$final_link_manifest" \
+    --allowed-root /custom/bin
+assert_absent "$final_link"
+assert_file_text "$final_link_target" 'foreign final-link target'
+
+# Without DESTDIR, the helper still anchors traversal at / and restricts the
+# manifest to configured install roots. Use a temporary absolute root so this
+# exercises live-root semantics without touching the host payload.
+root_mode_dir=$uninstall_safety_root/root-mode
+root_mode_allowed=$root_mode_dir/allowed
+root_mode_file=$root_mode_allowed/moguet
+root_mode_manifest=$uninstall_safety_root/root-mode-manifest.txt
+install -Dm644 /dev/null "$root_mode_file"
+printf '%s\n' 'owned root-mode payload' > "$root_mode_file"
+printf '%s\n' "$root_mode_file" > "$root_mode_manifest"
+DESTDIR='' "$uninstall_helper" \
+    --manifest "$root_mode_manifest" \
+    --allowed-root "$root_mode_allowed"
+assert_absent "$root_mode_file"
+
 printf 'install-layout-test: all checks passed\n'

@@ -1,5 +1,38 @@
 cmake_minimum_required(VERSION 3.18)
 
+# This is an invocation-scoped frontend signal, not persistent provenance.
+# Make and PKGBUILD pass ON on every canonical configure; ordinary direct
+# CMake callers retain the normal environment/cache precedence.
+set(_moguet_sync_external_build_inputs OFF)
+if(DEFINED MOGUET_SYNC_EXTERNAL_BUILD_INPUTS)
+    if("${MOGUET_SYNC_EXTERNAL_BUILD_INPUTS}" STREQUAL "ON")
+        set(_moguet_sync_external_build_inputs ON)
+    elseif(NOT "${MOGUET_SYNC_EXTERNAL_BUILD_INPUTS}" STREQUAL "OFF")
+        message(
+            FATAL_ERROR
+            "MOGUET_SYNC_EXTERNAL_BUILD_INPUTS must be ON or OFF"
+        )
+    endif()
+endif()
+unset(MOGUET_SYNC_EXTERNAL_BUILD_INPUTS CACHE)
+unset(MOGUET_SYNC_EXTERNAL_BUILD_INPUTS)
+
+if(_moguet_sync_external_build_inputs)
+    foreach(
+        _moguet_external_build_input
+        IN ITEMS CPPFLAGS CXXFLAGS LDFLAGS CCACHE
+    )
+        if(NOT DEFINED ENV{${_moguet_external_build_input}})
+            message(
+                FATAL_ERROR
+                "Synchronized frontend configure requires an exported "
+                "${_moguet_external_build_input} value, including an "
+                "explicitly empty value"
+            )
+        endif()
+    endforeach()
+endif()
+
 # GNU Make's `CXXFLAGS ?= -O2 -pipe` applies the defaults only when the
 # caller did not define CXXFLAGS at all. Record that distinction before
 # project() initializes CMAKE_CXX_FLAGS, including an explicitly empty value.
@@ -7,17 +40,13 @@ set(_moguet_cxxflags_defined_before_project OFF)
 if(DEFINED ENV{CXXFLAGS} OR DEFINED CACHE{CMAKE_CXX_FLAGS})
     set(_moguet_cxxflags_defined_before_project ON)
 endif()
-set(_moguet_cxxflags_environment_defined OFF)
-if(DEFINED ENV{CXXFLAGS})
-    set(_moguet_cxxflags_environment_defined ON)
-endif()
 
 project(Moguet LANGUAGES CXX)
 
 # CMake uses CXXFLAGS and LDFLAGS only to initialize a new cache.  The Make
-# and PKGBUILD frontends reuse persistent trees, so an explicitly exported
-# value (including an empty one) is the current invocation's authority.
-if(DEFINED ENV{CXXFLAGS})
+# and PKGBUILD frontends explicitly opt into current-invocation synchronization
+# for persistent trees.  Direct CMake calls retain normal cache semantics.
+if(_moguet_sync_external_build_inputs)
     set(
         CMAKE_CXX_FLAGS
         "$ENV{CXXFLAGS}"
@@ -25,8 +54,6 @@ if(DEFINED ENV{CXXFLAGS})
         "Flags used by the CXX compiler during all build types"
         FORCE
     )
-endif()
-if(DEFINED ENV{LDFLAGS})
     set(
         CMAKE_EXE_LINKER_FLAGS
         "$ENV{LDFLAGS}"
@@ -34,8 +61,6 @@ if(DEFINED ENV{LDFLAGS})
         "Flags used by the linker during all executable builds"
         FORCE
     )
-endif()
-if(DEFINED ENV{CCACHE})
     separate_arguments(
         _moguet_cxx_compiler_launcher
         UNIX_COMMAND
@@ -187,9 +212,9 @@ endif()
 add_custom_target(moguet_catalogs ALL DEPENDS ${MOGUET_CATALOG_FILES})
 
 # CMake does not consume CPPFLAGS.  Match the current-invocation semantics
-# above whenever a frontend exports it, while retaining an explicit CMake
-# cache value for callers that configure without an environment value.
-if(DEFINED ENV{CPPFLAGS})
+# only for an opted-in frontend.  Direct CMake initializes the cache once and
+# preserves an explicit -DMOGUET_CPPFLAGS value over the environment.
+if(_moguet_sync_external_build_inputs)
     set(
         MOGUET_CPPFLAGS
         "$ENV{CPPFLAGS}"
@@ -200,9 +225,9 @@ if(DEFINED ENV{CPPFLAGS})
 elseif(NOT DEFINED CACHE{MOGUET_CPPFLAGS})
     set(
         MOGUET_CPPFLAGS
-        ""
+        "$ENV{CPPFLAGS}"
         CACHE STRING
-        "External preprocessor flags synchronized from CPPFLAGS"
+        "External preprocessor flags initialized from CPPFLAGS"
     )
 endif()
 
@@ -310,13 +335,18 @@ if(NOT _moguet_cppflag_option_group STREQUAL "")
     )
 endif()
 
-if(
-    _moguet_cxxflags_environment_defined
-    OR NOT DEFINED MOGUET_ENABLE_DEFAULT_COMPILE_OPTIONS
-)
-    if(_moguet_cxxflags_environment_defined)
-        set(_moguet_enable_default_compile_options OFF)
-    elseif(_moguet_cxxflags_defined_before_project)
+if(_moguet_sync_external_build_inputs)
+    # An explicitly synchronized empty CXXFLAGS retains the Make/package
+    # contract: it suppresses the plain direct-CMake -O2/-pipe defaults.
+    set(
+        MOGUET_ENABLE_DEFAULT_COMPILE_OPTIONS
+        OFF
+        CACHE BOOL
+        "Use Moguet's -O2 and -pipe defaults for a plain developer build"
+        FORCE
+    )
+elseif(NOT DEFINED CACHE{MOGUET_ENABLE_DEFAULT_COMPILE_OPTIONS})
+    if(_moguet_cxxflags_defined_before_project)
         set(_moguet_enable_default_compile_options OFF)
     else()
         set(_moguet_enable_default_compile_options ON)
@@ -326,7 +356,6 @@ if(
         "${_moguet_enable_default_compile_options}"
         CACHE BOOL
         "Use Moguet's -O2 and -pipe defaults for a plain developer build"
-        FORCE
     )
 endif()
 
@@ -654,17 +683,79 @@ install(
     DESTINATION "${MOGUET_INSTALL_DOCUMENT_DIRECTORY}/docs/migration"
 )
 
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/MoguetUninstall.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/MoguetUninstall.cmake"
-    @ONLY
+add_executable(
+    moguet-uninstall-helper
+    EXCLUDE_FROM_ALL
+    cmake/MoguetUninstall.cpp
 )
+set_target_properties(
+    moguet-uninstall-helper
+    PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED YES
+        CXX_EXTENSIONS NO
+)
+target_link_libraries(
+    moguet-uninstall-helper
+    PRIVATE
+        moguet_external_cppflags
+        moguet_build_contract
+)
+
+function(moguet_resolve_install_root output_variable destination)
+    if(IS_ABSOLUTE "${destination}")
+        set(_moguet_install_root "${destination}")
+    else()
+        set(
+            _moguet_install_root
+            "${CMAKE_INSTALL_PREFIX}/${destination}"
+        )
+    endif()
+    set("${output_variable}" "${_moguet_install_root}" PARENT_SCOPE)
+endfunction()
+
+set(_moguet_uninstall_roots "")
+foreach(
+    _moguet_install_destination
+    IN ITEMS
+        "${CMAKE_INSTALL_BINDIR}"
+        "${MOGUET_INSTALL_BASH_COMPLETION_DIRECTORY}"
+        "${MOGUET_INSTALL_ZSH_COMPLETION_DIRECTORY}"
+        "${MOGUET_INSTALL_FISH_COMPLETION_DIRECTORY}"
+        "${MOGUET_INSTALL_MAN1_DIRECTORY}"
+        "${MOGUET_INSTALL_JA_MAN1_DIRECTORY}"
+        "${MOGUET_INSTALL_LICENSE_DIRECTORY}"
+        "${MOGUET_INSTALL_DOCUMENT_DIRECTORY}"
+        "${MOGUET_LOCALE_DIRECTORY}"
+)
+    moguet_resolve_install_root(
+        _moguet_resolved_install_root
+        "${_moguet_install_destination}"
+    )
+    list(APPEND _moguet_uninstall_roots "${_moguet_resolved_install_root}")
+endforeach()
+list(REMOVE_DUPLICATES _moguet_uninstall_roots)
+
+set(_moguet_uninstall_root_arguments "")
+foreach(_moguet_uninstall_root IN LISTS _moguet_uninstall_roots)
+    list(
+        APPEND
+        _moguet_uninstall_root_arguments
+        --allowed-root
+        "${_moguet_uninstall_root}"
+    )
+endforeach()
+
 add_custom_target(
     uninstall
     COMMAND
-        "${CMAKE_COMMAND}"
-        -P "${CMAKE_CURRENT_BINARY_DIR}/MoguetUninstall.cmake"
+        "$<TARGET_FILE:moguet-uninstall-helper>"
+        --manifest "${CMAKE_CURRENT_BINARY_DIR}/install_manifest.txt"
+        ${_moguet_uninstall_root_arguments}
+    DEPENDS moguet-uninstall-helper
     COMMENT "Removing files recorded by the canonical CMake install manifest"
+    USES_TERMINAL
+    VERBATIM
 )
 
 if(BUILD_TESTING)
