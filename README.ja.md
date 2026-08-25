@@ -44,11 +44,12 @@ Moguet v2.0.1は、採用済みXDG storage契約のうちsource-preference部分
 preferenceは実行user自身のXDG config contextだけを使い、公開済みv2.0.0のtag、Release、
 release noteは歴史的記録のまま変更しません。
 
-Moguet v2.3.2は最新releaseです。このmaintenance / hotfix releaseでは、制約された
-`RLIMIT_NOFILE`の下でも大規模local source workspace cleanupのfile descriptor使用量を
-boundedに保ち、`upgrade-all`で既に最新のsplit AUR targetが誤って未観測または
-attention-requiredとして表示されないようにします。利用者から見える変更の全体は
-[v2.3.2 release](https://github.com/seekerkrt/moguet/releases/tag/v2.3.2)を参照してください。
+Moguet v2.4.0は最新releaseです。headline featureは、利用者がPackageBase単位で最後に
+明示的に受理したAUR upstream revisionを保持し、そのreview baseline以降のtracked-file変更を
+表示するAUR sourceのreview済みrevision workflowです。さらに`moguet -G <pkg> --output-dir=DIR`、
+`upgrade-all`のphase-level package-state observation明確化、通常の`make` frontendを
+維持したCMake / CTest canonical C++ build/test graphを含みます。利用者から見える変更の
+全体は[v2.4.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.4.0)を参照してください。
 
 canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ちます。Moguet
 packageは`jpacker` command aliasを提供しません。AUR publicationは将来の別判断であり、
@@ -168,6 +169,7 @@ fail-closedで停止します。v2.xは、Moguetのsource-aware入口、安全�
 
 - `base-devel`を事前導入したArch build環境。現在の構成packageがC++ toolchain、
   `pkgconf`、GNU gettext development toolを提供します
+- `cmake` 3.18以降。optionalなtracked developer presetには3.19以降が必要です
 - `pacman`、`pacman-conf`、libalpm development metadata
 - `git`
 - `curl`
@@ -183,6 +185,30 @@ make
 ./moguet --help
 ```
 
+C++ build / install targetのauthorityはCMake、C++ test registration / executionの
+authorityはCTestです。root `Makefile`は従来のdeveloper shortcutとrepository固有validationを
+維持します。通常の`make`は`BUILD_TESTING=OFF`の`build/cmake-production`、`make test`は
+`BUILD_TESTING=ON`の`build/cmake-testing`を使い、CTestの後にrepository validation layerを
+実行します。既存のfocused入口も`make test-<area>`として利用できます。
+
+再現可能なdebug / editor設定にはtracked developer presetのpost-success frontendを使います。
+
+```bash
+make cmake-dev-configure
+cmake --build build/cmake-testing
+ctest --test-dir build/cmake-testing --output-on-failure
+```
+
+このpresetは`BUILD_TESTING=ON`、Debug build、`CMAKE_EXPORT_COMPILE_COMMANDS=ON`を有効にし、
+生成したdatabaseをrepository rootの`compile_commands.json` symlinkからclangd等のeditor / analysis
+toolへ公開します。`make cmake-dev-configure`は`cmake --preset dev-debug`を実行し、configureと
+generateを含むprocess全体が成功した後だけlinkをpublishします。configure / generate failureでは
+以前のvalidなpublicationを維持し、first failureでは何もpublishしません。rawな
+`cmake --preset dev-debug`はconfigure-onlyのCMake入口として残り、root linkをpublishしません。
+`make clean`はwrapper所有build treeとroot linkを削除します。CMake Presetsの利用にはCMake
+3.19以降が必要です。optionalなpreset CLIを使わないdirect configureでは、projectが宣言する
+CMake 3.18 minimumを維持します。
+
 live filesystemへ書き込まないpackaging用dry runは、payloadを一時directoryへstageします。
 
 ```bash
@@ -190,6 +216,10 @@ stage_dir=$(mktemp -d)
 make PREFIX=/usr DESTDIR="$stage_dir" install
 find "$stage_dir" -type f -print
 ```
+
+`make install` / `make uninstall`はcanonical CMake install graphとexactな
+`install_manifest.txt`へのfrontendです。上記destination overrideは別のMake install recipeではなく、
+同じCMake graphへmappingされます。
 
 v2.0.0のpackage名と唯一のexecutableは`moguet`で、`/usr/bin/jpacker`をinstall
 しません。payloadはjpacker v1.16.0 packageと重複しないため、metadataには
@@ -201,7 +231,7 @@ legacy directoryも作成・所有しません。
 
 package runtime dependencyは`curl`、`git`、`libalpm.so`、`libarchive`、`nano`、
 `pacman`、`sudo`です。package metadataへ記録するexactな`makedepends` setは
-`nlohmann-json`と`tomlplusplus`です。Arch package buildは`base-devel`の事前導入を
+`cmake`、`nlohmann-json`、`tomlplusplus`です。Arch package buildは`base-devel`の事前導入を
 前提とし、現在の構成packageがGNU gettextと`pkgconf`を提供するため、`base-devel`、
 `gettext`、`pkgconf`は`makedepends`へ含めません。`git`はruntime dependencyのまま
 とし、重複して列挙しません。gettextはcatalog build toolを提供し、runtime binaryは
@@ -226,7 +256,10 @@ makepkg -si
 
 `makepkg -si`は、そのtag付きreleaseをbuildし、同じ操作で`pacman -U`によってlive
 systemへinstallします。これは、development treeをその場でbuild・確認するだけで
-何もinstallしない、上記の`make`や`./moguet --help`とは異なります。この`PKGBUILD`は
+何もinstallしない、上記の`make`や`./moguet --help`とは異なります。`PKGBUILD`はcanonicalな
+production CMake build / install consumerとして`BUILD_TESTING=OFF`を指定し、94個のdeveloper
+C++ test executableと117件のCTest registrationはhost / CI / release validation側で扱います。
+この`PKGBUILD`は
 repository同梱のpackaging経路であり、AUR submissionではありません。Moguetはまだ
 AUR pageを公開していません。
 
@@ -254,7 +287,7 @@ edit-src <pkg>...
 list-src
 del-src <pkg>...
 revert <pkg>...
--G <pkg>
+-G <pkg> [--output-dir=DIR]
 -Gp <pkg>
 -S --select [--needed] <query>
 ```
@@ -299,7 +332,10 @@ moguet del-src <pkg>...
 moguet revert <pkg>...
 
 # PackageBase checkoutをexport、またはPKGBUILDだけを表示
-moguet -G <pkg>
+moguet -G wezterm-git
+moguet -G wezterm-git --output-dir=./exports
+moguet -G wezterm-git --output-dir="$HOME/src/aur"
+moguet -G wezterm-git --output-dir=/home/user/src/aur
 moguet -Gp <pkg>
 
 # persistent stateを変更せず、対応する全mutating routeを観測
@@ -312,6 +348,15 @@ moguet --dry-run upgrade
 moguet --dry-run upgrade-aur
 moguet --dry-run upgrade-all
 ```
+
+`-G`は`--output-dir`未指定時、command開始時current directoryへexportします。
+`--output-dir=DIR`はそのinvocationだけの既存parent directoryを指定し、relative valueは
+command開始時current directoryを基準に解決します。validated PackageBaseが常にdirect-childの
+destination nameです。Moguetはparentを作成せず、指定pathのsymlink componentをfollowせず、
+existing destinationを上書きせず、独自のtilde expansionも行いません。
+`--output-dir=~/src/aur`ではなく、`--output-dir="$HOME/src/aur"`またはabsolute pathを
+使用してください。このoptionは`-Gp`や他operationではunsupportedで、attached formだけを
+受理します。
 
 `--dry-run`は、Moguet-owned `-S` install / system-update route、`fetch`、remote / local
 `build`、`upgrade`、`upgrade-aur`、`upgrade-all`のglobal observation modifierです。
@@ -356,6 +401,38 @@ non-TTYと`--noconfirm`ではqueryやpackage選択を行わず失敗します。
 source-build preferenceはmulti-targetの`add-src`、`edit-src`、`del-src`、`revert`と、
 target-lessの`list-src`で管理します。一時的な`build <pkg> [V=K...]`はremote packageを
 解決し、preferenceを保存しません。
+
+### Reviewed AUR source workflow
+
+AUR Git source buildでは、最後に明示acceptしたexact upstream commitをPackageBaseごとの
+persistent XDG stateとして保持します。fetch / clone後は1つのexact target commitをpinします。
+このworkflowより前から存在するcacheを含め、reviewed stateがなければ、最初に対象となる
+PackageBaseのtracked file全体をfull reviewします。後続targetはprevious reviewed revisionから
+reviewし、同じtargetなら新しいpromptもstate writeも不要です。old commit objectが利用できない
+場合、cache checkoutへfallbackせずfull rebaseline reviewを提示します。invalid、corrupted、
+source-mismatched stateにはexplicitなfull rebind reviewが必要で、future / unsafe stateは
+fail-closedで停止します。
+
+review inventoryはextension allowlistではなく、全tracked fileのadd、modify、delete、rename、
+type changeを扱います。root `PKGBUILD`とtop-level `*.install`にはreview-sensitive guidanceを
+付けますが、patch、service unit、helper script、local source / config、binary change、その他の
+tracked contentも表示します。`.SRCINFO`はlower-priorityなgenerated metadataとして残し、
+source reviewの代用にはしません。
+
+`--diff`はreviewed-source prompt policyを選びますが、completeなreview後にinteractive
+`y` / `yes`を明示入力した場合だけ保存revisionを進めます。`--nodiff`、review decline、
+`--noconfirm`、non-TTY inputでは既存のcompatibility build behaviorを維持し得ますが、reviewed
+stateは進めません。cancellation、EOF、input failure、unsupported review、unsafe / future stateは、
+stateを進めず停止します。
+
+accept済みbuildはexact target commitへcheckoutし、mutableなcheckout HEAD、branch、remote refを
+build authorityにしません。publicationはcompare-and-swap guardを使い、並行processのreviewを
+上書きしません。後続build / install failureでも、正常にacceptされたrevisionをrollbackしません。
+`--edit` / `--noedit`はinvocation-localなPKGBUILD / `.install`編集を制御するもので、upstream
+acceptanceではありません。editor changeはreviewed commit上の別overlayです。official repository
+と`build --local` routeはこのstateを作りません。詳細は
+[reviewed AUR source state contract](https://github.com/seekerkrt/moguet/blob/develop/docs/contracts/reviewed-source-state.md)を
+参照してください。
 
 ### Package単位のbuild customization
 
@@ -464,6 +541,11 @@ canonical CLI overrideは`--edit` / `--noedit`、`--diff` / `--nodiff`、
 build modeのcompatibility aliasです。conflicting overrideはlast-one-winsにせず、
 external mutation前に失敗します。
 
+`review.diff`と`--diff` / `--nodiff`はAUR reviewed-source prompt policyを選びます。
+promptをskipしてもreviewed stateは進みません。`review.pkgbuild`と`--edit` / `--noedit`は
+invocation-localなPKGBUILD / `.install` editor behaviorを選び、upstream review acceptanceには
+なりません。
+
 config fileがない状態は正常です。fileが存在する場合は`schema_version = 1`が必須で、
 invalid TOML、unknown key、type error、invalid enum、未対応future schema versionは
 invocationを停止します。Moguetはfileを自動作成・rewrite・migrationせず、
@@ -490,12 +572,17 @@ legacy dataもcreate、migrate、removeしません。
 | --- | --- | --- |
 | user config | `$XDG_CONFIG_HOME/moguet/` | `~/.config/moguet/` |
 | source-build preference | `$XDG_CONFIG_HOME/moguet/source-build.d/` | `~/.config/moguet/source-build.d/` |
-| 永続runtime stateとlog | `$XDG_STATE_HOME/moguet/` | `~/.local/state/moguet/` |
+| 永続runtime state、reviewed AUR revision、log | `$XDG_STATE_HOME/moguet/` | `~/.local/state/moguet/` |
 | 再生成可能cache | `$XDG_CACHE_HOME/moguet/` | `~/.cache/moguet/` |
 
 default logはstate directory内の`moguet.log`です。cacheはauthorityではなく再生成可能で、
 cache削除によってconfigやpersistent stateを失ってはいけません。directoryはcommandが
 必要としたときだけ作成し、help / version表示では作成しません。
+
+accept済みAUR revisionは`$XDG_STATE_HOME/moguet/reviewed-sources/aur/`以下へ保存し、
+HOME fallbackでは`~/.local/state/moguet/`以下を使います。これはcache metadataではなく
+PackageBase stateであり、cache削除やreclone後も保持します。read-only lookupはstoreを
+作成しません。
 
 source-preference accessでは、`XDG_CONFIG_HOME`がunsetまたはemptyならHOME fallbackを
 使います。明示的な`XDG_CONFIG_HOME`はabsoluteで、既存かつownership、type、permissionの
@@ -529,6 +616,12 @@ Moguetはpacman-firstですが、すべてのsource-build routeで完全なpacma
 pacmanだけで完結するoperationはMoguetが消費しないoptionをpass-throughします。AUR /
 source-build routeをMoguetが所有する場合は、対応関係を明示したoptionだけを保持し、
 意味を維持できないものはmutation前に拒否します。
+
+reviewed-source stateが存在する前からのAUR cacheに手動migrationは不要です。recordがない状態は
+正常で、最初に対象となるPackageBaseを一度initial full reviewします。legacy checkout HEAD、
+branch、remote ref、build artifactからreviewed revisionを捏造しません。invalid、corrupted、
+source-mismatched、future、unsafe stateをmissingとして扱わず、reviewed-source contractに従って
+fail-closedを維持します。
 
 Moguetは`/etc/jpacker/jpacker.conf`を通常config layerとして読まず、
 `/etc/jpacker/package.build/`をsource-preference fallbackとして使用しません。

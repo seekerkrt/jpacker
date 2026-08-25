@@ -292,7 +292,18 @@ assert_source_preference_unchanged() {
 }
 
 assert_no_temporary_artifacts() {
-    temporary_artifact=$(find "$work_dir" "$TMPDIR" -maxdepth 1 \
+    temporary_artifact=$(find "$work_dir" "$TMPDIR" -maxdepth 4 \
+        -name '.moguet-pkgbuild-*' -print -quit)
+    if [ -n "$temporary_artifact" ]; then
+        echo "temporary clone artifact remains: $temporary_artifact" >&2
+        exit 1
+    fi
+}
+
+assert_no_temporary_artifacts_under() {
+    search_root=$1
+    [ -d "$search_root" ] || return 0
+    temporary_artifact=$(find "$search_root" -maxdepth 2 \
         -name '.moguet-pkgbuild-*' -print -quit)
     if [ -n "$temporary_artifact" ]; then
         echo "temporary clone artifact remains: $temporary_artifact" >&2
@@ -415,6 +426,26 @@ assert_stdout_empty
 assert_command_log_empty
 assert_normal_request_log_empty
 
+for invalid_output_invocation in \
+    '-G clean-root --output-dir' \
+    '-G clean-root --output-dir=' \
+    '-G clean-root --output-dir ./exports' \
+    '-G clean-root --output-dir=./exports --output-dir=./exports' \
+    '-G clean-root --output-dir=./exports --output-dir=/tmp' \
+    '-Gp clean-root --output-dir=./exports' \
+    'plan clean-root --output-dir=./exports' \
+    '--output-dir=./exports -G clean-root' \
+    '-G clean-root -- --output-dir=./exports'
+do
+    # These fixtures intentionally use fixed ASCII tokens without whitespace
+    # inside an operand, so shell field splitting represents the tested argv.
+    # shellcheck disable=SC2086
+    run_fail $invalid_output_invocation
+    assert_stdout_empty
+    assert_command_log_empty
+    assert_normal_request_log_empty
+done
+
 for invalid_target in core/filesystem . .. ../escape; do
     run_fail -Gp "$invalid_target"
     assert_contains "Invalid AUR target" "$stderr_file"
@@ -470,6 +501,66 @@ assert_contains \
 assert_stdout_empty
 assert_command_log_empty
 
+# Invalid export parentはAUR RPC / Gitより前にfail closedする。
+setup_case output-parent-missing
+missing_parent=$case_dir/missing-parent
+run_fail -G clean-root --output-dir="$missing_parent"
+assert_contains "Unable to safely open existing export directory" "$stderr_file"
+assert_command_log_empty
+assert_normal_request_log_empty
+[ ! -e "$missing_parent" ]
+
+setup_case output-parent-regular-file
+regular_parent=$case_dir/regular-parent
+printf 'regular parent marker\n' > "$regular_parent"
+run_fail -G clean-root --output-dir="$regular_parent"
+assert_contains "Unable to safely open existing export directory" "$stderr_file"
+assert_command_log_empty
+assert_normal_request_log_empty
+assert_contains "regular parent marker" "$regular_parent"
+
+setup_case output-parent-final-symlink
+real_parent=$case_dir/real-parent
+symlink_parent=$case_dir/symlink-parent
+mkdir "$real_parent"
+printf 'real parent marker\n' > "$real_parent/marker"
+ln -s "$real_parent" "$symlink_parent"
+run_fail -G clean-root --output-dir="$symlink_parent"
+assert_contains "Unable to safely open existing export directory" "$stderr_file"
+assert_command_log_empty
+assert_normal_request_log_empty
+[ -L "$symlink_parent" ]
+assert_contains "real parent marker" "$real_parent/marker"
+
+setup_case output-parent-intermediate-symlink
+real_intermediate=$case_dir/real-intermediate
+symlink_intermediate=$case_dir/symlink-intermediate
+mkdir -p "$real_intermediate/exports"
+printf 'intermediate marker\n' > "$real_intermediate/marker"
+ln -s "$real_intermediate" "$symlink_intermediate"
+run_fail -G clean-root --output-dir="$symlink_intermediate/exports"
+assert_contains "Unable to safely open existing export directory" "$stderr_file"
+assert_command_log_empty
+assert_normal_request_log_empty
+assert_contains "intermediate marker" "$real_intermediate/marker"
+
+setup_case output-parent-permission-denied
+denied_parent=$case_dir/denied-parent
+mkdir "$denied_parent"
+chmod 000 "$denied_parent"
+run_fail -G clean-root --output-dir="$denied_parent"
+assert_contains "Unable to safely open existing export directory" "$stderr_file"
+assert_command_log_empty
+assert_normal_request_log_empty
+chmod 0700 "$denied_parent"
+
+setup_case output-parent-unusable-component
+long_component=$(awk 'BEGIN { for(i = 0; i < 300; ++i) printf "x" }')
+run_fail -G clean-root --output-dir="$work_dir/$long_component"
+assert_contains "Unable to safely open existing export directory" "$stderr_file"
+assert_command_log_empty
+assert_normal_request_log_empty
+
 # Matrix B: exact AUR metadataとPackageBaseをstrictにpreflightする。
 setup_case missing-package
 run_fail -Gp missing-export-package
@@ -503,6 +594,42 @@ assert_exact_info_request clean-root
 assert_cache_root_absent
 assert_source_preference_unchanged
 assert_no_temporary_artifacts
+
+setup_case export-absolute-parent
+absolute_parent=$case_dir/absolute-exports
+mkdir "$absolute_parent"
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+run_ok -G clean-root --output-dir="$absolute_parent"
+assert_stdout_empty
+assert_fixture_tree "$absolute_parent/clean-root"
+[ ! -e "$work_dir/clean-root" ]
+assert_export_git_commands clean-root 2
+assert_exact_info_request clean-root
+assert_cache_root_absent
+assert_no_temporary_artifacts
+
+setup_case export-relative-parent
+mkdir "$work_dir/exports"
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+run_ok -G clean-root --output-dir=./exports
+assert_stdout_empty
+assert_fixture_tree "$work_dir/exports/clean-root"
+[ ! -e "$work_dir/clean-root" ]
+assert_export_git_commands clean-root 2
+assert_exact_info_request clean-root
+assert_cache_root_absent
+assert_no_temporary_artifacts
+
+setup_case export-relative-parent-with-dotdot
+mkdir "$case_dir/exports"
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+run_ok -G clean-root --output-dir=../exports
+assert_fixture_tree "$case_dir/exports/clean-root"
+[ ! -e "$work_dir/clean-root" ]
+assert_export_git_commands clean-root 2
+assert_exact_info_request clean-root
+assert_no_temporary_artifacts
+assert_no_temporary_artifacts_under "$case_dir/exports"
 
 setup_case export-root-only
 export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/risk-root.git
@@ -694,18 +821,88 @@ assert_contains "Export destination already exists" "$stderr_file"
 assert_contains "concurrent user path" "$work_dir/clean-root/user-file"
 assert_no_temporary_artifacts
 
+setup_case explicit-parent-publish-destination-race
+explicit_race_parent=$work_dir/exports
+mkdir "$explicit_race_parent"
+printf 'clean-root\n' > "$git_fixture_dir/.moguet-test-final-destination"
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+run_fail -G clean-root --output-dir=./exports
+assert_contains "Export destination already exists" "$stderr_file"
+assert_contains \
+    "concurrent user path" "$explicit_race_parent/clean-root/user-file"
+[ ! -e "$work_dir/clean-root" ]
+assert_no_temporary_artifacts
+
 setup_case current-directory-rename
 : > "$git_fixture_dir/.moguet-test-rename-cwd"
 export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
-run_ok -G clean-root
-assert_fixture_tree "$work_dir-moved/clean-root"
-if [ -e "$work_dir/clean-root" ] || [ -L "$work_dir/clean-root" ]; then
-    echo "-G published into a replacement for the command-start cwd" >&2
-    exit 1
-fi
+run_fail -G clean-root
+assert_contains "Refusing changed export directory path" "$stderr_file"
+[ ! -e "$work_dir/clean-root" ]
+[ ! -e "$work_dir-moved/clean-root" ]
 assert_export_git_commands clean-root 2
 assert_cache_root_absent
 assert_no_temporary_artifacts
+assert_no_temporary_artifacts_under "$work_dir-moved"
+
+setup_case explicit-parent-rename
+renamed_parent=$work_dir/exports
+mkdir "$renamed_parent"
+printf '%s\n' "$renamed_parent" > \
+    "$git_fixture_dir/.moguet-test-rename-export-parent"
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+run_fail -G clean-root --output-dir=./exports
+assert_contains "Unable to safely revalidate export directory" "$stderr_file"
+[ ! -e "$renamed_parent" ]
+[ -d "$renamed_parent-moved" ]
+[ ! -e "$renamed_parent-moved/clean-root" ]
+assert_no_temporary_artifacts_under "$renamed_parent-moved"
+
+setup_case explicit-parent-replacement
+replaced_parent=$work_dir/exports
+mkdir "$replaced_parent"
+printf '%s\n' "$replaced_parent" > \
+    "$git_fixture_dir/.moguet-test-replace-export-parent"
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+run_fail -G clean-root --output-dir=./exports
+assert_contains "Refusing changed export directory path" "$stderr_file"
+assert_contains "replacement parent marker" \
+    "$replaced_parent/replacement-marker"
+[ ! -e "$replaced_parent/clean-root" ]
+[ ! -e "$replaced_parent-moved/clean-root" ]
+assert_no_temporary_artifacts_under "$replaced_parent"
+assert_no_temporary_artifacts_under "$replaced_parent-moved"
+
+setup_case explicit-parent-identity-mismatch
+identity_parent=$work_dir/identity-parent
+mkdir "$identity_parent"
+printf '%s\n' "$identity_parent" > \
+    "$git_fixture_dir/.moguet-test-replace-export-parent"
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+run_fail -G clean-root --output-dir=./identity-parent
+assert_contains "Refusing changed export directory path" "$stderr_file"
+assert_contains "replacement parent marker" \
+    "$identity_parent/replacement-marker"
+[ ! -e "$identity_parent/clean-root" ]
+[ ! -e "$identity_parent-moved/clean-root" ]
+assert_no_temporary_artifacts_under "$identity_parent"
+assert_no_temporary_artifacts_under "$identity_parent-moved"
+
+setup_case explicit-parent-symlink-replacement
+symlink_race_parent=$work_dir/exports
+mkdir "$symlink_race_parent"
+printf '%s\n' "$symlink_race_parent" > \
+    "$git_fixture_dir/.moguet-test-symlink-export-parent"
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+run_fail -G clean-root --output-dir=./exports
+assert_contains "Unable to safely revalidate export directory" "$stderr_file"
+[ -L "$symlink_race_parent" ]
+assert_contains "symlink replacement marker" \
+    "$symlink_race_parent-replacement/replacement-marker"
+[ ! -e "$symlink_race_parent-replacement/clean-root" ]
+[ ! -e "$symlink_race_parent-moved/clean-root" ]
+assert_no_temporary_artifacts_under "$symlink_race_parent-replacement"
+assert_no_temporary_artifacts_under "$symlink_race_parent-moved"
 
 setup_case temporary-identity-swap
 : > "$git_fixture_dir/.moguet-test-swap-temp-identity"

@@ -1,0 +1,143 @@
+# Canonical production translation-unit manifest. Additions and removals are
+# build-graph changes and must be explicit; do not replace this with a glob.
+set(MOGUET_PRODUCTION_SOURCES
+    source/app_config.cpp
+    source/artifact_identity.cpp
+    source/artifact_identity_selection.cpp
+    source/artifact_identity_set.cpp
+    source/artifact_install_executor.cpp
+    source/artifact_install_plan.cpp
+    source/artifact_workspace.cpp
+    source/aur_constraint_metadata.cpp
+    source/aur_rpc.cpp
+    source/aur_update_cli_presentation.cpp
+    source/aur_update_execution_preflight.cpp
+    source/aur_update_execution_preparation.cpp
+    source/aur_update_execution_runner.cpp
+    source/aur_update_operation_result.cpp
+    source/aur_update_plan.cpp
+    source/aur_update_query.cpp
+    source/build_plan_artifact_target_projection.cpp
+    source/build_plan_relation_assessment.cpp
+    source/cache_authority.cpp
+    source/checkout_fetch.cpp
+    source/cli_parser.cpp
+    source/cli_public_projection.cpp
+    source/cli_routing.cpp
+    source/cli_runtime_contract.cpp
+    source/commands_aur_update.cpp
+    source/commands_inspect.cpp
+    source/commands_source_maintenance.cpp
+    source/commands_sync.cpp
+    source/commands_upgrade_all.cpp
+    source/dependency_constraint.cpp
+    source/dependency_constraint_presentation.cpp
+    source/dependency_plan.cpp
+    source/dependency_plan_model.cpp
+    source/dependency_spec.cpp
+    source/diagnostic_projection.cpp
+    source/dry_run.cpp
+    source/filtered_aur_update_operation.cpp
+    source/installed_package_relation_inventory.cpp
+    source/interactive_confirmation.cpp
+    source/local_dependency_plan_projection.cpp
+    source/local_package_metadata.cpp
+    source/local_source_build.cpp
+    source/local_source_build_dependency_preparation.cpp
+    source/local_source_install.cpp
+    source/local_source_metadata_evaluation.cpp
+    source/local_source_root.cpp
+    source/local_source_workspace.cpp
+    source/localization.cpp
+    source/logging.cpp
+    source/moguet.cpp
+    source/operation_state_model.cpp
+    source/package_base_artifact_install_executor.cpp
+    source/package_base_artifact_install_plan.cpp
+    source/package_constraint_metadata.cpp
+    source/package_identifier.cpp
+    source/package_metadata.cpp
+    source/package_relation.cpp
+    source/package_relation_assessment.cpp
+    source/package_relation_observation.cpp
+    source/package_relation_observation_adapter.cpp
+    source/package_relation_presentation.cpp
+    source/persistent_checkout.cpp
+    source/pkgbuild_export.cpp
+    source/presentation_projection.cpp
+    source/process.cpp
+    source/provider_installed_state.cpp
+    source/provider_installed_state_presentation.cpp
+    source/provider_selection.cpp
+    source/repository_query.cpp
+    source/reviewed_source_acceptance.cpp
+    source/reviewed_source_git_parser.cpp
+    source/reviewed_source_lifecycle.cpp
+    source/reviewed_source_package_base_lease.cpp
+    source/reviewed_source_patch.cpp
+    source/reviewed_source_pinned_build.cpp
+    source/reviewed_source_presentation.cpp
+    source/reviewed_source_production_failure.cpp
+    source/reviewed_source_production_outcome.cpp
+    source/reviewed_source_projection.cpp
+    source/reviewed_source_review.cpp
+    source/reviewed_source_state.cpp
+    source/reviewed_source_state_store.cpp
+    source/reviewed_source_trusted_review.cpp
+    source/root_package_candidate.cpp
+    source/root_package_route_projection.cpp
+    source/root_package_search.cpp
+    source/root_package_selection.cpp
+    source/runtime_diagnostic.cpp
+    source/separated_package_base_source_build.cpp
+    source/separated_source_build.cpp
+    source/shell_words.cpp
+    source/source_build.cpp
+    source/source_environment.cpp
+    source/source_install.cpp
+    source/source_install_preparation.cpp
+    source/source_package_compatibility.cpp
+    source/source_package_identity.cpp
+    source/source_package_identity_projection.cpp
+    source/source_preference.cpp
+    source/system_source_upgrade.cpp
+    source/trusted_cache.cpp
+    source/trusted_git.cpp
+    source/unified_plan_observation.cpp
+    source/unified_plan_projection.cpp
+    source/unified_plan_renderer.cpp
+    source/upgrade_all_operation.cpp
+    source/upgrade_all_operation_result.cpp
+    source/upgrade_all_plan.cpp
+    source/upgrade_all_presentation_projection.cpp
+    source/user_config.cpp
+    source/xdg_directory_safety.cpp
+    source/xdg_paths.cpp
+    source/xdg_state_log.cpp
+)
+
+set(_moguet_unique_production_sources ${MOGUET_PRODUCTION_SOURCES})
+list(REMOVE_DUPLICATES _moguet_unique_production_sources)
+list(LENGTH MOGUET_PRODUCTION_SOURCES _moguet_production_source_count)
+list(LENGTH _moguet_unique_production_sources _moguet_unique_source_count)
+if(NOT _moguet_production_source_count EQUAL _moguet_unique_source_count)
+    message(FATAL_ERROR "MOGUET_PRODUCTION_SOURCES contains duplicate entries")
+endif()
+
+foreach(_moguet_source IN LISTS MOGUET_PRODUCTION_SOURCES)
+    if(NOT _moguet_source MATCHES "^source/[^/]+\\.cpp$")
+        message(
+            FATAL_ERROR
+            "Production source is outside the source/*.cpp boundary: "
+            "${_moguet_source}"
+        )
+    endif()
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_moguet_source}")
+        message(FATAL_ERROR "Production source does not exist: ${_moguet_source}")
+    endif()
+endforeach()
+
+unset(_moguet_production_source_count)
+unset(_moguet_source)
+unset(_moguet_unique_production_sources)
+unset(_moguet_unique_source_count)

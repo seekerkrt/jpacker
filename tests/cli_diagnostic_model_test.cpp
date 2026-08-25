@@ -404,6 +404,25 @@ void test_rich_cli_option_and_ownership_contract() {
                             OptionSemanticScope::DependencyInspection),
             "--recursive occurrence/scope contract differs");
 
+    const OptionContract& output_directory =
+            option_contract(OptionId::PkgbuildOutputDirectory);
+    expect(
+            output_directory.canonical_token == "--output-dir" &&
+                    output_directory.value.kind ==
+                            OptionValueKind::AttachedValue &&
+                    output_directory.value.allowed_value_count == 1 &&
+                    output_directory.value.allowed_values[0] == "DIR" &&
+                    output_directory.default_occurrence ==
+                            OptionOccurrence::Once &&
+                    output_directory.lexical_placement ==
+                            OptionLexicalPlacement::OperationLocal &&
+                    has_option_scope(
+                            output_directory.semantic_scopes,
+                            OptionSemanticScope::PackageExport) &&
+                    find_option_contract("--output-dir=/tmp") ==
+                            &output_directory,
+            "--output-dir attached operation-local contract differs");
+
     expect(
             option_contract(OptionId::Aur).conflicts.contains(OptionId::Repo) &&
                     option_contract(OptionId::Repo).conflicts.contains(
@@ -460,7 +479,15 @@ void test_rich_cli_option_and_ownership_contract() {
                     print_operation.owner ==
                             GrammarOwnership::MoguetOwned &&
                     export_operation.dry_run_support ==
-                            DryRunSupport::Unsupported,
+                            DryRunSupport::Unsupported &&
+                    export_operation.option_relations.contains(
+                            OptionId::PkgbuildOutputDirectory) &&
+                    export_operation.option_relations
+                                    .find(OptionId::PkgbuildOutputDirectory)
+                                    ->public_syntax ==
+                            OptionPublicSyntax::Optional &&
+                    !print_operation.option_relations.contains(
+                            OptionId::PkgbuildOutputDirectory),
             "-G/-Gp structured authority differs");
 
     const std::array<OptionId, 1> select_context = {OptionId::Select};

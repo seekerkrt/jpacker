@@ -21,7 +21,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-using SeparatedSourceBuildExecutor = ArtifactInstallExecutionOutcome (*)(
+using SeparatedSourceBuildExecutor = SeparatedSourceBuildExecutionResult (*)(
         SeparatedSourceBuildUnitRequest,
         const SeparatedSourceBuildUnitOptions&);
 
@@ -114,6 +114,30 @@ template <typename Callable>
 void expect_build_runner_error(Callable&& callable, const std::string& context) {
     try {
         std::forward<Callable>(callable)();
+    } catch(const SeparatedSourceBuildPhaseError& phase_error) {
+        expect(
+                phase_error.phase() ==
+                                SeparatedSourceBuildFailurePhase::Build &&
+                        phase_error.production_outcome().build_outcome ==
+                                ProductionSourceBuildCommandOutcome::Started &&
+                        phase_error.production_outcome().install_outcome ==
+                                ProductionSourceInstallOutcome::NotAttempted,
+                context + ": staged build outcome differs");
+        try {
+            phase_error.rethrow_failure();
+        } catch(const BuildRunnerTestError& error) {
+            expect(
+                    std::string(error.what()) ==
+                            BUILD_RUNNER_THROW_DIAGNOSTIC,
+                    context + ": build runner diagnostic changed");
+            return;
+        } catch(const std::exception& error) {
+            throw std::runtime_error(
+                    context + ": nested build runner type changed: " +
+                    error.what());
+        }
+        throw std::runtime_error(
+                context + ": expected nested BuildRunnerTestError");
     } catch(const BuildRunnerTestError& error) {
         expect(
                 std::string(error.what()) == BUILD_RUNNER_THROW_DIAGNOSTIC,
@@ -374,6 +398,7 @@ struct InvocationPlan {
     bool            expect_install = false;
     int             install_exit_code = 0;
     const char*     install_reason_option = nullptr;
+    bool            replace_workspace_after_build = false;
     bool            replace_workspace_after_install = false;
 };
 
@@ -657,10 +682,27 @@ void observe_run_command() {
         expect(
                 fs::current_path() == scenario.expected_checkout_path,
                 "Build-only makepkg did not reuse the packagelist working directory");
+        const InvocationPlan& plan = scenario.plans[invocation_index];
         create_build_output(
-                scenario.plans[invocation_index].build_output,
+                plan.build_output,
                 scenario.workspace_paths[invocation_index],
                 scenario.artifact_paths[invocation_index]);
+        if(plan.replace_workspace_after_build) {
+            fs::path displaced_workspace =
+                    scenario.workspace_paths[invocation_index];
+            displaced_workspace +=
+                    ".build-succeeded-before-revalidation";
+            fs::rename(
+                    scenario.workspace_paths[invocation_index],
+                    displaced_workspace);
+            fs::create_directory(
+                    scenario.workspace_paths[invocation_index]);
+            fs::permissions(
+                    scenario.workspace_paths[invocation_index],
+                    fs::perms::owner_all, fs::perm_options::replace);
+            scenario.displaced_workspace_paths[invocation_index] =
+                    std::move(displaced_workspace);
+        }
         return;
     }
 
@@ -809,7 +851,7 @@ ArtifactInstallExecutionOutcome execute_scenario(
             fs::current_path() == scenario.caller_working_directory,
             "Separated lifecycle scenario started from a drifted working directory");
 
-    const ArtifactInstallExecutionOutcome install_outcome = [&]() {
+    const SeparatedSourceBuildExecutionResult execution = [&]() {
         try {
             return execute_separated_source_build_unit(
                     environment.request(
@@ -828,7 +870,13 @@ ArtifactInstallExecutionOutcome execute_scenario(
     expect(
             fs::current_path() == scenario.caller_working_directory,
             "Separated lifecycle success did not restore the caller working directory");
-    return install_outcome;
+    expect(
+            execution.production_outcome.build_outcome ==
+                            ProductionSourceBuildCommandOutcome::Succeeded &&
+                    execution.production_outcome.install_outcome ==
+                            ProductionSourceInstallOutcome::Succeeded,
+            "Separated lifecycle success lost staged build/install outcome");
+    return execution.install_outcome;
 }
 
 void test_rmdeps_rejected_before_workspace(
@@ -994,6 +1042,61 @@ void test_build_failure_retains_workspace(
                     runner_throw_scenario.artifact_paths.at(0)),
             "Build runner throw did not retain its produced artifact");
     require_scenario_complete(runner_throw_scenario);
+}
+
+void test_status_zero_post_build_revalidation_retains_succeeded_outcome(
+        const TemporaryTestEnvironment& environment) {
+    LifecycleScenario scenario;
+    scenario.plans.front().replace_workspace_after_build = true;
+    scenario.plans.front().expect_identity = false;
+    scenario.plans.front().expect_install = false;
+    activate_scenario(scenario);
+
+    bool failure_reported = false;
+    try {
+        static_cast<void>(execute_scenario(environment, scenario));
+    } catch(const SeparatedSourceBuildPhaseError& error) {
+        failure_reported = true;
+        expect(
+                error.phase() == SeparatedSourceBuildFailurePhase::Build &&
+                        error.production_outcome().build_outcome ==
+                                ProductionSourceBuildCommandOutcome::
+                                        Succeeded &&
+                        error.production_outcome().install_outcome ==
+                                ProductionSourceInstallOutcome::
+                                        NotAttempted,
+                "Status-zero post-build revalidation lost staged success");
+        try {
+            error.rethrow_failure();
+            throw std::runtime_error(
+                    "Status-zero post-build revalidation lost its typed cause");
+        } catch(const ProductionSourceBuildPostCommandRevalidationError&
+                        post_command_error) {
+            expect(
+                    post_command_error.command_exit_status() == 0,
+                    "Post-build revalidation changed the acquired makepkg status");
+            bool nested_failure_retained = false;
+            try {
+                post_command_error.rethrow_failure();
+            } catch(const std::exception&) {
+                nested_failure_retained = true;
+            }
+            expect(
+                    nested_failure_retained,
+                    "Post-build revalidation lost its identity failure");
+        }
+    }
+    expect(
+            failure_reported,
+            "Status-zero post-build revalidation returned success");
+    expect_process_counts(1, 1, "status-zero post-build revalidation");
+    expect_metadata_counts(0, 0, 0, "status-zero post-build revalidation");
+    expect(
+            fs::is_regular_file(
+                    scenario.displaced_workspace_paths.at(0) /
+                    ARTIFACT_LEAF),
+            "Status-zero post-build revalidation lost the built artifact");
+    require_scenario_complete(scenario);
 }
 
 void test_missing_artifact_retains_workspace(
@@ -1539,6 +1642,10 @@ int main() {
         });
         run_case("build failure retention", [&]() {
             test_build_failure_retains_workspace(environment);
+        });
+        run_case("status-zero post-build revalidation", [&]() {
+            test_status_zero_post_build_revalidation_retains_succeeded_outcome(
+                    environment);
         });
         run_case("expected artifact missing", [&]() {
             test_missing_artifact_retains_workspace(environment);

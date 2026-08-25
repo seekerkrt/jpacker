@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
 import sys
@@ -18,6 +19,8 @@ from generate_completions import (
 
 
 ANSI_HELP_ENTRY = re.compile(r"^    \x1b\[1m(.*?)\x1b\[0m", re.MULTILINE)
+ANSI_HELP_LINE = re.compile(r"^    \x1b\[1m(.*?)\x1b\[0m(.*)$")
+HELP_DESCRIPTION_COLUMN = 42
 LONG_TOKEN = re.compile(r"(?<![A-Za-z0-9-])--[a-z][a-z0-9-]*(?![A-Za-z0-9-])")
 SHORT_TOKEN = re.compile(r"(?<![A-Za-z0-9-])-(?!-)[A-Za-z][A-Za-z]*(?![A-Za-z0-9-])")
 CLI_DASH_TOKEN = re.compile(
@@ -76,6 +79,12 @@ class PublicSurface:
     options: frozenset[str]
 
 
+@dataclass(frozen=True)
+class SemanticTextContract:
+    required_patterns: tuple[str, ...]
+    forbidden_patterns: tuple[str, ...] = ()
+
+
 def fail(message: str) -> None:
     print(f"public-documentation-check: {message}", file=sys.stderr)
     raise SystemExit(1)
@@ -93,6 +102,163 @@ def shown_path(path: Path) -> str:
         return str(path.relative_to(REPOSITORY_ROOT))
     except ValueError:
         return str(path)
+
+
+def assert_semantic_text_contract(
+    label: str,
+    text: str,
+    contract: SemanticTextContract,
+) -> None:
+    normalized = " ".join(text.split()).casefold()
+    missing = [
+        pattern
+        for pattern in contract.required_patterns
+        if re.search(pattern, normalized) is None
+    ]
+    forbidden = [
+        pattern
+        for pattern in contract.forbidden_patterns
+        if re.search(pattern, normalized) is not None
+    ]
+    if missing:
+        fail(
+            f"{label} is missing semantic pattern(s): "
+            + ", ".join(repr(pattern) for pattern in missing)
+        )
+    if forbidden:
+        fail(
+            f"{label} retains obsolete semantics: "
+            + ", ".join(repr(pattern) for pattern in forbidden)
+        )
+
+
+def runtime_help_descriptions(label: str, text: str) -> dict[str, str]:
+    descriptions: dict[str, str] = {}
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        match = ANSI_HELP_LINE.match(lines[index])
+        if match is None:
+            index += 1
+            continue
+
+        syntax = match.group(1).strip()
+        if syntax in descriptions:
+            fail(f"{label} repeats help entry {syntax!r}")
+        parts = [match.group(2).strip()] if match.group(2).strip() else []
+        index += 1
+        while index < len(lines) and lines[index].startswith(
+            " " * HELP_DESCRIPTION_COLUMN
+        ):
+            continuation = lines[index][HELP_DESCRIPTION_COLUMN:].strip()
+            if continuation:
+                parts.append(continuation)
+            index += 1
+        descriptions[syntax] = " ".join(parts)
+    return descriptions
+
+
+def reviewed_source_runtime_help_contracts(
+    locale: str,
+) -> dict[str, SemanticTextContract]:
+    if locale == "en":
+        return {
+            "review.pkgbuild = prompt|skip": SemanticTextContract(
+                (
+                    r"(?:invocation-local|this invocation)",
+                    r"pkgbuild.*\.install",
+                    r"(?:editor|editing)",
+                    r"not (?:upstream )?(?:reviewed-source|reviewed source|review) acceptance",
+                ),
+                (r"pkgbuild review policy",),
+            ),
+            "review.diff = prompt|skip": SemanticTextContract(
+                (
+                    r"repository (?:update )?diff",
+                    r"aur (?:reviewed-source|reviewed source) review",
+                    r"(?:skip|skipping)",
+                    r"(?:does not advance|without advancing).*reviewed state|reviewed state.*unchanged",
+                ),
+                (r"repository update diff policy",),
+            ),
+            "--diff": SemanticTextContract(
+                (
+                    r"repository (?:updates|diff)",
+                    r"aur",
+                    r"exact (?:fetched )?target",
+                    r"(?:previous|last) reviewed revision",
+                    r"all tracked source.*(?:first review|initial)|(?:first review|initial).*all tracked source|initial full tracked-file review",
+                    r"advance.*reviewed state.*explicit acceptance|explicit acceptance.*advance.*reviewed state",
+                ),
+            ),
+            "--nodiff": SemanticTextContract(
+                (
+                    r"repository diff",
+                    r"(?:reviewed-source|reviewed source) review",
+                    r"without advancing reviewed state|does not advance reviewed state",
+                ),
+                (r"skip reviewed source changes",),
+            ),
+        }
+    if locale == "ja":
+        return {
+            "review.pkgbuild = prompt|skip": SemanticTextContract(
+                (
+                    r"invocation-local|今回のinvocation|この実行",
+                    r"pkgbuild.*\.install",
+                    r"editor|編集",
+                    r"reviewed-source acceptanceでは(?:ない|ありません)",
+                ),
+                (r"pkgbuildの確認方針",),
+            ),
+            "review.diff = prompt|skip": SemanticTextContract(
+                (
+                    r"repository diff|リポジトリ(?:更新)?差分",
+                    r"aur (?:reviewed-source|reviewed source) review",
+                    r"skip|省略",
+                    r"reviewed state.*進め(?:ない|ません)",
+                ),
+                (r"リポジトリ更新差分の確認方針",),
+            ),
+            "--diff": SemanticTextContract(
+                (
+                    r"(?:repository|リポジトリ)(?: update|更新)",
+                    r"aur",
+                    r"exact (?:fetched )?target",
+                    r"(?:previous|前回の) reviewed revision",
+                    r"初回review.*tracked (?:source|file)全体|initial full tracked-file review",
+                    r"explicit acceptance.*reviewed state.*進め",
+                ),
+            ),
+            "--nodiff": SemanticTextContract(
+                (
+                    r"repository diff|リポジトリ差分",
+                    r"(?:reviewed-source|reviewed source) review",
+                    r"reviewed state.*進め(?:ない|ません)",
+                ),
+            ),
+        }
+    raise ValueError(f"unsupported reviewed-source help locale: {locale}")
+
+
+def check_reviewed_source_runtime_help(
+    english_help: str,
+    japanese_help: str,
+) -> None:
+    for locale, label, text in (
+        ("en", "English runtime help", english_help),
+        ("ja", "Japanese runtime help", japanese_help),
+    ):
+        descriptions = runtime_help_descriptions(label, text)
+        for syntax, contract in reviewed_source_runtime_help_contracts(
+            locale
+        ).items():
+            description = descriptions.get(syntax)
+            if description is None:
+                fail(f"{label} is missing reviewed-source entry {syntax!r}")
+            assert_semantic_text_contract(
+                f"{label} entry {syntax!r}", description, contract
+            )
 
 
 def expected_surface(schema) -> PublicSurface:
@@ -127,7 +293,7 @@ def assert_surface(label: str, actual: PublicSurface, expected: PublicSurface) -
         details.append("missing options: " + format_tokens(missing_options))
     if extra_options:
         details.append("extra options: " + format_tokens(extra_options))
-    fail(f"{label} differs from src/cli_authority.hpp ({'; '.join(details)})")
+    fail(f"{label} differs from source/cli_authority.hpp ({'; '.join(details)})")
 
 
 def help_surface(path: Path, expected: PublicSurface) -> PublicSurface:
@@ -161,7 +327,7 @@ def help_surface(path: Path, expected: PublicSurface) -> PublicSurface:
 
     if unknown_tokens:
         fail(
-            f"{path} exposes tokens outside src/cli_authority.hpp: "
+            f"{path} exposes tokens outside source/cli_authority.hpp: "
             + format_tokens(unknown_tokens)
         )
     return PublicSurface(frozenset(operation_tokens), frozenset(option_tokens))
@@ -346,7 +512,7 @@ def assert_man_option_definition_projection(
     if unknown:
         fail(
             f"{shown_path(path)} PUBLIC OPTIONS contains "
-            f"tokens outside src/cli_authority.hpp: {format_tokens(unknown)}"
+            f"tokens outside source/cli_authority.hpp: {format_tokens(unknown)}"
         )
     if actual_counts != expected_counts:
         missing = expected_counts - actual_counts
@@ -410,7 +576,7 @@ def exact_man_public_surface(
     if unknown_commands:
         fail(
             f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC COMMANDS contains "
-            f"tokens outside src/cli_authority.hpp: {format_tokens(unknown_commands)}"
+            f"tokens outside source/cli_authority.hpp: {format_tokens(unknown_commands)}"
         )
     duplicate_operations = {token for token, count in operation_counts.items() if count != 1}
     if duplicate_operations:
@@ -635,13 +801,43 @@ def assert_document_contract(
     forbidden = [fragment for fragment in forbidden_fragments if fragment in text]
     if missing:
         fail(
-            f"{path.relative_to(REPOSITORY_ROOT)} is missing required contract text: "
+            f"{shown_path(path)} is missing required contract text: "
             + ", ".join(repr(fragment) for fragment in missing)
         )
     if forbidden:
         fail(
-            f"{path.relative_to(REPOSITORY_ROOT)} retains obsolete contract text: "
+            f"{shown_path(path)} retains obsolete contract text: "
             + ", ".join(repr(fragment) for fragment in forbidden)
+        )
+
+
+def check_reviewed_source_completion_semantics(repository_root: Path) -> None:
+    path = repository_root / "completions/descriptions/en.json"
+    try:
+        document = json.loads(read_text(path))
+    except json.JSONDecodeError as error:
+        fail(f"invalid JSON in {shown_path(path)}: {error}")
+    if not isinstance(document, dict) or not isinstance(
+        document.get("options"), dict
+    ):
+        fail(f"{shown_path(path)} has no option-description object")
+
+    options = document["options"]
+    runtime_contracts = reviewed_source_runtime_help_contracts("en")
+    for token in ("--diff", "--nodiff"):
+        contract = runtime_contracts[token]
+        if token == "--diff":
+            contract = SemanticTextContract(
+                contract.required_patterns[:-1],
+                contract.forbidden_patterns,
+            )
+        description = options.get(token)
+        if not isinstance(description, str):
+            fail(f"{shown_path(path)} has no description for {token}")
+        assert_semantic_text_contract(
+            f"{shown_path(path)} description for {token}",
+            description,
+            contract,
         )
 
 
@@ -723,6 +919,163 @@ def check_package_relation_documentation() -> None:
         assert_document_contract(path, required, obsolete)
 
 
+def reviewed_source_documentation_contracts(
+    repository_root: Path,
+) -> dict[Path, tuple[tuple[str, ...], tuple[str, ...]]]:
+    obsolete_help = (
+        "Prompt to review {} and {} files",
+        "Skip {} and {} review",
+        "Prompt to review PKGBUILD and .install files",
+        "Skip PKGBUILD and .install review",
+        "Prompt to view repository update diffs",
+        "Skip the repository update diff prompt",
+        "{} review policy",
+        "Repository update diff policy",
+        "Review changes from the previous reviewed revision to the exact target",
+        "Skip reviewed source changes without advancing reviewed state",
+    )
+    return {
+        repository_root / "README.md": (
+            (
+                "last explicitly accepted exact upstream commit for each PackageBase",
+                "existing cache created before this workflow",
+                "full tracked-file review",
+                "previous reviewed revision",
+                "only an explicit interactive `y` or `yes`",
+                "do not advance reviewed state",
+                "compare-and-swap guard",
+                "separate overlay on the reviewed commit",
+                "Official-repository and `build --local` routes do not create this state",
+                "No manual migration is required",
+                "never invents a reviewed revision from the legacy checkout HEAD",
+            ),
+            (),
+        ),
+        repository_root / "README.ja.md": (
+            (
+                "最後に明示acceptしたexact upstream commitをPackageBaseごと",
+                "このworkflowより前から存在するcache",
+                "tracked file全体をfull review",
+                "previous reviewed revision",
+                "interactive `y` / `yes`を明示入力した場合だけ",
+                "reviewed stateは進めません",
+                "compare-and-swap guard",
+                "reviewed commit上の別overlay",
+                "official repositoryと`build --local` routeはこのstateを作りません",
+                "手動migrationは不要",
+                "legacy checkout HEAD、branch、remote ref、build artifactからreviewed revisionを捏造しません",
+            ),
+            (),
+        ),
+        repository_root / "docs/COMPATIBILITY.md": (
+            (
+                "previous reviewed revisionからexact targetまで",
+                "AUR Git treeのtracked file全体",
+                "defaultなしのinteractive promptへ明示入力した`y` / `yes`だけ",
+                "compatibility buildを継続し得る場合もstateを進めない",
+                "CAS semantics",
+                "後続build / install / cleanup failureでrollbackしない",
+                "invocation-localなPKGBUILD / detected top-level `*.install` editor policy",
+                "manual migrationは不要",
+                "legacy checkout HEAD、branch、remote ref、artifactからreviewed revisionを捏造しない",
+                "official repository source-buildとlocal PKGBUILD routeはreviewed-source stateをread / writeしない",
+                "generic source identity projectionとreviewed-source persistent / build authorityは同じものではない",
+            ),
+            (),
+        ),
+        repository_root / "docs/contracts/README.md": (
+            (
+                "[Reviewed AUR source state](reviewed-source-state.md)",
+                "PackageBase単位のexact reviewed revision",
+            ),
+            (),
+        ),
+        repository_root / "docs/contracts/reviewed-source-state.md": (
+            (
+                "Scopeとauthority",
+                "stateの単位はPackageBase",
+                "InitialFullReview",
+                "already reviewed",
+                "update review",
+                "full rebaseline review",
+                "full rebind / rebaseline review",
+                "unsupported future schema、unsafe history",
+                "review eligibilityのauthorityはAUR Git treeのtracked file全体",
+                "root `PKGBUILD`またはtop-level `*.install`",
+                "reviewのmaterialize / 表示成功とacceptanceは別event",
+                "CAS semantics",
+                "exact targetへdetached checkout",
+                "invocation-local overlay",
+                "no reviewed state -> Missing -> InitialFullReview",
+                "userによるstate file作成、cache変換、手動 migrationは不要",
+                "official repository source-buildと`build --local`",
+                "generic source identity projection != reviewed-source persistent/build authority",
+                "generic projectionを`Known`へ昇格させない",
+            ),
+            (),
+        ),
+        repository_root / "docs/contracts/source-package-identity.md": (
+            (
+                "Issue #411のreviewed-source lifecycle",
+                "generic projection inputの拡張ではない",
+                "common projectionの`Unknown`を`Known`へ昇格させたりしない",
+                "exact target OIDを保持していても、このgeneric projection ruleは変わらない",
+                "reviewed-source exact OIDの注入をgeneric projectionへ追加しない",
+            ),
+            (),
+        ),
+        repository_root / "man/moguet.1.in": (
+            (
+                "previous reviewed revision to the exact fetched target",
+                "Only explicit acceptance after a complete review advances reviewed state",
+                "does not advance reviewed state",
+                "invocation-local editor policy, not upstream reviewed-source acceptance",
+                "Persistent PackageBase-scoped reviewed AUR revision state",
+                "compare-and-swap semantics",
+                "does not roll back a correctly accepted and published revision",
+                "requires no manual migration",
+                "does not invent a reviewed revision from legacy checkout HEAD",
+            ),
+            (),
+        ),
+        repository_root / "man/ja/moguet.1.in": (
+            (
+                "previous reviewed revisionからexact fetched targetまで",
+                "explicit acceptanceだけがreviewed stateを進めます",
+                "reviewed stateを進めません",
+                "invocation-localなeditor policyであり、upstream reviewed-source acceptanceではなく",
+                "PackageBase単位のpersistent reviewed AUR revision state",
+                "compare-and-swap semantics",
+                "正常にaccept / publishしたrevisionをrollbackしません",
+                "manual migrationは不要",
+                "legacy checkout HEAD、branch、remote ref、build artifactからreviewed revisionを捏造しません",
+            ),
+            (),
+        ),
+        repository_root / "source/moguet.cpp": (
+            (
+                "review.pkgbuild = prompt|skip",
+                "review.diff = prompt|skip",
+            ),
+            obsolete_help,
+        ),
+        repository_root / "completions/descriptions/en.json": (
+            (),
+            obsolete_help,
+        ),
+    }
+
+
+def check_reviewed_source_documentation(
+    repository_root: Path = REPOSITORY_ROOT,
+) -> None:
+    for path, (required, forbidden) in reviewed_source_documentation_contracts(
+        repository_root
+    ).items():
+        assert_document_contract(path, required, forbidden)
+    check_reviewed_source_completion_semantics(repository_root)
+
+
 def markdown_canonical_grammar(path: Path) -> tuple[str, ...]:
     text = read_text(path)
     begin_marker = "<!-- CLI CANONICAL GRAMMAR BEGIN -->"
@@ -776,6 +1129,10 @@ def main() -> int:
         "Japanese runtime help",
         read_text(arguments.help_ja),
         schema.canonical_grammar,
+    )
+    check_reviewed_source_runtime_help(
+        read_text(arguments.help_en),
+        read_text(arguments.help_ja),
     )
 
     version = read_text(REPOSITORY_ROOT / "VERSION").strip()
@@ -860,6 +1217,7 @@ def main() -> int:
             )
 
     check_package_relation_documentation()
+    check_reviewed_source_documentation()
     check_generated_completions(schema)
     print("public-documentation-check: all checks passed")
     return 0

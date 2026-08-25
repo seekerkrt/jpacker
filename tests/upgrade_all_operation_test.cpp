@@ -799,6 +799,18 @@ void test_option_mismatch_rejected_before_system_mutation() {
                                     OptionSnapshotMismatch) &&
                     result.has_inconsistency(),
             "Aggregate option mismatch was not typed");
+    const UpgradeAllPhasePackageStateObservations phase_observations =
+            project_upgrade_all_phase_package_state_observations(result);
+    expect(
+            phase_observations.system_source.state ==
+                            PackageStateObservation::Unverified &&
+                    phase_observations.system_source.reason ==
+                            ObservationReason::InconsistentEvidence &&
+                    phase_observations.aur.state ==
+                            PackageStateObservation::NotObserved &&
+                    phase_observations.aur.reason ==
+                            ObservationReason::PhaseNotAttempted,
+            "Inconsistent system/source and unattempted AUR phases were conflated");
     expect(stub::system_commands().empty(),
            "Option mismatch crossed system mutation boundary");
     expect_aur_not_attempted(
@@ -2086,6 +2098,8 @@ void test_system_only_observation_failure_remains_unverified() {
             "Observation failure was rounded to failure or NoUpdates");
     const OperationStateProjection operation_state =
             project_upgrade_all_operation_state(result);
+    const UpgradeAllPhasePackageStateObservations phase_observations =
+            project_upgrade_all_phase_package_state_observations(result);
     const PresentationProjection presentation =
             project_upgrade_all_presentation(result);
     expect(
@@ -2095,6 +2109,18 @@ void test_system_only_observation_failure_remains_unverified() {
                     operation_state.package_state.reason ==
                             ObservationReason::BeforeSnapshotUnavailable,
             "System-only observation failure lost its typed unverified state");
+    expect(
+            phase_observations.system_source ==
+                            PackageStateObservationValue{
+                                    PackageStateObservation::Unverified,
+                                    ObservationReason::
+                                            BeforeSnapshotUnavailable} &&
+                    phase_observations.aur ==
+                            PackageStateObservationValue{
+                                    PackageStateObservation::
+                                            VerifiedUnchanged,
+                                    std::nullopt},
+            "Phase projection lost snapshot failure or authoritative AUR no-change evidence");
     expect(
             presentation.summary_counts.total == 1 &&
                     presentation.summary_counts.attention_required == 1 &&
@@ -2887,6 +2913,183 @@ UpgradeAllOperationResult make_constructed_completed_helper_fixture(
     return result;
 }
 
+enum class PhaseObservationFixture {
+    Changed,
+    VerifiedUnchanged,
+    Unverified,
+    NotObserved,
+};
+
+UpgradeAllOperationResult make_phase_observation_fixture(
+        PhaseObservationFixture system_source_observation,
+        PhaseObservationFixture aur_observation) {
+    UpgradeAllOperationResult result =
+            make_constructed_completed_helper_fixture(
+                    PackageStateChange::NoChange);
+
+    switch(system_source_observation) {
+    case PhaseObservationFixture::Changed:
+        result.system_source.system.package_state_change =
+                PackageStateChange::Changed;
+        break;
+    case PhaseObservationFixture::VerifiedUnchanged:
+        break;
+    case PhaseObservationFixture::Unverified:
+        result.system_source.system.package_state_change =
+                PackageStateChange::Unknown;
+        break;
+    case PhaseObservationFixture::NotObserved:
+        result.system_source.status =
+                SystemSourceUpgradeStatus::BlockedBeforeMutation;
+        result.system_source.stopped_phase =
+                SystemSourceUpgradePhase::Preparation;
+        result.system_source.system.status =
+                SystemUpgradePhaseStatus::NotAttempted;
+        break;
+    }
+
+    switch(aur_observation) {
+    case PhaseObservationFixture::Changed:
+    case PhaseObservationFixture::Unverified: {
+        SelectedRepositoryProviderTransactionResult& provider_transaction =
+                result.aur.operation_result->reduced_operation_result.
+                        selected_repository_provider_transaction;
+        provider_transaction.status =
+                SelectedRepositoryProviderTransactionStatus::Succeeded;
+        provider_transaction.selected_providers = {
+                ProvidedDependency::from_repository(
+                        "extra", "phase-provider")};
+        provider_transaction.package_state_change =
+                aur_observation == PhaseObservationFixture::Changed
+                ? PackageStateChange::Changed
+                : PackageStateChange::Unknown;
+        provider_transaction.command_exit_status = 0;
+        break;
+    }
+    case PhaseObservationFixture::VerifiedUnchanged:
+        break;
+    case PhaseObservationFixture::NotObserved:
+        result.aur.status = UpgradeAllAurPhaseStatus::NotAttempted;
+        result.aur.not_attempted_reason =
+                UpgradeAllNotAttemptedReason::SystemFailure;
+        result.aur.operation_result.reset();
+        break;
+    }
+
+    return result;
+}
+
+void test_phase_package_state_observation_matrix() {
+    struct PhaseObservationCase {
+        const char* name;
+        PhaseObservationFixture system_source_input;
+        PhaseObservationFixture aur_input;
+        PackageStateObservation expected_system_source;
+        PackageStateObservation expected_aur;
+        PackageStateObservation expected_aggregate;
+    };
+
+    const std::vector<PhaseObservationCase> cases = {
+            {"system changed, AUR unchanged",
+             PhaseObservationFixture::Changed,
+             PhaseObservationFixture::VerifiedUnchanged,
+             PackageStateObservation::Changed,
+             PackageStateObservation::VerifiedUnchanged,
+             PackageStateObservation::Changed},
+            {"system unchanged, AUR changed",
+             PhaseObservationFixture::VerifiedUnchanged,
+             PhaseObservationFixture::Changed,
+             PackageStateObservation::VerifiedUnchanged,
+             PackageStateObservation::Changed,
+             PackageStateObservation::Changed},
+            {"both unchanged",
+             PhaseObservationFixture::VerifiedUnchanged,
+             PhaseObservationFixture::VerifiedUnchanged,
+             PackageStateObservation::VerifiedUnchanged,
+             PackageStateObservation::VerifiedUnchanged,
+             PackageStateObservation::VerifiedUnchanged},
+            {"both changed",
+             PhaseObservationFixture::Changed,
+             PhaseObservationFixture::Changed,
+             PackageStateObservation::Changed,
+             PackageStateObservation::Changed,
+             PackageStateObservation::Changed},
+            {"system unverified, AUR unchanged",
+             PhaseObservationFixture::Unverified,
+             PhaseObservationFixture::VerifiedUnchanged,
+             PackageStateObservation::Unverified,
+             PackageStateObservation::VerifiedUnchanged,
+             PackageStateObservation::Unverified},
+            {"system unchanged, AUR unverified",
+             PhaseObservationFixture::VerifiedUnchanged,
+             PhaseObservationFixture::Unverified,
+             PackageStateObservation::VerifiedUnchanged,
+             PackageStateObservation::Unverified,
+             PackageStateObservation::Unverified},
+            {"system changed, AUR unverified",
+             PhaseObservationFixture::Changed,
+             PhaseObservationFixture::Unverified,
+             PackageStateObservation::Changed,
+             PackageStateObservation::Unverified,
+             PackageStateObservation::Changed},
+            {"system unverified, AUR changed",
+             PhaseObservationFixture::Unverified,
+             PhaseObservationFixture::Changed,
+             PackageStateObservation::Unverified,
+             PackageStateObservation::Changed,
+             PackageStateObservation::Changed},
+            {"system changed, AUR not observed",
+             PhaseObservationFixture::Changed,
+             PhaseObservationFixture::NotObserved,
+             PackageStateObservation::Changed,
+             PackageStateObservation::NotObserved,
+             PackageStateObservation::Changed},
+            {"system not observed, AUR changed",
+             PhaseObservationFixture::NotObserved,
+             PhaseObservationFixture::Changed,
+             PackageStateObservation::NotObserved,
+             PackageStateObservation::Changed,
+             PackageStateObservation::Changed},
+    };
+
+    for(const PhaseObservationCase& test_case : cases) {
+        const UpgradeAllOperationResult result =
+                make_phase_observation_fixture(
+                        test_case.system_source_input,
+                        test_case.aur_input);
+        const UpgradeAllPhasePackageStateObservations phase_observations =
+                project_upgrade_all_phase_package_state_observations(result);
+        const OperationStateProjection aggregate_observation =
+                project_upgrade_all_operation_state(result);
+
+        expect(
+                phase_observations.system_source.state ==
+                                test_case.expected_system_source &&
+                        phase_observations.aur.state ==
+                                test_case.expected_aur &&
+                        aggregate_observation.package_state.state ==
+                                test_case.expected_aggregate,
+                std::string("Phase package-state observation differs: ") +
+                        test_case.name);
+        if(test_case.expected_system_source ==
+           PackageStateObservation::NotObserved) {
+            expect(
+                    result.system_source.package_state_change() ==
+                                    PackageStateChange::NoChange &&
+                            phase_observations.system_source.reason ==
+                                    ObservationReason::PhaseNotAttempted,
+                    "Unattempted system/source default NoChange was presented as verified");
+        }
+        if(test_case.expected_aur ==
+           PackageStateObservation::NotObserved) {
+            expect(
+                    phase_observations.aur.reason ==
+                            ObservationReason::PhaseNotAttempted,
+                    "Unattempted AUR phase lost its NotObserved reason");
+        }
+    }
+}
+
 void test_constructed_completed_unknown_success_fixture() {
     UpgradeAllOperationResult result =
             make_constructed_completed_helper_fixture(
@@ -3206,6 +3409,9 @@ int main() {
         run_case(
                 "constructed AUR NoChange NoOp basis",
                 test_constructed_aur_no_change_noop_basis_fixture);
+        run_case(
+                "phase package-state observation matrix",
+                test_phase_package_state_observation_matrix);
         run_case(
                 "constructed Completed Unknown success",
                 test_constructed_completed_unknown_success_fixture);

@@ -251,6 +251,15 @@ setup_case all-updated all-updated
 run_status 0 upgrade-aur
 assert_exact_line "AUR update: completed" "$stdout_file"
 assert_exact_line "updated-pkg: updated" "$stdout_file"
+assert_exact_line \
+    "Reviewed-source outcome for PackageBase updated-pkg: initial full review accepted for exact upstream commit 2222222222222222222222222222222222222222." \
+    "$stdout_file"
+assert_exact_line \
+    "Reviewed state for PackageBase updated-pkg was published at generation 1; build and install outcomes are reported separately." \
+    "$stdout_file"
+assert_exact_line \
+    "Build input for PackageBase updated-pkg includes an invocation-local editor overlay on reviewed upstream commit 2222222222222222222222222222222222222222; it is not the exact reviewed commit tree." \
+    "$stdout_file"
 assert_not_contains "PackageBase result:" "$stdout_file"
 assert_exact_line "query" "$command_log"
 assert_line_before "query" "preflight" "$command_log"
@@ -273,6 +282,12 @@ setup_case all-no-change all-no-change
 run_status 0 upgrade-aur
 assert_exact_line "AUR update: completed" "$stdout_file"
 assert_exact_line "no-change-pkg: no change" "$stdout_file"
+assert_exact_line \
+    "Reviewed-source outcome for PackageBase no-change-pkg: exact upstream commit 2222222222222222222222222222222222222222 was already reviewed; no review prompt or state rewrite occurred." \
+    "$stdout_file"
+assert_exact_line \
+    "Reviewed state for PackageBase no-change-pkg remains at generation 4; build and install outcomes are reported separately." \
+    "$stdout_file"
 assert_not_contains "PackageBase result:" "$stdout_file"
 
 setup_case updated-no-change-mixed updated-no-change-mixed
@@ -280,8 +295,18 @@ run_status 0 upgrade-aur
 assert_exact_line "AUR update: completed" "$stdout_file"
 assert_exact_line "zeta-pkg: updated" "$stdout_file"
 assert_exact_line "alpha-pkg: no change" "$stdout_file"
+assert_contains \
+    "Reviewed-source outcome for PackageBase zeta-pkg: update review accepted" \
+    "$stdout_file"
+assert_exact_line \
+    "Reviewed-source outcome for PackageBase alpha-pkg: --nodiff skipped review acceptance; this invocation has compatibility-only source authority, and reviewed state was not advanced." \
+    "$stdout_file"
 assert_line_before \
     "zeta-pkg: updated" "alpha-pkg: no change" "$stdout_file"
+assert_line_before \
+    "Reviewed-source outcome for PackageBase zeta-pkg: update review accepted for exact upstream commit 2222222222222222222222222222222222222222." \
+    "Reviewed-source outcome for PackageBase alpha-pkg: --nodiff skipped review acceptance; this invocation has compatibility-only source authority, and reviewed state was not advanced." \
+    "$stdout_file"
 
 # PackageBase detail is child-authoritative and only appears when the ordinary
 # singular summary cannot explain the selected artifact set.
@@ -324,6 +349,12 @@ assert_not_contains "required child: split-suite-debug" "$stdout_file"
 
 setup_case transaction-failure transaction-failure
 run_status 1 upgrade-aur
+assert_contains \
+    "Reviewed-source outcome for PackageBase tx-suite: update review accepted" \
+    "$stdout_file"
+assert_exact_line \
+    "Reviewed state for PackageBase tx-suite was published at generation 11; build and install outcomes are reported separately." \
+    "$stdout_file"
 assert_exact_line \
     "tx-main: failed: package transaction failed (exit code 73)" "$stdout_file"
 assert_exact_line \
@@ -403,6 +434,40 @@ assert_exact_line \
 assert_contains \
     "  execution failure: build or install failure" \
     "$stderr_file"
+
+# Reviewed-state publication ambiguity is a post-commit STOP, not a generic
+# pre-publication failure or a compatibility retry. makepkg/pacman never start.
+setup_case reviewed-published-uncertain reviewed-published-uncertain
+run_status 1 upgrade-aur
+assert_exact_line \
+    "uncertain-pkg: failed: Reviewed source state publication reached a post-commit ambiguity; the build was not started, and automatic retry, rollback, and compatibility fallback are forbidden." \
+    "$stdout_file"
+assert_contains \
+    "execution failure for PackageBase uncertain-pkg: Reviewed source state publication reached a post-commit ambiguity; the build was not started, and automatic retry, rollback, and compatibility fallback are forbidden." \
+    "$stderr_file"
+assert_exact_line "external git clone fixture" "$command_log"
+assert_not_contains "external makepkg" "$command_log"
+assert_not_contains "external sudo pacman -U" "$command_log"
+assert_not_contains "compatibility-only" "$stdout_file"
+assert_not_contains "retrying" "$stdout_file"
+
+# A later makepkg failure retains and displays the already-published review
+# outcome separately; install remains not attempted.
+setup_case reviewed-build-failure reviewed-build-failure
+run_status 1 upgrade-aur
+assert_contains \
+    "Reviewed-source outcome for PackageBase reviewed-build-pkg: update review accepted" \
+    "$stdout_file"
+assert_exact_line \
+    "Reviewed state for PackageBase reviewed-build-pkg was published at generation 12; build and install outcomes are reported separately." \
+    "$stdout_file"
+assert_exact_line \
+    "reviewed-build-pkg: failed: source build failure" "$stdout_file"
+assert_contains \
+    "execution failure for PackageBase reviewed-build-pkg: source build failure" \
+    "$stderr_file"
+assert_exact_line "external makepkg -sc fixture" "$command_log"
+assert_not_contains "external sudo pacman -U" "$command_log"
 
 # Selected repository provider failure is an invocation phase, not a work-item
 # failure, and it stops before source checkout/build/install.
@@ -657,7 +722,7 @@ run_status 0 upgrade
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_pipeline_absent
 
-if [ "$case_count" -ne 45 ]; then
+if [ "$case_count" -ne 47 ]; then
     fail_case "internal test case count changed: $case_count"
 fi
 echo "AUR update command integration tests passed ($case_count cases)."

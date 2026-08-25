@@ -2,6 +2,7 @@
 #include "upgrade_all_operation.hpp"
 
 #include <array>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <limits>
@@ -19,6 +20,29 @@
 namespace {
 
 struct UnknownFixtureException {};
+
+ProductionSourceBuildProvenance localized_reviewed_source_provenance() {
+    ProductionSourceBuildProvenance provenance;
+    provenance.review_status = ProductionSourceReviewStatus::Reviewed;
+    provenance.editor_overlay =
+            ReviewedSourceEditorOverlayStatus::InvocationLocal;
+    provenance.reviewed_upstream_base_revision =
+            SourceRevisionIdentity::git_commit(
+                    "4444444444444444444444444444444444444444");
+    provenance.publication_status =
+            ReviewedSourcePublicationStatus::Published;
+    provenance.reviewed_outcome =
+            ProductionReviewedSourceOutcome::UpdateReview;
+    provenance.reviewed_state_generation = 31;
+    return provenance;
+}
+
+ProductionSourceBuildStagedOutcome localized_reviewed_source_outcome() {
+    return ProductionSourceBuildStagedOutcome{
+            localized_reviewed_source_provenance(),
+            ProductionSourceBuildCommandOutcome::Succeeded,
+            ProductionSourceInstallOutcome::Succeeded};
+}
 
 std::string current_scenario() {
     const char* value = std::getenv("MOGUET_TEST_UPGRADE_ALL_SCENARIO");
@@ -1296,6 +1320,36 @@ UpgradeAllOperationResult make_issue_449_split_up_to_date_result() {
     return result;
 }
 
+UpgradeAllOperationResult
+make_issue_455_system_changed_aur_up_to_date_result() {
+    UpgradeAllOperationResult result = make_success_result(
+            UpgradeAllOperationStatus::Completed,
+            PackageStateChange::Changed);
+    result.aur.operation_result->reduced_operation_result.targets.push_back(
+            make_issue_449_split_up_to_date_target(0));
+    return result;
+}
+
+UpgradeAllOperationResult make_issue_455_aur_changed_result() {
+    UpgradeAllOperationResult result = make_success_result(
+            UpgradeAllOperationStatus::Completed,
+            PackageStateChange::NoChange);
+    result.aur.operation_result->reduced_operation_result.targets.push_back(
+            make_aur_target(
+                    "issue-455-aur-updated",
+                    AurUpdateOperationTargetStatus::Updated));
+    AurUpdateWorkItemExecutionResult work_item = make_work_item_result(
+            0,
+            "issue-455-aur-updated",
+            AurUpdateWorkItemExecutionStatus::Updated,
+            AurUpdateWorkItemFailureKind::None,
+            std::nullopt);
+    work_item.production_outcome = localized_reviewed_source_outcome();
+    result.aur.operation_result->reduced_operation_result.
+            execution_work_items.push_back(std::move(work_item));
+    return result;
+}
+
 UpgradeAllOperationResult make_registered_package_base_result() {
     UpgradeAllOperationResult result = make_success_result(
             UpgradeAllOperationStatus::Completed,
@@ -2009,6 +2063,12 @@ UpgradeAllOperationResult result_for_scenario(const std::string& scenario) {
         return make_success_result(
                 UpgradeAllOperationStatus::NoUpdates,
                 PackageStateChange::NoChange);
+    }
+    if(scenario == "issue-455-system-changed-aur-up-to-date") {
+        return make_issue_455_system_changed_aur_up_to_date_result();
+    }
+    if(scenario == "issue-455-aur-changed") {
+        return make_issue_455_aur_changed_result();
     }
     if(scenario == "completed-changed") {
         return make_completed_changed_result();

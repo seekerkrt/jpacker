@@ -59,7 +59,8 @@ Moguetのsource distributionには、少なくとも次を同じrevisionから�
 - `THIRD_PARTY_NOTICES.md`
 - `LICENSES/jpacker-MIT-legacy.txt`
 - 監査で必要と確定したthird-party notice files
-- buildとinstallに必要なMakefile、PKGBUILD、scripts、および対応するsource code
+- buildとinstallに必要な`CMakeLists.txt`、`cmake/`、`CMakePresets.json`、Makefile、PKGBUILD、
+  scripts、および対応するsource code
 
 modified sourceを配布する場合は、GPLv3が求める変更表示、日付、notice、source提供条件を満たす必要があります。source archiveやtagを作る際は、license、notice、build/install scriptsが同じrevisionに揃っていることをrelease checkで確認します。
 

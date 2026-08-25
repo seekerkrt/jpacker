@@ -22,7 +22,7 @@ depends=('curl' 'git' 'libalpm.so' 'libarchive' 'nano' 'pacman' 'sudo')
 # makepkg assumes base-devel is already installed. Its current members provide
 # gettext and pkgconf, while git is already a runtime dependency. Only
 # additional build-time packages belong in this metadata.
-makedepends=('nlohmann-json' 'tomlplusplus')
+makedepends=('cmake' 'nlohmann-json' 'tomlplusplus')
 
 # Moguet and jpacker v1.16.0 have disjoint package payloads. Do not add
 # provides/conflicts/replaces: there is no jpacker command alias, coexistence
@@ -44,12 +44,28 @@ pkgver() {
 }
 
 build() {
-    # git cloneされたディレクトリに入る
-    cd "$_srcname"
-    make
+    local requested_cxx=${CXX:-c++}
+
+    cmake \
+        -DMOGUET_COMPILER_PREFLIGHT_BUILD_DIR=build \
+        -DMOGUET_REQUESTED_CXX="$requested_cxx" \
+        -P "$_srcname/cmake/MoguetCompilerPreflight.cmake"
+    # CXX initializes only a fresh cache; an existing cache keeps the compiler
+    # spelling whose executable identity the preflight already accepted.
+    CPPFLAGS="${CPPFLAGS-}" \
+    CXXFLAGS="${CXXFLAGS-}" \
+    LDFLAGS="${LDFLAGS-}" \
+    CCACHE="${CCACHE-}" \
+    CXX="$requested_cxx" \
+        cmake -S "$_srcname" -B build \
+        -DCMAKE_BUILD_TYPE=None \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DMOGUET_LOCALE_DIRECTORY=/usr/share/locale \
+        -DMOGUET_SYNC_EXTERNAL_BUILD_INPUTS=ON \
+        -DBUILD_TESTING=OFF
+    cmake --build build
 }
 
 package() {
-    cd "$_srcname"
-    make PREFIX=/usr DESTDIR="$pkgdir" install
+    DESTDIR="$pkgdir" cmake --install build
 }

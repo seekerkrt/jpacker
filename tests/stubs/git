@@ -228,10 +228,11 @@ if [ "$1" = "clone" ]; then
             rm "$clone_destination/.moguet-test-final-destination" || exit 1
             case $clone_destination in
                 /proc/*/fd/*)
-                    # PKGBUILD export binds its already-open destination through
-                    # /proc.  The race fixture still targets the caller-visible
-                    # export parent, not the procfs descriptor directory.
-                    clone_parent=$PWD
+                    # Resolve the already-open staging directory so this race
+                    # targets either the default cwd or an explicit export
+                    # parent, never the procfs descriptor directory itself.
+                    original_clone_path=$(readlink -f "$clone_destination") || exit 1
+                    clone_parent=$(dirname "$original_clone_path") || exit 1
                     ;;
                 *)
                     clone_parent=$(dirname "$clone_destination") || exit 1
@@ -252,6 +253,27 @@ if [ "$1" = "clone" ]; then
             esac
             mv "$original_work_dir" "$original_work_dir-moved" || exit 1
             mkdir "$original_work_dir" || exit 1
+        fi
+        if [ -f "$clone_destination/.moguet-test-rename-export-parent" ]; then
+            export_parent=$(cat "$clone_destination/.moguet-test-rename-export-parent") || exit 1
+            rm "$clone_destination/.moguet-test-rename-export-parent" || exit 1
+            mv -- "$export_parent" "$export_parent-moved" || exit 1
+        fi
+        if [ -f "$clone_destination/.moguet-test-replace-export-parent" ]; then
+            export_parent=$(cat "$clone_destination/.moguet-test-replace-export-parent") || exit 1
+            rm "$clone_destination/.moguet-test-replace-export-parent" || exit 1
+            mv -- "$export_parent" "$export_parent-moved" || exit 1
+            mkdir -- "$export_parent" || exit 1
+            printf 'replacement parent marker\n' > "$export_parent/replacement-marker" || exit 1
+        fi
+        if [ -f "$clone_destination/.moguet-test-symlink-export-parent" ]; then
+            export_parent=$(cat "$clone_destination/.moguet-test-symlink-export-parent") || exit 1
+            rm "$clone_destination/.moguet-test-symlink-export-parent" || exit 1
+            mv -- "$export_parent" "$export_parent-moved" || exit 1
+            mkdir -- "$export_parent-replacement" || exit 1
+            printf 'symlink replacement marker\n' > \
+                "$export_parent-replacement/replacement-marker" || exit 1
+            ln -s -- "$export_parent-replacement" "$export_parent" || exit 1
         fi
         if [ -e "$clone_destination/.moguet-test-swap-temp-identity" ]; then
             rm "$clone_destination/.moguet-test-swap-temp-identity" || exit 1

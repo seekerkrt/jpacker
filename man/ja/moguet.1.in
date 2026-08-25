@@ -141,13 +141,23 @@ clone、build、pacman、sudoを開始します。
 state logは再生成可能cacheに含みません。
 .
 .TP
-.B "-G <pkg>"
-exactly one AUR packageの完全なPackageBase repositoryを
-.I ./<PackageBase>
-へexportします。
+.B "-G <pkg> [--output-dir=DIR]"
+exactly one AUR packageの完全なPackageBase repositoryをexportします。
+.B --output-dir
+未指定時のparentはcommand開始時current directoryです。
+.B --output-dir=DIR
+指定時はnamed existing directoryをparentとし、relative valueはcommand開始時current
+directoryから解決します。validated PackageBaseが常にdirect-childのdestination nameです。
+parentは作成せず、final / intermediate symlink componentを拒否し、Moguet独自のtilde
+expansionは行いません。absolute pathまたは
+.B --output-dir="$HOME/src/aur"
+のようなattached valueを使用します。
 種類を問わずdestinationが存在すればhard failureです。
+parentのrename、replacement、symlink replacement、identity driftはno-replace publish前に
+fail closedになります。
 build cacheを使わず、PKGBUILD評価、dependency取得、build、installを行いません。
-このoperationではglobal / pacman optionはunsupportedです。
+attached output-directory formだけを受理し、その他のglobal / pacman optionはこのoperationで
+unsupportedです。
 .
 .TP
 .B "-Gp <pkg>"
@@ -365,26 +375,34 @@ schemaは追加しません。
 .B "--edit"
 今回のinvocationで、PKGBUILDと検出済みtop-level
 .I *.install
-のreview prompt policyを選びます。
+fileを開く・編集するprompt policyを選びます。
 .B review.pkgbuild
 をoverrideします。
+これはinvocation-localなeditor policyであり、upstream reviewed-source acceptanceでは
+なく、reviewed revisionを進めません。
 .
 .TP
 .B "--noedit"
 今回のinvocationで、PKGBUILDと検出済みtop-level
 .I *.install
-のreviewをskipします。
+のinvocation-local editingをskipします。
+別のupstream reviewed-source decisionをacceptまたはskipするoptionではありません。
 source、artifact、identity、transaction validationは無効化しません。
 .
 .TP
 .B "--diff"
-repository update diff表示のprompt policyを選びます。
+AUR sourceについて、previous reviewed revisionからexact fetched targetまでの変更を
+reviewするprompt policyを選びます。reviewed stateがない場合、またはold baseline objectが
+利用できない場合は、cache HEADへfallbackせずcurrent tracked file全体をreviewします。
 .B review.diff
 をoverrideします。
+completeなreview後のexplicit acceptanceだけがreviewed stateを進めます。
 .
 .TP
 .B "--nodiff"
-repository update diff promptをskipします。
+今回のinvocationでreviewed-source changeのreview / acceptance導線をskipし、reviewed stateを
+進めません。unsafe、future、inconsistent stateをmissingとして扱ったりbypassしたりせず、
+fail-closedを維持します。
 user modificationの破棄やdestructive Git operationを許可しません。
 .
 .TP
@@ -399,6 +417,15 @@ local PKGBUILD metadata評価にもdefaultはなく、このoptionは
 を許可しません。
 「すべてyes」ではなく、unresolved / ambiguous dependency、cycle、source selection、
 conflicts / replaces、artifact identity、ownership等のsafety guardを突破しません。
+.
+.TP
+.B "--output-dir=DIR"
+.B -G
+の既存export parentを指定します。このoperation-local optionはnon-empty attached valueを
+必須とし、1回だけ指定でき、configへ保存せず、
+.B -Gp
+や他operationではunsupportedです。relative valueはcommand開始時current directoryを
+基準にします。parentの作成、symlink componentのfollow、tilde expansionは行いません。
 .
 .TP
 .B "--select"
@@ -515,6 +542,18 @@ built-in default -> user config -> CLI override
 .fi
 .
 .PP
+.B review.diff
+と
+.BR --diff / --nodiff
+はAUR reviewed-source prompt policyを選び、skipしてもreviewed stateを進めません。
+.B review.pkgbuild
+と
+.BR --edit / --noedit
+はinvocation-localなPKGBUILD /
+.I *.install
+editor behaviorを選び、upstream review acceptanceにはなりません。
+.
+.PP
 fileがない状態は正常です。
 fileが存在する場合はinteger
 .B schema_version = 1
@@ -549,6 +588,14 @@ default human-readable logです。
 fallbackは
 .I ~/.local/state/moguet/moguet.log
 です。
+.
+.TP
+.I $XDG_STATE_HOME/moguet/reviewed-sources/aur/
+PackageBase単位のpersistent reviewed AUR revision stateです。
+fallbackは
+.I ~/.local/state/moguet/reviewed-sources/aur/
+です。再生成可能cacheとは別で、cache削除やreclone後も保持します。read-only lookupは
+storeを作成しません。
 .
 .TP
 .I $XDG_CACHE_HOME/moguet/
@@ -692,6 +739,44 @@ cancellationはその時点以降の処理を停止します。invocation全体�
 完了済みGit、editor、pacman、先行system phaseのrollbackを意味しません。
 .
 .PP
+AUR Git source buildでは、最後に明示acceptしたexact upstream commitをPackageBaseごとに
+保持します。stateがmissingならtracked file全体のinitial full review、targetが異なれば
+previous reviewed revisionからのupdate review、同じならprompt / rewriteなしとなります。
+old commitが利用できなければcache HEADへfallbackせずfull rebaseline reviewを要求します。
+current stateがinvalid、corrupted、source-mismatchedならexplicitなfull rebind reviewを要求し、
+future schema、unsafe / inconsistent historyはoverwriteせずfail-closedで停止します。
+.
+.PP
+review inventoryは全tracked fileのadd、modify、delete、rename、type changeを保持します。
+root PKGBUILDとtop-level
+.I *.install
+にはreview-sensitive guidanceを付けますが、patch、service unit、helper script、local source /
+config、binary change、その他のtracked contentも除外しません。
+.I .SRCINFO
+はlower-priorityなgenerated metadataであり、source-review authorityではありません。
+.
+.PP
+review表示だけではacceptanceになりません。completeなreview後のinteractiveな明示
+.B y
+または
+.B yes
+だけがstateを進めます。
+.BR --nodiff
+skip、review decline、
+.BR --noconfirm 、
+non-TTY inputはcompatibility-only buildを維持し得ますが、stateを進めません。cancellation、
+EOF、input failure、unsupported review、unsafe / future stateはadvanceせず停止します。
+.
+.PP
+accept済みAUR buildはexact target OIDへdetached checkoutし、mutable HEAD、branch、remote refを
+build authorityにしません。state publicationはcompare-and-swap semanticsで行い、別processの
+review結果を上書きしません。後続build / install failureでも、正常にaccept / publishした
+revisionをrollbackしません。
+.BR --edit / --noedit
+はupstream reviewed revisionと別のinvocation-local editor overlayを制御します。official
+repository / local PKGBUILD routeはreviewed-source stateを作りません。
+.
+.PP
 build / install前に、Moguetはprovided componentとversion付きrelationを含め、declared
 conflict / replacementをinstalled / planned packageへ照合します。diagnosticはinstalled
 conflictとplanned target conflictを区別します。matching replacementはreviewが必要な
@@ -822,6 +907,12 @@ clone / buildせずAUR dependency graphを調査する:
 .RE
 .
 .TP
+既存relative parent直下へPackageBaseをexportする:
+.RS
+.B moguet -G wezterm-git --output-dir=./exports
+.RE
+.
+.TP
 mutationなしでbuild planを表示する:
 .RS
 .B moguet plan mongodb-bin
@@ -842,6 +933,13 @@ user configよりreviewとnormal build defaultを今回だけ優先する:
 .\" parity:migration
 .SH MIGRATION
 .na
+reviewed-source state導入前から存在するMoguet AUR cacheにmanual migrationは不要です。
+recordがない状態はnormalなmissing stateであり、最初に対象となるPackageBaseを一度initial
+full reviewします。legacy checkout HEAD、branch、remote ref、build artifactからreviewed
+revisionを捏造しません。invalid、corrupted、source-mismatched、future、unsafe、inconsistent
+stateをmissingとして扱いません。
+.
+.PP
 Moguet v2.0.1以降は
 .I /etc/jpacker/jpacker.conf
 を通常config layerとして読まず、

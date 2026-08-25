@@ -24,10 +24,13 @@ struct PreparationStubState {
     std::optional<std::string>            supported_options_failure;
     std::optional<std::size_t>            pkgdest_failure_call;
     std::string                           pkgdest_failure_diagnostic;
+    std::optional<std::size_t>            reviewed_preflight_failure_call;
+    std::string                           reviewed_preflight_failure_diagnostic;
     std::vector<std::string>              preference_reads;
     std::vector<bool>                     supported_options_guards;
     std::vector<SourceBuildEnvironment>   pkgdest_guards;
     std::size_t                           database_calls = 0;
+    std::size_t                           reviewed_preflight_calls = 0;
     std::vector<stub::Event>              events;
 };
 
@@ -81,6 +84,13 @@ void fail_pkgdest_guard_on_call(
     g_state.pkgdest_failure_diagnostic = std::move(diagnostic);
 }
 
+void fail_reviewed_state_preflight_on_call(
+        std::size_t one_based_call_index,
+        std::string diagnostic) {
+    g_state.reviewed_preflight_failure_call = one_based_call_index;
+    g_state.reviewed_preflight_failure_diagnostic = std::move(diagnostic);
+}
+
 const std::vector<std::string>& strict_preference_read_history() {
     return g_state.preference_reads;
 }
@@ -95,6 +105,10 @@ const std::vector<SourceBuildEnvironment>& pkgdest_guard_history() {
 
 std::size_t database_call_count() {
     return g_state.database_calls;
+}
+
+std::size_t reviewed_state_preflight_call_count() {
+    return g_state.reviewed_preflight_calls;
 }
 
 const std::vector<Event>& event_history() {
@@ -176,6 +190,20 @@ void require_unclaimed_artifact_pkgdest(
        g_state.pkgdest_guards.size() == *g_state.pkgdest_failure_call) {
         throw std::runtime_error(g_state.pkgdest_failure_diagnostic);
     }
+}
+
+std::shared_ptr<ReviewedSourceFatalStatePreflightSlot>
+preflight_reviewed_source_fatal_state_for_production(
+        const SourceBuildRequest& request) {
+    if(!request.aur_review_identity.has_value()) return nullptr;
+    ++g_state.reviewed_preflight_calls;
+    if(g_state.reviewed_preflight_failure_call.has_value() &&
+       g_state.reviewed_preflight_calls ==
+               *g_state.reviewed_preflight_failure_call) {
+        throw std::runtime_error(
+                g_state.reviewed_preflight_failure_diagnostic);
+    }
+    return nullptr;
 }
 
 void seed_production_source_build_cache(

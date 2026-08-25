@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: Moguet 2.3.2\n"
+"Project-Id-Version: Moguet 2.4.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-17 12:48+0900\n"
+"POT-Creation-Date: 2026-08-24 00:26+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -132,6 +132,10 @@ msgstr ""
 #. TRANSLATORS: {} is the literal CLI option "--rmdeps".
 #, c++-format
 msgid "Separated build/install does not support {}."
+msgstr ""
+
+#, c++-format
+msgid "Internal {} output capture failed."
 msgstr ""
 
 #, c++-format
@@ -713,6 +717,12 @@ msgstr ""
 msgid "artifact identity failure"
 msgstr ""
 
+msgid "install preparation failure"
+msgstr ""
+
+msgid "install transaction failure"
+msgstr ""
+
 msgid "build or install failure"
 msgstr ""
 
@@ -932,6 +942,11 @@ msgstr ""
 #. TRANSLATORS: AUR is a runtime project identity.
 #, c++-format
 msgid "{} transaction failure detail has no attempt evidence."
+msgstr ""
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "An unattempted {} work item unexpectedly has a production outcome."
 msgstr ""
 
 msgid "installed / updated"
@@ -1923,15 +1938,19 @@ msgid "Operation {} requires exactly one {} operand."
 msgstr ""
 
 #, c++-format
+msgid "{} export was not requested."
+msgstr ""
+
+#, c++-format
 msgid "Unsupported option {} for operation {}."
 msgstr ""
 
 #, c++-format
-msgid "Operation {} requires exactly one {} package target."
+msgid "Option {} requires a non-empty attached value in the form {}."
 msgstr ""
 
 #, c++-format
-msgid "Usage: {} {} {}"
+msgid "Option {} may be specified only once for operation {}."
 msgstr ""
 
 #, c++-format
@@ -1972,10 +1991,6 @@ msgstr ""
 
 #, c++-format
 msgid "Option {} is supported only with operation {}."
-msgstr ""
-
-#, c++-format
-msgid "Option {} may be specified only once for operation {}."
 msgstr ""
 
 #, c++-format
@@ -5087,9 +5102,9 @@ msgstr ""
 msgid "{} INSPECTION"
 msgstr ""
 
-#. TRANSLATORS: AUR, PackageBase, and the destination path are literal identities.
+#. TRANSLATORS: AUR and PackageBase are literal identities.
 #, c++-format
-msgid "Export one {} {} repository to {} without building or installing"
+msgid "Export one {} {} repository under the command-start current directory or selected output parent without building or installing"
 msgstr ""
 
 #. TRANSLATORS: AUR, PackageBase, PKGBUILD, and stdout are literal identities.
@@ -5195,18 +5210,26 @@ msgstr ""
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
-msgid "Prompt to review {} and {} files"
+msgid "Open or edit {} and {} files for this invocation"
 msgstr ""
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
-msgid "Skip {} and {} review"
+msgid "Skip invocation-local {} and {} editing"
 msgstr ""
 
-msgid "Prompt to view repository update diffs"
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "Review repository updates; for {}, review the exact target"
 msgstr ""
 
-msgid "Skip the repository update diff prompt"
+msgid "Use the previous reviewed revision, or all tracked source on first review"
+msgstr ""
+
+msgid "Advance reviewed state only after explicit acceptance"
+msgstr ""
+
+msgid "Skip repository diff / reviewed-source review without advancing reviewed state"
 msgstr ""
 
 #. TRANSLATORS: pacman and makepkg are literal external-program identities.
@@ -5215,6 +5238,14 @@ msgid "Pass this option to {} and {}"
 msgstr ""
 
 msgid "Do not bypass conflict/replacement safety stops or perform automatic replacement"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the literal -G CLI operation.
+#, c++-format
+msgid "Select an existing export parent for {}; resolve relative paths from the command-start current directory"
+msgstr ""
+
+msgid "Reject symlink components and do not create the parent directory"
 msgstr ""
 
 #. TRANSLATORS: pacman, AUR, and -S are literal identities or CLI tokens.
@@ -5257,12 +5288,14 @@ msgstr ""
 msgid "Required schema version"
 msgstr ""
 
-#. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
+#. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
-msgid "{} review policy"
+msgid "Invocation-local {} / {} editor policy; not reviewed-source acceptance"
 msgstr ""
 
-msgid "Repository update diff policy"
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "Repository diff / {} reviewed-source review policy; skipping does not advance reviewed state"
 msgstr ""
 
 msgid "Source-build mode"
@@ -5797,7 +5830,7 @@ msgid "Invalid {} target for operation {}: {}"
 msgstr ""
 
 #, c++-format
-msgid "Failed to inspect the current export directory: {}"
+msgid "Failed to inspect export directory {}: {}"
 msgstr ""
 
 #, c++-format
@@ -5815,7 +5848,8 @@ msgstr ""
 msgid "Unknown export directory identity context."
 msgstr ""
 
-msgid "The current export directory is not a directory."
+#, c++-format
+msgid "Export path {} is not a directory."
 msgstr ""
 
 #, c++-format
@@ -5831,6 +5865,22 @@ msgid "Exported {} path {} is not a directory."
 msgstr ""
 
 #, c++-format
+msgid "Unable to retain the resolution base for export directory {}: {}"
+msgstr ""
+
+#, c++-format
+msgid "Unable to safely revalidate export directory {}: {}"
+msgstr ""
+
+#, c++-format
+msgid "Unable to safely open existing export directory {}: {}"
+msgstr ""
+
+#, c++-format
+msgid "Unable to open the filesystem root for export resolution: {}"
+msgstr ""
+
+#, c++-format
 msgid "Failed to open temporary directory parent {}: {}"
 msgstr ""
 
@@ -5840,6 +5890,18 @@ msgstr ""
 
 #, c++-format
 msgid "Refusing changed temporary directory parent path: {}"
+msgstr ""
+
+#, c++-format
+msgid "Export directory descriptor changed identity: {}"
+msgstr ""
+
+#, c++-format
+msgid "Refusing changed command-start current directory path: {}"
+msgstr ""
+
+#, c++-format
+msgid "Refusing changed export directory path: {}"
 msgstr ""
 
 #, c++-format
@@ -5942,15 +6004,7 @@ msgid "Unable to read the current directory: {}"
 msgstr ""
 
 #, c++-format
-msgid "Unable to canonicalize the current directory: {}"
-msgstr ""
-
-#, c++-format
-msgid "Unable to revalidate current directory {}: {}"
-msgstr ""
-
-#, c++-format
-msgid "Refusing changed current directory path: {}"
+msgid "The {} export directory must not be empty."
 msgstr ""
 
 #, c++-format
@@ -5962,7 +6016,7 @@ msgid "Unable to canonicalize the temporary directory: {}"
 msgstr ""
 
 #, c++-format
-msgid "Export destination resolves outside the current directory: {}"
+msgid "Export destination resolves outside the export directory: {}"
 msgstr ""
 
 #, c++-format
@@ -6007,6 +6061,10 @@ msgstr ""
 
 #, c++-format
 msgid "{} package mapping: {} -> {} {}."
+msgstr ""
+
+#, c++-format
+msgid "Exported {} {} {} under {}."
 msgstr ""
 
 #, c++-format
@@ -6118,6 +6176,446 @@ msgstr ""
 msgid "Repository provider capability metadata is invalid."
 msgstr ""
 
+msgid "Reviewed source review could not produce explicit acceptance; the build was not started."
+msgstr ""
+
+msgid "Reviewed source content requires manual inspection; this invocation was stopped without state publication or compatibility fallback, and the build was not started."
+msgstr ""
+
+msgid "Review-sensitive source content could not be rendered safely; this invocation was stopped without state publication or compatibility fallback, and the build was not started."
+msgstr ""
+
+msgid "Reviewed source state uses an unsupported future schema; the build was not started."
+msgstr ""
+
+msgid "Reviewed source state history is unsafe; the build was not started."
+msgstr ""
+
+msgid "Reviewed source state could not be read safely; the build was not started."
+msgstr ""
+
+msgid "Reviewed source state observation was inconsistent; the build was not started."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed source {} lease is already held; the build was not started."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed source {} lease could not be acquired; the build was not started."
+msgstr ""
+
+msgid "Reviewed source target revision resolution failed; the build was not started."
+msgstr ""
+
+msgid "Reviewed source lifecycle planning failed; the build was not started."
+msgstr ""
+
+msgid "Reviewed source exact checkout materialization failed; the build was not started."
+msgstr ""
+
+msgid "Reviewed source review projection failed; the build was not started."
+msgstr ""
+
+msgid "Reviewed source review materialization failed; the build was not started."
+msgstr ""
+
+msgid "Reviewed source editor overlay could not be proven; the build was not started."
+msgstr ""
+
+msgid "Reviewed source checkout revalidation failed; the build was not started."
+msgstr ""
+
+msgid "Reviewed source state publication conflicted with current state; the build was not started."
+msgstr ""
+
+msgid "Reviewed source state publication reached a post-commit ambiguity; the build was not started, and automatic retry, rollback, and compatibility fallback are forbidden."
+msgstr ""
+
+msgid "Reviewed source state publication encountered unsafe history; the build was not started."
+msgstr ""
+
+msgid "Reviewed source state publication failed; the build was not started."
+msgstr ""
+
+msgid "Reviewed source checkout changed after state publication; the build was not started."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed source checkout changed before {}; the build was not started."
+msgstr ""
+
+msgid "Reviewed source production preparation failed; the build was not started."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: {} skipped review acceptance; this invocation has compatibility-only source authority, and reviewed state was not advanced."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: {} did not create review acceptance; this invocation has compatibility-only source authority, and reviewed state was not advanced."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: {} is non-interactive, so no review acceptance was created; this invocation has compatibility-only source authority, and reviewed state was not advanced."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: review acceptance was explicitly declined; this invocation has compatibility-only source authority, and reviewed state was not advanced."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: review acceptance was declined by the safe default; this invocation has compatibility-only source authority, and reviewed state was not advanced."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: initial full review accepted for exact upstream commit {}."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: update review accepted for exact upstream commit {}."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: explicit full rebaseline accepted for exact upstream commit {}."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: explicit rebind/rebaseline of invalid state accepted for exact upstream commit {}."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: explicit rebind/rebaseline of corrupted state accepted for exact upstream commit {}."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: explicit source-identity rebind/rebaseline accepted for exact upstream commit {}."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed-source outcome for {} {}: exact upstream commit {} was already reviewed; no review prompt or state rewrite occurred."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed state for {} {} remains at generation {}; build and install outcomes are reported separately."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed state for {} {} was published at generation {}; build and install outcomes are reported separately."
+msgstr ""
+
+#, c++-format
+msgid "Reviewed state for {} {} already matched the accepted target at publication; generation {} was retained and no state rewrite was needed."
+msgstr ""
+
+#, c++-format
+msgid "Build input for {} {} is pinned to reviewed upstream commit {} with no invocation-local editor overlay."
+msgstr ""
+
+#, c++-format
+msgid "Build input for {} {} includes an invocation-local editor overlay on reviewed upstream commit {}; it is not the exact reviewed commit tree."
+msgstr ""
+
+#, c++-format
+msgid "Build outcome for {} {}: not attempted."
+msgstr ""
+
+#, c++-format
+msgid "Build outcome for {} {}: started; completion was not proven."
+msgstr ""
+
+#, c++-format
+msgid "Build outcome for {} {}: failed."
+msgstr ""
+
+#, c++-format
+msgid "Build outcome for {} {}: succeeded."
+msgstr ""
+
+#, c++-format
+msgid "Install outcome for {} {}: not attempted."
+msgstr ""
+
+#, c++-format
+msgid "Install outcome for {} {}: started; completion was not proven."
+msgstr ""
+
+#, c++-format
+msgid "Install outcome for {} {}: failed."
+msgstr ""
+
+#, c++-format
+msgid "Install outcome for {} {}: succeeded."
+msgstr ""
+
+#, c++-format
+msgid "Build input for {} {} includes invocation-local editor changes, but no reviewed upstream authority was created."
+msgstr ""
+
+msgid "100644 (regular file)"
+msgstr ""
+
+msgid "100755 (executable file)"
+msgstr ""
+
+msgid "120000 (symbolic link)"
+msgstr ""
+
+msgid "160000 (Gitlink)"
+msgstr ""
+
+msgid "tracked source"
+msgstr ""
+
+msgid "generated metadata"
+msgstr ""
+
+msgid "line-reviewable content"
+msgstr ""
+
+msgid "content containing NUL bytes"
+msgstr ""
+
+msgid "Gitlink metadata"
+msgstr ""
+
+msgid "complete text patch"
+msgstr ""
+
+msgid "complete full text"
+msgstr ""
+
+msgid "no content change"
+msgstr ""
+
+msgid "mixed text and non-text content"
+msgstr ""
+
+msgid "manual inspection required"
+msgstr ""
+
+msgid "sensitive source cannot be rendered safely"
+msgstr ""
+
+msgid "ordinary"
+msgstr ""
+
+msgid "review-sensitive"
+msgstr ""
+
+msgid "added"
+msgstr ""
+
+msgid "modified"
+msgstr ""
+
+msgid "deleted"
+msgstr ""
+
+msgid "renamed"
+msgstr ""
+
+msgid "type changed"
+msgstr ""
+
+#, c++-format
+msgid "{} path: "
+msgstr ""
+
+msgid "none\n"
+msgstr ""
+
+#, c++-format
+msgid "{} mode: "
+msgstr ""
+
+#, c++-format
+msgid "{} object: "
+msgstr ""
+
+#, c++-format
+msgid "{} size: "
+msgstr ""
+
+msgid "unavailable\n"
+msgstr ""
+
+#, c++-format
+msgid "{} bytes\n"
+msgstr ""
+
+#, c++-format
+msgid "{} classification: "
+msgstr ""
+
+#, c++-format
+msgid "{} content kind: "
+msgstr ""
+
+#, c++-format
+msgid "  {} change marker: "
+msgstr ""
+
+#, c++-format
+msgid "text (added lines: {}; deleted lines: {})"
+msgstr ""
+
+msgid "binary"
+msgstr ""
+
+msgid "  change status: "
+msgstr ""
+
+msgid "  review readiness detail: "
+msgstr ""
+
+msgid "complete terminal-safe content presentation\n"
+msgstr ""
+
+msgid "WARNING: manual inspection is required; metadata alone is not a complete content review\n"
+msgstr ""
+
+msgid "WARNING: review-sensitive source content cannot be rendered safely; metadata does not complete the review\n"
+msgstr ""
+
+msgid "    (empty)\n"
+msgstr ""
+
+msgid "    \\ No newline at end of file\n"
+msgstr ""
+
+msgid "  old full text:\n"
+msgstr ""
+
+msgid "  new full text:\n"
+msgstr ""
+
+msgid "  verified text patch:\n"
+msgstr ""
+
+msgid "  content: content unchanged\n"
+msgstr ""
+
+msgid "  metadata change: rename only (content unchanged)\n"
+msgstr ""
+
+msgid "  metadata change: mode changed (content unchanged)\n"
+msgstr ""
+
+msgid "  metadata change: change type retained despite unchanged content\n"
+msgstr ""
+
+msgid "  content: mixed text and non-line-reviewable content; raw bytes withheld\n"
+msgstr ""
+
+msgid "  line-reviewable old content:\n"
+msgstr ""
+
+msgid "  line-reviewable new content:\n"
+msgstr ""
+
+msgid "  content: binary/non-line-reviewable content; raw bytes withheld\n"
+msgstr ""
+
+msgid "  content: Gitlink/submodule metadata only; recursive review not performed\n"
+msgstr ""
+
+#, c++-format
+msgid "review entry {}:\n"
+msgstr ""
+
+msgid "old"
+msgstr ""
+
+msgid "new"
+msgstr ""
+
+msgid "  rename similarity: "
+msgstr ""
+
+msgid "  review emphasis: "
+msgstr ""
+
+msgid "  presentation priority: "
+msgstr ""
+
+msgid "review-sensitive\n"
+msgstr ""
+
+#, c++-format
+msgid "  review-sensitive guidance: explicitly inspect root {}/{} source content\n"
+msgstr ""
+
+msgid "lower-priority generated metadata\n"
+msgstr ""
+
+msgid "  generated metadata guidance: lower emphasis; not source-review authority\n"
+msgstr ""
+
+msgid "ordinary\n"
+msgstr ""
+
+msgid "  content representation: "
+msgstr ""
+
+msgid "  review readiness: "
+msgstr ""
+
+msgid "overall review readiness: "
+msgstr ""
+
+#, c++-format
+msgid ""
+"\n"
+"review entry count: {}\n"
+"review entries:\n"
+msgstr ""
+
+msgid "  (none)\n"
+msgstr ""
+
+msgid "reviewed baseline is an ancestor of the target"
+msgstr ""
+
+msgid "reviewed baseline is not an ancestor of the target"
+msgstr ""
+
+msgid "baseline object is missing or is not a commit"
+msgstr ""
+
+msgid "review type: initial full review\n"
+msgstr ""
+
+msgid "target revision: "
+msgstr ""
+
+msgid "review type: already reviewed\n"
+msgstr ""
+
+msgid "reviewed revision: "
+msgstr ""
+
+msgid "review result: already reviewed; no acceptance prompt is required\n"
+msgstr ""
+
+msgid "review type: update review\n"
+msgstr ""
+
+msgid "baseline revision: "
+msgstr ""
+
+msgid "history relation: "
+msgstr ""
+
+msgid "review type: explicit full rebaseline\n"
+msgstr ""
+
+msgid "unavailable baseline: "
+msgstr ""
+
+msgid "baseline unavailable reason: "
+msgstr ""
+
 msgid "Unsupported"
 msgstr ""
 
@@ -6209,6 +6707,33 @@ msgstr ""
 msgid "{} artifact aggregate validation failed."
 msgstr ""
 
+#. TRANSLATORS: The placeholder is the literal Arch field name
+#. "PackageBase".
+#, c++-format
+msgid "{} install-result preparation failed before package transaction."
+msgstr ""
+
+msgid "Source-build context preparation failed with an unknown error."
+msgstr ""
+
+msgid "Source-build artifact-list query failed with an unknown error."
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the literal command
+#. name "makepkg".
+#, c++-format
+msgid "The build-only {} execution failed with an unknown error."
+msgstr ""
+
+msgid "Built package artifact validation failed with an unknown error."
+msgstr ""
+
+msgid "Package install preparation failed with an unknown error."
+msgstr ""
+
+msgid "Package install transaction failed with an unknown error."
+msgstr ""
+
 msgid "Prepared source-build execution capability is invalid or test-only."
 msgstr ""
 
@@ -6255,6 +6780,21 @@ msgstr ""
 msgid "Edit install script {}?"
 msgstr ""
 
+msgid "Accept this explicit reviewed-source full rebaseline?"
+msgstr ""
+
+msgid "Accept this explicit rebind/rebaseline of invalid reviewed state?"
+msgstr ""
+
+msgid "Accept this explicit rebind/rebaseline of corrupted reviewed state?"
+msgstr ""
+
+msgid "Accept this explicit reviewed-source identity rebind/rebaseline?"
+msgstr ""
+
+msgid "Accept this reviewed upstream revision?"
+msgstr ""
+
 #, c++-format
 msgid "{} was updated by the system transaction ({} -> {}); rebuilding the preferred source package."
 msgstr ""
@@ -6286,6 +6826,13 @@ msgstr ""
 msgid "Failed to fetch updates."
 msgstr ""
 
+msgid "Cloning repository..."
+msgstr ""
+
+#, c++-format
+msgid "Failed to clone {}"
+msgstr ""
+
 #, c++-format
 msgid "Detected branch: {}"
 msgstr ""
@@ -6298,13 +6845,6 @@ msgid "Updates were detected in the existing cache repository. View the {} diff?
 msgstr ""
 
 msgid "Failed to reset repository."
-msgstr ""
-
-msgid "Cloning repository..."
-msgstr ""
-
-#, c++-format
-msgid "Failed to clone {}"
 msgstr ""
 
 #, c++-format
@@ -6442,6 +6982,14 @@ msgstr ""
 msgid "{} unselected artifact identity is incoherent for presentation."
 msgstr ""
 
+#, c++-format
+msgid "Install Error: {}"
+msgstr ""
+
+#, c++-format
+msgid "Source-build Error: {}"
+msgstr ""
+
 msgid "Cannot seed cache for an empty source-build invocation."
 msgstr ""
 
@@ -6508,6 +7056,9 @@ msgstr ""
 
 #, c++-format
 msgid "Failed while building/installing {} {} ({}): {}"
+msgstr ""
+
+msgid "Source-build work item failed with an unknown error."
 msgstr ""
 
 #, c++-format

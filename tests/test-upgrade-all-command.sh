@@ -163,6 +163,14 @@ assert_successful_snapshot_unavailable() {
     assert_exact_line "  operation outcome: Succeeded" "$stdout_file"
     assert_exact_line \
         "  package state observation: Unverified" "$stdout_file"
+    assert_exact_line "    system/source: Unverified" "$stdout_file"
+    assert_exact_line "    AUR: Verified unchanged" "$stdout_file"
+    assert_immediately_before \
+        "  package state observation: Unverified" \
+        "    system/source: Unverified" "$stdout_file"
+    assert_immediately_before \
+        "    system/source: Unverified" \
+        "    AUR: Verified unchanged" "$stdout_file"
     assert_exact_line \
         "    observation reason: $expected_reason" "$stdout_file"
     assert_occurrence_count 1 "$expected_reason" "$stdout_file"
@@ -190,6 +198,18 @@ assert_line_before() {
     if [ -z "$first_line" ] || [ -z "$second_line" ] ||
        [ "$first_line" -ge "$second_line" ]; then
         fail_case "expected '$first' before '$second'"
+    fi
+}
+
+assert_immediately_before() {
+    first=$1
+    second=$2
+    file=$3
+    first_line=$(grep -nFx -- "$first" "$file" | sed -n '1s/:.*//p')
+    second_line=$(grep -nFx -- "$second" "$file" | sed -n '1s/:.*//p')
+    if [ -z "$first_line" ] || [ -z "$second_line" ] ||
+       [ "$second_line" -ne $((first_line + 1)) ]; then
+        fail_case "expected '$first' immediately before '$second'"
     fi
 }
 
@@ -301,6 +321,15 @@ assert_exact_line "upgrade-all summary:" "$stdout_file"
 assert_exact_line "  operation outcome: No operation needed" "$stdout_file"
 assert_exact_line \
     "  package state observation: Verified unchanged" "$stdout_file"
+assert_exact_line \
+    "    system/source: Verified unchanged" "$stdout_file"
+assert_exact_line "    AUR: Verified unchanged" "$stdout_file"
+assert_immediately_before \
+    "  package state observation: Verified unchanged" \
+    "    system/source: Verified unchanged" "$stdout_file"
+assert_immediately_before \
+    "    system/source: Verified unchanged" \
+    "    AUR: Verified unchanged" "$stdout_file"
 assert_exact_line "  no-op basis: No relevant work" "$stdout_file"
 assert_exact_line \
     "  items: 0 total, 0 normal, 0 attention-required" "$stdout_file"
@@ -434,7 +463,60 @@ assert_event_count 1 \
 assert_event_count 1 \
     "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=true rmdeps=false"
 
-# 22-28: success matrix and normal detailed presentation.
+# Issue #455: aggregate Changed remains authoritative while the phase rows
+# identify which phase supplied the change evidence.
+setup_case issue-455-exact issue-455-system-changed-aur-up-to-date
+run_status 0 upgrade-all
+assert_event_count 1 "upgrade-all prepare $default_snapshot"
+assert_event_count 1 "upgrade-all execute $default_snapshot"
+assert_exact_line "  operation outcome: Succeeded" "$stdout_file"
+assert_exact_line "  package state observation: Changed" "$stdout_file"
+assert_exact_line "    system/source: Changed" "$stdout_file"
+assert_exact_line "    AUR: Verified unchanged" "$stdout_file"
+assert_immediately_before \
+    "  package state observation: Changed" \
+    "    system/source: Changed" "$stdout_file"
+assert_immediately_before \
+    "    system/source: Changed" \
+    "    AUR: Verified unchanged" "$stdout_file"
+assert_exact_line \
+    "  items: 1 total, 1 normal, 0 attention-required" "$stdout_file"
+assert_exact_line \
+    "  update candidates: 0, blockers: 0, requires-check: 0, failures: 0" \
+    "$stdout_file"
+assert_not_contains "ttf-noto-sans-mono-cjk-vf" "$stdout_file"
+assert_no_external_mutation
+if [ -s "$stderr_file" ]; then
+    fail_case "Issue #455 exact case wrote to stderr"
+fi
+
+setup_case issue-455-reverse issue-455-aur-changed
+run_status 0 upgrade-all
+assert_event_count 1 "upgrade-all prepare $default_snapshot"
+assert_event_count 1 "upgrade-all execute $default_snapshot"
+assert_exact_line "  operation outcome: Succeeded" "$stdout_file"
+assert_exact_line "  package state observation: Changed" "$stdout_file"
+assert_exact_line \
+    "    system/source: Verified unchanged" "$stdout_file"
+assert_exact_line "    AUR: Changed" "$stdout_file"
+assert_immediately_before \
+    "  package state observation: Changed" \
+    "    system/source: Verified unchanged" "$stdout_file"
+assert_immediately_before \
+    "    system/source: Verified unchanged" \
+    "    AUR: Changed" "$stdout_file"
+assert_exact_line \
+    "  items: 1 total, 0 normal, 1 attention-required" "$stdout_file"
+assert_exact_line \
+    "  update candidates: 1, blockers: 0, requires-check: 0, failures: 0" \
+    "$stdout_file"
+assert_exact_line "  - package: issue-455-aur-updated" "$stdout_file"
+assert_no_external_mutation
+if [ -s "$stderr_file" ]; then
+    fail_case "Issue #455 reverse case wrote to stderr"
+fi
+
+# Success matrix and normal detailed presentation.
 setup_case completed-changed completed-changed
 run_status 0 upgrade-all
 assert_exact_line "  operation outcome: Succeeded" "$stdout_file"
@@ -543,6 +625,14 @@ setup_case completed-unknown completed-unknown
 run_status 0 upgrade-all
 assert_exact_line "  operation outcome: Succeeded" "$stdout_file"
 assert_exact_line "  package state observation: Unverified" "$stdout_file"
+assert_exact_line "    system/source: Unverified" "$stdout_file"
+assert_exact_line "    AUR: Verified unchanged" "$stdout_file"
+assert_immediately_before \
+    "  package state observation: Unverified" \
+    "    system/source: Unverified" "$stdout_file"
+assert_immediately_before \
+    "    system/source: Unverified" \
+    "    AUR: Verified unchanged" "$stdout_file"
 assert_exact_line \
     "    observation reason: Observation not prepared" "$stdout_file"
 assert_occurrence_count 1 "Observation not prepared" "$stdout_file"
@@ -600,6 +690,14 @@ assert_event_count 1 "upgrade-all prepare $default_snapshot"
 assert_event_count 0 "upgrade-all execute $default_snapshot"
 assert_exact_line "  operation outcome: Blocked" "$stdout_file"
 assert_exact_line "  package state observation: Not observed" "$stdout_file"
+assert_exact_line "    system/source: Not observed" "$stdout_file"
+assert_exact_line "    AUR: Not observed" "$stdout_file"
+assert_immediately_before \
+    "  package state observation: Not observed" \
+    "    system/source: Not observed" "$stdout_file"
+assert_immediately_before \
+    "    system/source: Not observed" \
+    "    AUR: Not observed" "$stdout_file"
 assert_exact_line \
     "  - package: source-unsupported" \
     "$stdout_file"
@@ -1114,6 +1212,9 @@ LANGUAGE=ja \
 assert_exact_line "  操作結果: 操作不要" "$stdout_file"
 assert_exact_line \
     "  パッケージ状態の観測: 変更なしを確認" "$stdout_file"
+assert_exact_line \
+    "    system/source: 変更なしを確認" "$stdout_file"
+assert_exact_line "    AUR: 変更なしを確認" "$stdout_file"
 assert_exact_line "  no-opの根拠: 該当作業なし" "$stdout_file"
 assert_not_contains "  操作結果: 失敗" "$stdout_file"
 
@@ -1127,6 +1228,74 @@ assert_exact_line "  操作結果: 成功" "$stdout_file"
 assert_exact_line "  パッケージ状態の観測: 変更あり" "$stdout_file"
 assert_not_contains "  操作結果: 操作不要" "$stdout_file"
 
+setup_case localized-issue-455-exact \
+    issue-455-system-changed-aur-up-to-date
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    run_status 0 upgrade-all
+assert_exact_line "  操作結果: 成功" "$stdout_file"
+assert_exact_line "  パッケージ状態の観測: 変更あり" "$stdout_file"
+assert_exact_line "    system/source: 変更あり" "$stdout_file"
+assert_exact_line "    AUR: 変更なしを確認" "$stdout_file"
+assert_immediately_before \
+    "  パッケージ状態の観測: 変更あり" \
+    "    system/source: 変更あり" "$stdout_file"
+assert_immediately_before \
+    "    system/source: 変更あり" \
+    "    AUR: 変更なしを確認" "$stdout_file"
+assert_exact_line \
+    "  項目: 全1件、通常1件、要確認0件" "$stdout_file"
+assert_exact_line \
+    "  更新候補: 0件、blocker: 0件、要確認: 0件、失敗: 0件" \
+    "$stdout_file"
+assert_not_contains "ttf-noto-sans-mono-cjk-vf" "$stdout_file"
+
+setup_case localized-issue-455-reverse issue-455-aur-changed
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    run_status 0 upgrade-all
+assert_exact_line "  操作結果: 成功" "$stdout_file"
+assert_exact_line "  パッケージ状態の観測: 変更あり" "$stdout_file"
+assert_exact_line \
+    "    system/source: 変更なしを確認" "$stdout_file"
+assert_exact_line "    AUR: 変更あり" "$stdout_file"
+assert_immediately_before \
+    "  パッケージ状態の観測: 変更あり" \
+    "    system/source: 変更なしを確認" "$stdout_file"
+assert_immediately_before \
+    "    system/source: 変更なしを確認" \
+    "    AUR: 変更あり" "$stdout_file"
+assert_exact_line \
+    "  項目: 全1件、通常0件、要確認1件" "$stdout_file"
+assert_exact_line \
+    "  更新候補: 1件、blocker: 0件、要確認: 0件、失敗: 0件" \
+    "$stdout_file"
+assert_contains \
+    "確認済みソースの結果（PackageBase issue-455-aur-updated）: 正確なupstream commit 4444444444444444444444444444444444444444 の更新レビューを受理しました。" \
+    "$stdout_file"
+assert_contains \
+    "確認済み状態（PackageBase issue-455-aur-updated）を世代 31として公開しました。ビルドとインストールの結果は別に報告します。" \
+    "$stdout_file"
+assert_contains \
+    "この実行内のeditor変更" "$stdout_file"
+assert_contains \
+    "正確な確認済みcommit treeそのものではありません" "$stdout_file"
+assert_contains \
+    "ビルド結果（PackageBase issue-455-aur-updated）: 成功。" \
+    "$stdout_file"
+assert_contains \
+    "インストール結果（PackageBase issue-455-aur-updated）: 成功。" \
+    "$stdout_file"
+assert_not_contains "UpdateReview" "$stdout_file"
+assert_not_contains "InvocationLocal" "$stdout_file"
+assert_not_contains "exact upstream commit" "$stdout_file"
+assert_not_contains "generation" "$stdout_file"
+assert_not_contains "invocation-local editor overlay" "$stdout_file"
+
 setup_case localized-completed-unknown completed-unknown
 LOCPATH=$locale_root \
 LANG=en_US.UTF-8 \
@@ -1136,6 +1305,8 @@ LANGUAGE=ja \
 assert_exact_line "upgrade-allの概要:" "$stdout_file"
 assert_exact_line "  操作結果: 成功" "$stdout_file"
 assert_exact_line "  パッケージ状態の観測: 未検証" "$stdout_file"
+assert_exact_line "    system/source: 未検証" "$stdout_file"
+assert_exact_line "    AUR: 変更なしを確認" "$stdout_file"
 assert_exact_line "    観測理由: 観測未準備" "$stdout_file"
 assert_exact_line "    診断: 確認が必要" "$stdout_file"
 assert_exact_line "    確認が必要" "$stdout_file"
@@ -1155,6 +1326,8 @@ LANGUAGE=ja \
     run_status 1 upgrade-all
 assert_exact_line "  操作結果: 実行不可" "$stdout_file"
 assert_exact_line "  パッケージ状態の観測: 未観測" "$stdout_file"
+assert_exact_line "    system/source: 未観測" "$stdout_file"
+assert_exact_line "    AUR: 未観測" "$stdout_file"
 assert_exact_line "    診断: 未対応" "$stdout_file"
 assert_exact_line "    診断: 確認が必要" "$stdout_file"
 assert_contains "    実行を阻害" "$stdout_file"
@@ -1190,7 +1363,7 @@ assert_exact_line "  操作結果: 不整合" "$stdout_file"
 assert_exact_line "  パッケージ状態の観測: 未検証" "$stdout_file"
 assert_exact_line "    診断: 内部不整合" "$stdout_file"
 
-if [ "$case_count" -ne 228 ]; then
+if [ "$case_count" -ne 232 ]; then
     echo "upgrade-all command test scenario count drifted: $case_count" >&2
     exit 1
 fi

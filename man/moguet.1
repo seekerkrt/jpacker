@@ -1,4 +1,4 @@
-.TH MOGUET 1 "August 2026" "Moguet 2.3.2" "User Commands"
+.TH MOGUET 1 "August 2026" "Moguet 2.4.0" "User Commands"
 .\" parity:name
 .SH NAME
 moguet \- pacman-first AUR helper with verified source builds
@@ -145,13 +145,27 @@ and, after confirmation, the resolved Moguet cache.
 The state log is not part of the reproducible cache.
 .
 .TP
-.B "-G <pkg>"
-Export exactly one AUR package's complete PackageBase repository to
-.IR ./<PackageBase> .
+.B "-G <pkg> [--output-dir=DIR]"
+Export exactly one AUR package's complete PackageBase repository.
+Without
+.BR --output-dir ,
+the parent is the command-start current directory.
+With
+.BR --output-dir=DIR ,
+the parent is the named existing directory; relative values are resolved from
+the command-start current directory. The validated PackageBase is always the
+direct-child destination name.
+The parent is not created, final and intermediate symlink components are
+rejected, and Moguet does not expand a leading tilde. Use an absolute path or
+an attached value such as
+.BR --output-dir="$HOME/src/aur" .
 An existing destination of any type is a hard failure.
+Parent rename, replacement, symlink replacement, and identity drift fail
+closed before the no-replace publish.
 The command does not use the build cache, evaluate PKGBUILD, retrieve
 dependencies, build, or install.
-Global and pacman options are unsupported for this operation.
+Only the attached output-directory form is accepted; all other global and
+pacman options are unsupported for this operation.
 .
 .TP
 .B "-Gp <pkg>"
@@ -381,28 +395,37 @@ machine-readable plan schema is introduced.
 .
 .TP
 .B "--edit"
-Select the prompt policy for PKGBUILD and detected top-level
+Select the prompt policy for opening or editing PKGBUILD and detected top-level
 .I *.install
-review for this invocation.
+files for this invocation.
 This overrides
 .BR review.pkgbuild .
+It is invocation-local editor policy, not upstream reviewed-source acceptance,
+and cannot advance a reviewed revision.
 .
 .TP
 .B "--noedit"
-Select the skip policy for PKGBUILD and detected top-level
+Skip invocation-local PKGBUILD and detected top-level
 .I *.install
-review for this invocation.
+editing for this invocation.
+It neither accepts nor skips the separate upstream reviewed-source decision.
 It does not disable source, artifact, identity, or transaction validation.
 .
 .TP
 .B "--diff"
-Select the prompt policy for viewing repository update diffs.
+Select the prompt policy for reviewing AUR source changes from the previous
+reviewed revision to the exact fetched target. If there is no reviewed state,
+or the old baseline object is unavailable, the safe review is a full current
+tracked-file review rather than a cache-HEAD fallback.
 This overrides
 .BR review.diff .
+Only explicit acceptance after a complete review advances reviewed state.
 .
 .TP
 .B "--nodiff"
-Skip the repository update diff prompt.
+Skip the reviewed-source change review and acceptance path for this invocation.
+It does not advance reviewed state. Unsafe, future, or inconsistent state is
+still fail-closed rather than treated as missing or bypassed.
 It does not authorize discarding user modifications or destructive Git
 operations.
 .
@@ -420,6 +443,17 @@ authorizes
 This is not \(dqyes to everything\(dq and does not bypass unresolved or
 ambiguous dependencies, cycles, source selection, conflicts/replacements,
 artifact identity, ownership, or other safety guards.
+.
+.TP
+.B "--output-dir=DIR"
+Select an existing export parent for
+.BR -G .
+This operation-local option requires a non-empty attached value, may appear
+only once, is not stored in configuration, and is not supported by
+.BR -Gp
+or any other operation. Relative values use the command-start current
+directory. Moguet does not create the parent, follow symlink components, or
+perform tilde expansion.
 .
 .TP
 .B "--select"
@@ -541,6 +575,19 @@ built-in defaults -> user config -> CLI override
 .fi
 .
 .PP
+.B review.diff
+and
+.BR --diff / --nodiff
+select the AUR reviewed-source prompt policy. Skipping it never advances
+reviewed state.
+.B review.pkgbuild
+and
+.BR --edit / --noedit
+select invocation-local PKGBUILD and
+.I *.install
+editor behavior; they are not upstream review acceptance.
+.
+.PP
 A missing file is normal.
 An existing file requires integer
 .B schema_version = 1
@@ -574,6 +621,14 @@ All source-preference commands and build or upgrade readers use this authority.
 Default human-readable log.
 The fallback is
 .IR ~/.local/state/moguet/moguet.log .
+.
+.TP
+.I $XDG_STATE_HOME/moguet/reviewed-sources/aur/
+Persistent PackageBase-scoped reviewed AUR revision state.
+The fallback is
+.IR ~/.local/state/moguet/reviewed-sources/aur/ .
+It is separate from reproducible cache and survives cache deletion or
+recloning. Read-only lookup does not create the store.
 .
 .TP
 .I $XDG_CACHE_HOME/moguet/
@@ -722,6 +777,50 @@ whole invocation was side-effect free and does not roll back an already
 completed Git, editor, pacman, or earlier system phase.
 .
 .PP
+For AUR Git source builds, Moguet stores the last explicitly accepted exact
+upstream commit for each PackageBase. Missing state starts an initial full
+tracked-file review. A different target is reviewed from the previous reviewed
+revision, the same target needs no prompt or rewrite, and an unavailable old
+commit requires a full rebaseline review instead of a cache-HEAD fallback.
+Invalid, corrupted, or source-mismatched current state requires an explicit
+full rebind review. Future schema and unsafe or inconsistent history fail
+closed without overwrite.
+.
+.PP
+The review inventory retains every tracked added, modified, deleted, renamed,
+or type-changed file. Root PKGBUILD and top-level
+.I *.install
+files receive review-sensitive guidance, but patches, service units, helper
+scripts, local source/config files, binary changes, and other tracked content
+are not filtered out.
+.I .SRCINFO
+is lower-priority generated metadata, not source-review authority.
+.
+.PP
+Displaying a review is not acceptance. Only an explicit interactive
+.B y
+or
+.B yes
+after a complete review can advance state. A
+.BR --nodiff
+skip, review decline,
+.BR --noconfirm ,
+or non-TTY input may keep a compatibility-only build route but does not advance
+state. Cancellation, EOF, input failure, unsupported review, and unsafe or
+future state stop without advancement.
+.
+.PP
+An accepted AUR build uses the exact target OID in a detached checkout;
+mutable HEAD, branches, and remote refs are not build authority. State
+publication uses compare-and-swap semantics and does not overwrite another
+process's reviewed result. A later build or install failure does not roll back
+a correctly accepted and published revision.
+.BR --edit / --noedit
+controls an invocation-local editor overlay that is separate from the upstream
+reviewed revision. Official-repository and local PKGBUILD routes do not create
+reviewed-source state.
+.
+.PP
 Before build or install, Moguet assesses declared conflicts and replacements
 against installed and planned packages, including provided components and
 versioned relations. Diagnostics distinguish installed conflicts from planned
@@ -863,6 +962,12 @@ Inspect an AUR dependency graph without cloning or building:
 .RE
 .
 .TP
+Export a PackageBase under an existing relative parent:
+.RS
+.B moguet -G wezterm-git --output-dir=./exports
+.RE
+.
+.TP
 View a build plan without mutation:
 .RS
 .B moguet plan mongodb-bin
@@ -882,6 +987,14 @@ Temporarily restore review and normal build defaults over user config:
 .
 .\" parity:migration
 .SH MIGRATION
+An existing Moguet AUR cache from before reviewed-source state requires no
+manual migration. No record is a normal missing state and causes one initial
+full review for the first affected PackageBase. Moguet does not invent a
+reviewed revision from legacy checkout HEAD, a branch, a remote ref, or build
+artifacts. Invalid, corrupted, source-mismatched, future, unsafe, or
+inconsistent state is not treated as missing.
+.
+.PP
 Starting with Moguet v2.0.1, Moguet does not read
 .I /etc/jpacker/jpacker.conf
 as a normal configuration layer or

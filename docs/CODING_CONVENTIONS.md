@@ -11,7 +11,11 @@ transaction、互換性、project stance等の設計判断は対応する正式d
 
 ## 言語・実行環境
 
-- 現行Makefileはhosted環境の`g++`と`-std=c++20`を使用する。
+- CMake target propertyをC++ compile / link authorityとし、hostedなstrict C++20
+  （`CXX_STANDARD_REQUIRED=YES`、extensionなし）を使用する。Makefileはcompilerを直接起動しない。
+- compiler selectionはdirect CMakeのtoolchain/cache、またはMake / PKGBUILD frontendの外部`CXX`
+  inputとして扱う。project側で特定compiler実体へ固定せず、persistent treeではCMake-compatibleに
+  分解したcompiler実体とimmutable required argumentsのidentity preflightを維持する。
 - standard library、libcurl、libalpmを既存の責務境界に従って利用できる。
 - 例外は内部の失敗伝播に使用できる。CLI境界で`std::exception`等を捕捉し、利用者向けerrorと終了codeへ変換する。
 - destructorから例外を外へ出さない。cleanup failureを無視する場合は、その契約が重要なら理由を残す。
@@ -20,13 +24,15 @@ transaction、互換性、project stance等の設計判断は対応する正式d
 
 ## File構成と分割
 
-現在の実装は`src/moguet.cpp`だけの単一構成ではなく、CLI、設定、package metadata、plan、source build、process実行等を責務ごとの`.hpp` / `.cpp`へ分けている。
+現在の実装は`source/moguet.cpp`だけの単一構成ではなく、CLI、設定、package metadata、plan、source build、process実行等を責務ごとの`.hpp` / `.cpp`へ分けている。
 
 - 新しい非自明な型や複数箇所から使うinterfaceは、既存moduleと同様に宣言を`.hpp`、定義を`.cpp`へ分ける。
-- entry pointとtop-level CLI wiringは`src/moguet.cpp`へ置き、domain実装を戻して肥大化させない。
+- entry pointとtop-level CLI wiringは`source/moguet.cpp`へ置き、domain実装を戻して肥大化させない。
 - 既存の責務pairへ収まる変更では、新しいgeneric moduleやwrapperを増やさない。
 - file分割そのものを目的に既存moduleを一括移動しない。
 - testは対象moduleと既存`tests/`の構成に対応させる。
+- production translation unitは`cmake/MoguetSources.cmake`、test source / stub / definition / include /
+  link profileは`cmake/MoguetTestTargets.cmake`を正とし、Makefileやvalidation scriptへ二重列挙しない。
 
 ## 命名
 
@@ -75,7 +81,8 @@ transaction、互換性、project stance等の設計判断は対応する正式d
 ## 書式とtool設定
 
 - 現在repository rootに`.editorconfig`と`.clang-format`はない。変更箇所の既存styleとcompiler warningを基準にする。
-- C++ buildは`-Wall -Wextra`を含む。新しいwarningを無視するcastやsuppressionを安易に追加しない。
+- CMakeのproject build contractは`-Wall -Wextra`を含む。新しいwarningを無視するcastやsuppressionを
+  安易に追加しない。
 - formatterを新規導入したり、repository全体を整形したりする変更は、機能変更と分けた明示的な作業にする。
 
 ## Project固有の確認入口
@@ -83,6 +90,9 @@ transaction、互換性、project stance等の設計判断は対応する正式d
 - 基本build: `make`
 - 全test: `make test`
 - 限定test: 対応する`make test-<領域>`
-- release統合確認: `make release-check`
+- PR / merge用host gate: `make test-host-release`
+- historical release subset: `make release-check`
+- preset CMake / CTest: `make cmake-dev-configure`後に`cmake --build build/cmake-testing`、
+  `ctest --test-dir build/cmake-testing --output-on-failure`
 
 CLI挙動を変えた場合は対象command、error、終了codeも確認する。pacman / makepkg / sudoを伴うsystem mutationは通常testに含めず、明示された安全な環境とscopeでだけ実施する。

@@ -49,11 +49,13 @@ a new storage direction: source-build preferences now use only the executing
 user's XDG config context, while the published v2.0.0 tag, Release, and release
 notes remain historical records.
 
-Moguet v2.3.2 is the latest release. This maintenance/hotfix release bounds file
-descriptor use when cleaning large local source workspaces under constrained
-`RLIMIT_NOFILE`, and prevents already-current split AUR targets in `upgrade-all`
-from appearing as false unobserved or attention-required items. See the
-[v2.3.2 release](https://github.com/seekerkrt/moguet/releases/tag/v2.3.2) for
+Moguet v2.4.0 is the latest release. Its headline feature is the reviewed AUR
+source revision workflow, which retains the last AUR upstream revision
+explicitly accepted at PackageBase scope and shows later tracked-file changes
+from that review baseline. It also adds `moguet -G <pkg> --output-dir=DIR`, clearer phase-level
+package-state observations in `upgrade-all`, and the CMake / CTest canonical
+C++ build/test graph while retaining the usual `make` frontend. See the
+[v2.4.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.4.0) for
 the complete user-visible changes.
 
 The canonical repository identity is Moguet on GitHub, with a GitLab mirror.
@@ -196,6 +198,8 @@ and adopted design decisions are recorded in
 - An Arch build environment with `base-devel` preinstalled; its current
   members provide the C++ toolchain, `pkgconf`, and GNU gettext development
   tools
+- `cmake` 3.18 or later; the optional tracked developer preset requires 3.19
+  or later
 - `pacman`, `pacman-conf`, and libalpm development metadata
 - `git`
 - `curl`
@@ -211,6 +215,36 @@ make
 ./moguet --help
 ```
 
+CMake is the authority for C++ build and install targets, CTest is the
+authority for C++ test registration and execution, and the root `Makefile`
+keeps the familiar developer shortcuts plus repository-specific validation.
+Plain `make` uses `build/cmake-production` with `BUILD_TESTING=OFF`; `make
+test` uses `build/cmake-testing` with `BUILD_TESTING=ON`, runs CTest, and then
+runs the repository validation layer. Existing focused entries remain
+available as `make test-<area>`.
+
+For a repeatable debug/editor configuration, use the tracked developer
+preset through its post-success frontend:
+
+```bash
+make cmake-dev-configure
+cmake --build build/cmake-testing
+ctest --test-dir build/cmake-testing --output-on-failure
+```
+
+This preset enables `BUILD_TESTING=ON`, a Debug build, and
+`CMAKE_EXPORT_COMPILE_COMMANDS=ON`. It exposes that tree's database through
+the generated repository-root `compile_commands.json` symlink for clangd and
+other editor or analysis tools. `make cmake-dev-configure` runs `cmake
+--preset dev-debug` and publishes the link only after the complete configure
+and generate process exits successfully. A failed configure or generate
+preserves the previous valid publication and publishes nothing on a first
+failure. Raw `cmake --preset dev-debug` remains a configure-only CMake entry
+and does not publish the root link. `make clean` removes both wrapper-owned
+build trees and the root link. CMake Presets require CMake 3.19 or later. The
+project remains directly configurable with its declared CMake 3.18 minimum
+when the optional preset CLI is not used.
+
 For a packaging-safe dry run, stage the payload outside the live filesystem:
 
 ```bash
@@ -218,6 +252,11 @@ stage_dir=$(mktemp -d)
 make PREFIX=/usr DESTDIR="$stage_dir" install
 find "$stage_dir" -type f -print
 ```
+
+`make install` and `make uninstall` are frontends to the canonical CMake
+install graph and its exact `install_manifest.txt`; the destination overrides
+shown above are mapped into that graph rather than implemented by a separate
+Make install recipe.
 
 The v2.0.0 package and its only executable are named `moguet`; it does not
 install `/usr/bin/jpacker`. Its payload is disjoint from the jpacker v1.16.0
@@ -230,7 +269,7 @@ creates or owns neither user XDG data nor the legacy directory.
 
 The package runtime dependencies are `curl`, `git`, `libalpm.so`, `libarchive`,
 `nano`, `pacman`, and `sudo`. The exact `makedepends` set recorded by the
-package is `nlohmann-json` and `tomlplusplus`. Arch package builds assume
+package is `cmake`, `nlohmann-json`, and `tomlplusplus`. Arch package builds assume
 `base-devel` is preinstalled; its current membership supplies GNU gettext and
 `pkgconf`, so `base-devel`, `gettext`, and `pkgconf` are not listed in
 `makedepends`. `git` remains a runtime dependency and is not duplicated there.
@@ -259,7 +298,10 @@ makepkg -si
 `makepkg -si` builds that tagged release and installs it onto the live
 system with `pacman -U` in the same step. This differs from `make` and
 `./moguet --help` above, which only build and inspect the development tree
-in place and install nothing. This `PKGBUILD` is a repository-provided
+in place and install nothing. The `PKGBUILD` is the canonical production
+CMake build/install consumer and configures `BUILD_TESTING=OFF`; the 94
+developer C++ test executables and 117 CTest registrations remain in host,
+CI, and release validation. This `PKGBUILD` is a repository-provided
 packaging path, not an AUR submission; Moguet still has no published AUR
 page.
 
@@ -287,7 +329,7 @@ edit-src <pkg>...
 list-src
 del-src <pkg>...
 revert <pkg>...
--G <pkg>
+-G <pkg> [--output-dir=DIR]
 -Gp <pkg>
 -S --select [--needed] <query>
 ```
@@ -333,7 +375,10 @@ moguet del-src <pkg>...
 moguet revert <pkg>...
 
 # Export one PackageBase checkout or print only its PKGBUILD
-moguet -G <pkg>
+moguet -G wezterm-git
+moguet -G wezterm-git --output-dir=./exports
+moguet -G wezterm-git --output-dir="$HOME/src/aur"
+moguet -G wezterm-git --output-dir=/home/user/src/aur
 moguet -Gp <pkg>
 
 # Observe every supported mutating route without changing persistent state
@@ -346,6 +391,16 @@ moguet --dry-run upgrade
 moguet --dry-run upgrade-aur
 moguet --dry-run upgrade-all
 ```
+
+`-G` exports to the command-start current directory when `--output-dir` is
+omitted. `--output-dir=DIR` selects an existing parent directory for that
+invocation only; a relative value is resolved from the command-start current
+directory, and the validated PackageBase remains the direct-child destination
+name. Moguet does not create the parent, follow any symlink component in the
+specified path, overwrite an existing destination, or provide its own tilde
+expansion. Use `--output-dir="$HOME/src/aur"` or an absolute path instead of
+`--output-dir=~/src/aur`. The option is not supported by `-Gp` or other
+operations, and only the attached form is accepted.
 
 `--dry-run` is a global observation modifier for the Moguet-owned `-S` install
 and system-update routes, `fetch`, remote and local `build`, `upgrade`,
@@ -398,6 +453,42 @@ choosing a package.
 Source-build preferences are managed with multi-target `add-src`, `edit-src`,
 `del-src`, and `revert`, plus target-less `list-src`. A one-off
 `build <pkg> [V=K...]` resolves a remote package and does not save a preference.
+
+### Reviewed AUR source workflow
+
+For an AUR Git source build, Moguet keeps the last explicitly accepted exact
+upstream commit for each PackageBase in persistent XDG state. After fetch or
+clone, it pins one exact target commit. With no reviewed state—including an
+existing cache created before this workflow—the first affected PackageBase
+gets a full tracked-file review. A later target is reviewed from the previous
+reviewed revision; the same target needs no new prompt or state write. If the
+old commit object is unavailable, Moguet presents a full rebaseline review
+instead of falling back to the cache checkout. Invalid, corrupted, or
+source-mismatched state requires an explicit full rebind review; future or
+unsafe state fails closed.
+
+The review inventory covers every tracked added, modified, deleted, renamed,
+or type-changed file, not an extension allowlist. Root `PKGBUILD` and top-level
+`*.install` files receive review-sensitive guidance, while patches, service
+units, helper scripts, local source/config files, binary changes, and other
+tracked content remain visible. `.SRCINFO` stays visible as lower-priority
+generated metadata and is not a substitute for source review.
+
+`--diff` selects the reviewed-source prompt policy, but only an explicit
+interactive `y` or `yes` after a complete review advances the stored revision.
+`--nodiff`, a review decline, `--noconfirm`, or non-TTY input may retain the
+existing compatibility build behavior, but they do not advance reviewed
+state. Cancellation, EOF, input failure, an unsupported review, and unsafe or
+future state stop without advancing it.
+
+An accepted build is checked out at the exact target commit; mutable checkout
+HEAD, branches, and remote refs are not build authority. Publication uses a
+compare-and-swap guard so a concurrent review is not overwritten, and a later
+build or install failure does not roll back a correctly accepted revision.
+`--edit` / `--noedit` control invocation-local PKGBUILD and `.install` editing,
+not upstream acceptance: editor changes are a separate overlay on the reviewed
+commit. Official-repository and `build --local` routes do not create this
+state. See the [reviewed AUR source state contract](https://github.com/seekerkrt/moguet/blob/develop/docs/contracts/reviewed-source-state.md).
 
 ### Per-package build customization
 
@@ -512,6 +603,11 @@ The canonical CLI overrides are `--edit` / `--noedit`, `--diff` /
 Conflicting overrides fail before external mutation rather than using
 last-one-wins behavior.
 
+`review.diff` and `--diff` / `--nodiff` select the AUR reviewed-source prompt
+policy. Skipping that prompt never advances reviewed state. `review.pkgbuild`
+and `--edit` / `--noedit` select invocation-local PKGBUILD / `.install` editor
+behavior and do not act as upstream review acceptance.
+
 A missing config file is normal. An existing file must contain
 `schema_version = 1`; invalid TOML, unknown keys, type errors, invalid enum
 values, and unsupported future schema versions stop the invocation. Moguet
@@ -540,13 +636,19 @@ migrate, or remove either XDG preferences or legacy data.
 | --- | --- | --- |
 | User configuration | `$XDG_CONFIG_HOME/moguet/` | `~/.config/moguet/` |
 | Source-build preferences | `$XDG_CONFIG_HOME/moguet/source-build.d/` | `~/.config/moguet/source-build.d/` |
-| Persistent runtime state and log | `$XDG_STATE_HOME/moguet/` | `~/.local/state/moguet/` |
+| Persistent runtime state, reviewed AUR revisions, and log | `$XDG_STATE_HOME/moguet/` | `~/.local/state/moguet/` |
 | Reproducible cache | `$XDG_CACHE_HOME/moguet/` | `~/.cache/moguet/` |
 
 The default log is `moguet.log` in the state directory. Cache contents are not
 authoritative and may be regenerated; deleting cache must not delete config or
 persistent state. Directories are created only when a command needs them.
 Help and version output do not create XDG directories.
+
+Accepted AUR revisions are stored below
+`$XDG_STATE_HOME/moguet/reviewed-sources/aur/`, with the HOME fallback below
+`~/.local/state/moguet/`. They are PackageBase state, not cache metadata, and
+survive cache deletion or recloning. A read-only lookup does not create this
+store.
 
 For source-preference access, an unset or empty `XDG_CONFIG_HOME` uses the HOME
 fallback. An explicit `XDG_CONFIG_HOME` must be absolute, already exist, and
@@ -584,6 +686,13 @@ route. Operations handled entirely by pacman pass through options that Moguet
 does not consume. When Moguet takes responsibility for an AUR or source-build
 route, it preserves only options with an explicitly defined equivalent and
 fails before mutation for the rest.
+
+No manual migration is required for an AUR cache created before reviewed-source
+state existed. The absence of a record is normal and causes one initial full
+review for the first affected PackageBase. Moguet never invents a reviewed
+revision from the legacy checkout HEAD, branch, remote ref, or build artifacts.
+Invalid, corrupted, source-mismatched, future, or unsafe state is not treated
+as missing and remains fail-closed according to the reviewed-source contract.
 
 Moguet does not read `/etc/jpacker/jpacker.conf` as a normal config layer or
 use `/etc/jpacker/package.build/` as a source-preference fallback. It does not

@@ -1025,6 +1025,20 @@ assert_command "makepkg --packagelist"
 assert_command "makepkg -sc"
 assert_command_content_absent "sudo pacman -U"
 
+setup_case build-install-failure-keeps-staged-outcome
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
+export MOGUET_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING='pacman -U'
+run_fail --noedit --nodiff --noconfirm build clean-root
+assert_contains \
+    "Build outcome for PackageBase clean-root: succeeded." \
+    "$output_file"
+assert_contains \
+    "Install outcome for PackageBase clean-root: failed." \
+    "$output_file"
+assert_contains "Install Error: pacman -U failed with exit code 1." "$output_file"
+assert_not_contains "Build Error: pacman -U" "$output_file"
+assert_command_prefix_count "sudo pacman -U --noconfirm -- " 1
+
 setup_case build-cleanup-partial-success-keeps-cli-contract
 installed_after_success=$case_dir/installed-after-success
 install_success_log=$XDG_CACHE_HOME/pacman-u-success.log
@@ -1232,8 +1246,54 @@ assert_command_prefix_count "sudo pacman -U --noconfirm -- " 1
 assert_cleanup_partial_success_fixture "$install_success_log"
 assert_source_tree_unchanged "$local_root" "$source_tree_before"
 
-# Remote AUR dependency units execute and install as Dependency before the
-# local root.
+# A fatal reviewed-state observation for a remote AUR dependency must happen
+# after the read-only local plan, but before the first persistent cache
+# mutation owned by the top-level local route.
+setup_case build-local-aur-dependency-fatal-before-cache
+local_root=$case_dir/local-source
+prepare_local_source_root "$local_root" local-app local-app clean-root
+XDG_STATE_HOME=$case_dir/xdg-state
+export XDG_STATE_HOME
+reviewed_state_package_dir=$XDG_STATE_HOME/moguet/reviewed-sources/aur/clean-root
+mkdir -p "$reviewed_state_package_dir"
+chmod 700 \
+    "$XDG_STATE_HOME" \
+    "$XDG_STATE_HOME/moguet" \
+    "$XDG_STATE_HOME/moguet/reviewed-sources" \
+    "$XDG_STATE_HOME/moguet/reviewed-sources/aur" \
+    "$reviewed_state_package_dir"
+reviewed_state_file=$reviewed_state_package_dir/1.toml
+printf '%s\n' 'schema_version = 2' > "$reviewed_state_file"
+chmod 600 "$reviewed_state_file"
+reviewed_state_before=$case_dir/reviewed-state-before
+cp "$reviewed_state_file" "$reviewed_state_before"
+source_tree_before=$case_dir/source-tree-before.snapshot
+snapshot_source_tree "$local_root" "$source_tree_before"
+assert_path_absent "$cache_root"
+
+run_fail --noedit --noconfirm build --local "$local_root"
+
+assert_contains \
+    "Reviewed source state uses an unsupported future schema; the build was not started." \
+    "$output_file"
+assert_path_absent "$cache_root"
+assert_file_equals "$reviewed_state_before" "$reviewed_state_file"
+assert_source_tree_unchanged "$local_root" "$source_tree_before"
+reviewed_state_file_count=$(find "$reviewed_state_package_dir" \
+    -mindepth 1 -maxdepth 1 -type f | wc -l)
+if [ "$reviewed_state_file_count" -ne 1 ]; then
+    echo "fatal local dependency preflight changed reviewed state" >&2
+    find "$reviewed_state_package_dir" -mindepth 1 -maxdepth 1 -print >&2
+    exit 1
+fi
+assert_command_content_absent "git clone"
+assert_command_content_absent "makepkg"
+assert_command_content_absent "sudo "
+assert_command_content_absent "moguet-test-editor"
+assert_contains "clean-root" "$request_log"
+
+# A non-fatal remote AUR dependency continues through cache activation,
+# dependency installation, and then the local root build.
 setup_case build-local-aur-dependency-before-root
 local_root=$case_dir/local-source
 prepare_local_source_root "$local_root" local-app local-app clean-root
@@ -1241,6 +1301,10 @@ export MOGUET_TEST_MAKEPKG_LOCAL_PACKAGE_BASE=local-app
 export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='clean-root|clean-root|1.0-1
 local-app|local-app|1.0-1'
 run_ok --noedit --noconfirm build --local "$local_root"
+if [ ! -d "$cache_root" ] || [ -L "$cache_root" ]; then
+    echo "non-fatal local dependency route did not activate its cache root" >&2
+    exit 1
+fi
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command_pattern_count \
     '^sudo pacman -U --noconfirm --asdeps -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$' 1

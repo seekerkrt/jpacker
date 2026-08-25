@@ -7,11 +7,13 @@
 /build/
 /jpacker
 /moguet
+/compile_commands.json
 
 # Local editor settings
 .vscode/
 
 # Arch Linux package artifacts
+/src/
 /pkg/
 *.pkg.tar.zst
 *.pkg.tar.xz

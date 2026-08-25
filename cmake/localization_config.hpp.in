@@ -1,0 +1,3 @@
+#pragma once
+
+#define MOGUET_LOCALE_DIRECTORY "@MOGUET_LOCALE_DIRECTORY@"

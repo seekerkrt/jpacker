@@ -4,7 +4,10 @@
 #include "shell_words.hpp"
 
 #include <filesystem>
+#include <memory>
+#include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -23,6 +26,62 @@ std::string remote_ref(const std::string& branch) {
 
 } // namespace
 
+struct TrustedGitPinnedCheckout::State {
+    const ValidatedCachePath               checkout;
+    const AurReviewedSourceReviewIdentity identity;
+
+    State(
+            ValidatedCachePath value_checkout,
+            AurReviewedSourceReviewIdentity value_identity)
+        : checkout(std::move(value_checkout)),
+          identity(std::move(value_identity)) {}
+};
+
+TrustedGitPinnedCheckout::TrustedGitPinnedCheckout(
+        ValidatedCachePath checkout,
+        AurReviewedSourceReviewIdentity identity)
+    : state_(std::make_unique<State>(
+              std::move(checkout), std::move(identity))) {}
+
+TrustedGitPinnedCheckout::TrustedGitPinnedCheckout(
+        TrustedGitPinnedCheckout&& other) noexcept = default;
+
+TrustedGitPinnedCheckout& TrustedGitPinnedCheckout::operator=(
+        TrustedGitPinnedCheckout&& other) noexcept = default;
+
+TrustedGitPinnedCheckout::~TrustedGitPinnedCheckout() = default;
+
+bool TrustedGitPinnedCheckout::valid() const noexcept {
+    return state_ != nullptr;
+}
+
+const TrustedGitPinnedCheckout::State&
+TrustedGitPinnedCheckout::require_state() const {
+    if(!state_) {
+        throw std::logic_error(
+                "A moved-from pinned Git checkout has no authority.");
+    }
+    return *state_;
+}
+
+const AurReviewedSourceReviewIdentity&
+TrustedGitPinnedCheckout::identity() const {
+    return require_state().identity;
+}
+
+const std::filesystem::path&
+TrustedGitPinnedCheckout::checkout_path() const {
+    return require_state().checkout.canonical_path();
+}
+
+std::uintmax_t TrustedGitPinnedCheckout::checkout_device() const {
+    return require_state().checkout.device();
+}
+
+std::uintmax_t TrustedGitPinnedCheckout::checkout_inode() const {
+    return require_state().checkout.inode();
+}
+
 std::string trusted_git_remote_origin_url(
         const ValidatedCachePath&) {
     return trim(exec_command("git config --get remote.origin.url"));
@@ -32,6 +91,13 @@ int trusted_git_fetch_origin(
         const ValidatedCachePath&,
         const std::string&) {
     return run_command("git fetch origin");
+}
+
+int trusted_git_fetch_origin(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        const ReviewedSourcePackageBaseLease&) {
+    return trusted_git_fetch_origin(checkout, expected_remote_url);
 }
 
 std::string trusted_git_detect_remote_branch(
@@ -95,12 +161,110 @@ int trusted_git_reset_hard(
             "git reset --hard " + shell_words::quote(remote_ref(branch)));
 }
 
+int trusted_git_reset_hard(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        const std::string& branch,
+        const ReviewedSourcePackageBaseLease&) {
+    return trusted_git_reset_hard(
+            checkout, expected_remote_url, branch);
+}
+
 int trusted_git_clone_persistent_checkout(
         const ValidatedCachePath& destination,
         const std::string& remote_url) {
     return run_command(
             "git clone " + shell_words::quote(remote_url) + " " +
             shell_words::quote(destination.path().filename().string()));
+}
+
+int trusted_git_clone_persistent_checkout(
+        const ValidatedCachePath& destination,
+        const std::string& remote_url,
+        const ReviewedSourcePackageBaseLease&) {
+    return trusted_git_clone_persistent_checkout(
+            destination, remote_url);
+}
+
+TrustedGitCommitResolutionResult trusted_git_resolve_remote_commit(
+        const ValidatedCachePath&,
+        const std::string&,
+        const std::string&) {
+    return TrustedGitReviewFailure{
+            TrustedGitReviewFailureReason::CommandFailed,
+            TrustedGitReviewStage::TargetResolution,
+            1};
+}
+
+TrustedGitAurReviewedSourceProjectionResult
+trusted_git_project_aur_reviewed_source(
+        const ValidatedCachePath&,
+        AurReviewedSourceReviewIdentity,
+        std::optional<SourceRevisionIdentity>) {
+    return TrustedGitReviewFailure{
+            TrustedGitReviewFailureReason::CommandFailed,
+            TrustedGitReviewStage::TargetValidation,
+            1};
+}
+
+TrustedGitAurReviewedSourceMaterializationResult
+trusted_git_materialize_aur_reviewed_source_review(
+        const ValidatedCachePath&,
+        TrustedAurReviewedSourceProjection) {
+    return TrustedGitReviewFailure{
+            TrustedGitReviewFailureReason::CommandFailed,
+            TrustedGitReviewStage::BlobRead,
+            1};
+}
+
+TrustedGitPinnedCheckoutResult trusted_git_materialize_pinned_checkout(
+        const ValidatedCachePath&,
+        AurReviewedSourceReviewIdentity,
+        const ReviewedSourcePackageBaseLease&) {
+    return TrustedGitPinnedCheckoutFailure{
+            TrustedGitPinnedCheckoutFailureReason::CommandFailed,
+            TrustedGitPinnedCheckoutStage::CheckoutMaterialization,
+            1, 0, 0, std::nullopt};
+}
+
+TrustedGitPinnedCheckoutRevalidationResult
+revalidate_trusted_git_pinned_checkout(
+        const TrustedGitPinnedCheckout&) {
+    return TrustedGitPinnedCheckoutFailure{
+            TrustedGitPinnedCheckoutFailureReason::InvalidCapability,
+            TrustedGitPinnedCheckoutStage::BoundaryRevalidation,
+            std::nullopt, 0, 0, std::nullopt};
+}
+
+TrustedGitPinnedCheckoutOverlayObservationResult
+observe_clean_trusted_git_pinned_checkout_overlay(
+        const TrustedGitPinnedCheckout&,
+        const ReviewedSourcePackageBaseLease&) {
+    return TrustedGitPinnedCheckoutFailure{
+            TrustedGitPinnedCheckoutFailureReason::InvalidCapability,
+            TrustedGitPinnedCheckoutStage::OverlayObservation,
+            std::nullopt, 0, 0, std::nullopt};
+}
+
+TrustedGitPinnedCheckoutOverlayObservationResult
+observe_trusted_git_pinned_checkout_overlay(
+        const TrustedGitPinnedCheckout&,
+        const ReviewedSourcePackageBaseLease&) {
+    return TrustedGitPinnedCheckoutFailure{
+            TrustedGitPinnedCheckoutFailureReason::InvalidCapability,
+            TrustedGitPinnedCheckoutStage::OverlayObservation,
+            std::nullopt, 0, 0, std::nullopt};
+}
+
+TrustedGitPinnedCheckoutRevalidationResult
+revalidate_trusted_git_pinned_checkout_overlay(
+        const TrustedGitPinnedCheckout&,
+        const ReviewedSourcePackageBaseLease&,
+        const TrustedGitPinnedCheckoutOverlayObservation&) {
+    return TrustedGitPinnedCheckoutFailure{
+            TrustedGitPinnedCheckoutFailureReason::InvalidCapability,
+            TrustedGitPinnedCheckoutStage::OverlayRevalidation,
+            std::nullopt, 0, 0, std::nullopt};
 }
 
 int trusted_git_clone_aur_export(
