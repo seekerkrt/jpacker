@@ -944,19 +944,19 @@ void print_help() {
             "schema_version = 1",
             localization::translate_message("Required schema version"));
     print_help_entry(
-            "review.pkgbuild = prompt|skip",
+            "review.pkgbuild = \"prompt\"|\"skip\"",
             localization::format_translated_message(
                     // TRANSLATORS: PKGBUILD and .install are literal artifact names.
                     "Invocation-local {} / {} editor policy; not reviewed-source acceptance",
                     "PKGBUILD", ".install"));
     print_help_entry(
-            "review.diff = prompt|skip",
+            "review.diff = \"prompt\"|\"skip\"",
             localization::format_translated_message(
                     // TRANSLATORS: The placeholder is the AUR project identity.
                     "Repository diff / {} reviewed-source review policy; skipping does not advance reviewed state",
                     "AUR"));
     print_help_entry(
-            "build.mode = normal|rebuild|clean",
+            "build.mode = \"normal\"|\"rebuild\"|\"clean\"",
             localization::translate_message("Source-build mode"));
 }
 

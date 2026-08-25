@@ -64,6 +64,14 @@ assert_not_contains() {
         printf 'localization-test: unexpected text: %s\n' "$unexpected" >&2
         sed -n '1,200p' "$output_file" >&2
         exit 1
+    else
+        grep_status=$?
+        case $grep_status in
+            1) ;;
+            *)
+                fail "text inspection failed with status $grep_status: $output_file"
+                ;;
+        esac
     fi
 }
 
@@ -348,8 +356,17 @@ assert_contains \
     '設定を保存せず、リモートパッケージ1件またはローカルPKGBUILDルート1件をビルド' \
     "$ja_help_plain"
 assert_contains '$XDG_CONFIG_HOME/moguet/config.toml' "$ja_help_plain"
-assert_contains 'review.pkgbuild = prompt|skip' "$ja_help_plain"
-assert_contains 'build.mode = normal|rebuild|clean' "$ja_help_plain"
+assert_contains 'review.pkgbuild = "prompt"|"skip"' "$ja_help_plain"
+assert_contains 'review.diff = "prompt"|"skip"' "$ja_help_plain"
+assert_contains 'build.mode = "normal"|"rebuild"|"clean"' "$ja_help_plain"
+for obsolete_config_syntax in \
+    'review.pkgbuild = prompt|skip' \
+    'review.diff = prompt|skip' \
+    'build.mode = normal|rebuild|clean'
+do
+    assert_not_contains "$obsolete_config_syntax" "$c_help_plain"
+    assert_not_contains "$obsolete_config_syntax" "$ja_help_plain"
+done
 assert_not_contains 'legacy jpacker.conf' "$c_help_plain"
 assert_not_contains 'legacy jpacker.conf' "$ja_help_plain"
 

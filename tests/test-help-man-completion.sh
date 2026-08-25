@@ -28,6 +28,20 @@ assert_contains() {
         fail "missing expected help text: $pattern"
 }
 
+assert_not_contains() {
+    pattern=$1
+    file=$2
+    if grep -F -- "$pattern" "$file" >/dev/null; then
+        fail "unexpected obsolete help text: $pattern"
+    else
+        grep_status=$?
+        case $grep_status in
+            1) ;;
+            *) fail "help text inspection failed with status $grep_status: $file" ;;
+        esac
+    fi
+}
+
 for command_name in python3 bash zsh fish localedef; do
     command -v "$command_name" >/dev/null 2>&1 ||
         fail "$command_name is required."
@@ -106,6 +120,24 @@ assert_contains \
 assert_contains \
     '競合/置換の安全停止を回避せず、自動置換も行いません' \
     "$japanese_help"
+
+for config_syntax in \
+    'review.pkgbuild = "prompt"|"skip"' \
+    'review.diff = "prompt"|"skip"' \
+    'build.mode = "normal"|"rebuild"|"clean"'
+do
+    assert_contains "$config_syntax" "$english_help"
+    assert_contains "$config_syntax" "$japanese_help"
+done
+
+for obsolete_config_syntax in \
+    'review.pkgbuild = prompt|skip' \
+    'review.diff = prompt|skip' \
+    'build.mode = normal|rebuild|clean'
+do
+    assert_not_contains "$obsolete_config_syntax" "$english_help"
+    assert_not_contains "$obsolete_config_syntax" "$japanese_help"
+done
 
 version_short=$tmp_dir/version-short
 version_long=$tmp_dir/version-long

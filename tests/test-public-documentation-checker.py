@@ -190,6 +190,17 @@ def main() -> int:
             copy_reviewed_source_documentation_fixture(directory)
         )
 
+    quoted_pkgbuild_help_entry = (
+        "    print_help_entry(\n"
+        '            "review.pkgbuild = \\"prompt\\"|\\"skip\\"",'
+    )
+    additive_unquoted_pkgbuild_help_entry = (
+        "    print_help_entry(\n"
+        '            "review.pkgbuild = prompt|skip",\n'
+        '            localization::translate_message("Source-build mode"));\n'
+        + quoted_pkgbuild_help_entry
+    )
+
     reviewed_source_mutations = (
         (
             "missing legacy-cache migration contract",
@@ -222,6 +233,18 @@ def main() -> int:
             "Repository update diff policy",
         ),
         (
+            "unquoted runtime review.pkgbuild config syntax",
+            "source/moguet.cpp",
+            r"review.pkgbuild = \"prompt\"|\"skip\"",
+            "review.pkgbuild = prompt|skip",
+        ),
+        (
+            "additive unquoted runtime review.pkgbuild config syntax",
+            "source/moguet.cpp",
+            quoted_pkgbuild_help_entry,
+            additive_unquoted_pkgbuild_help_entry,
+        ),
+        (
             "completion wording without initial full review",
             "completions/descriptions/en.json",
             "Review repository updates; for AUR, review the exact target from the previous reviewed revision or all tracked source initially",
@@ -243,13 +266,13 @@ def main() -> int:
         (
             "stale English review.pkgbuild config wording",
             "en",
-            "review.pkgbuild = prompt|skip",
+            "review.pkgbuild = \"prompt\"|\"skip\"",
             "PKGBUILD review policy",
         ),
         (
             "stale English review.diff config wording",
             "en",
-            "review.diff = prompt|skip",
+            "review.diff = \"prompt\"|\"skip\"",
             "Repository update diff policy",
         ),
         (
@@ -271,7 +294,7 @@ def main() -> int:
         (
             "editor action described as review acceptance",
             "en",
-            "review.pkgbuild = prompt|skip",
+            "review.pkgbuild = \"prompt\"|\"skip\"",
             (
                 "PKGBUILD / .install editor action for this invocation is "
                 "reviewed-source acceptance"
@@ -280,7 +303,7 @@ def main() -> int:
         (
             "stale Japanese review.pkgbuild config wording",
             "ja",
-            "review.pkgbuild = prompt|skip",
+            "review.pkgbuild = \"prompt\"|\"skip\"",
             "PKGBUILDの確認方針",
         ),
     )
@@ -292,9 +315,15 @@ def main() -> int:
             description,
         )
 
+    scenario_count = (
+        len(mutations)
+        + len(reviewed_source_mutations)
+        + len(runtime_help_mutations)
+        + 2
+    )
     print(
         "public-documentation-checker-test: "
-        f"{len(mutations) + len(reviewed_source_mutations) + len(runtime_help_mutations) + 2} scenarios passed"
+        f"{scenario_count} scenarios passed"
     )
     return 0
 

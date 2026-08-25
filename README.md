@@ -578,6 +578,14 @@ $XDG_CONFIG_HOME/moguet/config.toml
 fallback: ~/.config/moguet/config.toml
 ```
 
+In a repository checkout, the canonical copy is `sample/config.toml`. A
+standard Arch package installation places the same file at
+`/usr/share/doc/moguet/examples/config.toml`. Copy it to
+`$XDG_CONFIG_HOME/moguet/config.toml`, or to the fallback shown above only when
+`XDG_CONFIG_HOME` is unset, before editing it. The enum values `prompt`, `skip`,
+`normal`, `rebuild`, and `clean` are TOML strings and must remain quoted; the
+canonical sample uses double quotes.
+
 The minimal v2.0.0 schema and built-in defaults are:
 
 ```toml
