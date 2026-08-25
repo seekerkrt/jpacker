@@ -1135,6 +1135,11 @@ assert_contains "$offline_runner" 'test-host-release'
 assert_not_contains "$offline_runner" 'make clean'
 assert_not_contains "$offline_runner" 'parallel-build'
 assert_not_contains "$offline_runner" 'parallel-release-check'
+for cmake_consumer in \
+    "$offline_dockerfile" "$live_dockerfile" "$aur_dockerfile" "$local_dockerfile"
+do
+    assert_contains "$cmake_consumer" '        cmake \'
+done
 offline_target=$(make_target_body test-container)
 case "$offline_target" in
     *arch-live-validation*)

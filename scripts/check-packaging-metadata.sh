@@ -143,8 +143,9 @@ for forbidden_tomlplusplus_flag in \
     TOML_HEADER_ONLY=0 \
     TOML_SHARED_LIB=1
 do
-    if grep -F -- "$forbidden_tomlplusplus_flag" "$repo_root/Makefile" >/dev/null; then
-        fail "Makefile enables toml++ shared-library mode: $forbidden_tomlplusplus_flag"
+    if grep -E "^[[:space:]]*[^#].*$forbidden_tomlplusplus_flag" \
+        "$repo_root/CMakeLists.txt" "$repo_root"/cmake/*.cmake >/dev/null; then
+        fail "CMake enables toml++ shared-library mode: $forbidden_tomlplusplus_flag"
     fi
 done
 
@@ -161,6 +162,7 @@ bash -c '
     cd "$package_work"
     pkgdir=$package_stage
     source "$package_file"
+    build
     package
 ' bash "$package_work" "$stage_root" "$repo_root/PKGBUILD" >/dev/null
 

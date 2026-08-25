@@ -12,6 +12,7 @@ RUN pacman-key --init \
     && pacman-key --populate archlinux \
     && pacman -Syu --needed --noconfirm \
         base-devel \
+        cmake \
         curl \
         git \
         libarchive \

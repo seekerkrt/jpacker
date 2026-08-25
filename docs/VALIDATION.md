@@ -6,9 +6,10 @@
 必要なvalidation、approval evidence、evidenceの再利用と無効化、reviewの終了条件を定める
 policy authorityである。
 
-Make targetの実際のprerequisiteとrecipeは`Makefile`、branch / PR / release操作は
-[`DEVELOPMENT.md`](DEVELOPMENT.md)を正とする。この文書は、それらの実行段階と証拠の十分性を所有する。
-記載と実装がdriftした場合は、対象を十分に見なして続行せず、両者を揃える。
+C++ build / install graphは`CMakeLists.txt`と`cmake/`、C++ test registration / executionはCTest、
+repository validation targetの実際のprerequisiteとrecipeは`Makefile`と`scripts/`、branch / PR /
+release操作は[`DEVELOPMENT.md`](DEVELOPMENT.md)を正とする。この文書は、それらの実行段階と証拠の
+十分性を所有する。記載と実装がdriftした場合は、対象を十分に見なして続行せず、両者を揃える。
 
 目的はcoverageの削減ではない。変更が壊し得るcontractを先に特定し、そのcontractを
 所有するvalidationで証明するrisk-based validationを正式運用とする。
@@ -20,8 +21,9 @@ Make targetの実際のprerequisiteとrecipeは`Makefile`、branch / PR / releas
 
 - Slice 2: producer failureを後段commandのsuccessへ丸めず、`grep` status 0 / 1 / 2+、
   canonical expected status、business failure / infrastructure failureを区別し、primary failureを保持する。
-- Slice 4: compiler dependency / signature trackingでstale binaryを防ぎ、target-specific build profileを
-  保つ。`release-check-exclusive`、`test-host-release`、standalone `release-check`のowner分離を維持する。
+- Slice 4: canonical CMake dependency graphとtarget propertyでstale binaryを防ぎ、target-specific
+  compile / link profile、stub exclusion、link firewallを保つ。`release-check-exclusive`、
+  `test-host-release`、standalone `release-check`のowner分離を維持する。
 - Slice 3: root `VERSION`をversion authorityとし、validation側の不要なmanual synchronizationへ戻さない。
   independent expected oracle、deterministic / live分離、transport-specific fixture authorityを維持する。
 
@@ -48,10 +50,17 @@ PR / mergeのcanonical host gateは`test-host-release`である。`test`と
 `test-container`はhost A–D / Gを代替せず、`test-live-contract`はactual Fを代替しない。
 `test-container-live`がPASSした場合、同じcandidateに対する3つのindividual live targetの再実行は不要である。
 
-ccacheとmoldにはdefault approval targetを設けない。現行`CCACHE`は重量級test objectの
-compile recipeだけ、`LDFLAGS=-fuse-ld=mold`は`LDFLAGS`を消費するlinkだけを検証する。
-実行時は対象target、clean / incremental条件、実際にwrapper / linkerを消費した範囲を記録し、
-default compiler / linker gateの代替にしない。
+通常の`make`とpackage consumerは`build/cmake-production` / `BUILD_TESTING=OFF`、developer / host /
+release validationは`build/cmake-testing` / `BUILD_TESTING=ON`を使う。developerの`dev-debug` presetは
+testing treeへDebugとcompile databaseを明示する。`make cmake-dev-configure`がpreset configure / generateの
+exit 0を確認した後だけrepository root linkを生成し、raw preset configureはroot publicationを行わない。
+package / release buildへcompile database生成を要求しない。CMake Presets非対応の3.18 runtimeではdirect
+configureを使い、preset未実行をCMake project自体のfailureへ読み替えない。
+
+ccacheとmoldにはdefault approval targetを設けない。`CCACHE`はCMakeのcompiler launcherとして
+全CMake-owned compile commandへ作用し、link commandへは作用しない。`LDFLAGS=-fuse-ld=mold`は
+CMakeが生成するlink commandへ外部inputとして同期される。実行時は対象target、clean / incremental
+条件、実際にwrapper / linkerを消費した範囲を記録し、default compiler / linker gateの代替にしない。
 
 ## Evidenceの種類と記録
 
@@ -82,7 +91,7 @@ PASSとして扱わない。cleanup / diagnostic failureはprimary failureを上
 対象はimplementation loop、local debugging、small fix、review finding fixである。
 
 - 変更したcontractのownerと、直接consumerを覆うaffected / focused targetを実行する。
-- Slice 4のdependency / signature contractを前提としてincremental buildを利用できる。
+- canonical CMake dependency graphを前提としてincremental buildを利用できる。
 - static contract、failure injection、deterministic full-CLIでしか見つからないriskは、
   対応するC / D targetを追加する。
 - production変更のたびにclean buildやfull suiteを無条件で実行しない。
@@ -151,7 +160,7 @@ pathとtargetはその根拠として使う。
 | 変更したcontract | Development / Sliceのhigh-signal evidence | 原則として無効化されるevidence |
 | --- | --- | --- |
 | Production C++ semantics、CLI、出力、exit status | ownerのA / B target、直接consumer、対応するDのfull-CLI scenario | A–D。payload / version / install surfaceも変わるならG / E / Fも対象 |
-| Make / build graph、dependency、compile / link profile、target composition | affected binaryのrebuild、signature / depfile / link firewall、compositionのstatic contract | clean/default buildとA–D。container graphも変えたらE |
+| CMake / CTest graph、Make frontend、dependency、compile / link profile、target composition | production / testing configure policy、affected targetのrebuild、inventory / link firewall、focused alias composition、必要ならUnix Makefiles / Ninja parity | clean/default buildとA–D。container / package consumer graphも変えたらE / package validation |
 | Test runner、status helper、capture / normalization、expected status | `test-validation-status`と全ての直接consumer、必要なfault injection | helperを消費するlane。host / E / Fのうち実際に影響する範囲 |
 | Fixture authority、expected oracle、transport-specific projection | `test-fixture-authority`、affected deterministic scenario、`test-live-contract` | fixtureのconsumerが属するD / E / F。他transportの独立authorityは自動で無効化しない |
 | Offline Dockerfile / runner / current Arch dependency | `test-live-contract`のstatic boundaryと、semanticsを変えた場合の`test-container` | E。shared host targetも変えた場合だけA–D / G |

@@ -168,6 +168,7 @@ fail-closedで停止します。v2.xは、Moguetのsource-aware入口、安全�
 
 - `base-devel`を事前導入したArch build環境。現在の構成packageがC++ toolchain、
   `pkgconf`、GNU gettext development toolを提供します
+- `cmake` 3.18以降。optionalなtracked developer presetには3.19以降が必要です
 - `pacman`、`pacman-conf`、libalpm development metadata
 - `git`
 - `curl`
@@ -183,6 +184,30 @@ make
 ./moguet --help
 ```
 
+C++ build / install targetのauthorityはCMake、C++ test registration / executionの
+authorityはCTestです。root `Makefile`は従来のdeveloper shortcutとrepository固有validationを
+維持します。通常の`make`は`BUILD_TESTING=OFF`の`build/cmake-production`、`make test`は
+`BUILD_TESTING=ON`の`build/cmake-testing`を使い、CTestの後にrepository validation layerを
+実行します。既存のfocused入口も`make test-<area>`として利用できます。
+
+再現可能なdebug / editor設定にはtracked developer presetのpost-success frontendを使います。
+
+```bash
+make cmake-dev-configure
+cmake --build build/cmake-testing
+ctest --test-dir build/cmake-testing --output-on-failure
+```
+
+このpresetは`BUILD_TESTING=ON`、Debug build、`CMAKE_EXPORT_COMPILE_COMMANDS=ON`を有効にし、
+生成したdatabaseをrepository rootの`compile_commands.json` symlinkからclangd等のeditor / analysis
+toolへ公開します。`make cmake-dev-configure`は`cmake --preset dev-debug`を実行し、configureと
+generateを含むprocess全体が成功した後だけlinkをpublishします。configure / generate failureでは
+以前のvalidなpublicationを維持し、first failureでは何もpublishしません。rawな
+`cmake --preset dev-debug`はconfigure-onlyのCMake入口として残り、root linkをpublishしません。
+`make clean`はwrapper所有build treeとroot linkを削除します。CMake Presetsの利用にはCMake
+3.19以降が必要です。optionalなpreset CLIを使わないdirect configureでは、projectが宣言する
+CMake 3.18 minimumを維持します。
+
 live filesystemへ書き込まないpackaging用dry runは、payloadを一時directoryへstageします。
 
 ```bash
@@ -190,6 +215,10 @@ stage_dir=$(mktemp -d)
 make PREFIX=/usr DESTDIR="$stage_dir" install
 find "$stage_dir" -type f -print
 ```
+
+`make install` / `make uninstall`はcanonical CMake install graphとexactな
+`install_manifest.txt`へのfrontendです。上記destination overrideは別のMake install recipeではなく、
+同じCMake graphへmappingされます。
 
 v2.0.0のpackage名と唯一のexecutableは`moguet`で、`/usr/bin/jpacker`をinstall
 しません。payloadはjpacker v1.16.0 packageと重複しないため、metadataには
@@ -201,7 +230,7 @@ legacy directoryも作成・所有しません。
 
 package runtime dependencyは`curl`、`git`、`libalpm.so`、`libarchive`、`nano`、
 `pacman`、`sudo`です。package metadataへ記録するexactな`makedepends` setは
-`nlohmann-json`と`tomlplusplus`です。Arch package buildは`base-devel`の事前導入を
+`cmake`、`nlohmann-json`、`tomlplusplus`です。Arch package buildは`base-devel`の事前導入を
 前提とし、現在の構成packageがGNU gettextと`pkgconf`を提供するため、`base-devel`、
 `gettext`、`pkgconf`は`makedepends`へ含めません。`git`はruntime dependencyのまま
 とし、重複して列挙しません。gettextはcatalog build toolを提供し、runtime binaryは
@@ -226,7 +255,10 @@ makepkg -si
 
 `makepkg -si`は、そのtag付きreleaseをbuildし、同じ操作で`pacman -U`によってlive
 systemへinstallします。これは、development treeをその場でbuild・確認するだけで
-何もinstallしない、上記の`make`や`./moguet --help`とは異なります。この`PKGBUILD`は
+何もinstallしない、上記の`make`や`./moguet --help`とは異なります。`PKGBUILD`はcanonicalな
+production CMake build / install consumerとして`BUILD_TESTING=OFF`を指定し、94個のdeveloper
+C++ test executableと117件のCTest registrationはhost / CI / release validation側で扱います。
+この`PKGBUILD`は
 repository同梱のpackaging経路であり、AUR submissionではありません。Moguetはまだ
 AUR pageを公開していません。
 

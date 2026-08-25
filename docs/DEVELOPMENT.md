@@ -93,188 +93,118 @@ PR merge 後:
 
 GitLab側の同一refはmirror workflowの完了後に確認する。通常flowで手動pushしない。
 
-### Integration test build contract
+### CMake / CTest build authority
 
-Issue #380 Slice 1のpreflightでは、Makefileが直接生成する66個のtest binaryを棚卸しした。
-このうち64 targetは複数の`.cpp`を1回のcompiler invocationへ渡してcompileとlinkをまとめて
-実行している。production source数には、64個以上を含む次の10 targetと、次点の
-`PRODUCTION_SOURCE_BUILD_TEST_TARGET`（33個）の間に明確な差がある。この10 targetを
-Issue #380でobject分離する「重量級integration test target」とする。
+Issue #463の最終状態では、CMakeがproject-ownedなC++ compile / link / build / install graph、
+CTestがC++ test registration / executionを所有する。Makefileはdeveloper shortcutとrepository
+validation frontendであり、production / test source list、C++ standard、warning、compile definition、
+include / link graph、negative compile recipeを所有しない。
 
-| Make target variable | Binary | 現行source構成（production / test support） |
+用途別build treeは次の2つを基本とする。
+
+| Tree | Policy | Consumer |
 | --- | --- | --- |
-| `APP_CONFIG_INTEGRATION_TEST_TARGET` | `build/tests/moguet-app-config-test` | `$(SRCS)`（71 / 0） |
-| `AUR_RPC_VALIDATION_TEST_TARGET` | `build/tests/moguet-aur-rpc-validation-test` | `$(SRCS)` + package-metadata alpm stub（71 / 1） |
-| `CLI_LOCALIZATION_TEST_TARGET` | `build/tests/moguet-cli-localization-test` | `$(SRCS)`（71 / 0） |
-| `TEST_TARGET` | `build/tests/moguet-test` | `$(SRCS)`（71 / 0） |
-| `UPGRADE_BASELINE_METADATA_TEST_TARGET` | `build/tests/moguet-upgrade-baseline-metadata-test` | `$(SRCS)` + package-metadata alpm stub（71 / 1） |
-| `SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET` | `build/tests/moguet-source-install-characterization-test` | `$(SRCS)`から`moguet.cpp`を除外 + characterization test（70 / 1） |
-| `UPGRADE_ALL_COMMAND_TEST_TARGET` | `build/tests/moguet-upgrade-all-command-test` | `$(SRCS)`から`upgrade_all_operation.cpp`を除外 + 2 stub（70 / 2） |
-| `COMMANDS_INSPECT_TEST_TARGET` | `build/tests/moguet-commands-inspect-test` | `$(SRCS)`から`aur_rpc.cpp` / `repository_query.cpp`を除外 + 3 stub（69 / 3） |
-| `COMMANDS_SYNC_TEST_TARGET` | `build/tests/moguet-commands-sync-test` | `$(SRCS)`から`aur_rpc.cpp` / `root_package_search.cpp`を除外 + 2 stub（69 / 2） |
-| `AUR_UPDATE_COMMAND_TEST_TARGET` | `build/tests/moguet-aur-update-command-test` | `$(SRCS)`から7 operation TUを除外 + 3 stub（64 / 3） |
+| `build/cmake-production` | `BUILD_TESTING=OFF` | 通常の`make`、install / uninstall、production smoke |
+| `build/cmake-testing` | `BUILD_TESTING=ON` | developer、CTest、host / release validation、focused test |
 
-ここでtest supportには、`tests/*_test.cpp`だけでなくproduction symbolを所有するscenario / ABI
-stubも含む。64 targetすべてを一度にobject化せず、上記10 targetだけをIssue #380の対象とする。
-production sourceが33個以下の残り54 targetのobject化は、実測に基づく別の判断がない限り
-Issue #380のscopeへ含めない。
+通常の`make`はproduction treeだけから`moguet`をbuildし、94個のC++ test executableや117件の
+CTest registrationを不用意にbuildしない。`make test`はtesting treeをbuildし、CTestを実行してから
+gettext、shell、docs、packaging等のrepository-specific validationを実行する。`make test-<area>`は
+互換entrypointとして残るが、exact target / CTest selectionは
+`cmake/MoguetFocusedTests.cmake`が所有する。
 
-#### 現行compile条件とstub ownership
+#### Developer debug preset / compile database
 
-重量級targetの現行compile共通部分は、順に`CPPFLAGS`、`LIBALPM_CPPFLAGS`、`CXXFLAGS`、
-`MY_CXXFLAGS`である。既定値ではlibalpmの`-D_FILE_OFFSET_BITS=64`、`-O2 -pipe`、
-`-std=c++20 -Wall -Wextra`、version macro、`-Ibuild/generated`を含む。target固有のmacro、
-include path、link libraryは次のとおりであり、object分離後も落としてはならない。
+tracked `CMakePresets.json`の`dev-debug` presetは、既存testing treeをDebug、
+`BUILD_TESTING=ON`、`CMAKE_EXPORT_COMPILE_COMMANDS=ON`でconfigureし、fresh treeのcompilerを
+Make frontendと同じ`g++`で初期化する。
 
-| Target | Target固有macro | Target固有include | Link library |
-| --- | --- | --- | --- |
-| `APP_CONFIG_INTEGRATION_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_TEST_CONFIG_PATH`, `MOGUET_ENABLE_APP_CONFIG_TEST_HOOKS` | なし | `MY_LDLIBS`, `LIBALPM_LDLIBS` |
-| `AUR_RPC_VALIDATION_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_AUR_RPC_TEST_HOOKS` | `source`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
-| `CLI_LOCALIZATION_TEST_TARGET` | target専用locale directory, `MOGUET_ENABLE_TEST_OVERRIDES` | なし | `MY_LDLIBS`, `LIBALPM_LDLIBS` |
-| `TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES` | なし | `MY_LDLIBS`, `LIBALPM_LDLIBS` |
-| `UPGRADE_BASELINE_METADATA_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_TEST_CONFIG_PATH`, `MOGUET_ENABLE_APP_CONFIG_TEST_HOOKS` | `source`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
-| `SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES` | `source` | `MY_LDLIBS`, `LIBALPM_LDLIBS` |
-| `UPGRADE_ALL_COMMAND_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_TEST_CONFIG_PATH` | `source`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
-| `COMMANDS_INSPECT_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES` | `source`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
-| `COMMANDS_SYNC_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_TEST_CONFIG_PATH` | `source` | `MY_LDLIBS`, `LIBALPM_LDLIBS` |
-| `AUR_UPDATE_COMMAND_TEST_TARGET` | `MOGUET_ENABLE_TEST_OVERRIDES`, `MOGUET_ENABLE_TEST_CONFIG_PATH` | `source`, `tests/stubs/package-metadata` | `MY_LDLIBS` |
+    make cmake-dev-configure
+    cmake --build build/cmake-testing
+    ctest --test-dir build/cmake-testing --output-on-failure
 
-stub ownershipは次のsource境界を正とする。
+`make cmake-dev-configure`はtracked presetでconfigureし、そのprocessがconfigure / generateを
+含めてexit 0となった後だけpost-success publisherを実行する。repository rootの
+`compile_commands.json`は
+`build/cmake-testing/compile_commands.json`を指すgenerated symlinkとなる。presetの再configureはexactな
+root artifactをcurrent treeへ更新する。configure-phaseまたはgenerate-phaseで失敗した場合は
+以前のvalidなlinkを維持し、first failureではroot artifactを公開しない。rawな
+`cmake --preset dev-debug`はCMakeのconfigure-only入口であり、process終了後のpublicationを所有しないため
+root linkを更新しない。`make clean`はbuild treeとroot linkを削除する。package / release buildはroot
+compile databaseを必要とせず、`PKGBUILD`もこのdeveloper optionを有効にしない。
 
-- `AUR_RPC_VALIDATION_TEST_TARGET`と`UPGRADE_BASELINE_METADATA_TEST_TARGET`では
-  `tests/stubs/package-metadata/alpm_stub.cpp`がlibalpm ABIを所有し、`LIBALPM_LDLIBS`をlinkしない。
-- `UPGRADE_ALL_COMMAND_TEST_TARGET`では
-  `tests/stubs/upgrade-all-command/operation_stub.cpp`が除外した
-  `source/upgrade_all_operation.cpp`のoperation APIを所有し、package-metadata alpm stubがlibalpm ABIを
-  所有する。
-- `COMMANDS_INSPECT_TEST_TARGET`では`tests/commands_inspect_aur_stub.cpp`がAUR client、
-  `tests/stubs/commands-inspect/repository_query_stub.cpp`がrepository query、package-metadata alpm stubが
-  libalpm ABIを所有し、対応するproduction transportを同時にlinkしない。
-- `COMMANDS_SYNC_TEST_TARGET`では`tests/stubs/commands-sync/aur_rpc_stub.cpp`と
-  `tests/stubs/commands-sync/root_package_search_stub.cpp`が、除外した2つのproduction transportを
-  それぞれ所有する。package metadataはproductionのままなので`LIBALPM_LDLIBS`は維持する。
-- `AUR_UPDATE_COMMAND_TEST_TARGET`では
-  `aur_update_query.cpp`、`aur_update_execution_preflight.cpp`、
-  `aur_update_execution_preparation.cpp`、`aur_update_execution_runner.cpp`、
-  `aur_update_operation_result.cpp`、`filtered_aur_update_operation.cpp`、
-  `upgrade_all_operation.cpp`を除外する。aur-update / upgrade-all scenario stubと
-  package-metadata alpm stubだけがそのtest seamを所有し、`LIBALPM_LDLIBS`をlinkしない。
+CMake PresetsはCMake 3.19で導入されたため、`dev-debug`には3.19以降が必要である。project本体の
+`cmake_minimum_required(VERSION 3.18)`は維持し、3.18ではpresetを使わずdirect configureする。
+Ninjaはoptional generatorであり、必要な環境では別treeで次のように確認できる。
 
-#### Object・dependency・ccache契約
+    cmake -S . -B build/cmake-ninja -G Ninja -DBUILD_TESTING=ON
+    cmake --build build/cmake-ninja
+    ctest --test-dir build/cmake-ninja --output-on-failure
 
-Slice 2とSlice 3で移行した上記10 targetのobject分離は次を満たす。
+`build/cmake-ninja`はvalidation時の一時的な別backendであり、恒常的な第三のauthorityではない。
+Ninjaを`PKGBUILD`のmandatory dependencyへ追加しない。
 
-- objectは`build/tests/obj/<binary-name>/`以下のtarget専用directoryへ置く。`source/`、`tests/`、
-  `tests/stubs/`以下の相対pathをobject pathにも残し、同名fileの衝突を避ける。異なるtest target間で
-  Make objectを直接共有しない。
-- 1 sourceにつき1回のcompile invocationとし、`-MMD -MP`でobjectと同じdirectoryへ`.d`を生成する。
-  移行済みtargetの`.d`だけを`-include`し、header変更時は依存するobjectだけを再compileする。
-- targetごとにeffective `CXX`、`CPPFLAGS`、`LIBALPM_CPPFLAGS`、`CXXFLAGS`、`MY_CXXFLAGS`、
-  target固有macro / include pathを記録したcompile signatureを持つ。内容が変わった場合だけstampを
-  更新し、そのtargetのobjectを再compileする。command line overrideによるflag変更もtimestampに
-  関係なく検出する。
-- linkにもordered object set、effective `CXX`、`LDFLAGS`、`MY_LDLIBS`、
-  `LIBALPM_LDLIBS`、targetが実際に使うlibrary listを記録したsignatureを持つ。objectまたはlink条件が
-  変わった場合だけ再linkする。移行前の重量級recipeが参照していなかった`LDFLAGS`は、分離後の
-  link stepで正式に適用する。
-- `CCACHE ?=`を空の既定値として定義し、compile recipeだけを`$(CCACHE) $(CXX) ... -c`とする。
-  `make CCACHE=ccache ...`で有効化し、未導入環境、通常の`make`、または`CCACHE=`ではwrapperなしの
-  buildを維持する。`CCACHE`は生成物のcompile signatureへ含めず、compiler identityと全compile
-  inputのcache identityはccacheへ委ねる。link recipeへccacheを付けない。
-- `CXX`、`CPPFLAGS`、`CXXFLAGS`、`LDFLAGS`のoverrideを維持する。ccacheをruntime / packageの
-  必須dependencyにせず、mold等のlinkerも既定または必須にしない。
+#### External toolchain inputs
 
-#### Direct compile/link testのdependency契約
+project-ownedなstrict C++20、`-Wall -Wextra`、default `-O2 -pipe`、version macro、include、libraryは
+CMake target propertyが所有する。`CPPFLAGS`、`CXXFLAGS`、`LDFLAGS`、`CCACHE`、compiler selectionは
+外部toolchain inputであり、Make / PKGBUILD frontendはconfigureごとに明示的に同期する。direct
+CMakeはfrontend syncを既定で無効とし、explicit `-D` cache authorityと通常のCMake初期化規則を
+尊重する。
 
-重量級10件以外のMakefile-direct test binary 63件は、既存の単一compile/link invocationを維持する。
-objectを重量級targetや別profileと共有せず、各binaryが
-`build/tests/dep/<binary-name>/`以下に`dependencies.d`、`compile.signature`、
-`link.signature`を所有する。
+Make frontendでは、未定義の`CXXFLAGS`だけがCMake-owned defaultを要求する。command lineまたは
+environmentで明示した空値はdefaultを抑止する。persistent treeで値をA、B、explicit emptyへ変更しても、
+configureごとにcurrent valueへ同期し、stale flagやlauncherを残さない。
 
-- depfileは各targetと同じsource、macro、include path、compiler flagsで`-MM -MP`を実行して生成し、
-  実際に読んだproject / test-support headerだけをbinary prerequisiteへ戻す。全`source/*.hpp`を
-  一律prerequisiteにはしない。
-- compile signatureはeffective `CXX`、compile arguments、source / fake / stub setを記録する。
-  link signatureはeffective `CXX`、対象targetが実際に使う`LDFLAGS`、library、ordered build inputを
-  記録する。内容が変わらないstampのmtimeは更新しない。
-- source、tracked header、compile profileの変更時はそのbinaryだけを再compile/linkし、unchanged
-  rerunでは再利用する。depfileを失ったtargetは、空のplaceholderを先に作ってbinaryをstaleにし、
-  compile成功時にcompiler outputで置き換える。
-- direct targetのccache適用範囲と`LDFLAGS`適用範囲はこの変更で広げない。source composition、
-  fake / stub ownership、link library、既存link firewallをtargetごとに維持する。
-
-#### ccache・optional linkerの利用
-
-ccacheを導入済みの開発環境では、compile wrapperを明示して有効化する。
+ccacheを導入済みの環境ではcompile launcherを明示できる。
 
     make CCACHE=ccache -j8 --output-sync=target test
-
-cacheの状態はccache自身の正式な入口で確認する。
-
     ccache --show-stats
-
-ccacheを一時的に無効化する場合は空値を明示する。
-
     make CCACHE= -j8 --output-sync=target test
 
-`CCACHE`のdefaultは空なので、ccacheを導入していない環境でも通常の`make`、`make test`、
-`make release-check`はcompilerを直接呼ぶ。ccacheはruntime dependency、package dependency、
-default buildの前提ではない。
+launcherはcompile commandだけへ入り、link commandへは入らない。ccacheはruntime / package dependencyでも
+defaultでもない。optional linkerも外部`LDFLAGS`から指定できるが、mold等をproject defaultやmandatory
+dependencyにしない。
 
-linkerは`LDFLAGS`の既存overrideで任意に選べる。たとえばmoldを導入済みの環境では次のように指定する。
+Make / PKGBUILDはexisting treeのcached compilerとrequested compilerを、CMake-compatibleな
+executableとimmutable required argumentsへ分けてconfigure前に比較する。`g++`、`/usr/bin/g++`、
+同一実体へのsymlinkは許可し、`CXX='g++ -m64'`のようなrequired argumentもfresh treeとsame-argument
+reuseで維持する。異なるcompiler実体、argumentの変更、argumentの削除はcacheやtreeを変更する前に
+停止する。frontendからraw spellingを毎回`-DCMAKE_CXX_COMPILER`へ再注入しない。
 
-    make LDFLAGS=-fuse-ld=mold -j8 --output-sync=target test
+#### Test composition / link firewall
 
-この指定は任意であり、moldをMoguetの必須dependencyまたはdefault linkerにはしない。空の
-`LDFLAGS`ではtoolchain既定のlinkerを使う。
+`cmake/MoguetTests.cmake`、`MoguetTestTargets.cmake`、`MoguetTestRegistrations.cmake`が次のfail-closed
+inventoryを所有する。
 
-#### Link firewall
+| Inventory | Expected |
+| --- | ---: |
+| C++ test executables | 94 |
+| support / stub translation units | 29 |
+| link firewalls | 49 |
+| firewall descriptors | 49 |
+| CTest registrations | 117 |
 
-source listはobject mapping後もtest compositionのauthorityである。各entryをexactly oneのobjectへ
-写像し、最終link inputはそのordered object listだけから作る。wildcardでobject directory全体を
-linkしてはならない。既存のrequired production source、required test support、forbidden production
-sourceのcheckはsource listに対して維持し、source-to-object mappingと最終object listにも重複・欠落が
-ないことをstatic checkする。production implementationと同じsymbolを所有するstubを同じbinaryへ
-混在させない。
+stub / real implementation exclusion、replacement ABI、ALPM stub、exact source closureをtarget-localに
+維持する。単一production libraryを全testへ無条件linkしない。negative compileはCTest registrationから
+effective CMake compiler / launcher / compile optionを取得し、GNU Make recursive compileへ戻さない。
+Make focused aliasとCMake focused targetは各97件で一致し、missing / unexpectedを0に保つ。
 
-各targetは共通firewall recipeへtarget固有のrequired production source、required test support、
-forbidden production source、link libraryを渡す。10 targetすべてでsource重複、required setの
-exactly-once、forbidden owner、source-to-object mapping、明示link object setをtargetのprerequisite
-として確認する。
+completion生成が使う`moguet-cli-authority-exporter`もCMake targetであり、Python generatorはcompilerを
+直接起動しない。このtargetは`EXCLUDE_FROM_ALL`なので通常のproduction/package buildへ混ざらず、
+repository validationが必要時だけ明示buildする。tracked completionのcanonical write入口は
+`make generate-completions`であり、exporterへ依存するCMake targetがcurrent sourceに対してbuildした後、
+Pythonのstdout rendererを実行して3つのtracked fileをpublishする。
+`scripts/generate_completions.py`はcheck-only / stdout-onlyでtracked write modeを持たず、callerが
+environment markerを自称してもこのfreshness boundaryを代替できない。
 
-#### 実装済みscopeとbaseline
+#### Install / package consumer
 
-Slice 2では次の2 targetをobject化した。
-
-- `UPGRADE_ALL_COMMAND_TEST_TARGET`
-- `AUR_UPDATE_COMMAND_TEST_TARGET`
-
-Slice 3ではsignature、1 source / 1 object compile、明示object link、firewallを共通Make helperへ
-整理しながら、次の残り8 targetをobject化した。
-
-- `COMMANDS_SYNC_TEST_TARGET`
-- `COMMANDS_INSPECT_TEST_TARGET`
-- `TEST_TARGET`
-- `CLI_LOCALIZATION_TEST_TARGET`
-- `APP_CONFIG_INTEGRATION_TEST_TARGET`
-- `AUR_RPC_VALIDATION_TEST_TARGET`
-- `SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET`
-- `UPGRADE_BASELINE_METADATA_TEST_TARGET`
-
-2026-08-06のSlice 1 baselineは、16 logical CPU、GCC 16.1.1、GNU Make 4.4.1、ccache 4.13.6で、
-上記10 binary targetを`make -j8 --output-sync=target`へ同時指定して測定した。
-
-| Build mode | Elapsed | ccache result |
-| --- | ---: | --- |
-| clean、ccacheなし | 233.49 s | 未使用 |
-| 変更なしincremental | 0.02 s | compiler invocationなし |
-| isolated cold ccache | 232.60 s | cacheable 0 / 10、`Called for linking` 10 / 10 |
-| isolated warm ccache + clean rebuild | 233.06 s | 累計cacheable 0 / 20、hit 0、cache file 0 |
-
-cold / warm測定はtemporary `CCACHE_DIR`だけを使用し、global ccacheを参照・消去・変更していない。
-Slice 1時点のrecipeではccacheが全callをlink invocationと判定したため、warm cacheの効果はなかった。
-Slice 2 / 3の実装後も同じtarget集合についてdefault clean、incremental、isolated cold / warm ccache、
-test behavior、link firewallを測定し、このbaselineと比較する。
+CMake install graphと`install_manifest.txt`がinstall / uninstall payloadのcanonical authorityである。
+Makeの`PREFIX`、`BINDIR`、completion、man、license、doc、locale destination overrideはCMake cacheへ
+mappingし、別のMake install graphを持たない。`PKGBUILD`はgenerator-neutralなCMake configure / build /
+install consumerで、`BUILD_TESTING=OFF`を指定する。package payload / permission / layout validationは
+repository validation側で維持し、通常のpackage buildへfull CTestを追加しない。
 
 ### Host validation execution graph
 

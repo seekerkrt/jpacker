@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 18,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev-debug",
+      "displayName": "Developer debug build",
+      "description": "Configure the canonical testing tree; use make cmake-dev-configure for root compile database publication",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/cmake-testing",
+      "environment": {
+        "CXX": "g++"
+      },
+      "cacheVariables": {
+        "BUILD_TESTING": true,
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+        "MOGUET_DEVELOPER_COMPILE_COMMANDS_LINK": true
+      }
+    }
+  ]
+}

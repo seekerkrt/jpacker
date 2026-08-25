@@ -12,13 +12,13 @@ import re
 import shlex
 import subprocess
 import sys
-import tempfile
 from typing import Callable
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
-CLI_AUTHORITY_EXPORTER = REPOSITORY_ROOT / "scripts/export_cli_authority.cpp"
-CLI_PUBLIC_PROJECTION = REPOSITORY_ROOT / "source/cli_public_projection.cpp"
+DEFAULT_CLI_AUTHORITY_EXPORTER = (
+    REPOSITORY_ROOT / "build/cmake-testing/moguet-cli-authority-exporter"
+)
 DESCRIPTION_ROOT = REPOSITORY_ROOT / "completions/descriptions"
 
 # The exporter owns the C++ authority projection.  The loader does not trust
@@ -307,46 +307,31 @@ def parse_operand_terms(value: str) -> tuple[OperandTerm, ...]:
 
 
 def export_authority() -> str:
-    compiler = shlex.split(os.environ.get("CXX", "c++"))
-    if not compiler:
-        fail("CXX does not name a compiler")
-    with tempfile.TemporaryDirectory(prefix="moguet-cli-authority-") as directory:
-        executable = Path(directory) / "export-cli-authority"
-        compile_result = subprocess.run(
-            [
-                *compiler,
-                "-std=c++20",
-                "-Wall",
-                "-Wextra",
-                f"-I{REPOSITORY_ROOT / 'source'}",
-                str(CLI_AUTHORITY_EXPORTER),
-                str(CLI_PUBLIC_PROJECTION),
-                "-o",
-                str(executable),
-            ],
-            cwd=REPOSITORY_ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
+    executable = Path(
+        os.environ.get(
+            "MOGUET_CLI_AUTHORITY_EXPORTER",
+            str(DEFAULT_CLI_AUTHORITY_EXPORTER),
         )
-        if compile_result.returncode != 0:
-            fail(
-                "could not compile the CLI authority exporter:\n"
-                + compile_result.stderr.rstrip()
-            )
-        export_result = subprocess.run(
-            [str(executable)],
-            cwd=REPOSITORY_ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
+    )
+    if not executable.is_file():
+        fail(
+            "CMake-built CLI authority exporter is unavailable: "
+            f"{executable}; run 'make cmake-cli-authority-exporter-build'"
         )
-        if export_result.returncode != 0:
-            fail(
-                "CLI authority projection failed:\n"
-                + export_result.stderr.rstrip()
-            )
-        return export_result.stdout
+
+    export_result = subprocess.run(
+        [str(executable)],
+        cwd=REPOSITORY_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if export_result.returncode != 0:
+        fail(
+            "CLI authority projection failed:\n"
+            + export_result.stderr.rstrip()
+        )
+    return export_result.stdout
 
 
 def parse_exported_schema(exported_schema: str) -> CliSchema:
@@ -1885,7 +1870,15 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate Moguet static shell completions from the public CLI authority."
     )
-    parser.add_argument("--check", action="store_true", help="fail if tracked output differs")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
+        "--check", action="store_true", help="fail if tracked output differs"
+    )
+    mode.add_argument(
+        "--render",
+        choices=("bash", "zsh", "fish"),
+        help="render one completion to stdout without writing tracked files",
+    )
     parser.add_argument("--locale", default="en", help="description locale (default: en)")
     parser.add_argument(
         "--output-dir",
@@ -1911,11 +1904,12 @@ def main() -> int:
             check_generated(path, content) for path, content in outputs.items()
         ) else 1
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    for path, content in outputs.items():
-        path.write_text(content, encoding="utf-8")
-        shown = path.relative_to(REPOSITORY_ROOT) if path.is_relative_to(REPOSITORY_ROOT) else path
-        print(f"generated {shown}")
+    output_names = {
+        "bash": "moguet.bash",
+        "zsh": "_moguet",
+        "fish": "moguet.fish",
+    }
+    sys.stdout.write(outputs[output_dir / output_names[arguments.render]])
     return 0
 
 
