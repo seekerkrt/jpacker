@@ -392,7 +392,8 @@ class ScopedStdinReplacement final {
     ScopedStdinReplacement(
             int replacement_fd, int peer_fd)
         : replacement_fd_(replacement_fd), peer_fd_(peer_fd) {
-        saved_stdin_ = dup(STDIN_FILENO);
+        saved_stdin_ =
+                fcntl(STDIN_FILENO, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
         if(saved_stdin_ == -1 || dup2(replacement_fd_, STDIN_FILENO) == -1) {
             const int saved_error = errno;
             if(saved_stdin_ != -1) close(saved_stdin_);
@@ -407,7 +408,7 @@ class ScopedStdinReplacement final {
 public:
     static ScopedStdinReplacement noninteractive() {
         int descriptors[2];
-        if(pipe(descriptors) != 0) {
+        if(pipe2(descriptors, O_CLOEXEC) != 0) {
             throw std::runtime_error(
                     "Failed to create non-interactive stdin fixture.");
         }
@@ -3808,10 +3809,18 @@ void test_review_bypass_provenance(
 
     AppConfig non_tty = noninteractive_config();
     non_tty.user_config.review.diff = ReviewPolicy::Prompt;
-    expect_review_bypass_provenance(
-            environment, "review-bypass-non-tty", non_tty,
-            ReviewedSourceCompatibilityBuildReason::NonInteractiveInput,
-            "non-TTY review bypass");
+    {
+        const ScopedStdinReplacement stdin_fixture =
+                ScopedStdinReplacement::noninteractive();
+        static_cast<void>(stdin_fixture);
+        expect(
+                isatty(STDIN_FILENO) != 1,
+                "Non-TTY review bypass fixture unexpectedly exposed a TTY");
+        expect_review_bypass_provenance(
+                environment, "review-bypass-non-tty", non_tty,
+                ReviewedSourceCompatibilityBuildReason::NonInteractiveInput,
+                "non-TTY review bypass");
+    }
 }
 
 enum class FatalPreflightFixtureKind {
