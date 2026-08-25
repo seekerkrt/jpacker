@@ -5,8 +5,40 @@ set -eu
 repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
 cmake_command=${1:-cmake}
 test_root=$(mktemp -d)
+root_compile_commands=$repo_root/compile_commands.json
+compile_commands_publisher=$repo_root/cmake/MoguetPublishCompileCommands.cmake
+root_compile_commands_state=absent
+root_compile_commands_backup=$test_root/root-compile-commands.backup
+root_compile_commands_target=
+
+if [ -L "$root_compile_commands" ]; then
+    root_compile_commands_state=symlink
+    root_compile_commands_target=$(readlink "$root_compile_commands")
+elif [ -f "$root_compile_commands" ]; then
+    root_compile_commands_state=file
+    cp "$root_compile_commands" "$root_compile_commands_backup"
+elif [ -e "$root_compile_commands" ]; then
+    printf '%s\n' \
+        'cmake-frontend-contract-test: repository compile_commands.json is neither a file nor a symlink' >&2
+    exit 1
+fi
 
 cleanup() {
+    if [ -d "$root_compile_commands" ] && [ ! -L "$root_compile_commands" ]; then
+        rmdir "$root_compile_commands" 2>/dev/null || true
+    else
+        rm -f "$root_compile_commands"
+    fi
+    case $root_compile_commands_state in
+        symlink)
+            ln -s "$root_compile_commands_target" "$root_compile_commands"
+            ;;
+        file)
+            cp "$root_compile_commands_backup" "$root_compile_commands"
+            ;;
+        absent)
+            ;;
+    esac
     rm -rf "$test_root"
 }
 trap cleanup EXIT INT TERM
@@ -44,6 +76,49 @@ assert_not_contains() {
     if grep -F -- "$unexpected_text" "$inspected_file" >/dev/null; then
         fail "$inspected_file unexpectedly contains: $unexpected_text"
     fi
+}
+
+assert_compile_commands_link() {
+    expected_tree=$1
+    [ -L "$root_compile_commands" ] ||
+        fail 'repository compile_commands.json is not a symbolic link'
+    expected_compile_commands=$(readlink -f "$expected_tree/compile_commands.json")
+    actual_compile_commands=$(readlink -f "$root_compile_commands")
+    [ "$actual_compile_commands" = "$expected_compile_commands" ] ||
+        fail "repository compile database resolves to $actual_compile_commands; expected $expected_compile_commands"
+}
+
+assert_compile_commands_absent() {
+    if [ -e "$root_compile_commands" ] || [ -L "$root_compile_commands" ]; then
+        fail 'repository compile_commands.json was published by a failed configure'
+    fi
+}
+
+publish_compile_commands() {
+    publish_tree=$1
+    "$cmake_command" \
+        "-DMOGUET_COMPILE_COMMANDS_BUILD_DIR=$publish_tree" \
+        -P "$compile_commands_publisher"
+}
+
+configure_developer_tree() {
+    developer_build_tree=$1
+    shift
+    "$cmake_command" -S "$repo_root" -B "$developer_build_tree" "$@" ||
+        return $?
+    publish_compile_commands "$developer_build_tree"
+}
+
+run_dev_preset_frontend() {
+    preset_build_tree=$1
+    preset_configure_args=${2:-}
+    env -u MAKEFLAGS -u MFLAGS \
+        make -C "$repo_root" -f "$repo_root/Makefile" \
+            --no-print-directory \
+            "CMAKE=$cmake_command" \
+            "CMAKE_CTEST_BUILD_DIR=$preset_build_tree" \
+            "CMAKE_DEV_CONFIGURE_ARGS=$preset_configure_args" \
+            cmake-dev-configure
 }
 
 launcher_a=$test_root/launcher-a
@@ -124,6 +199,216 @@ env -u CPPFLAGS -u CXXFLAGS -u LDFLAGS -u CCACHE \
 assert_cache_value \
     "$plain_tree/CMakeCache.txt" MOGUET_ENABLE_DEFAULT_COMPILE_OPTIONS ON
 assert_contains "$plain_tree/compile_commands.json" '-O2 -pipe'
+
+# The developer compile-database bridge is opt-in, requires database
+# generation, overwrites only the exact generated root artifact, and follows
+# the currently configured tree across reconfigure and tree recreation.
+invalid_developer_tree=$test_root/invalid-developer-link
+if configure_developer_tree "$invalid_developer_tree" \
+    -DBUILD_TESTING=OFF \
+    -DMOGUET_DEVELOPER_COMPILE_COMMANDS_LINK=ON
+then
+    fail 'developer compile database link accepted export disabled'
+fi
+
+developer_tree=$test_root/developer
+rm -f "$root_compile_commands"
+assert_compile_commands_absent
+configure_developer_tree "$developer_tree" \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DMOGUET_DEVELOPER_COMPILE_COMMANDS_LINK=ON
+assert_compile_commands_link "$developer_tree"
+
+# A failure after project() and dependency discovery must retain the previous
+# valid publication. The same failure on a first configure must publish
+# nothing, including no dangling symlink.
+failed_developer_tree=$test_root/failed-developer
+if configure_developer_tree "$failed_developer_tree" \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DMOGUET_DEVELOPER_COMPILE_COMMANDS_LINK=ON \
+    -DMOGUET_LOCALE_DIRECTORY=relative
+then
+    fail 'post-project developer configure failure injection succeeded'
+fi
+assert_compile_commands_link "$developer_tree"
+
+rm -f "$root_compile_commands"
+failed_first_tree=$test_root/failed-first-developer
+if configure_developer_tree "$failed_first_tree" \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DMOGUET_DEVELOPER_COMPILE_COMMANDS_LINK=ON \
+    -DMOGUET_LOCALE_DIRECTORY=relative
+then
+    fail 'first post-project developer configure failure injection succeeded'
+fi
+assert_compile_commands_absent
+
+configure_developer_tree "$developer_tree" \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DMOGUET_DEVELOPER_COMPILE_COMMANDS_LINK=ON
+assert_compile_commands_link "$developer_tree"
+
+# CMAKE_PROJECT_INCLUDE injects a generator expression whose target does not
+# exist. Configuration reaches "Configuring done", but generation fails. The
+# post-success frontend must therefore preserve the previous publication.
+generation_failure_include=$test_root/generation-failure.cmake
+printf '%s\n' \
+    'add_custom_target(' \
+    '    moguet-generation-failure ALL' \
+    '    COMMAND' \
+    '        "${CMAKE_COMMAND}" -E echo' \
+    '        "$<TARGET_PROPERTY:moguet-generation-missing-target,NAME>"' \
+    ')' \
+    > "$generation_failure_include"
+
+failed_generation_tree=$test_root/failed-generation-developer
+failed_generation_log=$test_root/failed-generation-developer.log
+if configure_developer_tree "$failed_generation_tree" \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DMOGUET_DEVELOPER_COMPILE_COMMANDS_LINK=ON \
+    "-DCMAKE_PROJECT_INCLUDE=$generation_failure_include" \
+    > "$failed_generation_log" 2>&1
+then
+    fail 'generation-phase developer failure injection succeeded'
+fi
+assert_contains "$failed_generation_log" 'Configuring done'
+assert_contains "$failed_generation_log" 'CMake Generate step failed'
+assert_compile_commands_link "$developer_tree"
+
+rm -f "$root_compile_commands"
+failed_generation_first_tree=$test_root/failed-generation-first-developer
+failed_generation_first_log=$test_root/failed-generation-first-developer.log
+if configure_developer_tree "$failed_generation_first_tree" \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DMOGUET_DEVELOPER_COMPILE_COMMANDS_LINK=ON \
+    "-DCMAKE_PROJECT_INCLUDE=$generation_failure_include" \
+    > "$failed_generation_first_log" 2>&1
+then
+    fail 'first generation-phase developer failure injection succeeded'
+fi
+assert_contains "$failed_generation_first_log" 'Configuring done'
+assert_contains "$failed_generation_first_log" 'CMake Generate step failed'
+assert_compile_commands_absent
+
+configure_developer_tree "$developer_tree" \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DMOGUET_DEVELOPER_COMPILE_COMMANDS_LINK=ON
+assert_compile_commands_link "$developer_tree"
+
+rm -f "$root_compile_commands"
+printf '%s\n' 'stale generated compile database' > "$root_compile_commands"
+configure_developer_tree "$developer_tree" \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DMOGUET_DEVELOPER_COMPILE_COMMANDS_LINK=ON
+assert_compile_commands_link "$developer_tree"
+
+rm -f "$root_compile_commands"
+ln -s "$test_root/missing-compile-database" "$root_compile_commands"
+configure_developer_tree "$developer_tree" \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DMOGUET_DEVELOPER_COMPILE_COMMANDS_LINK=ON
+assert_compile_commands_link "$developer_tree"
+
+rm -f "$root_compile_commands"
+mkdir "$root_compile_commands"
+if configure_developer_tree "$developer_tree" \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DMOGUET_DEVELOPER_COMPILE_COMMANDS_LINK=ON
+then
+    fail 'developer compile database publication replaced a directory'
+fi
+[ -d "$root_compile_commands" ] ||
+    fail 'failed publication removed the unexpected compile database directory'
+rmdir "$root_compile_commands"
+configure_developer_tree "$developer_tree" \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DMOGUET_DEVELOPER_COMPILE_COMMANDS_LINK=ON
+assert_compile_commands_link "$developer_tree"
+
+rm -rf "$developer_tree"
+configure_developer_tree "$developer_tree" \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DMOGUET_DEVELOPER_COMPILE_COMMANDS_LINK=ON
+assert_compile_commands_link "$developer_tree"
+
+# Presets were introduced in CMake 3.19. The project itself remains directly
+# configurable with its declared CMake 3.18 minimum; newer hosts additionally
+# exercise the tracked dev-debug workflow.
+cmake_version=$("$cmake_command" --version | sed -n '1s/^[^0-9]*\([0-9][0-9.]*\).*$/\1/p')
+cmake_major=${cmake_version%%.*}
+cmake_minor_patch=${cmake_version#*.}
+cmake_minor=${cmake_minor_patch%%.*}
+if [ "$cmake_major" -gt 3 ] || \
+    { [ "$cmake_major" -eq 3 ] && [ "$cmake_minor" -ge 19 ]; }
+then
+    preset_tree=$test_root/preset-developer
+    preset_failure_tree=$test_root/preset-failure
+    preset_first_failure_tree=$test_root/preset-first-failure
+    raw_preset_tree=$test_root/raw-preset-developer
+    if run_dev_preset_frontend \
+        "$preset_failure_tree" \
+        -DMOGUET_LOCALE_DIRECTORY=relative
+    then
+        fail 'dev-debug preset failure injection succeeded'
+    fi
+    assert_compile_commands_link "$developer_tree"
+
+    rm -f "$root_compile_commands"
+    if run_dev_preset_frontend \
+        "$preset_first_failure_tree" \
+        -DMOGUET_LOCALE_DIRECTORY=relative
+    then
+        fail 'first dev-debug preset failure injection succeeded'
+    fi
+    assert_compile_commands_absent
+
+    # Raw preset invocation remains configure-only. It must not bypass the
+    # documented frontend's post-process-success publication boundary.
+    ln -s "$developer_tree/compile_commands.json" "$root_compile_commands"
+    (
+        cd "$repo_root"
+        "$cmake_command" --preset dev-debug -B "$raw_preset_tree"
+    )
+    assert_compile_commands_link "$developer_tree"
+
+    run_dev_preset_frontend "$preset_tree"
+    assert_cache_value "$preset_tree/CMakeCache.txt" BUILD_TESTING TRUE
+    assert_cache_value "$preset_tree/CMakeCache.txt" CMAKE_BUILD_TYPE Debug
+    assert_cache_value \
+        "$preset_tree/CMakeCache.txt" \
+        CMAKE_CXX_COMPILER \
+        "$(command -v g++)"
+    assert_cache_value \
+        "$preset_tree/CMakeCache.txt" CMAKE_EXPORT_COMPILE_COMMANDS TRUE
+    assert_cache_value \
+        "$preset_tree/CMakeCache.txt" \
+        MOGUET_DEVELOPER_COMPILE_COMMANDS_LINK \
+        TRUE
+    assert_compile_commands_link "$preset_tree"
+
+    rm -f "$root_compile_commands"
+    ln -s "$developer_tree/compile_commands.json" "$root_compile_commands"
+    run_dev_preset_frontend "$preset_tree"
+    assert_compile_commands_link "$preset_tree"
+else
+    printf '%s\n' \
+        "cmake-frontend-contract-test: dev-debug preset NOT RUN (CMake $cmake_version lacks preset support)"
+fi
+
+printf '%s\n' \
+    'cmake-frontend-contract-test: compile database success/failure publication checks passed'
 
 run_compiler_preflight() {
     preflight_tree=$1
@@ -328,6 +613,49 @@ assert_synced_configuration "$production_tree" OFF ''
 assert_synced_configuration "$testing_tree" ON ''
 assert_synced_configuration "$package_tree" OFF None
 
+# A multiword CXX initializes CMake's executable and immutable ARG1 fields as
+# one compiler identity. Reuse accepts equivalent executable spellings with
+# the same required argument and rejects argument changes before configure.
+multiword_tree=$test_root/multiword-compiler
+configure_synced_tree \
+    "$multiword_tree" OFF '' '' '' '' '' 'g++ -m64'
+assert_cache_value \
+    "$multiword_tree/CMakeCache.txt" \
+    CMAKE_CXX_COMPILER \
+    "$(command -v g++)"
+assert_cache_value \
+    "$multiword_tree/CMakeCache.txt" CMAKE_CXX_COMPILER_ARG1 ' -m64'
+assert_synced_configuration "$multiword_tree" OFF ''
+# The first reuse may stabilize unrelated find-package INTERNAL cache entries;
+# assert the compiler identity fields rather than requiring whole-cache byte
+# equality for that warm reconfigure.
+configure_synced_tree \
+    "$multiword_tree" OFF '' '' '' '' '' 'g++ -m64'
+assert_cache_value \
+    "$multiword_tree/CMakeCache.txt" \
+    CMAKE_CXX_COMPILER \
+    "$(command -v g++)"
+assert_cache_value \
+    "$multiword_tree/CMakeCache.txt" CMAKE_CXX_COMPILER_ARG1 ' -m64'
+reconfigure_with_equivalent_compiler \
+    "$multiword_tree" OFF '' '/usr/bin/g++ -m64' multiword-spelling
+
+multiword_cache=$multiword_tree/CMakeCache.txt
+for multiword_case in changed removed
+do
+    case $multiword_case in
+        changed) changed_multiword_cxx='g++ -m32' ;;
+        removed) changed_multiword_cxx='g++' ;;
+    esac
+    multiword_snapshot=$test_root/multiword-$multiword_case.before
+    cp "$multiword_cache" "$multiword_snapshot"
+    if run_compiler_preflight "$multiword_tree" "$changed_multiword_cxx"; then
+        fail "required compiler argument change unexpectedly succeeded: $changed_multiword_cxx"
+    fi
+    cmp -s "$multiword_snapshot" "$multiword_cache" ||
+        fail "required compiler argument rejection mutated $multiword_cache"
+done
+
 # Equivalent compiler spellings must pass the complete preflight + configure
 # path without changing CMake's cached spelling or any frontend invariant.
 compiler_alias=$test_root/compiler-alias
@@ -371,5 +699,146 @@ if command -v clang++ >/dev/null 2>&1; then
         fail 'clang++ to g++ compiler mismatch unexpectedly succeeded'
     fi
 fi
+
+# The canonical completion write frontend must build the CMake exporter first.
+# Exercise it in an isolated minimal source tree so an authority edit can make
+# the already-built exporter stale without touching the working repository.
+completion_fixture=$test_root/completion-freshness
+completion_baseline=$test_root/completion-baseline
+mkdir -p \
+    "$completion_fixture/cmake" \
+    "$completion_fixture/source" \
+    "$completion_fixture/scripts" \
+    "$completion_fixture/completions/descriptions" \
+    "$completion_baseline"
+cp \
+    "$repo_root/cmake/MoguetCompilerPreflight.cmake" \
+    "$completion_fixture/cmake/MoguetCompilerPreflight.cmake"
+cp \
+    "$repo_root/cmake/MoguetGenerateCompletions.cmake" \
+    "$repo_root/cmake/MoguetPublishCompileCommands.cmake" \
+    "$completion_fixture/cmake/"
+cp \
+    "$repo_root/scripts/export_cli_authority.cpp" \
+    "$repo_root/scripts/generate_completions.py" \
+    "$completion_fixture/scripts/"
+cp \
+    "$repo_root/source/cli_authority.hpp" \
+    "$repo_root/source/cli_public_projection.cpp" \
+    "$repo_root/source/cli_public_projection.hpp" \
+    "$completion_fixture/source/"
+cp \
+    "$repo_root/completions/descriptions/en.json" \
+    "$completion_fixture/completions/descriptions/en.json"
+printf '%s\n' \
+    'cmake_minimum_required(VERSION 3.18)' \
+    'project(MoguetCompletionFreshness LANGUAGES CXX)' \
+    'option(MOGUET_DEVELOPER_COMPILE_COMMANDS_LINK "" OFF)' \
+    'add_executable(' \
+    '    moguet-cli-authority-exporter' \
+    '    EXCLUDE_FROM_ALL' \
+    '    scripts/export_cli_authority.cpp' \
+    '    source/cli_public_projection.cpp' \
+    ')' \
+    'set_target_properties(' \
+    '    moguet-cli-authority-exporter' \
+    '    PROPERTIES' \
+    '        CXX_STANDARD 20' \
+    '        CXX_STANDARD_REQUIRED YES' \
+    '        CXX_EXTENSIONS NO' \
+    ')' \
+    'target_include_directories(' \
+    '    moguet-cli-authority-exporter' \
+    '    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/source"' \
+    ')' \
+    'add_custom_target(' \
+    '    moguet-generate-completions' \
+    '    COMMAND' \
+    '        "${CMAKE_COMMAND}"' \
+    '        "-DMOGUET_COMPLETION_PYTHON=python3"' \
+    '        "-DMOGUET_COMPLETION_GENERATOR=${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_completions.py"' \
+    '        "-DMOGUET_COMPLETION_EXPORTER=$<TARGET_FILE:moguet-cli-authority-exporter>"' \
+    '        "-DMOGUET_COMPLETION_OUTPUT_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}/completions"' \
+    '        -P' \
+    '        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/MoguetGenerateCompletions.cmake"' \
+    '    VERBATIM' \
+    ')' \
+    'add_dependencies(' \
+    '    moguet-generate-completions' \
+    '    moguet-cli-authority-exporter' \
+    ')' \
+    > "$completion_fixture/CMakeLists.txt"
+
+(
+    cd "$completion_fixture"
+    env -u MAKEFLAGS -u MFLAGS \
+        make -f "$repo_root/Makefile" \
+            CXX='g++ -m64' generate-completions
+)
+completion_exporter=$completion_fixture/build/cmake-testing/moguet-cli-authority-exporter
+completion_exporter_before=$test_root/completion-exporter.before
+cp "$completion_exporter" "$completion_exporter_before"
+completion_outputs='moguet.bash _moguet moguet.fish'
+for completion_output in $completion_outputs
+do
+    cp \
+        "$completion_fixture/completions/$completion_output" \
+        "$completion_baseline/$completion_output"
+done
+
+completion_authority=$completion_fixture/source/cli_public_projection.cpp
+awk '
+    $0 == "        OperationId::Build," {
+        print "        OperationId::Upgrade,"
+        next
+    }
+    $0 == "        OperationId::Upgrade," {
+        print "        OperationId::Build,"
+        next
+    }
+    { print }
+' "$completion_authority" > "$completion_authority.next"
+mv "$completion_authority.next" "$completion_authority"
+
+# A caller-controlled marker cannot grant tracked write authority. Python has
+# no write mode and must leave all three last-generated files unchanged.
+if MOGUET_CLI_AUTHORITY_EXPORTER=$completion_exporter \
+    MOGUET_COMPLETION_WRITE_FRONTEND=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+        python3 "$completion_fixture/scripts/generate_completions.py"
+then
+    fail 'direct completion write mode accepted a potentially stale exporter'
+fi
+for completion_output in $completion_outputs
+do
+    cmp -s \
+        "$completion_baseline/$completion_output" \
+        "$completion_fixture/completions/$completion_output" ||
+        fail "stale exporter unexpectedly changed $completion_output"
+done
+
+(
+    cd "$completion_fixture"
+    env -u MAKEFLAGS -u MFLAGS \
+        make -f "$repo_root/Makefile" \
+            CXX='g++ -m64' generate-completions
+)
+cmp -s "$completion_exporter_before" "$completion_exporter" &&
+    fail 'canonical completion write frontend did not rebuild the stale exporter'
+for completion_output in $completion_outputs
+do
+    if cmp -s \
+        "$completion_baseline/$completion_output" \
+        "$completion_fixture/completions/$completion_output"
+    then
+        fail "rebuilt completion exporter did not update $completion_output"
+    fi
+done
+MOGUET_CLI_AUTHORITY_EXPORTER=$completion_exporter \
+PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$completion_fixture/scripts/generate_completions.py" --check
+
+printf '%s\n' \
+    'cmake-frontend-contract-test: completion marker bypass and canonical rebuild checks passed'
 
 printf 'cmake-frontend-contract-test: all checks passed\n'

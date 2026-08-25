@@ -92,6 +92,6 @@ On the audited Arch system, the Moguet ELF had direct `DT_NEEDED` entries for `l
 
 - The Moguet source tree contains no vendored third-party library source, library archive, shared library binary, or third-party test fixture.
 - libalpm and libcurl are obtained as dynamic dependencies from Arch system packages. nlohmann-json and toml++ are obtained as system build dependencies.
-- For Moguet v2.0.0 and later, `make install` is the single owner of the audited license and notice layout used by the Arch `PKGBUILD`. The current `PKGBUILD` describes only Moguet and does not evaluate historical jpacker versions or provide a legacy license-file fallback.
+- For Moguet v2.0.0 and later, the CMake install graph is the authority for the audited license and notice layout. `make install` is a frontend to that graph, and the Arch `PKGBUILD` consumes it directly through `cmake --install`. The current `PKGBUILD` describes only Moguet and does not evaluate historical jpacker versions or provide a legacy license-file fallback.
 - External program license texts are not duplicated because no copy of those programs is distributed with Moguet.
 - Vendoring, static linking, binary bundling, a new linked/compiled dependency, a different nlohmann-json or toml++ header form, or a project-built binary distribution requires a fresh notice and source-availability audit.

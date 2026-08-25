@@ -54,12 +54,69 @@ string(
     "${_moguet_compiler_cache_entry}"
 )
 
+file(
+    STRINGS
+    "${_moguet_cache_file}"
+    _moguet_compiler_arg1_cache_entries
+    REGEX "^CMAKE_CXX_COMPILER_ARG1:[^=]*="
+)
+list(
+    LENGTH
+    _moguet_compiler_arg1_cache_entries
+    _moguet_compiler_arg1_entry_count
+)
+if(_moguet_compiler_arg1_entry_count GREATER 1)
+    message(
+        FATAL_ERROR
+        "CMake cache has ambiguous required C++ compiler arguments: "
+        "${_moguet_cache_file}"
+    )
+endif()
+
+set(_moguet_configured_cxx_arg1 "")
+if(_moguet_compiler_arg1_entry_count EQUAL 1)
+    list(
+        GET
+        _moguet_compiler_arg1_cache_entries
+        0
+        _moguet_compiler_arg1_cache_entry
+    )
+    string(
+        REGEX REPLACE
+        "^[^=]*="
+        ""
+        _moguet_configured_cxx_arg1
+        "${_moguet_compiler_arg1_cache_entry}"
+    )
+endif()
+
+# CMake treats the first shell word in CXX as the compiler executable and the
+# remaining words as immutable required arguments recorded in
+# CMAKE_CXX_COMPILER_ARG1. Parse the requested spelling the same way before
+# comparing it with a persistent tree.
+separate_arguments(
+    _moguet_requested_cxx_command
+    UNIX_COMMAND
+    "${MOGUET_REQUESTED_CXX}"
+)
+if(NOT _moguet_requested_cxx_command)
+    message(FATAL_ERROR "requested C++ compiler is empty")
+endif()
+list(GET _moguet_requested_cxx_command 0 _moguet_requested_cxx)
+list(REMOVE_AT _moguet_requested_cxx_command 0)
+set(_moguet_requested_cxx_arguments "${_moguet_requested_cxx_command}")
+
+separate_arguments(
+    _moguet_configured_cxx_arguments
+    UNIX_COMMAND
+    "${_moguet_configured_cxx_arg1}"
+)
+
 function(_moguet_resolve_compiler output_variable label compiler_value)
-    set(_moguet_compiler_command ${compiler_value})
-    if(NOT _moguet_compiler_command)
+    if("${compiler_value}" STREQUAL "")
         message(FATAL_ERROR "${label} C++ compiler is empty")
     endif()
-    list(GET _moguet_compiler_command 0 _moguet_compiler_executable)
+    set(_moguet_compiler_executable "${compiler_value}")
 
     if(IS_ABSOLUTE "${_moguet_compiler_executable}")
         set(_moguet_compiler_path "${_moguet_compiler_executable}")
@@ -103,7 +160,7 @@ _moguet_resolve_compiler(
 _moguet_resolve_compiler(
     _moguet_requested_cxx_realpath
     "requested"
-    "${MOGUET_REQUESTED_CXX}"
+    "${_moguet_requested_cxx}"
 )
 
 if(
@@ -117,5 +174,20 @@ if(
         "requested: ${_moguet_requested_cxx_realpath}. Remove and recreate "
         "this build directory explicitly before changing compilers; Moguet "
         "will not delete it automatically."
+    )
+endif()
+
+if(
+    NOT "${_moguet_configured_cxx_arguments}" STREQUAL
+        "${_moguet_requested_cxx_arguments}"
+)
+    message(
+        FATAL_ERROR
+        "Refusing to reuse ${_moguet_build_directory} with different "
+        "required C++ compiler arguments. Configured: "
+        "'${_moguet_configured_cxx_arg1}'; requested: "
+        "'${_moguet_requested_cxx_arguments}'. Remove and recreate this "
+        "build directory explicitly before changing required compiler "
+        "arguments; Moguet will not delete it automatically."
     )
 endif()

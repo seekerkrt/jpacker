@@ -17,6 +17,33 @@ endif()
 unset(MOGUET_SYNC_EXTERNAL_BUILD_INPUTS CACHE)
 unset(MOGUET_SYNC_EXTERNAL_BUILD_INPUTS)
 
+# Make can distinguish an undefined CXXFLAGS from an explicitly empty value.
+# Keep that frontend-only distinction invocation-scoped and let CMake remain
+# the sole owner of the actual default compile options.
+set(_moguet_frontend_use_default_compile_options OFF)
+if(DEFINED MOGUET_FRONTEND_USE_DEFAULT_COMPILE_OPTIONS)
+    if("${MOGUET_FRONTEND_USE_DEFAULT_COMPILE_OPTIONS}" STREQUAL "ON")
+        set(_moguet_frontend_use_default_compile_options ON)
+    elseif(NOT "${MOGUET_FRONTEND_USE_DEFAULT_COMPILE_OPTIONS}" STREQUAL "OFF")
+        message(
+            FATAL_ERROR
+            "MOGUET_FRONTEND_USE_DEFAULT_COMPILE_OPTIONS must be ON or OFF"
+        )
+    endif()
+endif()
+unset(MOGUET_FRONTEND_USE_DEFAULT_COMPILE_OPTIONS CACHE)
+unset(MOGUET_FRONTEND_USE_DEFAULT_COMPILE_OPTIONS)
+if(
+    _moguet_frontend_use_default_compile_options
+    AND NOT _moguet_sync_external_build_inputs
+)
+    message(
+        FATAL_ERROR
+        "MOGUET_FRONTEND_USE_DEFAULT_COMPILE_OPTIONS requires "
+        "MOGUET_SYNC_EXTERNAL_BUILD_INPUTS=ON"
+    )
+endif()
+
 if(_moguet_sync_external_build_inputs)
     foreach(
         _moguet_external_build_input
@@ -33,15 +60,30 @@ if(_moguet_sync_external_build_inputs)
     endforeach()
 endif()
 
-# GNU Make's `CXXFLAGS ?= -O2 -pipe` applies the defaults only when the
-# caller did not define CXXFLAGS at all. Record that distinction before
-# project() initializes CMAKE_CXX_FLAGS, including an explicitly empty value.
+# Plain direct CMake uses the project defaults only when the caller did not
+# define CXXFLAGS or CMAKE_CXX_FLAGS. Record that distinction before project()
+# initializes CMAKE_CXX_FLAGS, including an explicitly empty value.
 set(_moguet_cxxflags_defined_before_project OFF)
 if(DEFINED ENV{CXXFLAGS} OR DEFINED CACHE{CMAKE_CXX_FLAGS})
     set(_moguet_cxxflags_defined_before_project ON)
 endif()
 
 project(Moguet LANGUAGES CXX)
+
+option(
+    MOGUET_DEVELOPER_COMPILE_COMMANDS_LINK
+    "Request post-success compile database publication by a supported frontend"
+    OFF
+)
+if(MOGUET_DEVELOPER_COMPILE_COMMANDS_LINK)
+    if(NOT CMAKE_EXPORT_COMPILE_COMMANDS)
+        message(
+            FATAL_ERROR
+            "MOGUET_DEVELOPER_COMPILE_COMMANDS_LINK requires "
+            "CMAKE_EXPORT_COMPILE_COMMANDS=ON"
+        )
+    endif()
+endif()
 
 # CMake uses CXXFLAGS and LDFLAGS only to initialize a new cache.  The Make
 # and PKGBUILD frontends explicitly opt into current-invocation synchronization
@@ -336,11 +378,13 @@ if(NOT _moguet_cppflag_option_group STREQUAL "")
 endif()
 
 if(_moguet_sync_external_build_inputs)
-    # An explicitly synchronized empty CXXFLAGS retains the Make/package
-    # contract: it suppresses the plain direct-CMake -O2/-pipe defaults.
+    # Make communicates whether its synchronized empty CXXFLAGS was undefined
+    # (use CMake's defaults) or explicitly empty (suppress those defaults).
+    # Other synchronized frontends retain the explicit-empty behavior unless
+    # they opt in to the same invocation-scoped distinction.
     set(
         MOGUET_ENABLE_DEFAULT_COMPILE_OPTIONS
-        OFF
+        "${_moguet_frontend_use_default_compile_options}"
         CACHE BOOL
         "Use Moguet's -O2 and -pipe defaults for a plain developer build"
         FORCE
@@ -583,6 +627,55 @@ target_link_libraries(
         PkgConfig::ALPM
 )
 add_dependencies(moguet moguet_catalogs)
+
+# Completion generation consumes a small C++ projection helper.  Keep its
+# compile/link graph in CMake and exclude it from ordinary production/package
+# builds; repository validation requests the target explicitly.
+add_executable(
+    moguet-cli-authority-exporter
+    EXCLUDE_FROM_ALL
+    scripts/export_cli_authority.cpp
+    source/cli_public_projection.cpp
+)
+set_target_properties(
+    moguet-cli-authority-exporter
+    PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED YES
+        CXX_EXTENSIONS NO
+)
+target_link_libraries(
+    moguet-cli-authority-exporter
+    PRIVATE
+        moguet_external_cppflags
+        moguet_build_contract
+)
+target_include_directories(
+    moguet-cli-authority-exporter
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/source"
+)
+
+# Tracked completion writes stay behind the CMake dependency graph.  The
+# Python process only renders to stdout; this target publishes its output
+# after CMake has brought the exporter up to date for the current sources.
+add_custom_target(
+    moguet-generate-completions
+    COMMAND
+        "${CMAKE_COMMAND}"
+        "-DMOGUET_COMPLETION_PYTHON=python3"
+        "-DMOGUET_COMPLETION_GENERATOR=${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_completions.py"
+        "-DMOGUET_COMPLETION_EXPORTER=$<TARGET_FILE:moguet-cli-authority-exporter>"
+        "-DMOGUET_COMPLETION_OUTPUT_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}/completions"
+        -P
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/MoguetGenerateCompletions.cmake"
+    COMMENT "Generating tracked shell completions from current CLI authority"
+    USES_TERMINAL
+    VERBATIM
+)
+add_dependencies(
+    moguet-generate-completions
+    moguet-cli-authority-exporter
+)
 
 install(TARGETS moguet RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 foreach(_moguet_locale _moguet_catalog_file IN ZIP_LISTS MOGUET_LINGUAS MOGUET_CATALOG_FILES)

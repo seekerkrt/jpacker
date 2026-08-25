@@ -196,6 +196,8 @@ and adopted design decisions are recorded in
 - An Arch build environment with `base-devel` preinstalled; its current
   members provide the C++ toolchain, `pkgconf`, and GNU gettext development
   tools
+- `cmake` 3.18 or later; the optional tracked developer preset requires 3.19
+  or later
 - `pacman`, `pacman-conf`, and libalpm development metadata
 - `git`
 - `curl`
@@ -211,6 +213,36 @@ make
 ./moguet --help
 ```
 
+CMake is the authority for C++ build and install targets, CTest is the
+authority for C++ test registration and execution, and the root `Makefile`
+keeps the familiar developer shortcuts plus repository-specific validation.
+Plain `make` uses `build/cmake-production` with `BUILD_TESTING=OFF`; `make
+test` uses `build/cmake-testing` with `BUILD_TESTING=ON`, runs CTest, and then
+runs the repository validation layer. Existing focused entries remain
+available as `make test-<area>`.
+
+For a repeatable debug/editor configuration, use the tracked developer
+preset through its post-success frontend:
+
+```bash
+make cmake-dev-configure
+cmake --build build/cmake-testing
+ctest --test-dir build/cmake-testing --output-on-failure
+```
+
+This preset enables `BUILD_TESTING=ON`, a Debug build, and
+`CMAKE_EXPORT_COMPILE_COMMANDS=ON`. It exposes that tree's database through
+the generated repository-root `compile_commands.json` symlink for clangd and
+other editor or analysis tools. `make cmake-dev-configure` runs `cmake
+--preset dev-debug` and publishes the link only after the complete configure
+and generate process exits successfully. A failed configure or generate
+preserves the previous valid publication and publishes nothing on a first
+failure. Raw `cmake --preset dev-debug` remains a configure-only CMake entry
+and does not publish the root link. `make clean` removes both wrapper-owned
+build trees and the root link. CMake Presets require CMake 3.19 or later. The
+project remains directly configurable with its declared CMake 3.18 minimum
+when the optional preset CLI is not used.
+
 For a packaging-safe dry run, stage the payload outside the live filesystem:
 
 ```bash
@@ -218,6 +250,11 @@ stage_dir=$(mktemp -d)
 make PREFIX=/usr DESTDIR="$stage_dir" install
 find "$stage_dir" -type f -print
 ```
+
+`make install` and `make uninstall` are frontends to the canonical CMake
+install graph and its exact `install_manifest.txt`; the destination overrides
+shown above are mapped into that graph rather than implemented by a separate
+Make install recipe.
 
 The v2.0.0 package and its only executable are named `moguet`; it does not
 install `/usr/bin/jpacker`. Its payload is disjoint from the jpacker v1.16.0
@@ -230,7 +267,7 @@ creates or owns neither user XDG data nor the legacy directory.
 
 The package runtime dependencies are `curl`, `git`, `libalpm.so`, `libarchive`,
 `nano`, `pacman`, and `sudo`. The exact `makedepends` set recorded by the
-package is `nlohmann-json` and `tomlplusplus`. Arch package builds assume
+package is `cmake`, `nlohmann-json`, and `tomlplusplus`. Arch package builds assume
 `base-devel` is preinstalled; its current membership supplies GNU gettext and
 `pkgconf`, so `base-devel`, `gettext`, and `pkgconf` are not listed in
 `makedepends`. `git` remains a runtime dependency and is not duplicated there.
@@ -259,7 +296,10 @@ makepkg -si
 `makepkg -si` builds that tagged release and installs it onto the live
 system with `pacman -U` in the same step. This differs from `make` and
 `./moguet --help` above, which only build and inspect the development tree
-in place and install nothing. This `PKGBUILD` is a repository-provided
+in place and install nothing. The `PKGBUILD` is the canonical production
+CMake build/install consumer and configures `BUILD_TESTING=OFF`; the 94
+developer C++ test executables and 117 CTest registrations remain in host,
+CI, and release validation. This `PKGBUILD` is a repository-provided
 packaging path, not an AUR submission; Moguet still has no published AUR
 page.
 

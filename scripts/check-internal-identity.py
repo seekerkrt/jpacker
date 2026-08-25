@@ -664,7 +664,7 @@ NON_HOOK_UPPERCASE_TOKENS = {
 }
 TEST_INFRASTRUCTURE_TOKEN = re.compile(
     r"_TEST_(?:"
-    r"TARGET|SRCS|SUPPORT_SRCS|CPPFLAGS|LDLIBS|OBJECT_DIR|OBJECTS|"
+    r"TARGETS?|SRCS|SUPPORT_SRCS|CPPFLAGS|LDLIBS|OBJECT_DIR|OBJECTS|"
     r"LINK_OBJECTS|DEPS|COMPILE_SIGNATURE|LINK_SIGNATURE"
     r")$"
 )
@@ -872,6 +872,7 @@ def check_classifier_contract() -> None:
 
     infrastructure_tokens = (
         "OTHER" + "_TEST_TARGET",
+        "OTHER" + "_TEST_TARGETS",
         "OTHER" + "_TEST_SRCS",
         "OTHER" + "_TEST_SUPPORT_SRCS",
         "OTHER" + "_TEST_CPPFLAGS",
@@ -1101,32 +1102,48 @@ def main() -> int:
             )
         )
 
-    makefile = texts.get("Makefile", "")
-    required_test_targets = {
-        "TEST_TARGET": "moguet-test",
-        "ROOT_EXECUTION_IDENTITY_TEST_TARGET": "moguet-root-execution-identity-test",
-        "COMMANDS_INSPECT_TEST_TARGET": "moguet-commands-inspect-test",
-        "AUR_UPDATE_COMMAND_TEST_TARGET": "moguet-aur-update-command-test",
-        "UPGRADE_ALL_COMMAND_TEST_TARGET": "moguet-upgrade-all-command-test",
-        "AUR_RPC_VALIDATION_TEST_TARGET": "moguet-aur-rpc-validation-test",
-        "COMMANDS_SYNC_TEST_TARGET": "moguet-commands-sync-test",
-        "SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET": "moguet-source-install-characterization-test",
-        "APP_CONFIG_INTEGRATION_TEST_TARGET": "moguet-app-config-test",
-        "UPGRADE_BASELINE_METADATA_TEST_TARGET": "moguet-upgrade-baseline-metadata-test",
-    }
-    for variable, basename in required_test_targets.items():
-        assignment_pattern = re.compile(
-            rf"^{re.escape(variable)}\s*:?=.*"
-            rf"(?:build|\$\(BUILD_DIR\))/tests/{re.escape(basename)}$",
-            re.MULTILINE,
+    cmake_test_manifest_path = "cmake/MoguetTestTargets.cmake"
+    cmake_test_manifest = texts.get(cmake_test_manifest_path, "")
+    expected_target_block = re.search(
+        r"set\(\s*MOGUET_EXPECTED_CPP_TEST_TARGETS\s+(.*?)\n\)",
+        cmake_test_manifest,
+        re.DOTALL,
+    )
+    required_test_targets = (
+        "moguet-test",
+        "moguet-root-execution-identity-test",
+        "moguet-commands-inspect-test",
+        "moguet-aur-update-command-test",
+        "moguet-upgrade-all-command-test",
+        "moguet-aur-rpc-validation-test",
+        "moguet-commands-sync-test",
+        "moguet-source-install-characterization-test",
+        "moguet-app-config-test",
+        "moguet-upgrade-baseline-metadata-test",
+    )
+    if expected_target_block is None:
+        findings.append(
+            Finding(
+                "missing-moguet-cmake-test-inventory",
+                cmake_test_manifest_path,
+                0,
+                "MOGUET_EXPECTED_CPP_TEST_TARGETS",
+            )
         )
-        if assignment_pattern.search(makefile) is None:
+    else:
+        expected_target_text = expected_target_block.group(1)
+        for target_name in required_test_targets:
+            target_pattern = re.compile(
+                rf"^\s*{re.escape(target_name)}\s*$", re.MULTILINE
+            )
+            if target_pattern.search(expected_target_text) is not None:
+                continue
             findings.append(
                 Finding(
-                    "missing-moguet-test-target",
-                    "Makefile",
+                    "missing-moguet-cmake-test-target",
+                    cmake_test_manifest_path,
                     0,
-                    f"{variable} -> build/tests/{basename}",
+                    target_name,
                 )
             )
 
