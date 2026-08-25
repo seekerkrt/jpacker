@@ -1,3 +1,181 @@
+# Moguet v2.4.0
+
+This tracked file is the source of truth for release bodies. The English and
+Japanese sections for each release describe the same scope.
+
+## English
+
+Moguet v2.4.0 adds a reviewed-source workflow for AUR updates, an explicit
+export parent for `moguet -G`, and clearer phase-level observations in
+`upgrade-all`. It also completes the shared source-identity foundation and
+repository build-infrastructure work: `source/` avoids the root `makepkg`
+workspace collision, while CMake / CTest now own the C++ build and test graph.
+These changes preserve pacman / makepkg / Git ownership, existing `make`
+developer entrypoints, and fail-closed safety boundaries; reviewed state is
+explicit acknowledgement, not automatic security certification.
+
+### Reviewed AUR source revisions
+
+- Moguet records the last AUR upstream revision explicitly accepted by the
+  user as reviewed state at PackageBase scope. Fetched, reviewed, built, and
+  installed revisions remain distinct, and reviewed state is independent of
+  cache cleanup or recloning.
+- For later updates, the review baseline is the previous reviewed commit to
+  the exact fetched upstream commit, rather than the mutable cache `HEAD`.
+  That pinned source revision is carried through review, safety preflight, and
+  state publication.
+- Review covers tracked repository content rather than a PKGBUILD-only
+  extension whitelist. Added, changed, removed, and renamed content such as
+  `.install` files, patches, service units, helper/config files, and other
+  tracked files remains visible; binary or non-text changes are not treated as
+  no change.
+- Only explicit acceptance after successful review and preflight advances the
+  reviewed state. Fetching, displaying a diff, building, installing,
+  `--nodiff`, non-TTY operation, and `--noconfirm` do not manufacture review
+  acceptance.
+- When no reviewed state exists, including for existing users upgrading to
+  this release, Moguet performs an initial full review from the empty tree to
+  the exact target.
+- If a recorded baseline object is unavailable, or current-schema state is
+  invalid, corrupt, or source-mismatched, Moguet requires an explicit full
+  rebaseline/rebind review rather than falling back to cache `HEAD`.
+- Unsupported future state, unsafe history, store failures, and inconsistent
+  observations fail closed instead of being treated as an empty diff or a
+  reviewed result.
+- This is a review-history and acknowledgement workflow for AUR source. It
+  does not certify that an AUR package is safe or replace the user's review.
+
+### Explicit export destination for `moguet -G`
+
+- Existing `moguet -G <pkg>` behavior remains compatible: without an option,
+  the PackageBase is exported under the command-start current directory.
+- `moguet -G <pkg> --output-dir=DIR` selects an existing export parent for
+  that invocation. The attached `--output-dir=DIR` form is the public syntax;
+  relative paths use the command-start current directory, and the PackageBase
+  remains the direct-child destination.
+- Existing destinations are never replaced. Parent identity, symlink, path
+  containment, and other export safety checks remain fail-closed, and the
+  option is operation-local rather than a persistent or global setting.
+
+### Clearer `upgrade-all` package-state observations
+
+- Aggregate package-state semantics remain unchanged, while normal output now
+  makes the system/source and AUR phase-level observations easier to
+  distinguish alongside the aggregate result.
+- A system/source `Changed` result with an AUR phase that is verified
+  unchanged remains aggregate `Changed`, but is no longer as easy to read as
+  an AUR update. Solver, update, and transaction semantics are unchanged.
+
+### Common source identity foundation
+
+- A shared typed identity model now relates package children, PackageBases,
+  source kind, repository/AUR/local source distinctions, and source revisions
+  without flattening those identities into package names.
+- This foundation is reused by the reviewed-source workflow and later
+  profile/patch work. It does not itself add a public profile or PKGBUILD
+  patch command.
+
+### Repository structure cleanup
+
+- Moguet's production C++ tree moved from `src/` to `source/`, with repository
+  references updated consistently.
+- The structure-only refactor avoids collision with makepkg's root-level
+  `src/` working directory and does not change runtime behavior or public CLI
+  semantics.
+
+### CMake / CTest build infrastructure
+
+- CMake is now canonical for the project-owned C++ compile, link, build, and
+  install graph; CTest owns C++ test registration and execution. The PKGBUILD
+  consumes the canonical CMake build/install path, while repository-specific
+  validation remains with the Make frontend and scripts.
+- The Makefile remains a thin developer shortcut and validation frontend, so
+  the normal `make` workflow is retained. CMake presets and compile-database
+  support provide the developer-facing build tooling.
+- The project CMake minimum remains 3.18; direct configure retains that
+  compatibility, while the tracked `dev-debug` preset requires CMake 3.19+.
+  Ninja is an optional CMake generator, not a mandatory package dependency,
+  and this migration does not change the public CLI contract.
+
+## 日本語
+
+Moguet v2.4.0は、AUR updateのreview済みsource revision workflow、
+`moguet -G`の明示的なexport親directory、`upgrade-all`のphase-level
+observation明確化を追加します。さらに、common source identity foundationと
+repository build infrastructureを整え、root `makepkg` work directoryとの衝突を
+避ける`source/`構成と、C++ build/test graphのCMake / CTest authorityを完成させます。
+pacman / makepkg / Gitのownership、既存の`make` developer entrypoint、fail-closed
+safety boundaryは維持します。review済みstateは明示的なacknowledgementであり、
+自動的なsecurity certificationではありません。
+
+### AUR sourceのreview済みrevision
+
+- 利用者が明示的に受理したAUR upstreamの最後のrevisionを、PackageBase単位の
+  review済みstateとして保持します。fetched、reviewed、built、installedのrevisionは
+  分離され、review済みstateはcache cleanupやrecloneにも依存しません。
+- 後続updateでは、mutableなcache `HEAD`ではなく、前回review済みcommitから今回の
+  exact fetched upstream commitまでをreview baselineとします。このpinned source
+  revisionをreview、安全preflight、state publicationまで一貫して使います。
+- review対象はPKGBUILDだけのextension whitelistではなく、tracked repository
+  content全体です。`.install`、patch、service unit、helper/config fileなどの追加・
+  変更・削除・renameとその他tracked fileを保持し、binary / non-textの変更を変更なし
+  として扱いません。
+- reviewとpreflightが成功した後の明示的なacceptanceだけがreview済みstateを進めます。
+  fetch、diff表示、build、install、`--nodiff`、non-TTY operation、`--noconfirm`から
+  review acceptanceを暗黙に生成しません。
+- review済みstateが存在しない場合は、既存利用者のupgrade後も含め、empty treeから
+  exact targetまでのinitial full reviewを行います。
+- 記録済みbaseline objectが利用不能な場合や、current-schema stateがinvalid / corrupt /
+  source-mismatchedな場合は、cache `HEAD`へfallbackせず明示的なfull rebaseline /
+  rebind reviewを要求します。
+- unsupported future state、unsafe history、store failure、inconsistent observationは、
+  空のdiffやreview済み結果へ丸めずfail-closedで停止します。
+- これはAUR sourceのreview history / acknowledgement workflowです。AUR packageの安全性を
+  certifyするものでも、利用者自身のreviewを置き換えるものでもありません。
+
+### `moguet -G`の明示的なexport先
+
+- 既存の`moguet -G <pkg>` behaviorは互換性を維持します。optionを指定しなければ、
+  PackageBaseをcommand-start current directoryの下へexportします。
+- `moguet -G <pkg> --output-dir=DIR`で、そのinvocationだけの既存export parentを選べます。
+  公開syntaxはattached formの`--output-dir=DIR`で、relative pathはcommand-start current
+  directory基準、PackageBaseは常にdirect-childのdestinationです。
+- existing destinationは置換しません。parent identity、symlink、path containmentなどの
+  export safety checkはfail-closedを維持し、このoptionはpersistent / global settingではなく
+  operation-localです。
+
+### `upgrade-all`のpackage-state observation明確化
+
+- aggregate package-state semanticsは変更せず、normal outputでsystem/sourceとAURの
+  phase-level observationをaggregate resultと並べて区別しやすくします。
+- system/sourceが`Changed`でAUR phaseが変更なしを確認済みの場合もaggregate `Changed`は
+  維持しますが、AUR updateがあったようには読みにくくなります。solver、update、transaction
+  semanticsは変更しません。
+
+### common source identity基盤
+
+- package child、PackageBase、source kind、repository / AUR / local sourceの区別、source
+  revisionの関係を、package nameへflattenしないshared typed identity modelで共通化します。
+- このfoundationはreviewed-source workflowと後続のprofile / patch workで再利用しますが、
+  それ自体でpublic profile commandやPKGBUILD patch commandを追加するものではありません。
+
+### repository structureの整理
+
+- Moguetのproduction C++ treeを`src/`から`source/`へ移し、repository内の参照を一貫して更新しました。
+- structure-onlyのrefactorにより、makepkgがroot levelで使う作業用`src/`との名前衝突を避けます。
+  runtime behaviorやpublic CLI semanticsは変更しません。
+
+### CMake / CTest build infrastructure
+
+- project-ownedなC++ compile、link、build、install graphのcanonical authorityをCMakeへ移し、
+  C++ testのregistration / executionをCTestが所有します。PKGBUILDはcanonicalなCMake
+  build/install pathを利用し、repository固有validationはMake frontendとscriptsに残します。
+- Makefileはthinなdeveloper shortcut / validation frontendとして維持し、通常の`make` workflow
+  を残します。CMake presetとcompile database supportにより、developer向けbuild toolingも整えます。
+- projectのCMake minimumは3.18のままで、direct configureは3.18 compatibilityを維持します。
+  tracked `dev-debug` presetはCMake 3.19+を必要とします。NinjaはoptionalなCMake generatorであり、
+  mandatory package dependencyではありません。このmigrationによるpublic CLI contractの変更もありません。
+
 # Moguet v2.3.2
 
 This tracked file is the source of truth for release bodies. The English and

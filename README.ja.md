@@ -44,11 +44,12 @@ Moguet v2.0.1は、採用済みXDG storage契約のうちsource-preference部分
 preferenceは実行user自身のXDG config contextだけを使い、公開済みv2.0.0のtag、Release、
 release noteは歴史的記録のまま変更しません。
 
-Moguet v2.3.2は最新releaseです。このmaintenance / hotfix releaseでは、制約された
-`RLIMIT_NOFILE`の下でも大規模local source workspace cleanupのfile descriptor使用量を
-boundedに保ち、`upgrade-all`で既に最新のsplit AUR targetが誤って未観測または
-attention-requiredとして表示されないようにします。利用者から見える変更の全体は
-[v2.3.2 release](https://github.com/seekerkrt/moguet/releases/tag/v2.3.2)を参照してください。
+Moguet v2.4.0は最新releaseです。headline featureは、利用者がPackageBase単位で最後に
+明示的に受理したAUR upstream revisionを保持し、そのreview baseline以降のtracked-file変更を
+表示するAUR sourceのreview済みrevision workflowです。さらに`moguet -G <pkg> --output-dir=DIR`、
+`upgrade-all`のphase-level package-state observation明確化、通常の`make` frontendを
+維持したCMake / CTest canonical C++ build/test graphを含みます。利用者から見える変更の
+全体は[v2.4.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.4.0)を参照してください。
 
 canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ちます。Moguet
 packageは`jpacker` command aliasを提供しません。AUR publicationは将来の別判断であり、
