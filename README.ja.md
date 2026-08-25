@@ -517,6 +517,13 @@ $XDG_CONFIG_HOME/moguet/config.toml
 fallback: ~/.config/moguet/config.toml
 ```
 
+repository checkoutではcanonical copyを`sample/config.toml`として参照できます。
+standard Arch packageのinstall後は、同じfileを
+`/usr/share/doc/moguet/examples/config.toml`で参照できます。編集前に
+`$XDG_CONFIG_HOME/moguet/config.toml`へcopyし、`XDG_CONFIG_HOME`が未設定の場合だけ
+上記fallbackを使用してください。enum valueの`prompt`、`skip`、`normal`、`rebuild`、
+`clean`はTOML stringなのでquoteが必要で、canonical sampleではdouble quoteを使用します。
+
 v2.0.0の最小schemaとbuilt-in defaultは次のとおりです。
 
 ```toml

@@ -61,6 +61,7 @@ license_dir=$stage_dir/usr/share/licenses/$PACKAGE_NAME
 doc_dir=$stage_dir/usr/share/doc/$PACKAGE_NAME
 migration_dir=$doc_dir/docs/migration
 licensing_file=$doc_dir/docs/LICENSING.md
+config_sample_file=$doc_dir/examples/config.toml
 
 assert_installed_file() {
     source_file=$1
@@ -236,6 +237,8 @@ assert_package_artifacts_installed() {
     assert_installed_file "$repo_root/README.ja.md" "$doc_dir/README.ja.md"
     assert_installed_file "$repo_root/THIRD_PARTY_NOTICES.md" \
         "$doc_dir/THIRD_PARTY_NOTICES.md"
+    assert_installed_file "$repo_root/sample/config.toml" \
+        "$config_sample_file"
     assert_installed_file "$repo_root/docs/LICENSING.md" \
         "$licensing_file"
     assert_installed_file "$repo_root/docs/migration/v1-to-v2.md" \
@@ -249,6 +252,12 @@ assert_package_artifacts_installed() {
         "/usr/share/licenses/$PACKAGE_NAME/tomlplusplus-MIT.txt"
     assert_installed_text "$doc_dir/THIRD_PARTY_NOTICES.md" \
         "/usr/share/doc/$PACKAGE_NAME/docs/LICENSING.md"
+    assert_installed_text "$doc_dir/README.md" "sample/config.toml"
+    assert_installed_text "$doc_dir/README.md" \
+        "/usr/share/doc/$PACKAGE_NAME/examples/config.toml"
+    assert_installed_text "$doc_dir/README.ja.md" "sample/config.toml"
+    assert_installed_text "$doc_dir/README.ja.md" \
+        "/usr/share/doc/$PACKAGE_NAME/examples/config.toml"
     assert_installed_markdown_links
     assert_no_symlinks
 }
@@ -272,6 +281,7 @@ assert_package_artifacts_absent() {
         "$doc_dir/README.md" \
         "$doc_dir/README.ja.md" \
         "$doc_dir/THIRD_PARTY_NOTICES.md" \
+        "$config_sample_file" \
         "$licensing_file" \
         "$migration_dir/v1-to-v2.md" \
         "$migration_dir/v1-to-v2.ja.md"
@@ -428,6 +438,7 @@ custom_catalog=$custom_stage_dir$custom_localedir/ja/LC_MESSAGES/$GETTEXT_DOMAIN
 custom_license_dir=$custom_stage_dir$custom_licensedir
 custom_doc_dir=$custom_stage_dir$custom_docdir
 custom_migration_dir=$custom_doc_dir/docs/migration
+custom_config_sample=$custom_doc_dir/examples/config.toml
 
 run_custom_make install
 assert_installed_file "$repo_root/$COMMAND_NAME" "$custom_binary" 755
@@ -455,6 +466,8 @@ assert_installed_file "$repo_root/README.md" "$custom_doc_dir/README.md"
 assert_installed_file "$repo_root/README.ja.md" "$custom_doc_dir/README.ja.md"
 assert_installed_file "$repo_root/THIRD_PARTY_NOTICES.md" \
     "$custom_doc_dir/THIRD_PARTY_NOTICES.md"
+assert_installed_file "$repo_root/sample/config.toml" \
+    "$custom_config_sample"
 assert_installed_file "$repo_root/docs/LICENSING.md" \
     "$custom_doc_dir/docs/LICENSING.md"
 assert_installed_file "$repo_root/docs/migration/v1-to-v2.md" \
@@ -491,6 +504,7 @@ for custom_owned_file in \
     "$custom_doc_dir/README.md" \
     "$custom_doc_dir/README.ja.md" \
     "$custom_doc_dir/THIRD_PARTY_NOTICES.md" \
+    "$custom_config_sample" \
     "$custom_doc_dir/docs/LICENSING.md" \
     "$custom_migration_dir/v1-to-v2.md" \
     "$custom_migration_dir/v1-to-v2.ja.md"
