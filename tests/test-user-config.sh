@@ -99,6 +99,141 @@ if [ -s "$output" ]; then
     fail "pure config composition emitted unexpected output"
 fi
 
+canonical_sample=$repo_root/sample/config.toml
+[ -f "$canonical_sample" ] && [ ! -L "$canonical_sample" ] ||
+    fail "canonical config sample must be a regular non-symlink: $canonical_sample"
+
+canonical_sample_expected=$tmp_dir/canonical-sample.expected
+{
+    printf '%s\n' 'schema_version = 1'
+    printf '%s\n' ''
+    printf '%s\n' '[review]'
+    printf '%s\n' 'pkgbuild = "prompt"'
+    printf '%s\n' 'diff = "prompt"'
+    printf '%s\n' ''
+    printf '%s\n' '[build]'
+    printf '%s\n' 'mode = "normal"'
+} > "$canonical_sample_expected"
+
+canonical_sample_matches_expected() {
+    candidate=$1
+    cmp -s "$canonical_sample_expected" "$candidate"
+}
+
+assert_canonical_file_matches() {
+    candidate=$1
+    label=$2
+    if canonical_sample_matches_expected "$candidate"; then
+        return
+    else
+        comparison_status=$?
+    fi
+
+    case $comparison_status in
+        1)
+            diff -u "$canonical_sample_expected" "$candidate" >&2 || :
+            fail "$label differs from expected canonical config"
+            ;;
+        *)
+            fail "$label comparison failed with status $comparison_status"
+            ;;
+    esac
+}
+
+extract_configuration_toml_example() {
+    readme=$1
+    destination=$2
+    if awk '
+        /^<!-- parity:configuration -->[[:space:]]*$/ {
+            in_configuration = 1
+            next
+        }
+        in_configuration && /^<!-- parity:/ {
+            in_configuration = 0
+        }
+        !in_configuration { next }
+        /^```toml[[:space:]]*$/ {
+            if (toml_blocks != 0 || in_toml) exit 2
+            toml_blocks++
+            in_toml = 1
+            next
+        }
+        in_toml && /^```[[:space:]]*$/ {
+            in_toml = 0
+            closed_toml = 1
+            next
+        }
+        in_toml {
+            sub(/[[:space:]]+$/, "")
+            if ($0 == "") {
+                pending_blank_lines++
+                next
+            }
+            while (pending_blank_lines > 0) {
+                print ""
+                pending_blank_lines--
+            }
+            print
+        }
+        END {
+            if (toml_blocks != 1 || in_toml || !closed_toml) exit 2
+        }
+    ' "$readme" > "$destination"; then
+        return
+    else
+        extraction_status=$?
+    fi
+
+    fail "unable to extract one configuration TOML example from $readme: status $extraction_status"
+}
+
+assert_canonical_file_matches "$canonical_sample" \
+    "canonical config sample structure or defaults"
+
+# Optional keys resolve to built-in defaults, so prove the raw completeness
+# oracle rejects their omission independently of the production loader result.
+missing_canonical_key_sample=$tmp_dir/canonical-sample-missing-pkgbuild.toml
+sed '/^pkgbuild = "prompt"$/d' "$canonical_sample" > \
+    "$missing_canonical_key_sample"
+if grep -Fqx -- 'pkgbuild = "prompt"' "$missing_canonical_key_sample"; then
+    fail "canonical sample negative fixture retained review.pkgbuild"
+else
+    missing_key_grep_status=$?
+    case $missing_key_grep_status in
+        1) ;;
+        *)
+            fail "canonical sample negative fixture inspection failed with status $missing_key_grep_status"
+            ;;
+    esac
+fi
+if canonical_sample_matches_expected "$missing_canonical_key_sample"; then
+    fail "canonical sample completeness accepted missing review.pkgbuild"
+else
+    missing_key_comparison_status=$?
+    case $missing_key_comparison_status in
+        1) ;;
+        *)
+            fail "canonical sample negative comparison failed with status $missing_key_comparison_status"
+            ;;
+    esac
+fi
+printf '%s\n' \
+    '  ok: rejected canonical sample missing optional review.pkgbuild'
+
+for readme in "$repo_root/README.md" "$repo_root/README.ja.md"
+do
+    readme_example=$tmp_dir/$(basename "$readme").config.toml
+    extract_configuration_toml_example "$readme" "$readme_example"
+    assert_canonical_file_matches "$readme_example" \
+        "$readme configuration TOML example"
+done
+
+cp "$canonical_sample" "$tmp_dir/canonical-sample.before"
+run_ok "$output" load "$canonical_sample"
+assert_config "$output" prompt prompt normal
+cmp -s "$tmp_dir/canonical-sample.before" "$canonical_sample" ||
+    fail "canonical config sample was modified by the production loader"
+
 missing_parent=$tmp_dir/missing-parent
 missing_config=$missing_parent/config.toml
 run_ok "$output" load "$missing_config"

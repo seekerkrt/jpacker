@@ -49,13 +49,12 @@ a new storage direction: source-build preferences now use only the executing
 user's XDG config context, while the published v2.0.0 tag, Release, and release
 notes remain historical records.
 
-Moguet v2.4.0 is the latest release. Its headline feature is the reviewed AUR
-source revision workflow, which retains the last AUR upstream revision
-explicitly accepted at PackageBase scope and shows later tracked-file changes
-from that review baseline. It also adds `moguet -G <pkg> --output-dir=DIR`, clearer phase-level
-package-state observations in `upgrade-all`, and the CMake / CTest canonical
-C++ build/test graph while retaining the usual `make` frontend. See the
-[v2.4.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.4.0) for
+Moguet v2.4.1 is the latest release. This patch maintenance release adds a
+canonical `sample/config.toml`, installs it as an example in the standard Arch
+package documentation, and makes `moguet --help` show TOML string enum values
+with quotes. The strict parser, configuration schema, and built-in defaults are
+unchanged; malformed existing configuration continues to fail closed. See the
+[v2.4.1 release](https://github.com/seekerkrt/moguet/releases/tag/v2.4.1) for
 the complete user-visible changes.
 
 The canonical repository identity is Moguet on GitHub, with a GitLab mirror.
@@ -577,6 +576,14 @@ Moguet reads one optional, user-owned TOML file:
 $XDG_CONFIG_HOME/moguet/config.toml
 fallback: ~/.config/moguet/config.toml
 ```
+
+In a repository checkout, the canonical copy is `sample/config.toml`. A
+standard Arch package installation places the same file at
+`/usr/share/doc/moguet/examples/config.toml`. Copy it to
+`$XDG_CONFIG_HOME/moguet/config.toml`, or to the fallback shown above only when
+`XDG_CONFIG_HOME` is unset, before editing it. The enum values `prompt`, `skip`,
+`normal`, `rebuild`, and `clean` are TOML strings and must remain quoted; the
+canonical sample uses double quotes.
 
 The minimal v2.0.0 schema and built-in defaults are:
 

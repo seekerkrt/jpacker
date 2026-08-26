@@ -71,6 +71,14 @@ MAN_SECTION_SLUGS = (
     "license",
     "author",
 )
+OBSOLETE_UNQUOTED_USER_CONFIG_HELP_SYNTAX = (
+    "review.pkgbuild = prompt|skip",
+    "review.diff = prompt|skip",
+    "build.mode = normal|rebuild|clean",
+)
+OBSOLETE_UNQUOTED_USER_CONFIG_HELP_SOURCE_LITERALS = tuple(
+    f'"{syntax}"' for syntax in OBSOLETE_UNQUOTED_USER_CONFIG_HELP_SYNTAX
+)
 
 
 @dataclass(frozen=True)
@@ -163,7 +171,7 @@ def reviewed_source_runtime_help_contracts(
 ) -> dict[str, SemanticTextContract]:
     if locale == "en":
         return {
-            "review.pkgbuild = prompt|skip": SemanticTextContract(
+            "review.pkgbuild = \"prompt\"|\"skip\"": SemanticTextContract(
                 (
                     r"(?:invocation-local|this invocation)",
                     r"pkgbuild.*\.install",
@@ -172,7 +180,7 @@ def reviewed_source_runtime_help_contracts(
                 ),
                 (r"pkgbuild review policy",),
             ),
-            "review.diff = prompt|skip": SemanticTextContract(
+            "review.diff = \"prompt\"|\"skip\"": SemanticTextContract(
                 (
                     r"repository (?:update )?diff",
                     r"aur (?:reviewed-source|reviewed source) review",
@@ -202,7 +210,7 @@ def reviewed_source_runtime_help_contracts(
         }
     if locale == "ja":
         return {
-            "review.pkgbuild = prompt|skip": SemanticTextContract(
+            "review.pkgbuild = \"prompt\"|\"skip\"": SemanticTextContract(
                 (
                     r"invocation-local|今回のinvocation|この実行",
                     r"pkgbuild.*\.install",
@@ -211,7 +219,7 @@ def reviewed_source_runtime_help_contracts(
                 ),
                 (r"pkgbuildの確認方針",),
             ),
-            "review.diff = prompt|skip": SemanticTextContract(
+            "review.diff = \"prompt\"|\"skip\"": SemanticTextContract(
                 (
                     r"repository diff|リポジトリ(?:更新)?差分",
                     r"aur (?:reviewed-source|reviewed source) review",
@@ -250,6 +258,16 @@ def check_reviewed_source_runtime_help(
         ("ja", "Japanese runtime help", japanese_help),
     ):
         descriptions = runtime_help_descriptions(label, text)
+        obsolete_syntax = [
+            syntax
+            for syntax in OBSOLETE_UNQUOTED_USER_CONFIG_HELP_SYNTAX
+            if syntax in descriptions
+        ]
+        if obsolete_syntax:
+            fail(
+                f"{label} retains obsolete unquoted user-config syntax: "
+                + ", ".join(repr(syntax) for syntax in obsolete_syntax)
+            )
         for syntax, contract in reviewed_source_runtime_help_contracts(
             locale
         ).items():
@@ -1054,10 +1072,13 @@ def reviewed_source_documentation_contracts(
         ),
         repository_root / "source/moguet.cpp": (
             (
-                "review.pkgbuild = prompt|skip",
-                "review.diff = prompt|skip",
+                r"review.pkgbuild = \"prompt\"|\"skip\"",
+                r"review.diff = \"prompt\"|\"skip\"",
             ),
-            obsolete_help,
+            (
+                *obsolete_help,
+                *OBSOLETE_UNQUOTED_USER_CONFIG_HELP_SOURCE_LITERALS,
+            ),
         ),
         repository_root / "completions/descriptions/en.json": (
             (),
