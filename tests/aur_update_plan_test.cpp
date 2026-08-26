@@ -6,6 +6,9 @@
 #include <string>
 #include <vector>
 
+void run_devel_package_classification_tests();
+void run_devel_update_model_tests();
+
 namespace {
 
 void expect(bool condition, const std::string& message) {
@@ -245,6 +248,12 @@ int main() {
         run_case(
                 "unknown version relation is rejected",
                 test_unknown_version_relation_is_rejected);
+        run_case(
+                "devel package classification foundation",
+                run_devel_package_classification_tests);
+        run_case(
+                "devel update assessment foundation",
+                run_devel_update_model_tests);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
