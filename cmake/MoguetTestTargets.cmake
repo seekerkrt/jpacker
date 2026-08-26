@@ -1421,6 +1421,11 @@ moguet_add_cpp_test(
         tests/aur_update_query_test.cpp
         source/aur_update_query.cpp
         source/aur_update_plan.cpp
+        source/devel_package_classification.cpp
+        source/devel_update_model.cpp
+        source/vcs_source_identity.cpp
+        source/source_package_identity.cpp
+        source/package_identifier.cpp
         source/shell_words.cpp
         source/logging.cpp
     INCLUDE_DIRECTORIES "${_moguet_test_source_include_dir}"
@@ -1429,7 +1434,12 @@ moguet_add_cpp_test(
 set(
     _moguet_aur_update_execution_preflight_test_sources
     tests/aur_update_execution_preflight_test.cpp
+    source/aur_update_plan.cpp
     source/aur_update_execution_preflight.cpp
+    source/devel_package_classification.cpp
+    source/devel_update_model.cpp
+    source/vcs_source_identity.cpp
+    source/source_package_identity.cpp
     source/build_plan_artifact_target_projection.cpp
     source/dependency_constraint.cpp
     source/dependency_constraint_presentation.cpp
@@ -1467,7 +1477,12 @@ moguet_add_cpp_test(
     ALPM_COMPILE
     SOURCES
         tests/aur_update_execution_preflight_integration_test.cpp
+        source/aur_update_plan.cpp
         source/aur_update_execution_preflight.cpp
+        source/devel_package_classification.cpp
+        source/devel_update_model.cpp
+        source/vcs_source_identity.cpp
+        source/source_package_identity.cpp
         source/aur_constraint_metadata.cpp
         source/build_plan_relation_assessment.cpp
         source/installed_package_relation_inventory.cpp
@@ -1598,6 +1613,9 @@ set(
     _moguet_aur_update_operation_result_test_sources
     tests/aur_update_operation_result_test.cpp
     source/aur_update_operation_result.cpp
+    source/devel_package_classification.cpp
+    source/devel_update_model.cpp
+    source/vcs_source_identity.cpp
     source/aur_update_execution_preparation.cpp
     source/build_plan_artifact_target_projection.cpp
     source/dependency_constraint.cpp
@@ -1635,6 +1653,9 @@ set(
     source/upgrade_all_plan.cpp
     source/aur_update_query.cpp
     source/aur_update_plan.cpp
+    source/devel_package_classification.cpp
+    source/devel_update_model.cpp
+    source/vcs_source_identity.cpp
     source/aur_update_execution_preflight.cpp
     source/aur_update_execution_preparation.cpp
     source/build_plan_artifact_target_projection.cpp
@@ -1708,6 +1729,9 @@ set(
     source/upgrade_all_plan.cpp
     source/aur_update_query.cpp
     source/aur_update_plan.cpp
+    source/devel_package_classification.cpp
+    source/devel_update_model.cpp
+    source/vcs_source_identity.cpp
     source/aur_update_execution_preflight.cpp
     source/aur_update_execution_preparation.cpp
     source/build_plan_artifact_target_projection.cpp
@@ -2440,11 +2464,11 @@ set(
     separated-package-base-source-build-test=899ab2ca69d17cf61ec09e5def435dc24ba46bca96c8c5888dc3f4fab7c51ba1
     upgrade-all-plan-test=d6137022907fe9c8457801fe54a1cbb2697ee8cbc8086dbcfda9e9f9dbd395ae
     system-source-upgrade-test=835430b20b4f2deda02895303938aaf5ba365efe315474f0f3f768da240ac8d7
-    aur-update-execution-preflight-test=6ecb6a78abd6d3a9c14e4df18b853f32e291e5fa16d2214a6cf0936a18ce04b8
+    aur-update-execution-preflight-test=167eca6cef76a54712dd3281a015d38e406ae9fde1a264919d69b115a743cfd3
     aur-update-execution-runner-test=6bc5943cf6a1bdd3dacb4956d45aa9e670ae0467dc417176b9c4b9c0b2001818
-    aur-update-operation-result-test=f7db95c91026dccdb6527c396a1d231d08f215c2331b7c275d1e369007d3f850
-    filtered-aur-update-operation-test=f5aef3d993ab04820c2fea1987a4ef26a8b0427769df0d7146d0021320427a76
-    upgrade-all-operation-test=62408fad67d92ca4e1a73ae7d26cdefb20669576ce1dc68eb78fd22ba330aba5
+    aur-update-operation-result-test=794c70c37241de19fa40d3e5369fadebe282fb321fd0e3771b8b3d89e0a369d2
+    filtered-aur-update-operation-test=7fbff061914929873f29f271c3dc7608304895c6be1eb71817e5ad77d75d0372
+    upgrade-all-operation-test=b03062599814cc3d00b89d6b6eec40b56cd474734876b8340b065060b389e458
     cli-diagnostic-model-test=57469a334dfd834be89569a1132d7d2614e591aee3bcd461ab7a9bd992ba6d18
     runtime-cli-connection-test=887664c606df9a6b73e613510d4ac15e1c97282640e02f6db2def7f346b768f2
     dependency-plan-model-test=288ce4ce6900660a42fe2899d5f13769d831a4de0509c24d566ef075b9a96fa6

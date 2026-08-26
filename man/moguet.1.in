@@ -122,6 +122,11 @@ instead when registered source preferences must not be scanned.
 .TP
 .B "upgrade-aur"
 Update installed packages that still resolve to exact AUR packages.
+An exact AUR package with only a conventional devel suffix and no newer normal
+AUR version is reported as requiring a check and blocks the whole AUR
+execution before mutation; it is not rebuilt automatically.
+Moguet does not yet compare upstream VCS revisions or publish devel build
+provenance.
 This target-less operation does not run
 .B pacman -Syu
 and does not update packages selected only by source-build preferences.
@@ -324,6 +329,9 @@ preflight.
 .B "-Qua"
 Ask pacman for foreign-package updates, including installed packages that may
 have AUR updates.
+Conventional exact-AUR devel suffix candidates without a newer normal version
+are shown with a check-required reason instead of a version-update arrow.
+This check-required result alone retains query exit status zero.
 This remains a pacman-compatible query and is distinct from executing
 .BR upgrade-aur .
 The pacman-compatible forms above are examples of delegated open grammar, not

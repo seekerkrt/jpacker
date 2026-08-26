@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -23,6 +24,8 @@ std::unique_ptr<logging_detail::StateLogBackend> state_log_backend;
 std::exception_ptr pending_state_log_failure;
 bool initialized = false;
 bool diagnostics_to_stderr = false;
+thread_local ScopedLoggerDiagnosticCapture* active_diagnostic_capture =
+        nullptr;
 
 std::ostream& diagnostic_stream() {
     return diagnostics_to_stderr ? std::cerr : std::cout;
@@ -50,6 +53,62 @@ void reset_log_backend() noexcept {
 }
 
 } // namespace
+
+ScopedLoggerDiagnosticCapture::ScopedLoggerDiagnosticCapture() {
+    if(active_diagnostic_capture != nullptr) {
+        throw std::logic_error(
+                "Logger diagnostic capture is already active.");
+    }
+    active_diagnostic_capture = this;
+    active_ = true;
+}
+
+ScopedLoggerDiagnosticCapture::~ScopedLoggerDiagnosticCapture() noexcept {
+    stop();
+}
+
+void ScopedLoggerDiagnosticCapture::stop() noexcept {
+    if(!active_) return;
+    if(active_diagnostic_capture == this) {
+        active_diagnostic_capture = nullptr;
+    }
+    active_ = false;
+}
+
+void ScopedLoggerDiagnosticCapture::capture(
+        LoggerDiagnosticLevel level, const std::string& message) {
+    events_.push_back(LoggerDiagnosticEvent{level, message});
+}
+
+void ScopedLoggerDiagnosticCapture::replay() {
+    stop();
+    if(replayed_) return;
+    replayed_ = true;
+    std::vector<LoggerDiagnosticEvent> events = std::move(events_);
+    for(const auto& event : events) {
+        switch(event.level) {
+        case LoggerDiagnosticLevel::Info:
+            Logger::info(event.message);
+            break;
+        case LoggerDiagnosticLevel::Warning:
+            Logger::warn(event.message);
+            break;
+        case LoggerDiagnosticLevel::Error:
+            Logger::error(event.message);
+            break;
+        case LoggerDiagnosticLevel::Command:
+            Logger::raw_cmd(event.message);
+            break;
+        }
+    }
+}
+
+bool Logger::capture_diagnostic(
+        LoggerDiagnosticLevel level, const std::string& message) {
+    if(active_diagnostic_capture == nullptr) return false;
+    active_diagnostic_capture->capture(level, message);
+    return true;
+}
 
 void Logger::set_diagnostics_to_stderr() {
     diagnostics_to_stderr = true;
@@ -131,12 +190,14 @@ void Logger::write_log_record(
 }
 
 void Logger::info(const std::string& msg) {
+    if(capture_diagnostic(LoggerDiagnosticLevel::Info, msg)) return;
     diagnostic_stream() << "\033[1;32m::\033[0m " << msg << std::endl;
     // NO_TRANSLATE: INFO is a stable state-log schema token.
     write_log_record("INFO", msg);
 }
 
 void Logger::warn(const std::string& msg) {
+    if(capture_diagnostic(LoggerDiagnosticLevel::Warning, msg)) return;
     // TRANSLATORS: The placeholder is a complete warning diagnostic.
     diagnostic_stream() << "\033[1;33m::\033[0m "
                         << localization::format_translated_message(
@@ -170,6 +231,7 @@ void Logger::write_noexcept_warning_fallback() noexcept {
 }
 
 void Logger::error(const std::string& msg) {
+    if(capture_diagnostic(LoggerDiagnosticLevel::Error, msg)) return;
     // TRANSLATORS: The placeholder is a complete error diagnostic.
     std::cerr << "\033[1;31m::\033[0m "
               << localization::format_translated_message("Error: {}", msg)
@@ -179,6 +241,7 @@ void Logger::error(const std::string& msg) {
 }
 
 void Logger::raw_cmd(const std::string& cmd) {
+    if(capture_diagnostic(LoggerDiagnosticLevel::Command, cmd)) return;
     // TRANSLATORS: The placeholder is an exact shell command and must remain
     // byte-for-byte locale-neutral.
     diagnostic_stream() << "\033[1;33m::\033[0m "

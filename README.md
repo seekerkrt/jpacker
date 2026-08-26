@@ -437,6 +437,23 @@ a Moguet-specific multi-phase workflow, such as applying saved source-build
 preferences or rebuilding installed AUR packages from source. These commands
 are not aliases for an ordinary `-Syu`.
 
+Moguet v2.5.0 treats installed exact-AUR packages with conventional `-git`,
+`-svn`, `-hg`, `-bzr`, `-cvs`, or `-darcs` suffix evidence as devel
+candidates. When the normal AUR version is not newer and only that suffix
+evidence is available, `moguet -Qua` reports `RequiresCheck` with the package,
+PackageBase/child evidence, and reason instead of silently treating the
+package as up to date. A normal newer AUR version remains an update candidate
+and keeps the existing precedence.
+
+`RequiresCheck` is not an automatic rebuild candidate. `upgrade-aur`, its
+dry-run, and the fresh AUR phase of `upgrade-all` block before AUR mutation;
+non-TTY use and `--noconfirm` do not add a prompt or approve a rebuild. v2.5.0
+does not query or compare the upstream VCS revision and does not publish devel
+build provenance. The read-only Git observer and installed-artifact-bound
+authoritative comparison remain follow-up work in
+[issue #475](https://github.com/seekerkrt/moguet/issues/475) and
+[issue #476](https://github.com/seekerkrt/moguet/issues/476).
+
 `--aur` limits supported `-S`, `-Ss`, and `-Si` forms to AUR. `--repo`
 limits them to official binary repositories. Combining the selectors is an
 error before an external command or AUR query. Pacman-only routes preserve

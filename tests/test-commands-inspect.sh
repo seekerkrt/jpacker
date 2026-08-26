@@ -1278,6 +1278,28 @@ assert_empty_file "$stderr_file"
 assert_no_foreign_update_mutation
 echo "  ok: foreign query classifies up-to-date and non-AUR without mutation"
 
+# exact AUR suffix candidateはfalse UpToDateへ丸めず、package/reasonを
+# version arrowなしで表示する。suffixだけのnon-AUR packageは昇格しない。
+setup_case foreign-devel-requires-check
+export MOGUET_TEST_INSPECTION_SCENARIO=foreign-devel-requires-check
+set_foreign_inventory 'split-cli 2.0-1 explicit
+split-child-git 2.0-1 dependency
+non-aur-git 2.0-1 explicit'
+export MOGUET_TEST_VERCMP_OUTPUT=0
+run_ok -Qua
+assert_contains \
+    "split-cli: devel package update status requires check (suffix candidate only: PackageBase split-suite-git; authoritative build provenance is unavailable)." \
+    "$stdout_file"
+assert_contains \
+    "split-child-git: devel package update status requires check (installed package suffix candidate only; authoritative build provenance is unavailable)." \
+    "$stdout_file"
+assert_contains "Foreign package not found in AUR: non-aur-git" "$stdout_file"
+assert_not_contains "split-cli 2.0-1 ->" "$stdout_file"
+assert_not_contains "split-child-git 2.0-1 ->" "$stdout_file"
+assert_not_contains "non-aur-git: devel package" "$stdout_file"
+assert_no_foreign_update_mutation
+echo "  ok: foreign devel suffix candidates are visible RequiresCheck states"
+
 # vercmp parse failureはwarningを出し、fail-closedでupdateに分類しない。
 setup_case foreign-invalid-vercmp
 export MOGUET_TEST_INSPECTION_SCENARIO=foreign-classification
@@ -1299,6 +1321,26 @@ command -v localedef >/dev/null 2>&1 ||
 locale_root=$tmp_dir/locale
 mkdir -p "$locale_root"
 localedef --no-archive -i en_US -f UTF-8 "$locale_root/en_US.UTF-8"
+setup_case foreign-devel-requires-check-ja
+export MOGUET_TEST_INSPECTION_SCENARIO=foreign-devel-requires-check
+set_foreign_inventory 'split-cli 2.0-1 explicit
+split-child-git 2.0-1 dependency
+non-aur-git 2.0-1 explicit'
+export MOGUET_TEST_VERCMP_OUTPUT=0
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    run_ok -Qua
+assert_contains \
+    "split-cli: devel packageの更新状態は確認が必要です（suffix候補のみ: PackageBase split-suite-git、authoritativeなbuild provenanceは利用できません）。" \
+    "$stdout_file"
+assert_contains \
+    "split-child-git: devel packageの更新状態は確認が必要です（installed package suffix候補のみ、authoritativeなbuild provenanceは利用できません）。" \
+    "$stdout_file"
+assert_not_contains "split-cli 2.0-1 ->" "$stdout_file"
+assert_no_foreign_update_mutation
+echo "  ok: foreign devel RequiresCheck presentation is localized"
 setup_case plan-localized-semantic-parity
 export MOGUET_TEST_INSPECTION_SCENARIO=plan-metadata-risk-readiness
 LOCPATH=$locale_root \

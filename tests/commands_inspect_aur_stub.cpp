@@ -6,6 +6,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 // WHY: inspection handler のloop / barrierだけをcharacterizeするため、real AUR transportを
@@ -55,7 +56,8 @@ bool is_graph_scenario(const std::string& scenario) {
            scenario != "foreign-ordinary-failure" &&
            scenario != "foreign-schema-failure" &&
            scenario != "foreign-order" &&
-           scenario != "foreign-classification";
+           scenario != "foreign-classification" &&
+           scenario != "foreign-devel-requires-check";
 }
 
 bool is_numbered_foreign_package(const std::string& package_name) {
@@ -334,6 +336,19 @@ std::map<std::string, AurPackageInfo> foreign_info_many(
                 "foreign-up-to-date", "foreign-non-aur"};
         if(package_names == expected) {
             return {{"foreign-up-to-date", package_info("foreign-up-to-date")}};
+        }
+    } else if(scenario == "foreign-devel-requires-check") {
+        const std::vector<std::string> expected = {
+                "split-cli", "split-child-git", "non-aur-git"};
+        if(package_names == expected) {
+            AurPackageInfo package_base_candidate = package_info("split-cli");
+            package_base_candidate.PackageBase = "split-suite-git";
+            AurPackageInfo child_candidate = package_info("split-child-git");
+            child_candidate.PackageBase = "split-suite";
+            return {
+                    {"split-cli", std::move(package_base_candidate)},
+                    {"split-child-git", std::move(child_candidate)},
+            };
         }
     }
 

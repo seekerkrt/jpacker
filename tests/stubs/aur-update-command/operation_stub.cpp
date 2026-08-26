@@ -138,14 +138,29 @@ AurUpdatePlanEntry make_plan_entry(
     return entry;
 }
 
+AurUpdatePlanEntry make_requires_check_plan_entry(
+        const std::string& package_name) {
+    AurUpdatePlanEntry entry = make_plan_entry(
+            package_name, AurUpdateClassification::UpToDate);
+    entry.devel_classification = DevelPackageClassification::classify(
+            DevelPackageSuffixEvidence::classify(
+                    package_name, {package_name}));
+    entry.devel_assessment = DevelUpdateAssessment::requires_check(
+            DevelRequiresCheckReason::SuffixCandidateOnly);
+    return entry;
+}
+
 AurUpdateExecutionIssue make_preflight_issue(
         AurUpdateExecutionReason reason,
         const std::string& package_name,
-        std::string diagnostic) {
+        std::string diagnostic,
+        std::optional<DevelRequiresCheckReason>
+                devel_requires_check_reason = std::nullopt) {
     AurUpdateExecutionIssue issue;
     issue.reason = reason;
     issue.package_name = package_name;
     issue.diagnostic = std::move(diagnostic);
+    issue.devel_requires_check_reason = devel_requires_check_reason;
     return issue;
 }
 
@@ -456,6 +471,11 @@ AurUpdateQueryResult query_installed_aur_updates() {
                 "up-to-date-pkg", AurUpdateClassification::UpToDate));
         return query;
     }
+    if(test_scenario == "devel-requires-check") {
+        query.plan.entries.push_back(
+                make_requires_check_plan_entry("manual-check-git"));
+        return query;
+    }
     if(test_scenario == "non-aur-foreign") {
         query.plan.entries.push_back(make_plan_entry(
                 "non-aur-pkg", AurUpdateClassification::NonAurForeign));
@@ -627,38 +647,53 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
         target.update_plan_index = index;
         target.update = update_plan.entries[index];
 
-        switch(target.update.classification) {
-            case AurUpdateClassification::UpdateAvailable:
+        switch(project_aur_update_effective_state(target.update)) {
+            case AurUpdateEffectiveState::UpdateAvailable:
                 target.status = AurUpdateExecutionTargetStatus::Executable;
                 target.desired_install_reason = DesiredInstallReason::Explicit;
                 break;
-            case AurUpdateClassification::UpToDate:
+            case AurUpdateEffectiveState::UpToDate:
                 target.status = AurUpdateExecutionTargetStatus::Skipped;
                 target.issues.push_back(make_preflight_issue(
                         AurUpdateExecutionReason::UpToDate,
                         target.update.installed_name,
                         "installed package is already up to date"));
                 break;
-            case AurUpdateClassification::NonAurForeign:
+            case AurUpdateEffectiveState::RequiresCheck:
+                target.status = AurUpdateExecutionTargetStatus::Incomplete;
+                target.issues.push_back(make_preflight_issue(
+                        AurUpdateExecutionReason::DevelRequiresCheck,
+                        target.update.installed_name,
+                        "fixture suffix candidate only; authoritative build provenance is unavailable",
+                        DevelRequiresCheckReason::SuffixCandidateOnly));
+                break;
+            case AurUpdateEffectiveState::NonAurForeign:
                 target.status = AurUpdateExecutionTargetStatus::Skipped;
                 target.issues.push_back(make_preflight_issue(
                         AurUpdateExecutionReason::NonAurForeign,
                         target.update.installed_name,
                         "foreign package does not exist in AUR"));
                 break;
-            case AurUpdateClassification::MetadataUnavailable:
+            case AurUpdateEffectiveState::MetadataUnavailable:
                 target.status = AurUpdateExecutionTargetStatus::Incomplete;
                 target.issues.push_back(make_preflight_issue(
                         AurUpdateExecutionReason::AurMetadataUnavailable,
                         target.update.installed_name,
                         "fixture AUR metadata request failed"));
                 break;
-            case AurUpdateClassification::VersionComparisonUnavailable:
+            case AurUpdateEffectiveState::VersionComparisonUnavailable:
                 target.status = AurUpdateExecutionTargetStatus::Incomplete;
                 target.issues.push_back(make_preflight_issue(
                         AurUpdateExecutionReason::VersionComparisonUnavailable,
                         target.update.installed_name,
                         "fixture version comparator failed"));
+                break;
+            case AurUpdateEffectiveState::Inconsistent:
+                target.status = AurUpdateExecutionTargetStatus::Incomplete;
+                target.issues.push_back(make_preflight_issue(
+                        AurUpdateExecutionReason::UpdatePlanInconsistent,
+                        target.update.installed_name,
+                        "fixture update state is inconsistent"));
                 break;
         }
 
@@ -951,6 +986,7 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
     }
     if(test_scenario == "metadata-unavailable" ||
        test_scenario == "version-comparison-unavailable" ||
+       test_scenario == "devel-requires-check" ||
        test_scenario == "unsupported-blocker" ||
        test_scenario == "incomplete-blocker") {
         result.status = AurUpdateOperationStatus::BlockedBeforeExecution;

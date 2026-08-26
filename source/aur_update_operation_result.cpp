@@ -68,7 +68,9 @@ bool same_update_entry(
            lhs.installed_version == rhs.installed_version &&
            lhs.install_reason == rhs.install_reason &&
            same_remote_package(lhs.aur_package, rhs.aur_package) &&
-           lhs.classification == rhs.classification;
+           lhs.classification == rhs.classification &&
+           lhs.devel_classification == rhs.devel_classification &&
+           lhs.devel_assessment == rhs.devel_assessment;
 }
 
 bool same_preflight_issue(
@@ -79,6 +81,8 @@ bool same_preflight_issue(
            lhs.package_base == rhs.package_base &&
            lhs.dependency_specification == rhs.dependency_specification &&
            lhs.diagnostic == rhs.diagnostic &&
+           lhs.devel_requires_check_reason ==
+                   rhs.devel_requires_check_reason &&
            lhs.build_plan_projection_issue ==
                    rhs.build_plan_projection_issue &&
            lhs.relation_reason == rhs.relation_reason;
@@ -154,6 +158,7 @@ bool is_known_preflight_reason(AurUpdateExecutionReason reason) noexcept {
     switch(reason) {
     case AurUpdateExecutionReason::None:
     case AurUpdateExecutionReason::UpToDate:
+    case AurUpdateExecutionReason::DevelRequiresCheck:
     case AurUpdateExecutionReason::NonAurForeign:
     case AurUpdateExecutionReason::AurMetadataUnavailable:
     case AurUpdateExecutionReason::VersionComparisonUnavailable:

@@ -75,6 +75,8 @@ bool same_update_entry(
            lhs.installed_version == rhs.installed_version &&
            lhs.install_reason == rhs.install_reason &&
            lhs.classification == rhs.classification &&
+           lhs.devel_classification == rhs.devel_classification &&
+           lhs.devel_assessment == rhs.devel_assessment &&
            same_remote_package(lhs.aur_package, rhs.aur_package);
 }
 
@@ -86,6 +88,8 @@ bool same_preflight_issue(
            lhs.package_base == rhs.package_base &&
            lhs.dependency_specification == rhs.dependency_specification &&
            lhs.diagnostic == rhs.diagnostic &&
+           lhs.devel_requires_check_reason ==
+                   rhs.devel_requires_check_reason &&
            lhs.build_plan_projection_issue ==
                    rhs.build_plan_projection_issue &&
            lhs.relation_reason == rhs.relation_reason;
@@ -171,9 +175,11 @@ UpgradeAllPackageBaseIdentity package_base_identity(
     return UpgradeAllResolvedPackageBase{entry.aur_package->package_base};
 }
 
-bool is_normal_skip(AurUpdateClassification classification) noexcept {
-    return classification == AurUpdateClassification::UpToDate ||
-           classification == AurUpdateClassification::NonAurForeign;
+bool is_normal_skip(const AurUpdatePlanEntry& update) noexcept {
+    const AurUpdateEffectiveState effective_state =
+            project_aur_update_effective_state(update);
+    return effective_state == AurUpdateEffectiveState::UpToDate ||
+           effective_state == AurUpdateEffectiveState::NonAurForeign;
 }
 
 bool target_disposition_is_excluded(
@@ -1402,7 +1408,7 @@ FilteredAurUpdateTargetAdapter adapt_aur_update_plan_for_upgrade_all(
         adapter_entry.original_query_plan_index = original_index;
         adapter_entry.update = update;
 
-        if(is_normal_skip(update.classification)) {
+        if(is_normal_skip(update)) {
             adapter_entry.disposition =
                     FilteredAurUpdateTargetAdapterDisposition::NormalSkip;
             adapter.entries.push_back(std::move(adapter_entry));
@@ -1412,8 +1418,8 @@ FilteredAurUpdateTargetAdapter adapt_aur_update_plan_for_upgrade_all(
         UpgradeAllAurTargetStatus status =
                 UpgradeAllAurTargetStatus::Incomplete;
         std::string status_detail;
-        switch(update.classification) {
-        case AurUpdateClassification::UpdateAvailable:
+        switch(project_aur_update_effective_state(update)) {
+        case AurUpdateEffectiveState::UpdateAvailable:
             status = update.aur_package.has_value()
                     ? UpgradeAllAurTargetStatus::Candidate
                     : UpgradeAllAurTargetStatus::Incomplete;
@@ -1427,25 +1433,30 @@ FilteredAurUpdateTargetAdapter adapt_aur_update_plan_for_upgrade_all(
                               "{} update candidate has no remote package identity",
                               AUR_SERVICE_NAME);
             break;
-        case AurUpdateClassification::MetadataUnavailable:
+        case AurUpdateEffectiveState::RequiresCheck:
+            status = UpgradeAllAurTargetStatus::Incomplete;
+            status_detail = localization::translate_message(
+                    "devel package update status requires check: suffix candidate only");
+            break;
+        case AurUpdateEffectiveState::MetadataUnavailable:
             status = UpgradeAllAurTargetStatus::Incomplete;
             status_detail = localization::format_translated_message(
                     // TRANSLATORS: {} is the literal service name "AUR".
                     "{} metadata unavailable", AUR_SERVICE_NAME);
             break;
-        case AurUpdateClassification::VersionComparisonUnavailable:
+        case AurUpdateEffectiveState::VersionComparisonUnavailable:
             status = UpgradeAllAurTargetStatus::Incomplete;
             status_detail = localization::format_translated_message(
                     // TRANSLATORS: {} is the literal service name "AUR".
                     "{} version comparison unavailable", AUR_SERVICE_NAME);
             break;
-        case AurUpdateClassification::UpToDate:
-        case AurUpdateClassification::NonAurForeign:
+        case AurUpdateEffectiveState::UpToDate:
+        case AurUpdateEffectiveState::NonAurForeign:
             throw std::logic_error(localization::format_translated_message(
                     // TRANSLATORS: {} is the literal command name "upgrade-all".
                     "Normal skip unexpectedly reached the {} target adapter.",
                     UPGRADE_ALL_COMMAND_NAME));
-        default: {
+        case AurUpdateEffectiveState::Inconsistent: {
             status = UpgradeAllAurTargetStatus::Incomplete;
             status_detail = localization::format_translated_message(
                     // TRANSLATORS: {} is the literal service name "AUR".

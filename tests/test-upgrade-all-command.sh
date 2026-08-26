@@ -1032,9 +1032,10 @@ run_matrix_table operation-status 8 <<'EOF'
 1|-|Unexpected upgrade-all command failure: Unknown AUR update operation status.
 EOF
 
-run_matrix_table preflight-reason 22 <<'EOF'
+run_matrix_table preflight-reason 23 <<'EOF'
 1|  - package: matrix-target|AUR preflight issue: none: matrix preflight diagnostic
 0|  - package: matrix-target|-
+1|  - package: matrix-target|AUR preflight issue: devel update requires check: matrix preflight diagnostic
 0|  - package: matrix-target|-
 1|  - package: matrix-target|AUR preflight issue: AUR metadata unavailable: matrix preflight diagnostic
 1|  - package: matrix-target|AUR preflight issue: version comparison unavailable: matrix preflight diagnostic
@@ -1363,7 +1364,7 @@ assert_exact_line "  操作結果: 不整合" "$stdout_file"
 assert_exact_line "  パッケージ状態の観測: 未検証" "$stdout_file"
 assert_exact_line "    診断: 内部不整合" "$stdout_file"
 
-if [ "$case_count" -ne 232 ]; then
+if [ "$case_count" -ne 233 ]; then
     echo "upgrade-all command test scenario count drifted: $case_count" >&2
     exit 1
 fi

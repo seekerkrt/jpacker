@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace xdg_state_log {
 class PreparedLogFile;
@@ -32,8 +33,51 @@ public:
 
 } // namespace logging_detail
 
+enum class LoggerDiagnosticLevel {
+    Info,
+    Warning,
+    Error,
+    Command,
+};
+
+struct LoggerDiagnosticEvent {
+    LoggerDiagnosticLevel level = LoggerDiagnosticLevel::Info;
+    std::string           message;
+};
+
+// Synchronous route preparation can retain diagnostics without touching the
+// terminal or state log. The caller owns this scope and explicitly replays it
+// once after deciding whether persistent logging is allowed.
+class ScopedLoggerDiagnosticCapture final {
+public:
+    ScopedLoggerDiagnosticCapture();
+    ScopedLoggerDiagnosticCapture(
+            const ScopedLoggerDiagnosticCapture&) = delete;
+    ScopedLoggerDiagnosticCapture& operator=(
+            const ScopedLoggerDiagnosticCapture&) = delete;
+    ScopedLoggerDiagnosticCapture(
+            ScopedLoggerDiagnosticCapture&&) = delete;
+    ScopedLoggerDiagnosticCapture& operator=(
+            ScopedLoggerDiagnosticCapture&&) = delete;
+    ~ScopedLoggerDiagnosticCapture() noexcept;
+
+    void stop() noexcept;
+    void replay();
+
+private:
+    friend class Logger;
+
+    void capture(LoggerDiagnosticLevel level, const std::string& message);
+
+    std::vector<LoggerDiagnosticEvent> events_;
+    bool active_ = false;
+    bool replayed_ = false;
+};
+
 // CLI 表示と log file 出力をまとめる薄い logger。
 class Logger {
+    static bool capture_diagnostic(
+            LoggerDiagnosticLevel level, const std::string& message);
     static void write_log_record(
             std::string_view level, const std::string& message);
     static void adopt_state_log_backend(

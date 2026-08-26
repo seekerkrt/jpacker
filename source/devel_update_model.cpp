@@ -51,16 +51,6 @@ void require_unsupported_reason(DevelUnsupportedReason reason) {
 
 } // namespace
 
-DevelUpdateAssessment::DevelUpdateAssessment(
-        DevelUpdateAssessmentState state,
-        Reason reason) noexcept
-    : state_(state), reason_(std::move(reason)) {}
-
-DevelUpdateAssessment DevelUpdateAssessment::not_applicable() noexcept {
-    return DevelUpdateAssessment(
-            DevelUpdateAssessmentState::NotApplicable, std::monostate{});
-}
-
 DevelUpdateAssessment DevelUpdateAssessment::update_available() noexcept {
     return DevelUpdateAssessment(
             DevelUpdateAssessmentState::UpdateAvailable, std::monostate{});

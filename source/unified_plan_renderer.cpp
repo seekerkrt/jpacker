@@ -2951,6 +2951,8 @@ std::string aur_update_execution_reason_display(
         return "AurUpdateExecutionReason::None";
     case AurUpdateExecutionReason::UpToDate:
         return "AurUpdateExecutionReason::UpToDate";
+    case AurUpdateExecutionReason::DevelRequiresCheck:
+        return "AurUpdateExecutionReason::DevelRequiresCheck";
     case AurUpdateExecutionReason::NonAurForeign:
         return "AurUpdateExecutionReason::NonAurForeign";
     case AurUpdateExecutionReason::AurMetadataUnavailable:

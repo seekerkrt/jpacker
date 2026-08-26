@@ -46,6 +46,9 @@ std::string preflight_reason_label(AurUpdateExecutionReason reason) {
         return localization::translate_message("none");
     case AurUpdateExecutionReason::UpToDate:
         return localization::translate_message("up to date");
+    case AurUpdateExecutionReason::DevelRequiresCheck:
+        return localization::translate_message(
+                "devel update requires check");
     case AurUpdateExecutionReason::NonAurForeign:
         return localization::format_translated_message(
                 // TRANSLATORS: AUR is a runtime project identity.
@@ -233,8 +236,15 @@ std::string reduction_reason_label(AurUpdateOperationReductionReason reason) {
 
 std::string target_reason_label(const AurUpdateOperationTargetResult& target) {
     if(!target.preflight_issues.empty()) {
-        return std::string(
-                preflight_reason_label(target.preflight_issues.front().reason));
+        const AurUpdateExecutionIssue& issue =
+                target.preflight_issues.front();
+        if(issue.reason == AurUpdateExecutionReason::DevelRequiresCheck &&
+           issue.devel_requires_check_reason ==
+                   DevelRequiresCheckReason::SuffixCandidateOnly) {
+            return localization::translate_message(
+                    "devel update requires check: suffix candidate only");
+        }
+        return std::string(preflight_reason_label(issue.reason));
     }
     if(!target.preparation_issues.empty()) {
         return std::string(preparation_reason_label(
@@ -258,6 +268,11 @@ std::string target_status_label(
         return localization::translate_message("unsupported") + ": " +
                 target_reason_label(target);
     case AurUpdateOperationTargetStatus::Incomplete:
+        if(!target.preflight_issues.empty() &&
+           target.preflight_issues.front().reason ==
+                   AurUpdateExecutionReason::DevelRequiresCheck) {
+            return target_reason_label(target);
+        }
         return localization::translate_message("incomplete") + ": " +
                 target_reason_label(target);
     case AurUpdateOperationTargetStatus::Failed:
@@ -297,6 +312,7 @@ bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
     case AurUpdateExecutionReason::NonAurForeign:
         return true;
     case AurUpdateExecutionReason::None:
+    case AurUpdateExecutionReason::DevelRequiresCheck:
     case AurUpdateExecutionReason::AurMetadataUnavailable:
     case AurUpdateExecutionReason::VersionComparisonUnavailable:
     case AurUpdateExecutionReason::InstalledReasonUnknown:
@@ -451,14 +467,19 @@ void print_operation_result(
 
 } // namespace
 
-int cmd_upgrade_aur(const AppConfig& config) {
+PreparedFilteredAurUpdateOperation prepare_upgrade_aur_operation(
+        const AppConfig& config) {
     // POLICY(#267): NoUpdatesでもunsupported optionを成功へ落とさない。
     require_supported_production_source_build_options(config);
 
     AurUpdateQueryResult query_result = query_installed_aur_updates();
-    PreparedFilteredAurUpdateOperation prepared =
-            prepare_filtered_aur_update_operation(
-                    std::move(query_result), {}, config);
+    return prepare_filtered_aur_update_operation(
+            std::move(query_result), {}, config);
+}
+
+int cmd_upgrade_aur(
+        PreparedFilteredAurUpdateOperation prepared,
+        const AppConfig& config) {
     FilteredAurUpdateExecutionResult result =
             execute_prepared_filtered_aur_update_operation(
                     std::move(prepared), config);
