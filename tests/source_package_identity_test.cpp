@@ -9,6 +9,8 @@
 #include <vector>
 
 void run_vcs_source_identity_tests();
+void run_source_entry_parser_tests();
+void run_srcinfo_source_metadata_tests();
 
 namespace {
 
@@ -353,6 +355,8 @@ int main() {
         test_package_version_and_architecture_evidence();
         test_source_aware_structural_equality();
         run_vcs_source_identity_tests();
+        run_source_entry_parser_tests();
+        run_srcinfo_source_metadata_tests();
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
