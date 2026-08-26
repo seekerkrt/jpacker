@@ -382,6 +382,9 @@ public:
 
     // query由来expectedとのprovenance照合を必須にし、exact build-only argvだけを
     // 公開する。--needed/-r/-iを受けるarbitrary argv境界にはしない。
+    // LANDMINE(#404): build-onlyはartifactをinstallしないという意味であり、
+    // current `-sc`の`-s`が行い得るdependency installをMoguet-ownedにはしない。
+    // pre/post package snapshotだけからcausal ownershipへ昇格させてはならない。
     int run_makepkg_build_only(
             const ArtifactWorkspace& workspace,
             const ExpectedPackageArtifactPath& expected,

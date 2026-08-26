@@ -1366,6 +1366,9 @@ void test_shared_makepkg_context_and_packagelist_adapter(
             "makepkg environment log",
             read_file(test_environment.environment_log()),
             environment_record + environment_record);
+    // CHARACTERIZATION(#404): exact `-sc`はcurrent lifecycleの観測である。
+    // `-s`が導入したように見えるdependencyも、このargvやpre/post差分だけでは
+    // invocation-ownedにならず、`-r` cleanupもここでは有効化しない。
     expect_equal(
             "makepkg command log", read_file(test_environment.command_log()),
             "makepkg --packagelist\nmakepkg -sc\n");
