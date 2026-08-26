@@ -95,6 +95,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/separated_source_build.cpp
     source/shell_words.cpp
     source/source_build.cpp
+    source/source_entry_parser.cpp
     source/source_environment.cpp
     source/source_install.cpp
     source/source_install_preparation.cpp
@@ -102,6 +103,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/source_package_identity.cpp
     source/source_package_identity_projection.cpp
     source/source_preference.cpp
+    source/srcinfo_source_metadata.cpp
     source/system_source_upgrade.cpp
     source/trusted_cache.cpp
     source/trusted_git.cpp
