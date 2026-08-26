@@ -1,3 +1,64 @@
+# Moguet v2.4.1
+
+This tracked file is the source of truth for release bodies. The English and
+Japanese sections for each release describe the same scope.
+
+## English
+
+Moguet v2.4.1 is a patch maintenance release that makes the strict TOML
+user-configuration syntax easier to discover and provides a canonical
+configuration example in both the repository and installed documentation.
+It does not change the configuration schema, built-in defaults, or
+fail-closed handling of malformed configuration.
+
+### Canonical configuration sample
+
+- Add `sample/config.toml` containing the current schema-version 1 defaults:
+  - `review.pkgbuild = "prompt"`
+  - `review.diff = "prompt"`
+  - `build.mode = "normal"`
+- Install the example as:
+  `/usr/share/doc/moguet/examples/config.toml` under the standard Arch package
+  layout.
+- README documentation points users to both the repository sample and
+  installed example while retaining `$XDG_CONFIG_HOME` / HOME fallback
+  ownership.
+
+### Clear TOML string syntax in help
+
+- `moguet --help` now shows string enum values with TOML quotes:
+  - `review.pkgbuild = "prompt"|"skip"`
+  - `review.diff = "prompt"|"skip"`
+  - `build.mode = "normal"|"rebuild"|"clean"`
+- This prevents the previous help presentation from suggesting invalid bare
+  TOML string values.
+- The parser remains strict: malformed existing configuration still fails
+  closed rather than being silently accepted or replaced with defaults.
+
+## 日本語
+
+Moguet v2.4.1は、strict TOML user configurationの正しいsyntaxを見つけやすくし、
+repositoryとinstalled documentationの双方へcanonicalなconfiguration exampleを提供する
+patch / maintenance releaseです。configuration schema、built-in default、malformed configに
+対するfail-closed behaviorは変更しません。
+
+### canonical configuration sample
+
+- current schema version 1 / defaultを示す`sample/config.toml`を追加。
+- standard Arch package layoutでは
+  `/usr/share/doc/moguet/examples/config.toml`としてinstall。
+- README英日からrepository sample / installed exampleを案内し、
+  `$XDG_CONFIG_HOME`とHOME fallbackのownershipを維持。
+
+### helpのTOML string syntax明確化
+
+- `moguet --help`のstring enumをquoted表記へ変更:
+  - `review.pkgbuild = "prompt"|"skip"`
+  - `review.diff = "prompt"|"skip"`
+  - `build.mode = "normal"|"rebuild"|"clean"`
+- bare TOML stringを書けるように見える旧presentationを解消。
+- parser自体は変更せず、invalid existing configは引き続きfail closed。
+
 # Moguet v2.4.0
 
 This tracked file is the source of truth for release bodies. The English and
