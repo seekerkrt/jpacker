@@ -1,5 +1,6 @@
 #pragma once
 
+#include <utility>
 #include <variant>
 
 enum class DevelUpdateAssessmentState {
@@ -57,7 +58,11 @@ public:
             default;
     ~DevelUpdateAssessment() = default;
 
-    [[nodiscard]] static DevelUpdateAssessment not_applicable() noexcept;
+    [[nodiscard]] static DevelUpdateAssessment not_applicable() noexcept {
+        return DevelUpdateAssessment(
+                DevelUpdateAssessmentState::NotApplicable,
+                std::monostate{});
+    }
     [[nodiscard]] static DevelUpdateAssessment update_available() noexcept;
     [[nodiscard]] static DevelUpdateAssessment up_to_date() noexcept;
     [[nodiscard]] static DevelUpdateAssessment unknown(
@@ -85,7 +90,8 @@ private:
 
     DevelUpdateAssessment(
             DevelUpdateAssessmentState state,
-            Reason reason) noexcept;
+            Reason reason) noexcept
+        : state_(state), reason_(std::move(reason)) {}
 
     DevelUpdateAssessmentState state_;
     Reason                     reason_;

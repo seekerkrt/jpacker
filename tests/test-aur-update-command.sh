@@ -128,6 +128,12 @@ assert_cache_absent() {
     fi
 }
 
+assert_state_absent() {
+    if [ -e "$XDG_STATE_HOME/moguet" ]; then
+        fail_case "blocked invocation initialized Moguet state"
+    fi
+}
+
 assert_pipeline_absent() {
     if grep -E '^(query|preflight|prepare|execute|reduce)( |$)' \
         "$command_log" >/dev/null; then
@@ -174,6 +180,32 @@ assert_exact_line "AUR update: no updates" "$stdout_file"
 assert_exact_line "non-aur-pkg: skipped: non-AUR foreign" "$stdout_file"
 assert_exact_line "reduce execution=no" "$command_log"
 assert_no_external_mutation
+
+setup_case devel-requires-check devel-requires-check
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: blocked before execution" "$stdout_file"
+assert_exact_line \
+    "manual-check-git: devel update requires check: suffix candidate only" \
+    "$stdout_file"
+assert_contains \
+    "  preflight issue: devel update requires check: fixture suffix candidate only; authoritative build provenance is unavailable" \
+    "$stderr_file"
+assert_not_contains "manual-check-git 1.0-1 ->" "$stdout_file"
+assert_exact_line "reduce execution=no" "$command_log"
+assert_no_external_mutation
+assert_cache_absent
+assert_state_absent
+
+setup_case devel-requires-check-noconfirm devel-requires-check
+run_status 1 --noconfirm upgrade-aur
+assert_exact_line "AUR update: blocked before execution" "$stdout_file"
+assert_exact_line \
+    "manual-check-git: devel update requires check: suffix candidate only" \
+    "$stdout_file"
+assert_not_contains "prompt" "$command_log"
+assert_no_external_mutation
+assert_cache_absent
+assert_state_absent
 
 # Incomplete/unsupported preflight targets block every executable work item.
 setup_case metadata-unavailable metadata-unavailable
@@ -722,7 +754,7 @@ run_status 0 upgrade
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_pipeline_absent
 
-if [ "$case_count" -ne 47 ]; then
+if [ "$case_count" -ne 49 ]; then
     fail_case "internal test case count changed: $case_count"
 fi
 echo "AUR update command integration tests passed ($case_count cases)."

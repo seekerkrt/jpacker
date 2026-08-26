@@ -89,6 +89,35 @@ AurUpdatePlanEntry current_entry(const std::string& package_name) {
             AurUpdateClassification::UpToDate};
 }
 
+AurUpdatePlanEntry requires_check_entry(
+        const std::string& package_name,
+        const std::string& package_base = {}) {
+    const std::string resolved_base =
+            package_base.empty() ? package_name : package_base;
+    return classify_aur_update(AurUpdatePlanInput{
+            package_name,
+            "1.0-1",
+            InstalledPackageReason::Explicit,
+            AurUpdateRemotePackage{
+                    package_name,
+                    resolved_base,
+                    "1.0-1",
+                    AurVersionRelation::SameAsInstalled}});
+}
+
+AurUpdatePlanEntry classified_update_entry(
+        const std::string& package_name) {
+    return classify_aur_update(AurUpdatePlanInput{
+            package_name,
+            "1.0-1",
+            InstalledPackageReason::Explicit,
+            AurUpdateRemotePackage{
+                    package_name,
+                    package_name,
+                    "2.0-1",
+                    AurVersionRelation::NewerThanInstalled}});
+}
+
 AurUpdatePlanEntry non_aur_entry(const std::string& package_name) {
     return AurUpdatePlanEntry{
             package_name,
@@ -1028,6 +1057,78 @@ void test_query_recoverable_failure_is_retained_and_blocks_mutation() {
     expect_no_mutation("query recoverable failure");
 }
 
+void test_requires_check_blocks_mixed_operation_before_mutation() {
+    reset_stubs();
+    return_build_plan(
+            root_plan({{"normal-update-git", "normal-update-git"}}),
+            {"normal-update-git"});
+    const AppConfig config;
+
+    PreparedFilteredAurUpdateOperation prepared =
+            prepare_filtered_aur_update_operation(
+                    query_result({
+                            classified_update_entry("normal-update-git"),
+                            requires_check_entry("manual-check-git"),
+                    }),
+                    {}, config);
+
+    expect(
+            prepared.is_blocked(),
+            "RequiresCheck did not block the mixed operation");
+    expect(
+            prepared.filtered_plan().entries.size() == 2 &&
+                    prepared.execution_preflight().targets.size() == 2 &&
+                    prepared.execution_preflight().targets[0].status ==
+                            AurUpdateExecutionTargetStatus::Executable &&
+                    prepared.execution_preflight()
+                                    .targets[0]
+                                    .update.devel_assessment.state() ==
+                            DevelUpdateAssessmentState::RequiresCheck &&
+                    prepared.execution_preflight().targets[1].status ==
+                            AurUpdateExecutionTargetStatus::Incomplete,
+            "Mixed operation lost original order or effective states");
+    expect(
+            prepared.execution_preflight()
+                                    .targets[1]
+                                    .issues.front()
+                                    .reason ==
+                            AurUpdateExecutionReason::DevelRequiresCheck &&
+                    prepared.execution_preflight()
+                                    .targets[1]
+                                    .issues.front()
+                                    .devel_requires_check_reason ==
+                            DevelRequiresCheckReason::SuffixCandidateOnly,
+            "RequiresCheck preflight reason was flattened");
+    expect(
+            has_planner_issue(
+                    prepared.target_and_build_unit_plan(),
+                    UpgradeAllPlanningIssueKind::IncompleteAurTarget),
+            "RequiresCheck did not remain a typed planning blocker");
+
+    FilteredAurUpdateExecutionResult result =
+            execute_prepared_filtered_aur_update_operation(
+                    std::move(prepared), config);
+    expect(
+            !result.is_success() && !result.execution.has_value() &&
+                    result.reduced_operation_result.status ==
+                            AurUpdateOperationStatus::BlockedBeforeExecution,
+            "RequiresCheck mixed operation reached execution");
+    expect(
+            result.selected_target_results.size() == 1 &&
+                    result.selected_target_results.front()
+                                    .operation_result.status ==
+                            AurUpdateOperationTargetStatus::NotAttempted,
+            "RequiresCheck was promoted into the selected target subset");
+    expect(
+            result.reduced_operation_result.targets.size() == 2 &&
+                    result.reduced_operation_result.targets[0].status ==
+                            AurUpdateOperationTargetStatus::NotAttempted &&
+                    result.reduced_operation_result.targets[1].status ==
+                            AurUpdateOperationTargetStatus::Incomplete,
+            "RequiresCheck mixed result lost original filtered order");
+    expect_no_mutation("RequiresCheck mixed operation");
+}
+
 void test_planner_issue_blocks_mutation_but_keeps_disposition() {
     reset_stubs();
     const AppConfig config;
@@ -1677,6 +1778,9 @@ int main() {
         run_case(
                 "query recoverable failure",
                 test_query_recoverable_failure_is_retained_and_blocks_mutation);
+        run_case(
+                "RequiresCheck mixed operation no mutation",
+                test_requires_check_blocks_mixed_operation_before_mutation);
         run_case(
                 "planner issue no mutation",
                 test_planner_issue_blocks_mutation_but_keeps_disposition);

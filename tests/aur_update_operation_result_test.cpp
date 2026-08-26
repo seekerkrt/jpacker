@@ -105,6 +105,41 @@ AurUpdateExecutionTarget non_aur_target(
     return target;
 }
 
+AurUpdateExecutionTarget devel_requires_check_target(
+        std::size_t update_plan_index,
+        const std::string& package_name) {
+    DevelPackageClassification devel_classification =
+            DevelPackageClassification::classify(
+                    DevelPackageSuffixEvidence::classify(
+                            package_name, {package_name}));
+    AurUpdateExecutionTarget target;
+    target.update_plan_index = update_plan_index;
+    target.update = AurUpdatePlanEntry{
+            package_name,
+            "1.0-1",
+            InstalledPackageReason::Explicit,
+            AurUpdateRemotePackage{
+                    package_name,
+                    package_name,
+                    "1.0-1",
+                    AurVersionRelation::SameAsInstalled},
+            AurUpdateClassification::UpToDate,
+            std::move(devel_classification),
+            DevelUpdateAssessment::requires_check(
+                    DevelRequiresCheckReason::SuffixCandidateOnly)};
+    target.status = AurUpdateExecutionTargetStatus::Incomplete;
+    AurUpdateExecutionIssue issue{
+            AurUpdateExecutionReason::DevelRequiresCheck,
+            package_name,
+            package_name,
+            std::nullopt,
+            "Devel package suffix is candidate evidence only."};
+    issue.devel_requires_check_reason =
+            DevelRequiresCheckReason::SuffixCandidateOnly;
+    target.issues.push_back(std::move(issue));
+    return target;
+}
+
 AurUpdateExecutionTarget blocking_target(
         std::size_t update_plan_index,
         const std::string& package_name,
@@ -699,6 +734,7 @@ void test_preflight_blockers_keep_status_and_stop_executable_targets() {
                     "incomplete",
                     AurUpdateExecutionTargetStatus::Incomplete,
                     AurUpdateExecutionReason::BuildPlanInconsistent),
+            devel_requires_check_target(4, "manual-check-git"),
     });
     preparation_stub::reset();
     const AppConfig config;
@@ -708,15 +744,19 @@ void test_preflight_blockers_keep_status_and_stop_executable_targets() {
 
     expect(
             preparation.is_blocked() &&
-                    preparation.affected_update_targets.size() == 2 &&
+                    preparation.affected_update_targets.size() == 3 &&
                     preparation.affected_update_targets[0]
                                     .update_plan_index == 1 &&
                     preparation.affected_update_targets[1]
                                     .update_plan_index == 3 &&
-                    preparation.issues.size() == 2 &&
+                    preparation.affected_update_targets[2]
+                                    .update_plan_index == 4 &&
+                    preparation.issues.size() == 3 &&
                     preparation.issues[0].reason ==
                             AurUpdatePreparationReason::BlockingPreflight &&
                     preparation.issues[1].reason ==
+                            AurUpdatePreparationReason::BlockingPreflight &&
+                    preparation.issues[2].reason ==
                             AurUpdatePreparationReason::BlockingPreflight,
             "Preflight blocker preparation fixture differs from the producer contract");
 
@@ -735,6 +775,7 @@ void test_preflight_blockers_keep_status_and_stop_executable_targets() {
                     AurUpdateOperationTargetStatus::Unsupported,
                     AurUpdateOperationTargetStatus::Skipped,
                     AurUpdateOperationTargetStatus::Incomplete,
+                    AurUpdateOperationTargetStatus::Incomplete,
             },
             "preflight blocker mapping");
     expect(result.has_blocking_targets(), "Blocking target helper returned false");
@@ -746,7 +787,15 @@ void test_preflight_blockers_keep_status_and_stop_executable_targets() {
                             AurUpdateExecutionReason::
                                     SplitPackageSelectionRequired &&
                     result.targets[3].preflight_issues.front().reason ==
-                            AurUpdateExecutionReason::BuildPlanInconsistent,
+                            AurUpdateExecutionReason::BuildPlanInconsistent &&
+                    result.targets[4].preflight_issues.front().reason ==
+                            AurUpdateExecutionReason::DevelRequiresCheck &&
+                    result.targets[4]
+                                    .preflight_issues.front()
+                                    .devel_requires_check_reason ==
+                            DevelRequiresCheckReason::SuffixCandidateOnly &&
+                    result.targets[4].update.devel_assessment.state() ==
+                            DevelUpdateAssessmentState::RequiresCheck,
             "Blocking preflight reasons were not retained");
     expect(
             result.reduction_issues.empty() &&

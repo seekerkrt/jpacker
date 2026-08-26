@@ -137,6 +137,7 @@ constexpr std::array AUR_OPERATION_STATUSES{
 constexpr std::array AUR_PREFLIGHT_REASONS{
         AurUpdateExecutionReason::None,
         AurUpdateExecutionReason::UpToDate,
+        AurUpdateExecutionReason::DevelRequiresCheck,
         AurUpdateExecutionReason::NonAurForeign,
         AurUpdateExecutionReason::AurMetadataUnavailable,
         AurUpdateExecutionReason::VersionComparisonUnavailable,

@@ -104,7 +104,15 @@ Declinedはquestion固有のnegative answer、Cancelledはcurrent Moguet operati
 <a id="compat-aur-update"></a>
 ## AUR update operation summary
 
-`upgrade-aur`はinstalled foreign inventoryを起点に、AUR RPCでexact packageとして解決でき、installed versionより新しいpackageだけを対象にする。official repository package、AURに存在しないforeign package、source preferenceだけで選ばれるpackageはこのoperationの対象にしない。query、recursive plan、provider selection、conflicts / replaces metadata、preparationを全targetについて確認してからexecutionへ進み、blocking targetが1件でもあればgit checkout、makepkg、`pacman -U`、sudoを開始しない。
+`upgrade-aur`はinstalled foreign inventoryを起点にする。AUR RPCでexact packageとして解決でき、installed versionより新しいnormal AUR packageは従来どおりupdate candidateである。normal versionが新しくないexact AUR packageでも、PackageBaseまたはinstalled childに`-git`、`-svn`、`-hg`、`-bzr`、`-cvs`、`-darcs`のsuffix根拠があれば、v2.5.0ではsilentな`UpToDate`へ丸めず`RequiresCheck(SuffixCandidateOnly)`として保持する。suffixはcandidate evidenceだけであり、supported VCS、source metadata、tracking readiness、update有無を証明しない。AUR exact packageが存在しないsuffix付きforeign packageは`NonAurForeign`のままで、metadata / version comparison failureも既存failure semanticsを維持する。
+
+normal AUR `UpdateAvailable`はdevel assessmentより優先し、suffix候補やauthoritative baseline不足を理由に取り消さない。`moguet -Qua`は`RequiresCheck`をpackage、PackageBase / child根拠、reason付きで表示し、installed versionからAUR Versionへのupdate arrowへ偽装しない。check-required自体はquery transport failureではないため、それだけならqueryの終了codeは0である。
+
+`RequiresCheck`はautomatic update / rebuild candidateへ昇格しない。`upgrade-aur`はcurrent all-target contractに従い、1件でもあればoperation全体をAUR mutation前にblockする。dry-runは同じ状態を`Blocked`とnon-zeroへ投影し、`upgrade-all`はsystem、registered source、fresh foreign inventoryまでの完了済みphaseを保持したままfresh AUR phaseをblockする。non-TTYと`--noconfirm`はmanual rebuild promptやimplicit approvalを追加しない。query、recursive plan、provider selection、conflicts / replaces metadata、preparationを全targetについて確認してからexecutionへ進み、blocking targetが1件でもあればcache作成、git checkout、makepkg、`pacman -U`、sudoを開始しない。
+
+v2.5.0のconservative connectionはupstream VCS revisionをquery / 比較せず、`.SRCINFO` / PKGBUILDをproduction detection authorityとして評価せず、devel build provenanceやbaselineを保存しない。trusted Git remoteのread-only observerはIssue #475、installed artifactへ束縛したprovenanceとauthoritative `UpdateAvailable` / `UpToDate`比較はIssue #476のfollow-up contractであり、v2.5.0がfull VCS update trackingを実装済みであるとは扱わない。
+
+official repository package、AURに存在しないforeign package、source preferenceだけで選ばれるpackageはautomatic AUR update対象にしない。
 
 `upgrade-all`はsystem upgrade、registered source package、remaining installed AUR packageを`system → registered source → fresh foreign inventory → filtered AUR`のphase順で扱う。single atomic transactionやautomatic rollbackではなく、先行phaseの成功、現在のfailure、後続phaseの`NotAttempted`を区別する。`upgrade-aur`と`upgrade-all`の`--rmdeps`、package target、`--needed`、`--aur`、`--repo`はunsupportedであり、queryやcache mutationより前に停止する。
 

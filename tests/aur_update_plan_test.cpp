@@ -4,6 +4,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 void run_devel_package_classification_tests();
@@ -47,6 +48,25 @@ AurUpdatePlanInput remote_input(
             install_reason,
             AurUpdateRemotePackage{
                     aur_name, package_base, aur_version, version_relation}};
+}
+
+AurUpdatePlanEntry five_field_entry(
+        const std::string& installed_name,
+        const std::string& package_base,
+        AurVersionRelation version_relation,
+        AurUpdateClassification classification) {
+    return AurUpdatePlanEntry{
+            installed_name,
+            "1.0-1",
+            InstalledPackageReason::Explicit,
+            AurUpdateRemotePackage{
+                    installed_name,
+                    package_base,
+                    version_relation == AurVersionRelation::NewerThanInstalled
+                            ? "2.0-1"
+                            : "1.0-1",
+                    version_relation},
+            classification};
 }
 
 void test_newer_remote_version_is_update_available() {
@@ -203,6 +223,274 @@ void test_classifier_uses_relation_without_parsing_versions() {
             "Classifier changed the opaque AUR version");
 }
 
+const DevelPackageClassification& require_devel_classification(
+        const AurUpdatePlanEntry& entry,
+        std::string_view context) {
+    expect(
+            entry.devel_classification.has_value(),
+            std::string(context) + ": devel classification is missing");
+    return *entry.devel_classification;
+}
+
+void test_normal_update_precedes_suffix_requires_check() {
+    const AurUpdatePlanEntry entry = classify_aur_update(remote_input(
+            "normal-newer-git", "1.0-1", InstalledPackageReason::Explicit,
+            "normal-newer-git", "normal-newer-git", "2.0-1",
+            AurVersionRelation::NewerThanInstalled));
+
+    expect(
+            entry.classification ==
+                    AurUpdateClassification::UpdateAvailable,
+            "Normal suffix update lost its authoritative classification");
+    expect(
+            entry.devel_assessment.state() ==
+                            DevelUpdateAssessmentState::RequiresCheck &&
+                    entry.devel_assessment.requires_check_reason() !=
+                            nullptr &&
+                    *entry.devel_assessment.requires_check_reason() ==
+                            DevelRequiresCheckReason::SuffixCandidateOnly,
+            "Suffix candidate assessment was not retained orthogonally");
+    expect(
+            project_aur_update_effective_state(entry) ==
+                    AurUpdateEffectiveState::UpdateAvailable,
+            "Devel RequiresCheck downgraded a normal version update");
+}
+
+void test_package_base_suffix_requires_check() {
+    const AurUpdatePlanEntry entry = classify_aur_update(remote_input(
+            "split-cli", "1.0-1", InstalledPackageReason::Explicit,
+            "split-cli", "split-suite-git", "1.0-1",
+            AurVersionRelation::SameAsInstalled));
+    const DevelPackageClassification& devel =
+            require_devel_classification(entry, "PackageBase suffix");
+    const DevelPackageSuffixEvidence& suffix = devel.suffix_evidence();
+
+    expect(
+            suffix.package_base() == "split-suite-git" &&
+                    suffix.package_base_candidate_kind() != nullptr &&
+                    *suffix.package_base_candidate_kind() == VcsKind::Git,
+            "PackageBase suffix evidence was not retained");
+    expect(
+            suffix.installed_children().size() == 1 &&
+                    suffix.installed_children().front().package_name() ==
+                            "split-cli" &&
+                    suffix.installed_children().front().candidate_kind() ==
+                            nullptr,
+            "PackageBase suffix was flattened into child evidence");
+    expect(
+            entry.devel_assessment.state() ==
+                            DevelUpdateAssessmentState::RequiresCheck &&
+                    project_aur_update_effective_state(entry) ==
+                            AurUpdateEffectiveState::RequiresCheck,
+            "PackageBase suffix candidate was silently treated as up to date");
+}
+
+void test_installed_child_suffix_requires_check_without_confirming_base() {
+    const AurUpdatePlanEntry entry = classify_aur_update(remote_input(
+            "split-cli-git", "1.0-1", InstalledPackageReason::Dependency,
+            "split-cli-git", "split-suite", "1.0-1",
+            AurVersionRelation::SameAsInstalled));
+    const DevelPackageClassification& devel =
+            require_devel_classification(entry, "installed child suffix");
+    const DevelPackageSuffixEvidence& suffix = devel.suffix_evidence();
+
+    expect(
+            suffix.package_base() == "split-suite" &&
+                    suffix.package_base_candidate_kind() == nullptr,
+            "Child suffix promoted the PackageBase to a candidate");
+    expect(
+            suffix.installed_children().size() == 1 &&
+                    suffix.installed_children().front().candidate_kind() !=
+                            nullptr &&
+                    *suffix.installed_children().front().candidate_kind() ==
+                            VcsKind::Git,
+            "Installed child suffix evidence was not retained");
+    expect(
+            devel.evidence_level() == DevelEvidenceLevel::SuffixCandidate &&
+                    devel.trusted_metadata().empty() &&
+                    devel.successful_build_confirmations().empty() &&
+                    project_aur_update_effective_state(entry) ==
+                            AurUpdateEffectiveState::RequiresCheck,
+            "Child suffix was promoted to confirmed source authority");
+}
+
+void test_no_suffix_preserves_normal_up_to_date() {
+    const AurUpdatePlanEntry entry = classify_aur_update(remote_input(
+            "plain-package", "1.0-1", InstalledPackageReason::Explicit,
+            "plain-package", "plain-package", "1.0-1",
+            AurVersionRelation::SameAsInstalled));
+    const DevelPackageClassification& devel =
+            require_devel_classification(entry, "normal package");
+
+    expect(
+            devel.evidence_level() == DevelEvidenceLevel::Normal &&
+                    entry.devel_assessment.state() ==
+                            DevelUpdateAssessmentState::NotApplicable &&
+                    project_aur_update_effective_state(entry) ==
+                            AurUpdateEffectiveState::UpToDate,
+            "No-suffix package changed its normal up-to-date semantics");
+}
+
+void test_five_field_package_base_suffix_fails_closed() {
+    const AurUpdatePlanEntry entry = five_field_entry(
+            "foo-git", "foo-git", AurVersionRelation::SameAsInstalled,
+            AurUpdateClassification::UpToDate);
+
+    expect(
+            project_aur_update_effective_state(entry) ==
+                    AurUpdateEffectiveState::Inconsistent,
+            "Five-field PackageBase suffix escaped as up to date");
+}
+
+void test_five_field_child_suffix_fails_closed() {
+    const AurUpdatePlanEntry entry = five_field_entry(
+            "foo-git", "foo", AurVersionRelation::SameAsInstalled,
+            AurUpdateClassification::UpToDate);
+
+    expect(
+            project_aur_update_effective_state(entry) ==
+                    AurUpdateEffectiveState::Inconsistent,
+            "Five-field installed child suffix escaped as up to date");
+}
+
+void test_five_field_ordinary_compatibility_remains_up_to_date() {
+    const AurUpdatePlanEntry entry = five_field_entry(
+            "foo-cli", "foo", AurVersionRelation::SameAsInstalled,
+            AurUpdateClassification::UpToDate);
+
+    expect(
+            project_aur_update_effective_state(entry) ==
+                    AurUpdateEffectiveState::UpToDate,
+            "Ordinary five-field compatibility entry stopped being up to date");
+}
+
+void test_current_requires_check_pair_is_exact() {
+    AurUpdatePlanEntry future_reason = classify_aur_update(remote_input(
+            "future-reason-git", "1.0-1",
+            InstalledPackageReason::Explicit,
+            "future-reason-git", "future-reason-git", "1.0-1",
+            AurVersionRelation::SameAsInstalled));
+    future_reason.devel_assessment =
+            DevelUpdateAssessment::requires_check(
+                    DevelRequiresCheckReason::
+                            NoAuthoritativeBuildProvenance);
+    expect(
+            project_aur_update_effective_state(future_reason) ==
+                    AurUpdateEffectiveState::Inconsistent,
+            "Future RequiresCheck reason entered the conservative producer");
+
+    AurUpdatePlanEntry missing_classification = five_field_entry(
+            "missing-classification-git", "missing-classification-git",
+            AurVersionRelation::SameAsInstalled,
+            AurUpdateClassification::UpToDate);
+    missing_classification.devel_assessment =
+            DevelUpdateAssessment::requires_check(
+                    DevelRequiresCheckReason::SuffixCandidateOnly);
+    expect(
+            project_aur_update_effective_state(missing_classification) ==
+                    AurUpdateEffectiveState::Inconsistent,
+            "RequiresCheck without owned classification was accepted");
+
+    const AurUpdatePlanEntry valid = classify_aur_update(remote_input(
+            "valid-pair-git", "1.0-1", InstalledPackageReason::Explicit,
+            "valid-pair-git", "valid-pair-git", "1.0-1",
+            AurVersionRelation::SameAsInstalled));
+    expect(
+            project_aur_update_effective_state(valid) ==
+                    AurUpdateEffectiveState::RequiresCheck,
+            "Current SuffixCandidateOnly pair was rejected");
+}
+
+void test_normal_update_precedes_missing_devel_projection() {
+    const AurUpdatePlanEntry entry = five_field_entry(
+            "legacy-update-git", "legacy-update-git",
+            AurVersionRelation::NewerThanInstalled,
+            AurUpdateClassification::UpdateAvailable);
+
+    expect(
+            project_aur_update_effective_state(entry) ==
+                    AurUpdateEffectiveState::UpdateAvailable,
+            "Missing devel projection downgraded an authoritative normal update");
+}
+
+void test_confirmed_evidence_is_rejected_by_conservative_projection() {
+    const VcsSourceIdentity source = VcsSourceIdentity::make(
+            VcsKind::Git,
+            "git+https://example.invalid/conservative-firewall.git",
+            VcsSelector::default_head());
+    const DevelPackageSuffixEvidence suffix =
+            DevelPackageSuffixEvidence::classify(
+                    "confirmed-source", {"confirmed-source"});
+    const DevelPackageClassification metadata_confirmed =
+            DevelPackageClassification::classify(
+                    suffix,
+                    {TrustedDevelSourceMetadata::make(source)});
+    const DevelPackageClassification build_confirmed =
+            DevelPackageClassification::classify(
+                    suffix,
+                    {},
+                    {SuccessfulBuildSourceConfirmation::make(source)});
+
+    expect_exception<std::logic_error>(
+            [&metadata_confirmed]() {
+                static_cast<void>(
+                        project_conservative_devel_update_assessment(
+                                metadata_confirmed));
+            },
+            "Confirmed devel evidence is outside the conservative AUR update connection.");
+    expect_exception<std::logic_error>(
+            [&build_confirmed]() {
+                static_cast<void>(
+                        project_conservative_devel_update_assessment(
+                                build_confirmed));
+            },
+            "Confirmed devel evidence is outside the conservative AUR update connection.");
+}
+
+void test_non_aur_suffix_does_not_gain_devel_authority() {
+    const AurUpdatePlanEntry entry = classify_aur_update(AurUpdatePlanInput{
+            "foreign-only-git",
+            "1.0-1",
+            InstalledPackageReason::Explicit,
+            AurUpdateMetadataNotFound{}});
+
+    expect(
+            !entry.devel_classification.has_value() &&
+                    entry.devel_assessment.state() ==
+                            DevelUpdateAssessmentState::NotApplicable &&
+                    project_aur_update_effective_state(entry) ==
+                            AurUpdateEffectiveState::NonAurForeign,
+            "Suffix-only foreign package gained AUR devel authority");
+}
+
+void test_failure_states_precede_suffix_assessment() {
+    const AurUpdatePlanEntry metadata_failure = classify_aur_update(
+            AurUpdatePlanInput{
+                    "metadata-failed-git",
+                    "1.0-1",
+                    InstalledPackageReason::Explicit,
+                    AurUpdateMetadataUnavailable{}});
+    const AurUpdatePlanEntry comparison_failure = classify_aur_update(
+            remote_input(
+                    "comparison-failed-git", "opaque-installed",
+                    InstalledPackageReason::Explicit,
+                    "comparison-failed-git", "comparison-failed-git",
+                    "opaque-remote", AurVersionRelation::Unavailable));
+
+    expect(
+            project_aur_update_effective_state(metadata_failure) ==
+                            AurUpdateEffectiveState::MetadataUnavailable &&
+                    !metadata_failure.devel_classification.has_value(),
+            "Metadata failure was converted to devel success");
+    expect(
+            comparison_failure.devel_assessment.state() ==
+                            DevelUpdateAssessmentState::RequiresCheck &&
+                    project_aur_update_effective_state(comparison_failure) ==
+                            AurUpdateEffectiveState::
+                                    VersionComparisonUnavailable,
+            "Version comparison failure was replaced by RequiresCheck");
+}
+
 void test_unknown_version_relation_is_rejected() {
     AurUpdatePlanInput input = remote_input(
             "sample-package", "1.0-1", InstalledPackageReason::Unknown,
@@ -245,6 +533,42 @@ int main() {
         run_case(
                 "classifier uses relation without parsing versions",
                 test_classifier_uses_relation_without_parsing_versions);
+        run_case(
+                "normal update precedes suffix RequiresCheck",
+                test_normal_update_precedes_suffix_requires_check);
+        run_case(
+                "PackageBase suffix requires check",
+                test_package_base_suffix_requires_check);
+        run_case(
+                "installed child suffix requires check",
+                test_installed_child_suffix_requires_check_without_confirming_base);
+        run_case(
+                "no suffix preserves normal up to date",
+                test_no_suffix_preserves_normal_up_to_date);
+        run_case(
+                "five-field PackageBase suffix fails closed",
+                test_five_field_package_base_suffix_fails_closed);
+        run_case(
+                "five-field child suffix fails closed",
+                test_five_field_child_suffix_fails_closed);
+        run_case(
+                "five-field ordinary compatibility",
+                test_five_field_ordinary_compatibility_remains_up_to_date);
+        run_case(
+                "current RequiresCheck pair is exact",
+                test_current_requires_check_pair_is_exact);
+        run_case(
+                "normal update precedes missing devel projection",
+                test_normal_update_precedes_missing_devel_projection);
+        run_case(
+                "confirmed evidence conservative firewall",
+                test_confirmed_evidence_is_rejected_by_conservative_projection);
+        run_case(
+                "non-AUR suffix stays non-AUR",
+                test_non_aur_suffix_does_not_gain_devel_authority);
+        run_case(
+                "failure states precede suffix assessment",
+                test_failure_states_precede_suffix_assessment);
         run_case(
                 "unknown version relation is rejected",
                 test_unknown_version_relation_is_rejected);

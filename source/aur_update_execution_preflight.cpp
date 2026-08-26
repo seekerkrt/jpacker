@@ -42,6 +42,8 @@ bool same_issue(
            lhs.package_base == rhs.package_base &&
            lhs.dependency_specification == rhs.dependency_specification &&
            lhs.diagnostic == rhs.diagnostic &&
+           lhs.devel_requires_check_reason ==
+                   rhs.devel_requires_check_reason &&
            lhs.build_plan_projection_issue ==
                    rhs.build_plan_projection_issue &&
            lhs.relation_reason == rhs.relation_reason;
@@ -64,10 +66,13 @@ AurUpdateExecutionIssue make_localized_execution_issue(
         AurUpdateExecutionReason reason, std::string diagnostic,
         std::optional<std::string> package_name = std::nullopt,
         std::optional<std::string> package_base = std::nullopt,
-        std::optional<std::string> dependency_specification = std::nullopt) {
+        std::optional<std::string> dependency_specification = std::nullopt,
+        std::optional<DevelRequiresCheckReason>
+                devel_requires_check_reason = std::nullopt) {
     return AurUpdateExecutionIssue{
             reason, std::move(package_name), std::move(package_base),
-            std::move(dependency_specification), std::move(diagnostic)};
+            std::move(dependency_specification), std::move(diagnostic),
+            std::nullopt, std::nullopt, devel_requires_check_reason};
 }
 
 template<std::size_t Size>
@@ -75,11 +80,14 @@ AurUpdateExecutionIssue make_localized_execution_issue(
         AurUpdateExecutionReason reason, const char (&diagnostic)[Size],
         std::optional<std::string> package_name = std::nullopt,
         std::optional<std::string> package_base = std::nullopt,
-        std::optional<std::string> dependency_specification = std::nullopt) {
+        std::optional<std::string> dependency_specification = std::nullopt,
+        std::optional<DevelRequiresCheckReason>
+                devel_requires_check_reason = std::nullopt) {
     return make_localized_execution_issue(
             reason, localization::translate_message(diagnostic),
             std::move(package_name), std::move(package_base),
-            std::move(dependency_specification));
+            std::move(dependency_specification),
+            devel_requires_check_reason);
 }
 
 bool is_unsupported_reason(AurUpdateExecutionReason reason) noexcept {
@@ -97,6 +105,34 @@ bool is_unsupported_reason(AurUpdateExecutionReason reason) noexcept {
 bool is_skip_reason(AurUpdateExecutionReason reason) noexcept {
     return reason == AurUpdateExecutionReason::UpToDate ||
            reason == AurUpdateExecutionReason::NonAurForeign;
+}
+
+std::string devel_requires_check_diagnostic(
+        DevelRequiresCheckReason reason) {
+    switch(reason) {
+    case DevelRequiresCheckReason::SuffixCandidateOnly:
+        return localization::translate_message(
+                "Devel package update status requires check: the suffix is candidate evidence only, and authoritative build provenance is unavailable.");
+    case DevelRequiresCheckReason::NoAuthoritativeBuildProvenance:
+    case DevelRequiresCheckReason::InstalledArtifactDrift:
+    case DevelRequiresCheckReason::AurRecipeAdvanced:
+    case DevelRequiresCheckReason::SourceMetadataMissing:
+    case DevelRequiresCheckReason::SourceMetadataMalformed:
+    case DevelRequiresCheckReason::SourceIdentityChanged:
+    case DevelRequiresCheckReason::TransportRequiresCheck:
+    case DevelRequiresCheckReason::SelectorRequiresCheck:
+    case DevelRequiresCheckReason::MultipleFloatingSources:
+    case DevelRequiresCheckReason::ArchitectureSpecificSourceUnresolved:
+    case DevelRequiresCheckReason::ProvenanceMissing:
+    case DevelRequiresCheckReason::ProvenanceInvalid:
+    case DevelRequiresCheckReason::ProvenanceCorrupted:
+    case DevelRequiresCheckReason::ProvenanceFutureSchema:
+    case DevelRequiresCheckReason::BuildSourceProofUnavailable:
+        return localization::translate_message(
+                "Devel package update status requires check.");
+    }
+    return localization::translate_message(
+            "Devel package update status requires check.");
 }
 
 bool contains_control_character(const std::string& value) noexcept {
@@ -133,7 +169,8 @@ void reduce_target_status(AurUpdateExecutionTarget& target) noexcept {
     }
 }
 
-bool has_consistent_remote_metadata(const AurUpdatePlanEntry& entry) {
+bool has_consistent_normal_remote_metadata(
+        const AurUpdatePlanEntry& entry) {
     switch(entry.classification) {
     case AurUpdateClassification::UpdateAvailable:
         return entry.aur_package.has_value() &&
@@ -157,10 +194,10 @@ bool has_consistent_remote_metadata(const AurUpdatePlanEntry& entry) {
 }
 
 void add_initial_classification_issue(AurUpdateExecutionTarget& target) {
-    switch(target.update.classification) {
-    case AurUpdateClassification::UpdateAvailable:
+    switch(project_aur_update_effective_state(target.update)) {
+    case AurUpdateEffectiveState::UpdateAvailable:
         break;
-    case AurUpdateClassification::UpToDate:
+    case AurUpdateEffectiveState::UpToDate:
         add_issue(
                 target,
                 make_localized_execution_issue(
@@ -168,7 +205,33 @@ void add_initial_classification_issue(AurUpdateExecutionTarget& target) {
                         "Installed package is already up to date.",
                         target.update.installed_name));
         break;
-    case AurUpdateClassification::NonAurForeign:
+    case AurUpdateEffectiveState::RequiresCheck: {
+        const DevelRequiresCheckReason* reason =
+                target.update.devel_assessment.requires_check_reason();
+        if(reason == nullptr) {
+            add_issue(
+                    target,
+                    make_localized_execution_issue(
+                            AurUpdateExecutionReason::UpdatePlanInconsistent,
+                            "Devel update assessment has no check-required reason.",
+                            target.update.installed_name));
+            break;
+        }
+        add_issue(
+                target,
+                make_localized_execution_issue(
+                        AurUpdateExecutionReason::DevelRequiresCheck,
+                        devel_requires_check_diagnostic(*reason),
+                        target.update.installed_name,
+                        target.update.aur_package.has_value()
+                                ? std::optional<std::string>{
+                                          target.update.aur_package
+                                                  ->package_base}
+                                : std::nullopt,
+                        std::nullopt, *reason));
+        break;
+    }
+    case AurUpdateEffectiveState::NonAurForeign:
         add_issue(
                 target,
                 make_localized_execution_issue(
@@ -179,7 +242,7 @@ void add_initial_classification_issue(AurUpdateExecutionTarget& target) {
                                 AUR_SERVICE_NAME),
                         target.update.installed_name));
         break;
-    case AurUpdateClassification::MetadataUnavailable:
+    case AurUpdateEffectiveState::MetadataUnavailable:
         add_issue(
                 target,
                 make_localized_execution_issue(
@@ -190,7 +253,7 @@ void add_initial_classification_issue(AurUpdateExecutionTarget& target) {
                                 AUR_SERVICE_NAME),
                         target.update.installed_name));
         break;
-    case AurUpdateClassification::VersionComparisonUnavailable:
+    case AurUpdateEffectiveState::VersionComparisonUnavailable:
         add_issue(
                 target,
                 make_localized_execution_issue(
@@ -198,7 +261,7 @@ void add_initial_classification_issue(AurUpdateExecutionTarget& target) {
                         "Installed and remote versions could not be compared.",
                         target.update.installed_name));
         break;
-    default:
+    case AurUpdateEffectiveState::Inconsistent:
         add_issue(
                 target,
                 make_localized_execution_issue(
@@ -211,7 +274,7 @@ void add_initial_classification_issue(AurUpdateExecutionTarget& target) {
         return;
     }
 
-    if(!has_consistent_remote_metadata(target.update)) {
+    if(!has_consistent_normal_remote_metadata(target.update)) {
         add_issue(
                 target,
                 make_localized_execution_issue(
@@ -1445,8 +1508,8 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
         target.update = update_plan.entries[plan_index];
         add_initial_classification_issue(target);
 
-        if(target.update.classification ==
-           AurUpdateClassification::UpdateAvailable) {
+        if(project_aur_update_effective_state(target.update) ==
+           AurUpdateEffectiveState::UpdateAvailable) {
             target.desired_install_reason =
                     desired_install_reason_for_aur_update_root(
                             target.update.install_reason);

@@ -678,6 +678,91 @@ void test_installed_and_aur_identity_are_preserved() {
     expect(entry.aur_package->version == "aur-version", "AUR version differs");
 }
 
+void test_query_projects_exact_aur_suffix_candidates_conservatively() {
+    reset_fixture();
+    g_fixture.inventory = {
+            {"normal-newer-git", "1.0-1", InstalledPackageReason::Explicit},
+            {"split-cli", "1.0-1", InstalledPackageReason::Explicit},
+            {"split-child-git", "1.0-1", InstalledPackageReason::Dependency},
+            {"plain-package", "1.0-1", InstalledPackageReason::Explicit},
+            {"non-aur-git", "1.0-1", InstalledPackageReason::Explicit},
+            {"comparison-failed-git", "1.0-1", InstalledPackageReason::Explicit}};
+    g_fixture.info_many_handler = [](const std::vector<std::string>&) {
+        return std::map<std::string, AurPackageInfo>{
+                {"normal-newer-git",
+                 package_info("normal-newer-git", "2.0-1")},
+                {"split-cli",
+                 package_info("split-cli", "1.0-1", "split-suite-git")},
+                {"split-child-git",
+                 package_info("split-child-git", "1.0-1", "split-suite")},
+                {"plain-package", package_info("plain-package", "1.0-1")},
+                {"comparison-failed-git",
+                 package_info("comparison-failed-git", "opaque-remote")}};
+    };
+    g_fixture.exec_handler = [comparison_index = std::size_t{0}](
+                                     const std::string&) mutable {
+        const std::size_t current_index = comparison_index++;
+        if(current_index == 0) {
+            return std::string("1");
+        }
+        if(current_index == 4) {
+            return std::string("invalid");
+        }
+        return std::string("0");
+    };
+
+    const AurUpdateQueryResult result = query_installed_aur_updates();
+
+    expect_plan_matches_inventory(result.plan, g_fixture.inventory);
+    expect(
+            project_aur_update_effective_state(result.plan.entries[0]) ==
+                    AurUpdateEffectiveState::UpdateAvailable,
+            "Query downgraded normal update precedence");
+    expect(
+            result.plan.entries[1].devel_classification.has_value() &&
+                    result.plan.entries[1]
+                                    .devel_classification->suffix_evidence()
+                                    .package_base_candidate_kind() != nullptr &&
+                    result.plan.entries[1]
+                                    .devel_classification->suffix_evidence()
+                                    .installed_children().front()
+                                    .candidate_kind() == nullptr &&
+                    project_aur_update_effective_state(
+                            result.plan.entries[1]) ==
+                            AurUpdateEffectiveState::RequiresCheck,
+            "Query lost split PackageBase suffix evidence");
+    expect(
+            result.plan.entries[2].devel_classification.has_value() &&
+                    result.plan.entries[2]
+                                    .devel_classification->suffix_evidence()
+                                    .package_base_candidate_kind() == nullptr &&
+                    result.plan.entries[2]
+                                    .devel_classification->suffix_evidence()
+                                    .installed_children().front()
+                                    .candidate_kind() != nullptr &&
+                    project_aur_update_effective_state(
+                            result.plan.entries[2]) ==
+                            AurUpdateEffectiveState::RequiresCheck,
+            "Query lost installed child suffix evidence");
+    expect(
+            project_aur_update_effective_state(result.plan.entries[3]) ==
+                    AurUpdateEffectiveState::UpToDate,
+            "Query changed a normal no-suffix package");
+    expect(
+            project_aur_update_effective_state(result.plan.entries[4]) ==
+                            AurUpdateEffectiveState::NonAurForeign &&
+                    !result.plan.entries[4].devel_classification.has_value(),
+            "Query promoted a non-AUR suffix package");
+    expect(
+            result.plan.entries[5].devel_assessment.state() ==
+                            DevelUpdateAssessmentState::RequiresCheck &&
+                    project_aur_update_effective_state(
+                            result.plan.entries[5]) ==
+                            AurUpdateEffectiveState::
+                                    VersionComparisonUnavailable,
+            "Query changed version-comparison failure precedence");
+}
+
 void test_plan_preserves_inventory_order_instead_of_map_order() {
     reset_fixture();
     g_fixture.inventory = {
@@ -805,6 +890,9 @@ int main() {
         run_case(
                 "installed and AUR identity are preserved",
                 test_installed_and_aur_identity_are_preserved);
+        run_case(
+                "exact AUR suffix candidates are conservative",
+                test_query_projects_exact_aur_suffix_candidates_conservatively);
         run_case(
                 "plan preserves inventory order instead of map order",
                 test_plan_preserves_inventory_order_instead_of_map_order);

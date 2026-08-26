@@ -1373,6 +1373,77 @@ void test_logger_adoption_format_visibility_append_and_reset_close() {
     expect_log_record(lines[5], "INFO", "state-log-second-init");
 }
 
+std::size_t count_text_occurrences(
+        const std::string& text, const std::string& fragment) {
+    std::size_t count = 0;
+    std::size_t offset = 0;
+    while((offset = text.find(fragment, offset)) != std::string::npos) {
+        ++count;
+        offset += fragment.size();
+    }
+    return count;
+}
+
+void test_logger_diagnostic_capture_replays_once_and_releases_scope() {
+    PreparedStateFixture fixture;
+    ScopedLoggerReset    logger_reset;
+    ScopedStreamCapture stdout_capture(std::cout);
+    ScopedStreamCapture stderr_capture(std::cerr);
+    ScopedLoggerDiagnosticCapture capture;
+
+    Logger::info("captured-info");
+    Logger::warn("captured-warning");
+    Logger::error("captured-error");
+    Logger::raw_cmd("captured-command");
+    expect(
+            stdout_capture.str().empty() && stderr_capture.str().empty(),
+            "Diagnostic capture emitted before replay.");
+
+    capture.stop();
+    state_log::PreparedLogFile log_file =
+            state_log::open_default_state_log(
+                    fixture.paths(), fixture.directory());
+    Logger::init(std::move(log_file), "capture-started");
+    capture.replay();
+    capture.replay();
+
+    const std::vector<std::string> lines =
+            read_lines(fixture.paths().default_log_file);
+    expect(lines.size() == 5, "Captured diagnostics were lost or duplicated.");
+    expect_log_record(lines[0], "INFO", "capture-started");
+    expect_log_record(lines[1], "INFO", "captured-info");
+    expect_log_record(lines[2], "WARN", "captured-warning");
+    expect_log_record(lines[3], "ERROR", "captured-error");
+    expect_log_record(lines[4], "EXEC", "captured-command");
+    const std::string stdout_text = stdout_capture.str();
+    expect(
+            stdout_text.find("capture-started") <
+                            stdout_text.find("captured-info") &&
+                    count_text_occurrences(stdout_text, "captured-info") ==
+                            1 &&
+                    count_text_occurrences(
+                            stdout_text, "captured-warning") == 1 &&
+                    count_text_occurrences(
+                            stdout_text, "captured-command") == 1 &&
+                    count_text_occurrences(
+                            stderr_capture.str(), "captured-error") == 1,
+            "Captured diagnostics changed order, owner, or cardinality.");
+
+    Logger::shutdown();
+    {
+        ScopedLoggerDiagnosticCapture abandoned_capture;
+        Logger::info("abandoned-diagnostic");
+    }
+    Logger::info("after-abandoned-capture");
+    expect(
+            stdout_capture.str().find("abandoned-diagnostic") ==
+                            std::string::npos &&
+                    count_text_occurrences(
+                            stdout_capture.str(),
+                            "after-abandoned-capture") == 1,
+            "Destroyed diagnostic capture leaked into a later route.");
+}
+
 void test_logger_rejects_invalid_descriptor_flags_without_consuming_owner() {
     PreparedStateFixture fixture;
     ScopedLoggerReset    logger_reset;
@@ -1728,6 +1799,9 @@ int main() {
         run_case(
                 "Logger adoption format visibility and reset",
                 test_logger_adoption_format_visibility_append_and_reset_close);
+        run_case(
+                "Logger diagnostic capture one-shot scope",
+                test_logger_diagnostic_capture_replays_once_and_releases_scope);
         run_case(
                 "Logger invalid descriptor adoption rejection",
                 test_logger_rejects_invalid_descriptor_flags_without_consuming_owner);

@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.4.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-23 19:00+0900\n"
+"POT-Creation-Date: 2026-08-27 03:46+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -1009,8 +1009,17 @@ msgstr "  選択済みリポジトリプロバイダーのトランザクショ�
 msgid "  execution failure:"
 msgstr "  実行失敗:"
 
+msgid "Devel package update status requires check: the suffix is candidate evidence only, and authoritative build provenance is unavailable."
+msgstr "devel packageの更新状態は確認が必要です。suffixは候補根拠にすぎず、authoritativeなbuild provenanceは利用できません。"
+
+msgid "Devel package update status requires check."
+msgstr "devel packageの更新状態は確認が必要です。"
+
 msgid "Installed package is already up to date."
 msgstr "インストール済みパッケージはすでに最新です。"
+
+msgid "Devel update assessment has no check-required reason."
+msgstr "devel更新assessmentに確認が必要な理由がありません。"
 
 #. TRANSLATORS: {} is the literal service name "AUR".
 #, c++-format
@@ -2042,6 +2051,9 @@ msgstr "不明な{}更新操作状態です。"
 msgid "up to date"
 msgstr "最新"
 
+msgid "devel update requires check"
+msgstr "devel更新は確認が必要"
+
 #. TRANSLATORS: AUR is a runtime project identity.
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
 #, c++-format
@@ -2258,6 +2270,9 @@ msgstr "その他の対応関係に矛盾があります"
 #, c++-format
 msgid "Unknown {} update reduction reason."
 msgstr "不明な{}更新集約理由です。"
+
+msgid "devel update requires check: suffix candidate only"
+msgstr "devel更新は確認が必要: suffix候補のみ"
 
 msgid "reason unavailable"
 msgstr "理由を取得できません"
@@ -2754,6 +2769,29 @@ msgstr "{}は大きすぎるため{}へ書き込めません。"
 msgid "Failed to write {} to {}."
 msgstr "{}を{}へ書き込めませんでした。"
 
+msgid "Devel check-required update entry is inconsistent."
+msgstr "確認が必要なdevel更新項目に整合性がありません。"
+
+#. TRANSLATORS: The placeholders are an installed package,
+#. the literal field name "PackageBase", and its identity.
+#, c++-format
+msgid "{}: devel package update status requires check (suffix candidate only: {} {} and installed package suffix; authoritative build provenance is unavailable)."
+msgstr "{}: devel packageの更新状態は確認が必要です（suffix候補のみ: {} {}とinstalled package suffix、authoritativeなbuild provenanceは利用できません）。"
+
+#. TRANSLATORS: The placeholders are an installed package,
+#. the literal field name "PackageBase", and its identity.
+#, c++-format
+msgid "{}: devel package update status requires check (suffix candidate only: {} {}; authoritative build provenance is unavailable)."
+msgstr "{}: devel packageの更新状態は確認が必要です（suffix候補のみ: {} {}、authoritativeなbuild provenanceは利用できません）。"
+
+#. TRANSLATORS: The placeholder is an installed package.
+#, c++-format
+msgid "{}: devel package update status requires check (installed package suffix candidate only; authoritative build provenance is unavailable)."
+msgstr "{}: devel packageの更新状態は確認が必要です（installed package suffix候補のみ、authoritativeなbuild provenanceは利用できません）。"
+
+msgid "Devel check-required update entry has no suffix evidence."
+msgstr "確認が必要なdevel更新項目にsuffix根拠がありません。"
+
 msgid "No foreign packages found."
 msgstr "外部パッケージはありません。"
 
@@ -2770,8 +2808,8 @@ msgid "Failed to compare versions: {} -> {}"
 msgstr "バージョンを比較できませんでした: {} -> {}"
 
 #, c++-format
-msgid "Unknown {} update classification."
-msgstr "不明な{}更新分類です。"
+msgid "Inconsistent {} update state."
+msgstr "{}の更新状態に整合性がありません。"
 
 #, c++-format
 msgid "Unsafe command token: {}"
@@ -4857,6 +4895,9 @@ msgstr "{}更新候補"
 #, c++-format
 msgid "{} update candidate has no remote package identity"
 msgstr "{}更新候補にリモートパッケージ識別情報がありません"
+
+msgid "devel package update status requires check: suffix candidate only"
+msgstr "devel packageの更新状態は確認が必要: suffix候補のみ"
 
 #. TRANSLATORS: {} is the literal service name "AUR".
 #, c++-format
@@ -8989,6 +9030,10 @@ msgstr "{}のデフォルト状態ログを段階{}で安全に使用できま�
 
 msgid "Unknown state log error code."
 msgstr "不明な状態ログエラーコードです。"
+
+#, c++-format
+#~ msgid "Unknown {} update classification."
+#~ msgstr "不明な{}更新分類です。"
 
 #, c++-format
 #~ msgid "{} review policy"

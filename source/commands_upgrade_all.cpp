@@ -431,6 +431,9 @@ std::string preflight_reason_label(AurUpdateExecutionReason reason) {
         return localization::translate_message("none");
     case AurUpdateExecutionReason::UpToDate:
         return localization::translate_message("up to date");
+    case AurUpdateExecutionReason::DevelRequiresCheck:
+        return localization::translate_message(
+                "devel update requires check");
     case AurUpdateExecutionReason::NonAurForeign:
         // TRANSLATORS: The placeholder is the literal service name "AUR".
         return localization::format_translated_message("non-{} foreign",
@@ -805,6 +808,7 @@ bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
     case AurUpdateExecutionReason::NonAurForeign:
         return true;
     case AurUpdateExecutionReason::None:
+    case AurUpdateExecutionReason::DevelRequiresCheck:
     case AurUpdateExecutionReason::AurMetadataUnavailable:
     case AurUpdateExecutionReason::VersionComparisonUnavailable:
     case AurUpdateExecutionReason::InstalledReasonUnknown:

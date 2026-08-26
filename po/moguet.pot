@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.4.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-26 08:32+0900\n"
+"POT-Creation-Date: 2026-08-27 03:46+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1015,7 +1015,16 @@ msgstr ""
 msgid "  execution failure:"
 msgstr ""
 
+msgid "Devel package update status requires check: the suffix is candidate evidence only, and authoritative build provenance is unavailable."
+msgstr ""
+
+msgid "Devel package update status requires check."
+msgstr ""
+
 msgid "Installed package is already up to date."
+msgstr ""
+
+msgid "Devel update assessment has no check-required reason."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
@@ -2048,6 +2057,9 @@ msgstr ""
 msgid "up to date"
 msgstr ""
 
+msgid "devel update requires check"
+msgstr ""
+
 #. TRANSLATORS: AUR is a runtime project identity.
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
 #, c++-format
@@ -2263,6 +2275,9 @@ msgstr ""
 #. TRANSLATORS: AUR is a runtime project identity.
 #, c++-format
 msgid "Unknown {} update reduction reason."
+msgstr ""
+
+msgid "devel update requires check: suffix candidate only"
 msgstr ""
 
 msgid "reason unavailable"
@@ -2761,6 +2776,29 @@ msgstr ""
 msgid "Failed to write {} to {}."
 msgstr ""
 
+msgid "Devel check-required update entry is inconsistent."
+msgstr ""
+
+#. TRANSLATORS: The placeholders are an installed package,
+#. the literal field name "PackageBase", and its identity.
+#, c++-format
+msgid "{}: devel package update status requires check (suffix candidate only: {} {} and installed package suffix; authoritative build provenance is unavailable)."
+msgstr ""
+
+#. TRANSLATORS: The placeholders are an installed package,
+#. the literal field name "PackageBase", and its identity.
+#, c++-format
+msgid "{}: devel package update status requires check (suffix candidate only: {} {}; authoritative build provenance is unavailable)."
+msgstr ""
+
+#. TRANSLATORS: The placeholder is an installed package.
+#, c++-format
+msgid "{}: devel package update status requires check (installed package suffix candidate only; authoritative build provenance is unavailable)."
+msgstr ""
+
+msgid "Devel check-required update entry has no suffix evidence."
+msgstr ""
+
 msgid "No foreign packages found."
 msgstr ""
 
@@ -2777,7 +2815,7 @@ msgid "Failed to compare versions: {} -> {}"
 msgstr ""
 
 #, c++-format
-msgid "Unknown {} update classification."
+msgid "Inconsistent {} update state."
 msgstr ""
 
 #, c++-format
@@ -4863,6 +4901,9 @@ msgstr ""
 #. TRANSLATORS: {} is the literal service name "AUR".
 #, c++-format
 msgid "{} update candidate has no remote package identity"
+msgstr ""
+
+msgid "devel package update status requires check: suffix candidate only"
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".

@@ -410,6 +410,90 @@ void test_classification_order_and_combined_resolution() {
     expect(!can_execute(preflight), "Incomplete invocation was executable");
 }
 
+void test_devel_requires_check_blocks_without_candidate_promotion() {
+    reset_preflight_stub();
+    const AurUpdatePlanEntry requires_check = classify_aur_update(
+            AurUpdatePlanInput{
+                    "manual-check-git",
+                    "1.0-1",
+                    InstalledPackageReason::Explicit,
+                    AurUpdateRemotePackage{
+                            "manual-check-git",
+                            "manual-check-git",
+                            "1.0-1",
+                            AurVersionRelation::SameAsInstalled}});
+    AurUpdatePlan update_plan{{
+            remote_entry(
+                    "normal-update-git", InstalledPackageReason::Explicit),
+            requires_check,
+    }};
+    return_build_plan(build_plan_for({
+            {"normal-update-git", "normal-update-git", "normal-update-git"},
+    }));
+
+    const AurUpdateExecutionPreflight preflight =
+            resolve_aur_update_execution_preflight(update_plan);
+
+    expect_single_resolver_call(
+            {"normal-update-git"},
+            "RequiresCheck candidate firewall");
+    expect_status(
+            preflight.targets[0],
+            AurUpdateExecutionTargetStatus::Executable,
+            "Normal update precedence");
+    expect_status(
+            preflight.targets[1],
+            AurUpdateExecutionTargetStatus::Incomplete,
+            "Devel RequiresCheck target");
+    expect(
+            has_issue(
+                    preflight.targets[1],
+                    AurUpdateExecutionReason::DevelRequiresCheck),
+            "Devel RequiresCheck reason is missing");
+    expect(
+            preflight.targets[1].issues.size() == 1 &&
+                    preflight.targets[1]
+                                    .issues.front()
+                                    .devel_requires_check_reason ==
+                            DevelRequiresCheckReason::SuffixCandidateOnly &&
+                    preflight.targets[1]
+                                    .issues.front()
+                                    .package_base ==
+                            std::optional<std::string>{"manual-check-git"},
+            "Devel RequiresCheck reason or PackageBase was flattened");
+    expect(
+            has_executable_targets(preflight) &&
+                    has_blocking_targets(preflight) &&
+                    !can_execute(preflight),
+            "Mixed RequiresCheck invocation bypassed all-target preflight");
+}
+
+void test_five_field_suffix_up_to_date_is_inconsistent() {
+    reset_preflight_stub();
+    AurUpdatePlan update_plan{{remote_entry(
+            "legacy-current-git", InstalledPackageReason::Explicit,
+            AurUpdateClassification::UpToDate)}};
+
+    const AurUpdateExecutionPreflight preflight =
+            resolve_aur_update_execution_preflight(update_plan);
+
+    expect(
+            resolver_call_count() == 0,
+            "Inconsistent five-field suffix entry called the resolver");
+    expect_status(
+            preflight.targets.front(),
+            AurUpdateExecutionTargetStatus::Incomplete,
+            "Five-field suffix UpToDate consistency");
+    expect(
+            has_issue(
+                    preflight.targets.front(),
+                    AurUpdateExecutionReason::UpdatePlanInconsistent) &&
+                    !has_issue(
+                            preflight.targets.front(),
+                            AurUpdateExecutionReason::UpToDate),
+            "Five-field suffix entry remained a normal up-to-date skip");
+}
+
 void test_empty_and_skip_only_plans_suppress_resolution() {
     reset_preflight_stub();
     AurUpdateExecutionPreflight empty =
@@ -2327,6 +2411,12 @@ int main() {
         run_case(
                 "classification order and combined resolution",
                 test_classification_order_and_combined_resolution);
+        run_case(
+                "devel RequiresCheck blocks without candidate promotion",
+                test_devel_requires_check_blocks_without_candidate_promotion);
+        run_case(
+                "five-field suffix UpToDate is inconsistent",
+                test_five_field_suffix_up_to_date_is_inconsistent);
         run_case(
                 "empty and skip-only plans suppress resolution",
                 test_empty_and_skip_only_plans_suppress_resolution);

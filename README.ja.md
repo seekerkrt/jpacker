@@ -388,6 +388,21 @@ packageのsource build、またはそれらを組み合わせたMoguet固有のm
 明示的に実行する場合は、対応する`upgrade`、`upgrade-aur`、`upgrade-all`を使用します。
 これらは通常の`-Syu`の別名ではありません。
 
+Moguet v2.5.0では、exact AUR packageとして解決できるinstalled packageについて、
+`-git`、`-svn`、`-hg`、`-bzr`、`-cvs`、`-darcs`というconventionalなsuffix
+根拠をdevel candidateとして扱います。normal AUR versionが新しくなく、suffix根拠しか
+ない場合、`moguet -Qua`はsilentに最新扱いせず、package、PackageBase / child根拠、
+reason付きの`RequiresCheck`を表示します。normal AUR versionが新しい場合は既存の
+update candidate authorityを優先します。
+
+`RequiresCheck`はautomatic rebuild candidateではありません。`upgrade-aur`、そのdry-run、
+`upgrade-all`のfresh AUR phaseはAUR mutationより前にblockし、non-TTYや`--noconfirm`でも
+promptを追加せずrebuildを承認しません。v2.5.0ではupstream VCS revisionのquery / 比較や
+devel build provenanceのpublicationを行いません。read-only Git observerとinstalled artifactへ
+束縛したauthoritative comparisonはfollow-upの
+[Issue #475](https://github.com/seekerkrt/moguet/issues/475)と
+[Issue #476](https://github.com/seekerkrt/moguet/issues/476)が所有します。
+
 `--aur`は対応する`-S`、`-Ss`、`-Si`をAURへ限定し、`--repo`はofficial binary
 repositoryへ限定します。両selectorの併用はexternal commandやAUR queryより前に
 失敗します。pacman-only routeではcompatibleなpacman optionを保持し、source-build

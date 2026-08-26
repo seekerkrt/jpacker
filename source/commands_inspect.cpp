@@ -1480,6 +1480,46 @@ int cmd_print_pkgbuild(const PkgbuildExportInvocation& invocation) {
     return 0;
 }
 
+std::string devel_requires_check_query_message(
+        const AurUpdatePlanEntry& entry) {
+    if(!entry.devel_classification.has_value() ||
+       entry.devel_assessment.requires_check_reason() == nullptr ||
+       *entry.devel_assessment.requires_check_reason() !=
+               DevelRequiresCheckReason::SuffixCandidateOnly) {
+        throw std::logic_error(localization::translate_message(
+                "Devel check-required update entry is inconsistent."));
+    }
+
+    const DevelPackageSuffixEvidence& suffix =
+            entry.devel_classification->suffix_evidence();
+    const bool package_base_candidate =
+            suffix.package_base_candidate_kind() != nullptr;
+    const bool child_candidate = suffix.installed_children().size() == 1 &&
+            suffix.installed_children().front().candidate_kind() != nullptr;
+    if(package_base_candidate && child_candidate) {
+        return localization::format_translated_message(
+                // TRANSLATORS: The placeholders are an installed package,
+                // the literal field name "PackageBase", and its identity.
+                "{}: devel package update status requires check (suffix candidate only: {} {} and installed package suffix; authoritative build provenance is unavailable).",
+                entry.installed_name, "PackageBase", suffix.package_base());
+    }
+    if(package_base_candidate) {
+        return localization::format_translated_message(
+                // TRANSLATORS: The placeholders are an installed package,
+                // the literal field name "PackageBase", and its identity.
+                "{}: devel package update status requires check (suffix candidate only: {} {}; authoritative build provenance is unavailable).",
+                entry.installed_name, "PackageBase", suffix.package_base());
+    }
+    if(child_candidate) {
+        return localization::format_translated_message(
+                // TRANSLATORS: The placeholder is an installed package.
+                "{}: devel package update status requires check (installed package suffix candidate only; authoritative build provenance is unavailable).",
+                entry.installed_name);
+    }
+    throw std::logic_error(localization::translate_message(
+            "Devel check-required update entry has no suffix evidence."));
+}
+
 int cmd_query_foreign_updates() {
     AurUpdateQueryResult query_result = query_installed_aur_updates();
     if(query_result.plan.entries.empty()) {
@@ -1494,30 +1534,33 @@ int cmd_query_foreign_updates() {
                 "Checking package {}/{}: {}", i + 1,
                 query_result.plan.entries.size(), entry.installed_name));
 
-        switch(entry.classification) {
-        case AurUpdateClassification::NonAurForeign:
-        case AurUpdateClassification::MetadataUnavailable:
+        switch(project_aur_update_effective_state(entry)) {
+        case AurUpdateEffectiveState::NonAurForeign:
+        case AurUpdateEffectiveState::MetadataUnavailable:
             // POLICY(#266): failed batchも従来のnot-found warningを維持するが、
             // pure modelではconfirmed absenceとquery failureを同一視しない。
             Logger::warn(localization::format_translated_message(
                     "Foreign package not found in {}: {}",
                     "AUR", entry.installed_name));
             break;
-        case AurUpdateClassification::UpdateAvailable:
+        case AurUpdateEffectiveState::UpdateAvailable:
             std::cout << entry.installed_name << " " << entry.installed_version
                       << " -> " << entry.aur_package->version << std::endl;
             break;
-        case AurUpdateClassification::UpToDate:
+        case AurUpdateEffectiveState::UpToDate:
             break;
-        case AurUpdateClassification::VersionComparisonUnavailable:
+        case AurUpdateEffectiveState::RequiresCheck:
+            Logger::warn(devel_requires_check_query_message(entry));
+            break;
+        case AurUpdateEffectiveState::VersionComparisonUnavailable:
             Logger::warn(localization::format_translated_message(
                     "Failed to compare versions: {} -> {}",
                     entry.installed_version,
                     entry.aur_package->version));
             break;
-        default:
+        case AurUpdateEffectiveState::Inconsistent:
             throw std::logic_error(localization::format_translated_message(
-                    "Unknown {} update classification.", "AUR"));
+                    "Inconsistent {} update state.", "AUR"));
         }
     }
 

@@ -1810,6 +1810,62 @@ void test_recoverable_aur_query_failure_blocks_mutation() {
     stub::require_script_consumed();
 }
 
+void test_devel_requires_check_preserves_prior_phases_and_blocks_aur() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    stub::set_foreign_inventory(foreign_inventory({"manual-check-git"}));
+    enqueue_aur_query(
+            {{"manual-check-git", "manual-check-git"}}, "0");
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "devel RequiresCheck fixture");
+
+    const UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+
+    expect(
+            result.status ==
+                            UpgradeAllOperationStatus::
+                                    StoppedBeforeAurExecution &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::AurPreparation &&
+                    result.system_source.system.status ==
+                            SystemUpgradePhaseStatus::Completed &&
+                    result.foreign_inventory.status ==
+                            UpgradeAllForeignInventoryPhaseStatus::Completed &&
+                    result.aur.status ==
+                            UpgradeAllAurPhaseStatus::BlockedBeforeExecution &&
+                    result.aur.operation_result.has_value() &&
+                    result.has_partial_completion(),
+            "Devel RequiresCheck rewrote or lost a prior phase outcome");
+    const AurUpdateOperationResult& aur_result =
+            result.aur.operation_result->reduced_operation_result;
+    expect(
+            aur_result.status ==
+                            AurUpdateOperationStatus::BlockedBeforeExecution &&
+                    aur_result.targets.size() == 1 &&
+                    aur_result.targets.front().status ==
+                            AurUpdateOperationTargetStatus::Incomplete &&
+                    aur_result.targets.front().preflight_issues.size() == 1 &&
+                    aur_result.targets.front()
+                                    .preflight_issues.front()
+                                    .reason ==
+                            AurUpdateExecutionReason::DevelRequiresCheck &&
+                    aur_result.targets.front()
+                                    .preflight_issues.front()
+                                    .devel_requires_check_reason ==
+                            DevelRequiresCheckReason::SuffixCandidateOnly,
+            "upgrade-all flattened the AUR RequiresCheck blocker");
+    expect(
+            stub::system_commands().size() == 1 &&
+                    stub::resolver_call_count() == 0 &&
+                    stub::aur_execution_calls().empty(),
+            "RequiresCheck crossed the AUR mutation boundary");
+    stub::require_script_consumed();
+}
+
 void test_total_aur_query_failure_blocks_mutation() {
     stub::reset();
     stub::set_preference_directory(preference_directory({}));
@@ -3349,6 +3405,9 @@ int main() {
         run_case(
                 "recoverable AUR query failure",
                 test_recoverable_aur_query_failure_blocks_mutation);
+        run_case(
+                "devel RequiresCheck preserves prior phases",
+                test_devel_requires_check_preserves_prior_phases_and_blocks_aur);
         run_case(
                 "total AUR query failure",
                 test_total_aur_query_failure_blocks_mutation);

@@ -321,7 +321,9 @@ bool same_aur_update_entry(
            lhs.installed_version == rhs.installed_version &&
            lhs.install_reason == rhs.install_reason &&
            same_aur_remote_package(lhs.aur_package, rhs.aur_package) &&
-           lhs.classification == rhs.classification;
+           lhs.classification == rhs.classification &&
+           lhs.devel_classification == rhs.devel_classification &&
+           lhs.devel_assessment == rhs.devel_assessment;
 }
 
 bool has_package_role(
@@ -1285,6 +1287,7 @@ bool is_known_wrapped_preflight_issue_reason(
     case AurUpdateExecutionReason::None:
         return false;
     case AurUpdateExecutionReason::UpToDate:
+    case AurUpdateExecutionReason::DevelRequiresCheck:
     case AurUpdateExecutionReason::NonAurForeign:
     case AurUpdateExecutionReason::AurMetadataUnavailable:
     case AurUpdateExecutionReason::VersionComparisonUnavailable:
@@ -1358,6 +1361,8 @@ bool same_preflight_issue_identity(
        lhs.reason != rhs.reason || lhs.package_name != rhs.package_name ||
        lhs.package_base != rhs.package_base ||
        lhs.dependency_specification != rhs.dependency_specification ||
+       lhs.devel_requires_check_reason !=
+               rhs.devel_requires_check_reason ||
        lhs.relation_reason != rhs.relation_reason ||
        lhs.build_plan_projection_issue.has_value() !=
                rhs.build_plan_projection_issue.has_value()) {

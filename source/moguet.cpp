@@ -342,19 +342,10 @@ int run_moguet(int argc, char* argv[]) {
         }
     }
 
-    if(parsed.operation ==
-       cli_authority::operation_spec(
-               cli_authority::OperationId::UpgradeAur)
-               .token) {
-        try {
-            // POLICY(#267): NoUpdatesでも--rmdepsを成功扱いせず、queryやlog/cache
-            // 初期化より前に既存separated lifecycleのoption契約で拒否する。
-            require_supported_production_source_build_options(g_config);
-        } catch(const std::exception& error) {
-            Logger::error(error.what());
-            return 1;
-        }
-    }
+    std::optional<PreparedFilteredAurUpdateOperation>
+            prepared_aur_update;
+    std::optional<ScopedLoggerDiagnosticCapture>
+            aur_update_diagnostic_capture;
 
     const cli_authority::OperationSpec* custom_operation =
             cli_authority::find_moguet_operation(parsed.operation);
@@ -367,6 +358,32 @@ int run_moguet(int argc, char* argv[]) {
     }
 
     if(!validate_pre_log_operation_route(parsed)) return 1;
+
+    if(parsed.operation ==
+       cli_authority::operation_spec(
+               cli_authority::OperationId::UpgradeAur)
+               .token) {
+        try {
+            // POLICY(#267/#270): query/static preflight and option rejection
+            // finish before the default state log. RequiresCheck/no-op never
+            // gain a state/cache mutation merely by being observed.
+            aur_update_diagnostic_capture.emplace();
+            prepared_aur_update.emplace(
+                    prepare_upgrade_aur_operation(g_config));
+            aur_update_diagnostic_capture->stop();
+            if(!prepared_aur_update->is_prepared()) {
+                aur_update_diagnostic_capture->replay();
+                return cmd_upgrade_aur(
+                        std::move(*prepared_aur_update), g_config);
+            }
+        } catch(const std::exception& error) {
+            if(aur_update_diagnostic_capture.has_value()) {
+                aur_update_diagnostic_capture->replay();
+            }
+            Logger::error(error.what());
+            return 1;
+        }
+    }
 
     try {
         // POLICY(#305,#306): stateだけを解決し、validated directory
@@ -406,16 +423,31 @@ int run_moguet(int argc, char* argv[]) {
                         "Started {} v{}.",
                         application_identity::PROJECT_NAME,
                         application_identity::VERSION));
+        if(aur_update_diagnostic_capture.has_value()) {
+            // POLICY(#270): executable upgrade-aur restores its existing
+            // Started -> query -> execution trail only after persistent
+            // logging is allowed.
+            aur_update_diagnostic_capture->replay();
+        }
     } catch(const LocalSourceWorkspaceError& error) {
+        if(aur_update_diagnostic_capture.has_value()) {
+            aur_update_diagnostic_capture->replay();
+        }
         report_direct_error(
                 local_source_workspace_failure_diagnostic(error.failure()));
         return 1;
     } catch(const std::exception& error) {
+        if(aur_update_diagnostic_capture.has_value()) {
+            aur_update_diagnostic_capture->replay();
+        }
         // Default state authorityのfailureはoperation dispatch前にfatal。
         // Logger adoption後のwrite failureでも同じbackendへ再書込しない。
         report_direct_error(error.what());
         return 1;
     } catch(...) {
+        if(aur_update_diagnostic_capture.has_value()) {
+            aur_update_diagnostic_capture->replay();
+        }
         // TRANSLATORS: The placeholder is the project name.
         const std::string diagnostic = localization::format_translated_message(
                 "Cannot initialize the {} default state log because of an unknown error.",
@@ -483,7 +515,12 @@ int run_moguet(int argc, char* argv[]) {
                cli_authority::operation_spec(
                        cli_authority::OperationId::UpgradeAur)
                        .token) {
-                return cmd_upgrade_aur(g_config);
+                if(!prepared_aur_update.has_value()) {
+                    throw std::logic_error(
+                            "Prepared AUR update operation is missing.");
+                }
+                return cmd_upgrade_aur(
+                        std::move(*prepared_aur_update), g_config);
             }
             if(operation ==
                cli_authority::operation_spec(
