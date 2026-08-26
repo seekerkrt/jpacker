@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+void run_vcs_source_identity_tests();
+
 namespace {
 
 static_assert(!std::is_default_constructible_v<SourceLocationIdentity>);
@@ -350,6 +352,7 @@ int main() {
         test_source_revision_states_and_git_commit_contract();
         test_package_version_and_architecture_evidence();
         test_source_aware_structural_equality();
+        run_vcs_source_identity_tests();
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

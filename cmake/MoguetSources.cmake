@@ -30,6 +30,8 @@ set(MOGUET_PRODUCTION_SOURCES
     source/commands_source_maintenance.cpp
     source/commands_sync.cpp
     source/commands_upgrade_all.cpp
+    source/devel_package_classification.cpp
+    source/devel_update_model.cpp
     source/dependency_constraint.cpp
     source/dependency_constraint_presentation.cpp
     source/dependency_plan.cpp
@@ -111,6 +113,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/upgrade_all_plan.cpp
     source/upgrade_all_presentation_projection.cpp
     source/user_config.cpp
+    source/vcs_source_identity.cpp
     source/xdg_directory_safety.cpp
     source/xdg_paths.cpp
     source/xdg_state_log.cpp
