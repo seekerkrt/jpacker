@@ -12,6 +12,7 @@
 #include <vector>
 
 void run_invocation_owned_cleanup_adapter_tests();
+void run_trusted_alpm_receipt_tests();
 
 // The focused target compiles the existing typed dependency requirement
 // implementation but never evaluates a version constraint. Keeping this
@@ -827,6 +828,7 @@ int main() {
         test_structural_contradiction_is_invalid();
         test_precedence_and_reason_ordering();
         run_invocation_owned_cleanup_adapter_tests();
+        run_trusted_alpm_receipt_tests();
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

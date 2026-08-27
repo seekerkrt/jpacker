@@ -130,7 +130,8 @@ project_cleanup_current_package_evidence(
         const CleanupCurrentPackageEvidence& current_package,
         const InvocationDependencyTransactionLedger& transaction_ledger);
 
-// Slice 3 has no complete group/policy inventory authority.
+// Slice 3.6 adds causal transport only; it still has no complete group/policy
+// inventory authority.
 [[nodiscard]] CleanupPolicyProtection
 project_cleanup_policy_protection() noexcept;
 

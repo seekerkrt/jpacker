@@ -40,6 +40,12 @@ development_policy=$repo_root/docs/DEVELOPMENT.md
 validation_policy=$repo_root/docs/VALIDATION.md
 offline_dockerfile=$repo_root/containers/arch-validation/Dockerfile
 offline_runner=$repo_root/containers/arch-validation/run-tests.sh
+receipt_root=$repo_root/containers/arch-receipt-validation
+receipt_dockerfile=$receipt_root/Dockerfile
+receipt_runner=$receipt_root/run-installed-receipt.sh
+receipt_dependency_v1=$receipt_root/fixtures/dependency-v1/PKGBUILD
+receipt_dependency_v2=$receipt_root/fixtures/dependency-v2/PKGBUILD
+receipt_target=$receipt_root/fixtures/target/PKGBUILD
 
 fail() {
     printf '%s\n' "$*" >&2
@@ -114,6 +120,11 @@ assert_regular_file "$development_policy" 'development workflow authority'
 assert_regular_file "$validation_policy" 'validation policy authority'
 assert_regular_file "$offline_dockerfile" 'offline validation Dockerfile'
 assert_regular_file "$offline_runner" 'offline validation runner'
+assert_regular_file "$receipt_dockerfile" 'trusted receipt Dockerfile'
+assert_regular_file "$receipt_runner" 'trusted receipt installed runner'
+assert_regular_file "$receipt_dependency_v1" 'trusted receipt dependency v1 fixture'
+assert_regular_file "$receipt_dependency_v2" 'trusted receipt dependency v2 fixture'
+assert_regular_file "$receipt_target" 'trusted receipt solver target fixture'
 
 assert_contains "$readme_file" "live laneは既存のoffline validation lane"
 assert_contains "$readme_file" "ベースイメージは \`archlinux:latest\` を利用する"
@@ -1148,6 +1159,27 @@ case "$offline_target" in
 esac
 printf '%s\n' "$offline_target" | grep -F -- '--network=none' >/dev/null ||
     fail 'existing offline target lost its offline runtime network boundary'
+
+# Slice 3.6 uses an installed root-owned helper in a standalone ephemeral
+# container. It never substitutes a root-executed development-tree binary for
+# package provenance and both image build and runtime are networkless.
+assert_contains "$receipt_dockerfile" 'FROM moguet-arch-validation:local'
+assert_contains "$receipt_dockerfile" 'COPY --chown=moguet-validation:moguet-validation . .'
+assert_contains "$receipt_dockerfile" 'PREFIX=/usr -j8 --output-sync=target'
+assert_contains "$receipt_dockerfile" 'RUN cmake --install build/cmake-production'
+assert_contains "$receipt_dockerfile" '/usr/libexec/moguet/moguet-alpm-receipt-helper'
+assert_contains "$receipt_runner" 'root:root:755:regular file'
+assert_contains "$receipt_runner" '--hookdir "$install_hook_directory"'
+assert_contains "$receipt_runner" 'INSTALL'
+assert_contains "$receipt_runner" 'STATE'
+assert_contains "$receipt_runner" 'solver-introduced dependency'
+assert_contains "$receipt_runner" 'Upgrade transaction produced an Install receipt'
+assert_contains "$receipt_runner" 'failed transaction published a Complete receipt'
+receipt_target_body=$(make_target_body test-container-receipt)
+printf '%s\n' "$receipt_target_body" | grep -F -- '--network=none' >/dev/null ||
+    fail 'trusted receipt target lost its network-none boundary'
+printf '%s\n' "$receipt_target_body" | grep -F -- '--file containers/arch-receipt-validation/Dockerfile' >/dev/null ||
+    fail 'trusted receipt target does not build its standalone installed fixture'
 
 # The tracked fixture remains the Docker build input. Runtime cases consume its
 # pre-build root-owned authority and keep generated metadata case-local.

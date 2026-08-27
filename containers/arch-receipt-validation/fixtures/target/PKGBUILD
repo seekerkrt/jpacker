@@ -1,0 +1,12 @@
+pkgname=moguet-receipt-target
+pkgver=1
+pkgrel=1
+pkgdesc='Moguet trusted receipt solver target fixture'
+arch=('any')
+license=('GPL-3.0-or-later')
+depends=('moguet-receipt-dependency>=1')
+
+package() {
+    install -Dm644 /dev/null \
+        "$pkgdir/usr/share/moguet-receipt/target"
+}

@@ -221,6 +221,13 @@ find "$stage_dir" -type f -print
 `install_manifest.txt`へのfrontendです。上記destination overrideは別のMake install recipeではなく、
 同じCMake graphへmappingされます。
 
+current development packageはprivate implementation helper
+`/usr/libexec/moguet/moguet-alpm-receipt-helper`もinstallします。これはpackage-ownedな
+root transaction helperであり、public commandではありません。`PATH`外でman pageを持たず、
+executableやdestination pathを引数に取らず、source / build treeのhelperで置き換えては
+なりません。current public source-buildの`--rmdeps`は引き続きunsupported / fail-closedであり、
+helperのinstallによってdependency cleanupが有効になるわけではありません。
+
 v2.0.0のpackage名と唯一のexecutableは`moguet`で、`/usr/bin/jpacker`をinstall
 しません。payloadはjpacker v1.16.0 packageと重複しないため、metadataには
 `jpacker`への`provides`、`conflicts`、`replaces`を意図的に設定しません。manual

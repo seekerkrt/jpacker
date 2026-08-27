@@ -257,6 +257,14 @@ install graph and its exact `install_manifest.txt`; the destination overrides
 shown above are mapped into that graph rather than implemented by a separate
 Make install recipe.
 
+The current development package also installs the private implementation
+helper `/usr/libexec/moguet/moguet-alpm-receipt-helper`. It is a package-owned
+root transaction helper, not a public command: it is outside `PATH`, has no
+man page, does not accept an executable or destination path, and must never be
+replaced by a helper from a source or build tree. The current public
+source-build `--rmdeps` route remains unsupported and fail-closed; installing
+this helper does not enable dependency cleanup.
+
 The v2.0.0 package and its only executable are named `moguet`; it does not
 install `/usr/bin/jpacker`. Its payload is disjoint from the jpacker v1.16.0
 package, so the metadata intentionally declares no `provides`, `conflicts`, or

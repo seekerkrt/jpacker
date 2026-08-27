@@ -607,6 +607,19 @@ void test_failed_missing_and_mismatched_receipts_remain_unknown() {
     expect_unknown(
             dependency_transaction(
                     token, owner, {"build-tool"},
+                    InvocationDependencyTransactionCommandOutcome::Unknown,
+                    install_receipt),
+            "unknown transaction outcome projected InvocationOwned");
+    expect_unknown(
+            dependency_transaction(
+                    token, owner, {"build-tool"},
+                    InvocationDependencyTransactionCommandOutcome::
+                            NotAttempted,
+                    install_receipt),
+            "not-attempted transaction projected InvocationOwned");
+    expect_unknown(
+            dependency_transaction(
+                    token, owner, {"build-tool"},
                     InvocationDependencyTransactionCommandOutcome::Succeeded,
                     transaction_receipt(
                             token, owner, {},

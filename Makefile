@@ -12,6 +12,7 @@ ARCH_VALIDATION_IMAGE ?= moguet-arch-validation:local
 ARCH_LIVE_VALIDATION_IMAGE ?= moguet-arch-live-validation:local
 ARCH_LIVE_AUR_VALIDATION_IMAGE ?= moguet-arch-live-aur-validation:local
 ARCH_LIVE_LOCAL_VALIDATION_IMAGE ?= moguet-arch-live-local-validation:local
+ARCH_RECEIPT_VALIDATION_IMAGE ?= moguet-arch-receipt-validation:local
 
 VERSION_FILE := VERSION
 VERSION := $(strip $(shell cat $(VERSION_FILE) 2>/dev/null))
@@ -161,6 +162,7 @@ COMPLETION_FILES := $(BASH_COMPLETION) $(ZSH_COMPLETION) $(FISH_COMPLETION)
 # --- Canonical CMake install destination mapping ---
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
+LIBEXECDIR ?= $(PREFIX)/libexec/$(PACKAGE_NAME)
 COMPDIR ?= /usr/share/bash-completion/completions
 ZSHCOMPDIR ?= /usr/share/zsh/site-functions
 FISHCOMPDIR ?= /usr/share/fish/vendor_completions.d
@@ -283,7 +285,8 @@ export MOGUET_FRONTEND_USE_DEFAULT_COMPILE_OPTIONS
 	test-container-live \
 	test-container-live-provider \
 	test-container-live-aur \
-	test-container-live-local
+	test-container-live-local \
+	test-container-receipt
 .PHONY: check-reviewed-source-pinned-build-authority $(CMAKE_FOCUSED_ALIASES)
 
 all: $(TARGET) $(MANPAGES)
@@ -300,6 +303,7 @@ cmake-production-configure:
 	$(CMAKE) -S . -B $(CMAKE_PRODUCTION_BUILD_DIR) \
 		"-DCMAKE_INSTALL_PREFIX=$(PREFIX)" \
 		"-DCMAKE_INSTALL_BINDIR=$(BINDIR)" \
+		"-DMOGUET_INSTALL_INTERNAL_EXECUTABLE_DIRECTORY=$(LIBEXECDIR)" \
 		"-DMOGUET_INSTALL_BASH_COMPLETION_DIRECTORY=$(COMPDIR)" \
 		"-DMOGUET_INSTALL_ZSH_COMPLETION_DIRECTORY=$(ZSHCOMPDIR)" \
 		"-DMOGUET_INSTALL_FISH_COMPLETION_DIRECTORY=$(FISHCOMPDIR)" \
@@ -625,6 +629,17 @@ test-container-live-local:
 			.; \
 		printf '%s\n' ':: Running Arch live local-PKGBUILD validation container'; \
 		$(DOCKER) run --rm "$(ARCH_LIVE_LOCAL_VALIDATION_IMAGE)"
+
+test-container-receipt:
+	@set -eu; \
+		printf '%s\n' ':: Building trusted ALPM receipt validation image'; \
+		$(DOCKER) build --network=none \
+			--tag "$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
+			--file containers/arch-receipt-validation/Dockerfile \
+			.; \
+		printf '%s\n' ':: Running trusted ALPM receipt validation container'; \
+		$(DOCKER) run --rm --network=none \
+			"$(ARCH_RECEIPT_VALIDATION_IMAGE)"
 
 test-container-live:
 	+@set -eu; \
