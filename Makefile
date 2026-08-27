@@ -61,6 +61,7 @@ CMAKE_FOCUSED_ALIASES := \
 	test-source-package-identity \
 	test-source-package-identity-projection \
 	test-source-package-compatibility \
+	test-invocation-owned-cleanup-model \
 	test-reviewed-source-state \
 	test-reviewed-source-state-store \
 	test-reviewed-source-lifecycle \
