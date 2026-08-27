@@ -201,10 +201,12 @@ environment markerを自称してもこのfreshness boundaryを代替できな�
 #### Install / package consumer
 
 CMake install graphと`install_manifest.txt`がinstall / uninstall payloadのcanonical authorityである。
-Makeの`PREFIX`、`BINDIR`、completion、man、license、doc、locale destination overrideはCMake cacheへ
+Makeの`PREFIX`、`BINDIR`、internal `LIBEXECDIR`、completion、man、license、doc、locale destination overrideはCMake cacheへ
 mappingし、別のMake install graphを持たない。`PKGBUILD`はgenerator-neutralなCMake configure / build /
 install consumerで、`BUILD_TESTING=OFF`を指定する。package payload / permission / layout validationは
-repository validation側で維持し、通常のpackage buildへfull CTestを追加しない。
+repository validation側で維持し、通常のpackage buildへfull CTestを追加しない。current internal payloadには
+`/usr/libexec/moguet/moguet-alpm-receipt-helper` mode `0755`を含む。public commandとして扱わず、
+production root hookはconfigure / install graphが確定したabsolute helper pathだけを使用する。
 
 ### Host validation execution graph
 
@@ -253,6 +255,19 @@ statusをhostへ返す。実行containerは成功時・失敗時とも`--rm`で�
 
 このlaneはhostの通常build、`make test`、`make release-check`を置き換えず、それらから再帰的に
 呼び出さない。release前にはhost validationとcontainer validationを別々に確認する。
+
+Issue #404 Slice 3.6のroot trust / ALPM receipt boundaryは、追加のsecurity-specific installed fixtureで
+確認する。
+
+    make test-container-receipt
+
+このtargetは既存のlocal `moguet-arch-validation:local` imageをdependency/toolchain baseとしてreuseし、
+current sourceをhost bindではなくstandalone Docker contextからcopyする。image buildとruntimeはいずれも
+`--network=none`で、CMake install graphが配置したroot-owned
+`/usr/libexec/moguet/moguet-alpm-receipt-helper`だけをhookから実行する。actual Install、Upgrade non-match、
+solver-introduced dependency、transaction failure / ABORTをephemeral container package databaseで確認し、
+host package database、host `/run`、development-tree helperを共有しない。このtargetはsecurity Slice evidenceであり、
+host A–D、offline E、actual provider / AUR / local Fを相互に代替しない。
 
 Issue #372のlive aggregate gateは、provider selection、real AUR install、real local
 PKGBUILD build / installを単一のfail-fast recipeから別containerで順に実行する。parallel makeの

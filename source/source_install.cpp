@@ -691,13 +691,20 @@ void activate_production_source_build_cache(
     seed_production_source_build_cache(invocation, shared_root.value());
 }
 
-SelectedRepositoryProviderTransactionResult
-execute_selected_repository_provider_transaction(
-        const PreparedProductionSourceBuildInvocation& invocation,
-        const AppConfig& config) {
+namespace {
+
+struct PreparedSelectedRepositoryProviderTransaction {
     SelectedRepositoryProviderTransactionResult result;
-    result.selected_providers = invocation.selected_repository_providers;
-    if(result.selected_providers.empty()) return result;
+    std::optional<RepositoryProviderInstallDirective> directive;
+};
+
+PreparedSelectedRepositoryProviderTransaction
+prepare_selected_repository_provider_transaction(
+        const PreparedProductionSourceBuildInvocation& invocation) {
+    PreparedSelectedRepositoryProviderTransaction prepared;
+    prepared.result.selected_providers =
+            invocation.selected_repository_providers;
+    if(prepared.result.selected_providers.empty()) return prepared;
 
     if(!invocation.cache_root.has_value()) {
         throw std::logic_error(
@@ -708,32 +715,50 @@ execute_selected_repository_provider_transaction(
     // 再検証する。system phase中のroot replacementを古いsnapshotで通さない。
     invocation.cache_root->require_unchanged_identity();
 
-    RepositoryProviderInstallDirective directive;
     try {
-        directive = resolve_repository_provider_install_directive(
-                result.selected_providers, invocation.database_paths);
+        prepared.directive = resolve_repository_provider_install_directive(
+                prepared.result.selected_providers,
+                invocation.database_paths);
     } catch(const std::exception& error) {
-        result.status = SelectedRepositoryProviderTransactionStatus::
-                BlockedBeforeExecution;
-        result.diagnostic = error.what();
-        return result;
+        prepared.result.status =
+                SelectedRepositoryProviderTransactionStatus::
+                        BlockedBeforeExecution;
+        prepared.result.diagnostic = error.what();
+        return prepared;
     } catch(...) {
-        result.status = SelectedRepositoryProviderTransactionStatus::
-                BlockedBeforeExecution;
-        result.diagnostic = localization::translate_message(
+        prepared.result.status =
+                SelectedRepositoryProviderTransactionStatus::
+                        BlockedBeforeExecution;
+        prepared.result.diagnostic = localization::translate_message(
                 "Failed to inspect selected repository provider install reasons with an unknown exception.");
-        return result;
+        return prepared;
     }
 
     // Metadata sessionを閉じた後、actual pacman直前にもcache authorityを再証明する。
     invocation.cache_root->require_unchanged_identity();
+    // Command success is independent from a package changed-set. Both the
+    // legacy and receipt-capable path retain the aggregate as Unknown.
+    prepared.result.package_state_change = PackageStateChange::Unknown;
+    return prepared;
+}
 
-    // --needed成功だけではactual changeを断言できず、nonzero/exec failureも
-    // partial transactionの可能性を持つため、snapshotなしではUnknownを保つ。
-    result.package_state_change = PackageStateChange::Unknown;
+} // namespace
+
+SelectedRepositoryProviderTransactionResult
+execute_selected_repository_provider_transaction(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        const AppConfig& config) {
+    PreparedSelectedRepositoryProviderTransaction prepared =
+            prepare_selected_repository_provider_transaction(invocation);
+    SelectedRepositoryProviderTransactionResult result =
+            std::move(prepared.result);
+    if(result.selected_providers.empty() || !prepared.directive.has_value()) {
+        return result;
+    }
     try {
         const int exit_status = install_selected_repository_providers(
-                result.selected_providers, directive, config);
+                result.selected_providers, prepared.directive.value(),
+                config);
         result.command_exit_status = exit_status;
         if(exit_status == 0) {
             result.status =
@@ -754,6 +779,72 @@ execute_selected_repository_provider_transaction(
                 "Failed to install selected repository providers with an unknown exception.");
         return result;
     }
+}
+
+SelectedRepositoryProviderTrustedReceiptExecutionResult
+execute_selected_repository_provider_transaction(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        const AppConfig& config,
+        SelectedRepositoryProviderTrustedReceiptRequest receipt_request) {
+    static_cast<void>(receipt_request);
+    PreparedSelectedRepositoryProviderTransaction prepared =
+            prepare_selected_repository_provider_transaction(invocation);
+    SelectedRepositoryProviderTrustedReceiptExecutionResult execution{
+            std::move(prepared.result), std::nullopt};
+    if(execution.transaction.selected_providers.empty() ||
+       !prepared.directive.has_value()) {
+        return execution;
+    }
+
+    TrustedAlpmReceiptSelectedProviderRequest transport_request;
+    transport_request.install_directive =
+            prepared.directive.value() ==
+                            RepositoryProviderInstallDirective::AsDependency
+            ? TrustedAlpmReceiptRepositoryInstallDirective::AsDependency
+            : TrustedAlpmReceiptRepositoryInstallDirective::
+                      PreserveExistingReason;
+    transport_request.no_confirm = config.no_confirm;
+    transport_request.targets.reserve(
+            execution.transaction.selected_providers.size());
+    for(const ProvidedDependency& provider :
+        execution.transaction.selected_providers) {
+        const auto& repository =
+                std::get<RepositoryProviderOrigin>(provider.origin);
+        transport_request.targets.push_back(
+                TrustedAlpmReceiptRepositoryTarget{
+                        repository.repository_name,
+                        provider.package_name});
+    }
+
+    execution.receipt_capture =
+            execute_trusted_alpm_receipt_selected_provider_transaction(
+                    transport_request);
+    const TrustedAlpmReceiptCaptureResult& capture =
+            execution.receipt_capture.value();
+    execution.transaction.command_exit_status = capture.pacman_exit_status;
+    if(!capture.pacman_exit_status.has_value()) {
+        execution.transaction.status =
+                SelectedRepositoryProviderTransactionStatus::
+                        BlockedBeforeExecution;
+        execution.transaction.diagnostic = capture.diagnostic.value_or(
+                localization::translate_message(
+                        "Failed to install selected repository providers."));
+        return execution;
+    }
+    if(capture.pacman_exit_status.value() != 0) {
+        execution.transaction.status =
+                SelectedRepositoryProviderTransactionStatus::Failed;
+        execution.transaction.diagnostic = localization::translate_message(
+                "Failed to install selected repository providers.");
+        return execution;
+    }
+
+    // Receipt availability is a separate evidence dimension. A successful
+    // package transaction remains successful even when cleanup authority must
+    // fail closed because consume/publication was unavailable.
+    execution.transaction.status =
+            SelectedRepositoryProviderTransactionStatus::Succeeded;
+    return execution;
 }
 
 namespace {

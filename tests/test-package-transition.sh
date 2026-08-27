@@ -412,6 +412,7 @@ assert_archive_layout() {
     archive_path=$1
     archive_listing=$2
     executable_path=$3
+    internal_executable_path=${4:-}
 
     LC_ALL=C bsdtar --numeric-owner -tvf "$archive_path" >"$archive_listing"
     if ! awk '
@@ -425,14 +426,17 @@ assert_archive_layout() {
         fail "$archive_path contains a non-root-owned entry"
     fi
 
-    if ! awk -v executable_path="$executable_path" '
+    if ! awk \
+        -v executable_path="$executable_path" \
+        -v internal_executable_path="$internal_executable_path" '
         {
             entry_type = substr($1, 1, 1)
             entry_path = $NF
             if (entry_type == "d") {
                 expected_mode = "drwxr-xr-x"
             } else if (entry_type == "-") {
-                expected_mode = entry_path == executable_path \
+                expected_mode = (entry_path == executable_path || \
+                                 entry_path == internal_executable_path) \
                     ? "-rwxr-xr-x" : "-rw-r--r--"
             } else {
                 print "unexpected archive entry type: " $0
@@ -703,7 +707,9 @@ assert_metadata_set "$tmp_dir/v2.PKGINFO" makedepend "$expected_makedepends"
 assert_archive_layout "$v1_package_archive" \
     "$tmp_dir/v1-archive-listing.txt" usr/bin/jpacker
 assert_archive_layout "$v2_package_archive" \
-    "$tmp_dir/v2-archive-listing.txt" "usr/bin/$COMMAND_NAME"
+    "$tmp_dir/v2-archive-listing.txt" \
+    "usr/bin/$COMMAND_NAME" \
+    usr/libexec/moguet/moguet-alpm-receipt-helper
 bsdtar -xf "$v1_package_archive" -C "$v1_archive_root"
 bsdtar -xf "$v2_package_archive" -C "$v2_archive_root"
 assert_no_symlinks "$v1_archive_root"

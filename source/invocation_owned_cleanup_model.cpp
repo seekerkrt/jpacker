@@ -1,17 +1,15 @@
 #include "invocation_owned_cleanup_model.hpp"
 
 #include "package_identifier.hpp"
+#include "trusted_alpm_receipt_protocol.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <set>
 #include <string>
 #include <utility>
 #include <variant>
 
 namespace {
-
-constexpr std::size_t PACMAN_TRANSACTION_TOKEN_HEX_LENGTH = 64;
 
 void add_receipt_issue(
         std::vector<PacmanTransactionReceiptIssueKind>& issues,
@@ -593,15 +591,7 @@ bool PacmanTransactionReceipt::contains_newly_installed_package(
 
 bool is_valid_pacman_transaction_token(
         const std::string& transaction_token) noexcept {
-    if(transaction_token.size() != PACMAN_TRANSACTION_TOKEN_HEX_LENGTH) {
-        return false;
-    }
-    return std::all_of(
-            transaction_token.begin(), transaction_token.end(),
-            [](unsigned char character) {
-                return std::isdigit(character) != 0 ||
-                       (character >= 'a' && character <= 'f');
-            });
+    return is_valid_trusted_alpm_receipt_token(transaction_token);
 }
 
 PacmanTransactionReceipt validate_pacman_transaction_receipt(

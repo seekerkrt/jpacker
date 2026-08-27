@@ -7,6 +7,7 @@
 #include "repository_query.hpp"
 #include "separated_package_base_source_build.hpp"
 #include "source_build.hpp"
+#include "trusted_alpm_receipt_transport.hpp"
 #include "trusted_cache.hpp"
 
 #include <exception>
@@ -448,6 +449,26 @@ struct SelectedRepositoryProviderTransactionResult {
     }
 };
 
+// An explicit type selects the trusted receipt-capable execution path. The
+// existing two-argument transaction API remains the default and does not gain
+// a hidden helper, /run, or hook dependency.
+class SelectedRepositoryProviderTrustedReceiptRequest final {
+public:
+    [[nodiscard]] static
+    SelectedRepositoryProviderTrustedReceiptRequest capture_actual_installs()
+            noexcept {
+        return SelectedRepositoryProviderTrustedReceiptRequest{};
+    }
+
+private:
+    SelectedRepositoryProviderTrustedReceiptRequest() noexcept = default;
+};
+
+struct SelectedRepositoryProviderTrustedReceiptExecutionResult {
+    SelectedRepositoryProviderTransactionResult transaction;
+    std::optional<TrustedAlpmReceiptCaptureResult> receipt_capture;
+};
+
 #ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
 // phase/upgrade-allのfake-symbol binaryは#268 lower lifecycleをlinkしない。
 // production factoryを公開せず、registered orchestration seamのtyped ABIだけを
@@ -773,6 +794,14 @@ SelectedRepositoryProviderTransactionResult
 execute_selected_repository_provider_transaction(
         const PreparedProductionSourceBuildInvocation& invocation,
         const AppConfig& config);
+
+// Production-capable internal API for Slice 3.6. It is intentionally not
+// connected to the current public --rmdeps route.
+SelectedRepositoryProviderTrustedReceiptExecutionResult
+execute_selected_repository_provider_transaction(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        const AppConfig& config,
+        SelectedRepositoryProviderTrustedReceiptRequest receipt_request);
 
 // source-neutralなPackageBase set execution owner。required_targetsをauthorityにし、
 // child別outcomeとunselected artifact identityをflattenせず返す。

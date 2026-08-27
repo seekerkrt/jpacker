@@ -72,6 +72,35 @@ int command_status(const std::string& command) {
     return run_command(command);
 }
 
+namespace trusted_receipt_transport_stub {
+
+std::optional<TrustedAlpmReceiptCaptureResult> next_result;
+std::optional<TrustedAlpmReceiptSelectedProviderRequest> last_request;
+std::size_t call_count = 0;
+
+void set_result(TrustedAlpmReceiptCaptureResult result) {
+    next_result = std::move(result);
+    last_request.reset();
+    call_count = 0;
+}
+
+} // namespace trusted_receipt_transport_stub
+
+TrustedAlpmReceiptCaptureResult
+execute_trusted_alpm_receipt_selected_provider_transaction(
+        const TrustedAlpmReceiptSelectedProviderRequest& request) {
+    using namespace trusted_receipt_transport_stub;
+    ++call_count;
+    last_request = request;
+    if(!next_result.has_value()) {
+        throw std::logic_error(
+                "trusted receipt transport stub has no result");
+    }
+    TrustedAlpmReceiptCaptureResult result = std::move(next_result.value());
+    next_result.reset();
+    return result;
+}
+
 namespace {
 
 namespace fs = std::filesystem;
@@ -2233,6 +2262,91 @@ void test_new_repository_provider_uses_asdeps_needed_transaction(
     require_scenario_complete(
             scenario, 1,
             "new selected repository provider exact --asdeps --needed transaction");
+}
+
+void test_selected_repository_provider_trusted_receipt_api_reaches_ledger(
+        const TemporaryProductionEnvironment& environment) {
+    const ProvidedDependency provider = make_repository_provider(
+            "core", "receipt-provider", "virtual-receipt-provider",
+            "virtual-receipt-provider=1", std::string("1.0-1"));
+    std::vector<ProductionSourceBuildWorkItem> work_items =
+            prepare_aur_source_build_work_items(
+                    single_repository_provider_plan(
+                            provider,
+                            ProviderResolutionKind::UserSelected),
+                    false, false);
+    AppConfig config = noninteractive_config();
+    config.no_confirm = true;
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    activate_scenario(scenario);
+    expect_database_paths();
+    PreparedProductionSourceBuildInvocation invocation =
+            prepare_production_source_build_invocation(
+                    std::move(work_items), scenario.config);
+    activate_production_source_build_cache(invocation);
+
+    const std::string token(64, 'a');
+    const auto owner = InvocationDependencyTransactionOwner::
+            SelectedRepositoryProvider;
+    PacmanTransactionReceipt receipt = validate_pacman_transaction_receipt(
+            token, owner,
+            PacmanTransactionReceiptObservation{
+                    PacmanTransactionReceiptObservationState::Complete,
+                    token, owner,
+                    {{PacmanTransactionPackageOperation::Install,
+                      provider.package_name},
+                     {PacmanTransactionPackageOperation::Install,
+                      "solver-introduced-provider-dependency"}}});
+    InvocationDependencyTransactionLedger ledger;
+    ledger.transactions.push_back(InvocationDependencyTransaction{
+            token, owner, {provider.package_name},
+            InvocationDependencyTransactionCommandOutcome::Succeeded,
+            std::move(receipt)});
+    trusted_receipt_transport_stub::set_result(
+            TrustedAlpmReceiptCaptureResult{
+                    TrustedAlpmReceiptCaptureStatus::Complete, 0,
+                    std::move(ledger), std::nullopt});
+
+    const SelectedRepositoryProviderTrustedReceiptExecutionResult execution =
+            execute_selected_repository_provider_transaction(
+                    invocation, config,
+                    SelectedRepositoryProviderTrustedReceiptRequest::
+                            capture_actual_installs());
+    expect(
+            execution.transaction.status ==
+                            SelectedRepositoryProviderTransactionStatus::
+                                    Succeeded &&
+                    execution.transaction.package_state_change ==
+                            PackageStateChange::Unknown &&
+                    execution.receipt_capture.has_value() &&
+                    execution.receipt_capture->status ==
+                            TrustedAlpmReceiptCaptureStatus::Complete &&
+                    execution.receipt_capture->transaction_ledger.transactions
+                                    .size() == 1 &&
+                    execution.receipt_capture->transaction_ledger
+                            .transactions[0]
+                            .receipt.contains_newly_installed_package(
+                                    "solver-introduced-provider-dependency"),
+            "receipt-capable selected-provider API did not retain its complete ledger");
+    const std::vector<TrustedAlpmReceiptRepositoryTarget> expected_targets{
+            {"core", provider.package_name}};
+    expect(
+            trusted_receipt_transport_stub::call_count == 1 &&
+                    trusted_receipt_transport_stub::last_request.has_value() &&
+                    trusted_receipt_transport_stub::last_request->targets ==
+                            expected_targets &&
+                    trusted_receipt_transport_stub::last_request
+                                    ->install_directive ==
+                            TrustedAlpmReceiptRepositoryInstallDirective::
+                                    AsDependency &&
+                    trusted_receipt_transport_stub::last_request->no_confirm,
+            "selected-provider receipt request changed target/reason/noconfirm authority");
+    expect(
+            process_stub::run_command_call_count() == 0,
+            "receipt-capable API fell through to the legacy shell command");
+    process_stub::require_process_expectations_consumed();
+    deactivate_scenario();
 }
 
 void expect_existing_explicit_repository_provider_preserved(
@@ -5667,6 +5781,8 @@ int main() {
             test_selected_repository_provider_executes_before_source(
                     environment);
             test_new_repository_provider_uses_asdeps_needed_transaction(
+                    environment);
+            test_selected_repository_provider_trusted_receipt_api_reaches_ledger(
                     environment);
             test_existing_explicit_repository_provider_same_version_stays_explicit(
                     environment);

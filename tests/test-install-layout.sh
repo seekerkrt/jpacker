@@ -49,6 +49,8 @@ run_make() {
 }
 
 binary_file=$stage_dir/usr/bin/$COMMAND_NAME
+receipt_helper_file=$stage_dir/usr/libexec/moguet/moguet-alpm-receipt-helper
+receipt_helper_build=$repo_root/build/cmake-production/moguet-alpm-receipt-helper
 legacy_binary_file=$stage_dir/usr/bin/jpacker
 bash_completion_file=$stage_dir/usr/share/bash-completion/completions/$COMMAND_NAME
 zsh_completion_file=$stage_dir/usr/share/zsh/site-functions/_$COMMAND_NAME
@@ -98,6 +100,14 @@ assert_installed_text() {
 
     grep -F -- "$expected" "$installed_file" >/dev/null ||
         fail "$installed_file is missing installed-path reference: $expected"
+}
+
+assert_binary_contains() {
+    binary_path=$1
+    expected_text=$2
+
+    LC_ALL=C grep -aF -- "$expected_text" "$binary_path" >/dev/null ||
+        fail "$binary_path is missing compiled installed-path authority: $expected_text"
 }
 
 assert_absent() {
@@ -210,6 +220,15 @@ PY
 
 assert_package_artifacts_installed() {
     assert_installed_file "$repo_root/$COMMAND_NAME" "$binary_file" 755
+    assert_installed_file "$receipt_helper_build" "$receipt_helper_file" 755
+    assert_directory "$(dirname "$receipt_helper_file")"
+    assert_mode "$(dirname "$receipt_helper_file")" 755
+    assert_binary_contains \
+        "$binary_file" \
+        /usr/libexec/moguet/moguet-alpm-receipt-helper
+    assert_binary_contains \
+        "$receipt_helper_file" \
+        /usr/libexec/moguet/moguet-alpm-receipt-helper
     assert_absent "$legacy_binary_file"
     assert_installed_file "$repo_root/completions/$COMMAND_NAME.bash" \
         "$bash_completion_file"
@@ -265,6 +284,7 @@ assert_package_artifacts_installed() {
 assert_package_artifacts_absent() {
     for path in \
         "$binary_file" \
+        "$receipt_helper_file" \
         "$legacy_binary_file" \
         "$bash_completion_file" \
         "$zsh_completion_file" \
@@ -399,6 +419,7 @@ assert_no_symlinks
 custom_stage_dir=$stage_root/custom-root
 custom_prefix=/opt/moguet-prefix
 custom_bindir=/custom/bin
+custom_libexecdir=/custom/libexec/moguet
 custom_compdir=/custom/completions/bash
 custom_zshcompdir=/custom/completions/zsh
 custom_fishcompdir=/custom/completions/fish
@@ -417,6 +438,7 @@ run_custom_make() {
             PREFIX="$custom_prefix" \
             DESTDIR="$custom_stage_dir" \
             BINDIR="$custom_bindir" \
+            LIBEXECDIR="$custom_libexecdir" \
             COMPDIR="$custom_compdir" \
             ZSHCOMPDIR="$custom_zshcompdir" \
             FISHCOMPDIR="$custom_fishcompdir" \
@@ -429,6 +451,7 @@ run_custom_make() {
 }
 
 custom_binary=$custom_stage_dir$custom_bindir/$COMMAND_NAME
+custom_receipt_helper=$custom_stage_dir$custom_libexecdir/moguet-alpm-receipt-helper
 custom_bash_completion=$custom_stage_dir$custom_compdir/$COMMAND_NAME
 custom_zsh_completion=$custom_stage_dir$custom_zshcompdir/_$COMMAND_NAME
 custom_fish_completion=$custom_stage_dir$custom_fishcompdir/$COMMAND_NAME.fish
@@ -442,6 +465,15 @@ custom_config_sample=$custom_doc_dir/examples/config.toml
 
 run_custom_make install
 assert_installed_file "$repo_root/$COMMAND_NAME" "$custom_binary" 755
+assert_installed_file "$receipt_helper_build" "$custom_receipt_helper" 755
+assert_directory "$(dirname "$custom_receipt_helper")"
+assert_mode "$(dirname "$custom_receipt_helper")" 755
+assert_binary_contains \
+    "$custom_binary" \
+    "$custom_libexecdir/moguet-alpm-receipt-helper"
+assert_binary_contains \
+    "$custom_receipt_helper" \
+    "$custom_libexecdir/moguet-alpm-receipt-helper"
 assert_installed_file "$repo_root/completions/$COMMAND_NAME.bash" \
     "$custom_bash_completion"
 assert_installed_file "$repo_root/completions/_$COMMAND_NAME" \
@@ -476,6 +508,7 @@ assert_installed_file "$repo_root/docs/migration/v1-to-v2.ja.md" \
     "$custom_migration_dir/v1-to-v2.ja.md"
 
 assert_absent "$custom_stage_dir/usr/bin/$COMMAND_NAME"
+assert_absent "$custom_stage_dir/usr/libexec/moguet/moguet-alpm-receipt-helper"
 assert_absent "$custom_stage_dir/usr/share/bash-completion/completions/$COMMAND_NAME"
 assert_absent "$custom_stage_dir$custom_prefix/bin/$COMMAND_NAME"
 assert_absent "$custom_stage_dir$custom_prefix/share/man/man1/$COMMAND_NAME.1"
@@ -489,6 +522,7 @@ run_custom_make uninstall
 
 for custom_owned_file in \
     "$custom_binary" \
+    "$custom_receipt_helper" \
     "$custom_bash_completion" \
     "$custom_zsh_completion" \
     "$custom_fish_completion" \

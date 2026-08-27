@@ -109,6 +109,8 @@ set(MOGUET_PRODUCTION_SOURCES
     source/system_source_upgrade.cpp
     source/trusted_cache.cpp
     source/trusted_git.cpp
+    source/trusted_alpm_receipt_protocol.cpp
+    source/trusted_alpm_receipt_transport.cpp
     source/unified_plan_observation.cpp
     source/unified_plan_projection.cpp
     source/unified_plan_renderer.cpp
@@ -122,6 +124,45 @@ set(MOGUET_PRODUCTION_SOURCES
     source/xdg_paths.cpp
     source/xdg_state_log.cpp
 )
+
+# The package-installed root helper is a separate small executable and does
+# not link the Moguet production object graph. Keep its exact source closure
+# explicit alongside the main production manifest.
+set(MOGUET_ALPM_RECEIPT_HELPER_SOURCES
+    source/trusted_alpm_receipt_helper_main.cpp
+    source/trusted_alpm_receipt_helper_state.cpp
+    source/trusted_alpm_receipt_protocol.cpp
+)
+
+set(_moguet_unique_alpm_receipt_helper_sources
+    ${MOGUET_ALPM_RECEIPT_HELPER_SOURCES}
+)
+list(REMOVE_DUPLICATES _moguet_unique_alpm_receipt_helper_sources)
+list(LENGTH MOGUET_ALPM_RECEIPT_HELPER_SOURCES _moguet_helper_source_count)
+list(
+    LENGTH
+    _moguet_unique_alpm_receipt_helper_sources
+    _moguet_unique_helper_source_count
+)
+if(NOT _moguet_helper_source_count EQUAL _moguet_unique_helper_source_count)
+    message(
+        FATAL_ERROR
+        "MOGUET_ALPM_RECEIPT_HELPER_SOURCES contains duplicate entries"
+    )
+endif()
+foreach(_moguet_helper_source IN LISTS MOGUET_ALPM_RECEIPT_HELPER_SOURCES)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_moguet_helper_source}")
+        message(
+            FATAL_ERROR
+            "ALPM receipt helper source does not exist: "
+            "${_moguet_helper_source}"
+        )
+    endif()
+endforeach()
+unset(_moguet_helper_source)
+unset(_moguet_helper_source_count)
+unset(_moguet_unique_alpm_receipt_helper_sources)
+unset(_moguet_unique_helper_source_count)
 
 set(_moguet_unique_production_sources ${MOGUET_PRODUCTION_SOURCES})
 list(REMOVE_DUPLICATES _moguet_unique_production_sources)
