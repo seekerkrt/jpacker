@@ -139,6 +139,12 @@ StrictRepositoryPackageQueryResult query_repository_package_strict(
     return RepositoryPackageNotFound{};
 }
 
+StrictRepositoryPackageQueryResult query_repository_package_strict(
+        const PacmanRepositoryConfiguration&,
+        const std::string& package_name) {
+    return query_repository_package_strict(package_name);
+}
+
 InstalledExactPackageObservationResult query_installed_exact_package_strict(
         const std::string& package_name) {
     return InstalledExactPackageAbsent{package_name};

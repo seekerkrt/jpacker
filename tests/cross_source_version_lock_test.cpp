@@ -11,6 +11,8 @@
 #include <variant>
 #include <vector>
 
+void run_cross_source_version_lock_observation_tests();
+
 static_assert(
         !std::is_pointer_v<decltype(
                 RepositoryUpgradeCandidate::repository_candidate)>);
@@ -266,6 +268,7 @@ int main() {
         test_unrelated_aur_query_failure_is_ambiguous();
         test_ambiguous_replacement_candidates();
         test_indirect_dependency_fails_closed();
+        run_cross_source_version_lock_observation_tests();
         std::cout << "cross-source version-lock tests: all checks passed\n";
         return 0;
     } catch(const std::exception& error) {

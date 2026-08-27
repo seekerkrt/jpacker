@@ -41,11 +41,18 @@ struct RepositoryProvidedPackageMetadata {
     alpm_depmod_t              relation = ALPM_DEP_MOD_ANY;
 };
 
+struct PackageDependencyMetadata {
+    std::optional<std::string> package_name;
+    std::optional<std::string> version;
+    alpm_depmod_t              relation = ALPM_DEP_MOD_ANY;
+};
+
 struct LocalPackageMetadata {
     std::string       name;
     std::string       version;
     alpm_pkgreason_t reason = ALPM_PKG_REASON_EXPLICIT;
     std::vector<RepositoryProvidedPackageMetadata> provides = {};
+    std::vector<PackageDependencyMetadata> dependencies = {};
 };
 
 void reset_alpm_stub();
@@ -77,6 +84,9 @@ void set_local_packages(const std::vector<LocalPackageMetadata>& packages);
 void set_local_package_provides(
         std::size_t package_index,
         const std::vector<RepositoryProvidedPackageMetadata>& provides);
+void set_local_package_dependencies(
+        std::size_t package_index,
+        const std::vector<PackageDependencyMetadata>& dependencies);
 void set_local_package_cache_entry_null(std::size_t package_index);
 void set_local_package_name_null(std::size_t package_index);
 void set_local_package_version_null(std::size_t package_index);

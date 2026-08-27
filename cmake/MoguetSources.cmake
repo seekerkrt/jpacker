@@ -31,6 +31,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/commands_sync.cpp
     source/commands_upgrade_all.cpp
     source/cross_source_version_lock.cpp
+    source/cross_source_version_lock_observation.cpp
     source/devel_package_classification.cpp
     source/devel_update_model.cpp
     source/dependency_constraint.cpp

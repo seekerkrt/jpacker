@@ -74,6 +74,10 @@ struct LocalPackageState {
             provides;
     std::vector<alpm_depend_t> provide_dependencies;
     std::vector<alpm_list_t>   provide_nodes;
+    std::vector<package_metadata_test_stub::PackageDependencyMetadata>
+            dependencies;
+    std::vector<alpm_depend_t> dependency_records;
+    std::vector<alpm_list_t>   dependency_nodes;
 };
 
 struct LocalPackageQueryExpectation {
@@ -449,6 +453,9 @@ void configure_foreign_inventory_from_environment() {
                 false,
                 {},
                 {},
+                {},
+                {},
+                {},
                 {}});
     }
 
@@ -653,6 +660,39 @@ void rebuild_local_provides(LocalPackageState& package_state) {
     }
 }
 
+void rebuild_local_dependencies(LocalPackageState& package_state) {
+    package_state.dependency_records.clear();
+    package_state.dependency_records.reserve(
+            package_state.dependencies.size());
+    for(auto& dependency : package_state.dependencies) {
+        package_state.dependency_records.push_back(alpm_depend_t{
+                dependency.package_name.has_value()
+                        ? dependency.package_name->data()
+                        : nullptr,
+                dependency.version.has_value()
+                        ? dependency.version->data()
+                        : nullptr,
+                nullptr,
+                0,
+                dependency.relation});
+    }
+
+    package_state.dependency_nodes.resize(
+            package_state.dependency_records.size());
+    for(std::size_t index = 0;
+        index < package_state.dependency_nodes.size();
+        ++index) {
+        package_state.dependency_nodes[index] = alpm_list_t{
+                &package_state.dependency_records[index],
+                index == 0
+                        ? nullptr
+                        : &package_state.dependency_nodes[index - 1],
+                index + 1 == package_state.dependency_nodes.size()
+                        ? nullptr
+                        : &package_state.dependency_nodes[index + 1]};
+    }
+}
+
 RepositoryPackageState* repository_package_state(alpm_pkg_t* package) {
     if(package == nullptr || package->kind != AlpmStubDatabaseKind::Sync) return nullptr;
     auto package_state = g_state.repository_packages.find(
@@ -785,6 +825,9 @@ void enqueue_local_package_query_present(
                             false,
                             {},
                             {},
+                            {},
+                            {},
+                            {},
                             {}},
                     ALPM_ERR_OK});
     g_state.local_package_query_strict_mode = true;
@@ -837,8 +880,12 @@ void set_local_packages(const std::vector<LocalPackageMetadata>& packages) {
                 false,
                 package.provides,
                 {},
+                {},
+                package.dependencies,
+                {},
                 {}});
         rebuild_local_provides(g_state.local_packages.back());
+        rebuild_local_dependencies(g_state.local_packages.back());
     }
 }
 
@@ -849,6 +896,15 @@ void set_local_package_provides(
     LocalPackageState& package = g_state.local_packages[package_index];
     package.provides = provides;
     rebuild_local_provides(package);
+}
+
+void set_local_package_dependencies(
+        std::size_t package_index,
+        const std::vector<PackageDependencyMetadata>& dependencies) {
+    if(package_index >= g_state.local_packages.size()) return;
+    LocalPackageState& package = g_state.local_packages[package_index];
+    package.dependencies = dependencies;
+    rebuild_local_dependencies(package);
 }
 
 void set_local_package_cache_entry_null(std::size_t package_index) {
@@ -1752,6 +1808,68 @@ alpm_list_t* alpm_pkg_get_provides(alpm_pkg_t* package) {
         return nullptr;
     }
     return package_state->provide_nodes.data();
+}
+
+alpm_list_t* alpm_pkg_get_depends(alpm_pkg_t* package) {
+    if(package == nullptr || package->kind != AlpmStubDatabaseKind::Local) {
+        return nullptr;
+    }
+    LocalPackageState* package_state = local_package_state(package);
+    if(package_state == nullptr || package_state->dependency_nodes.empty()) {
+        return nullptr;
+    }
+    return package_state->dependency_nodes.data();
+}
+
+char* alpm_dep_compute_string(const alpm_depend_t* dependency) {
+    if(dependency == nullptr || dependency->name == nullptr ||
+       dependency->name[0] == '\0') {
+        return nullptr;
+    }
+
+    const char* relation = nullptr;
+    switch(dependency->mod) {
+    case ALPM_DEP_MOD_ANY:
+        relation = "";
+        break;
+    case ALPM_DEP_MOD_EQ:
+        relation = "=";
+        break;
+    case ALPM_DEP_MOD_GE:
+        relation = ">=";
+        break;
+    case ALPM_DEP_MOD_LE:
+        relation = "<=";
+        break;
+    case ALPM_DEP_MOD_GT:
+        relation = ">";
+        break;
+    case ALPM_DEP_MOD_LT:
+        relation = "<";
+        break;
+    default:
+        return nullptr;
+    }
+
+    const bool is_unversioned = dependency->mod == ALPM_DEP_MOD_ANY;
+    const bool has_version = dependency->version != nullptr &&
+                             dependency->version[0] != '\0';
+    if((is_unversioned && has_version) ||
+       (!is_unversioned && !has_version)) {
+        return nullptr;
+    }
+
+    std::string specification = dependency->name;
+    if(!is_unversioned) {
+        specification += relation;
+        specification += dependency->version;
+    }
+    char* result = static_cast<char*>(
+            std::malloc(specification.size() + 1U));
+    if(result == nullptr) return nullptr;
+    std::memcpy(
+            result, specification.c_str(), specification.size() + 1U);
+    return result;
 }
 
 const char* alpm_pkg_get_desc(alpm_pkg_t* package) {
