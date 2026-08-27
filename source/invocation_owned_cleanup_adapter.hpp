@@ -121,6 +121,15 @@ project_cleanup_current_package_evidence(
         const std::vector<SelectedRepositoryProviderTransactionResult>&
                 provider_transactions) noexcept;
 
+// InvocationOwned requires a complete receipt for the exact transaction and
+// an actual Install record for this package. Omission, Upgrade, command
+// success alone, or malformed ledger data remains Unknown.
+[[nodiscard]] CleanupCausalOwnership project_cleanup_causal_ownership(
+        const std::string& package_name,
+        CleanupBaselineObservation baseline,
+        const CleanupCurrentPackageEvidence& current_package,
+        const InvocationDependencyTransactionLedger& transaction_ledger);
+
 // Slice 3 has no complete group/policy inventory authority.
 [[nodiscard]] CleanupPolicyProtection
 project_cleanup_policy_protection() noexcept;
@@ -137,4 +146,5 @@ project_invocation_owned_cleanup_candidate(
         const ResolvedDependencyCandidate& candidate_authority,
         const CleanupInvocationLifecycleEvidence& lifecycle,
         const std::vector<SelectedRepositoryProviderTransactionResult>&
-                provider_transactions = {});
+                provider_transactions = {},
+        const InvocationDependencyTransactionLedger& transaction_ledger = {});

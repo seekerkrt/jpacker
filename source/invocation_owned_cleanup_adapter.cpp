@@ -1,6 +1,7 @@
 #include "invocation_owned_cleanup_adapter.hpp"
 
 #include "build_plan_artifact_target_projection.hpp"
+#include "package_identifier.hpp"
 #include "source_package_identity_projection.hpp"
 
 #include <algorithm>
@@ -60,6 +61,37 @@ bool is_dependency_role(PackageRole role) noexcept {
     return role == PackageRole::RuntimeDependency ||
            role == PackageRole::BuildDependency ||
            role == PackageRole::CheckDependency;
+}
+
+bool transaction_requested_packages_are_valid(
+        const std::vector<std::string>& requested_package_names) {
+    if(requested_package_names.empty()) return false;
+    std::set<std::string> unique_names;
+    return std::all_of(
+            requested_package_names.begin(), requested_package_names.end(),
+            [&unique_names](const std::string& package_name) {
+                return is_valid_package_name(package_name) &&
+                       unique_names.insert(package_name).second;
+            });
+}
+
+bool current_package_identity_supports_causal_projection(
+        const SourceAwarePackageIdentity& candidate,
+        const CleanupCurrentPackageEvidence& current_package) noexcept {
+    if(current_package.state != CleanupInstalledState::Present ||
+       current_package.verification !=
+               CleanupEvidenceVerification::Verified ||
+       !current_package.metadata.has_value() ||
+       current_package.metadata->name !=
+               candidate.package().package_name()) {
+        return false;
+    }
+
+    const PackageVersionIdentity& version = candidate.package_version();
+    if(version.state() != PackageVersionState::Known) return true;
+    const std::string* full_version = version.full_version();
+    return full_version != nullptr &&
+           *full_version == current_package.metadata->version;
 }
 
 bool has_role(
@@ -677,6 +709,47 @@ CleanupCausalOwnership project_cleanup_causal_ownership(
     return CleanupCausalOwnership::Unknown;
 }
 
+CleanupCausalOwnership project_cleanup_causal_ownership(
+        const std::string& package_name,
+        CleanupBaselineObservation baseline,
+        const CleanupCurrentPackageEvidence& current_package,
+        const InvocationDependencyTransactionLedger& transaction_ledger) {
+    // POLICY(#404): the receipt proves causality only when the independent
+    // observation dimensions do not contradict a newly installed package.
+    if(!is_valid_package_name(package_name) ||
+       baseline != CleanupBaselineObservation::NewlyObserved ||
+       current_package.state != CleanupInstalledState::Present ||
+       current_package.verification !=
+               CleanupEvidenceVerification::Verified ||
+       !current_package.metadata.has_value() ||
+       current_package.metadata->name != package_name) {
+        return CleanupCausalOwnership::Unknown;
+    }
+
+    for(const InvocationDependencyTransaction& transaction :
+        transaction_ledger.transactions) {
+        if(transaction.command_outcome !=
+                   InvocationDependencyTransactionCommandOutcome::Succeeded ||
+           !is_valid_pacman_transaction_token(
+                   transaction.transaction_token) ||
+           !transaction_requested_packages_are_valid(
+                   transaction.requested_package_names) ||
+           !transaction.receipt.is_complete_for(
+                   transaction.transaction_token, transaction.owner)) {
+            continue;
+        }
+        if(transaction.receipt.contains_newly_installed_package(
+                   package_name)) {
+            return CleanupCausalOwnership::InvocationOwned;
+        }
+    }
+
+    // Receipt omission is deliberately not NotInvocationOwned. Another
+    // transaction may be unavailable/incomplete, and a complete receipt may
+    // contain only an Upgrade for this package.
+    return CleanupCausalOwnership::Unknown;
+}
+
 CleanupPolicyProtection project_cleanup_policy_protection() noexcept {
     return CleanupPolicyProtection::Unknown;
 }
@@ -689,7 +762,8 @@ project_invocation_owned_cleanup_candidate(
         const ResolvedDependencyCandidate& candidate_authority,
         const CleanupInvocationLifecycleEvidence& lifecycle,
         const std::vector<SelectedRepositoryProviderTransactionResult>&
-                provider_transactions) {
+                provider_transactions,
+        const InvocationDependencyTransactionLedger& transaction_ledger) {
     std::vector<CleanupLifecycleProjectionIssue> issues;
     retain_snapshot_failure(
             baseline_snapshot,
@@ -975,14 +1049,22 @@ project_invocation_owned_cleanup_candidate(
     CleanupCurrentPackageEvidence current =
             project_cleanup_current_package_evidence(
                     current_snapshot, package_name);
-    const CleanupCausalOwnership causal =
-            project_cleanup_causal_ownership(
-                    lifecycle, provider_transactions);
-    add_issue(
-            issues,
-            CleanupLifecycleProjectionIssueKind::
-                    CausalOwnershipUnavailable,
-            std::nullopt, package_name);
+    // Legacy lifecycle/provider success evidence remains intentionally inert.
+    static_cast<void>(lifecycle);
+    static_cast<void>(provider_transactions);
+    CleanupCausalOwnership causal = CleanupCausalOwnership::Unknown;
+    if(current_package_identity_supports_causal_projection(
+               projected_candidate.value(), current)) {
+        causal = project_cleanup_causal_ownership(
+                package_name, baseline, current, transaction_ledger);
+    }
+    if(causal == CleanupCausalOwnership::Unknown) {
+        add_issue(
+                issues,
+                CleanupLifecycleProjectionIssueKind::
+                        CausalOwnershipUnavailable,
+                std::nullopt, package_name);
+    }
 
     const CleanupSharedRequirementState shared =
             project_shared_requirement(
