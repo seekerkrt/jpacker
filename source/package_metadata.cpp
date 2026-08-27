@@ -1184,6 +1184,72 @@ PackageMetadataSession::snapshot_local_package_versions() const {
     return snapshot;
 }
 
+InstalledPackageStateSnapshotResult
+PackageMetadataSession::snapshot_installed_package_states() const {
+    if(impl_ == nullptr) {
+        return query_failure(
+                PackageMetadataErrorCode::QueryFailed,
+                localization::translate_message(
+                        "Package metadata session is not open."));
+    }
+
+    InstalledPackageStateSnapshot snapshot;
+    // POLICY(#404): open()がpreloadしたcacheを一度だけ走査し、reasonを含む
+    // coherentなowned inventoryを作る。malformed entryをabsenceへ落とさない。
+    for(alpm_list_t* node = impl_->local_package_cache;
+        node != nullptr;
+        node = node->next) {
+        if(node->data == nullptr) {
+            return query_failure(
+                    PackageMetadataErrorCode::QueryFailed,
+                    localization::translate_message(
+                            "Local package cache contains an invalid package entry."));
+        }
+
+        auto* package = static_cast<alpm_pkg_t*>(node->data);
+        const char* raw_package_name = alpm_pkg_get_name(package);
+        if(raw_package_name == nullptr || raw_package_name[0] == '\0' ||
+           !is_valid_package_name(raw_package_name)) {
+            return query_failure(
+                    PackageMetadataErrorCode::MalformedMetadata,
+                    localization::translate_message(
+                            "Local package metadata contains an invalid package name."));
+        }
+
+        const char* raw_package_version = alpm_pkg_get_version(package);
+        if(raw_package_version == nullptr || raw_package_version[0] == '\0') {
+            return query_failure(
+                    PackageMetadataErrorCode::MalformedMetadata,
+                    localization::translate_message(
+                            "Local package metadata contains an invalid version."));
+        }
+
+        std::string package_name(raw_package_name);
+        InstalledPackageMetadata metadata{
+                package_name,
+                raw_package_version,
+                map_install_reason(alpm_pkg_get_reason(package))};
+        if(!snapshot.emplace(std::move(package_name), std::move(metadata))
+                    .second) {
+            return query_failure(
+                    PackageMetadataErrorCode::MalformedMetadata,
+                    localization::translate_message(
+                            "Local package metadata contains a duplicate package name."));
+        }
+    }
+    return snapshot;
+}
+
+InstalledPackageStateSnapshotResult snapshot_installed_package_states(
+        const PacmanDatabasePaths& paths) {
+    try {
+        PackageMetadataSession session = PackageMetadataSession::open(paths);
+        return session.snapshot_installed_package_states();
+    } catch(const PackageMetadataError& error) {
+        return error.failure();
+    }
+}
+
 InstalledPackageRelationMetadataInventoryResult
 PackageMetadataSession::snapshot_installed_package_relation_metadata() const {
     if(impl_ == nullptr) {

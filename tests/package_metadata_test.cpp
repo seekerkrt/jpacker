@@ -177,6 +177,20 @@ PackageMetadataFailure require_snapshot_failure(
     return failure;
 }
 
+PackageMetadataFailure require_state_snapshot_failure(
+        const InstalledPackageStateSnapshotResult& result,
+        PackageMetadataErrorCode expected_code,
+        const std::string& context) {
+    PackageMetadataFailure failure =
+            require_result_alternative<PackageMetadataFailure>(
+                    result, context);
+    expect(failure.code == expected_code,
+           context + ": unexpected failure code");
+    expect(!failure.diagnostic.empty(),
+           context + ": empty failure diagnostic");
+    return failure;
+}
+
 void set_pacman_conf_output(const std::string& output, int exit_code = 0) {
     stub::reset_process_stub();
     stub::enqueue_captured_command_result(
@@ -807,6 +821,123 @@ void test_moved_from_session_snapshot_reports_query_failure() {
             source.snapshot_local_package_versions(),
             PackageMetadataErrorCode::QueryFailed,
             "moved-from snapshot session"));
+}
+
+void test_installed_package_state_snapshot_is_owned_and_keeps_reasons() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({
+            {"explicit-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT},
+            {"dependency-package", "2.0-3", ALPM_PKG_REASON_DEPEND},
+            {"unknown-package", "3.0-2", ALPM_PKG_REASON_UNKNOWN}});
+
+    InstalledPackageStateSnapshot snapshot;
+    {
+        PackageMetadataSession session =
+                PackageMetadataSession::open(valid_database_paths());
+        InstalledPackageStateSnapshotResult result =
+                session.snapshot_installed_package_states();
+        snapshot = require_result_alternative<InstalledPackageStateSnapshot>(
+                result, "installed package state snapshot");
+        expect(
+                stub::package_cache_call_count() == 1,
+                "state snapshot reloaded the preloaded local package cache");
+    }
+
+    stub::reset_alpm_stub();
+    expect(snapshot.size() == 3, "state snapshot package count differs");
+    const InstalledPackageMetadata& explicit_package =
+            snapshot.at("explicit-package");
+    expect(
+            explicit_package.name == "explicit-package" &&
+                    explicit_package.version == "1.0-1" &&
+                    explicit_package.reason ==
+                            InstalledPackageReason::Explicit,
+            "state snapshot lost Explicit metadata");
+    const InstalledPackageMetadata& dependency_package =
+            snapshot.at("dependency-package");
+    expect(
+            dependency_package.name == "dependency-package" &&
+                    dependency_package.version == "2.0-3" &&
+                    dependency_package.reason ==
+                            InstalledPackageReason::Dependency,
+            "state snapshot lost Dependency metadata");
+    const InstalledPackageMetadata& unknown_package =
+            snapshot.at("unknown-package");
+    expect(
+            unknown_package.name == "unknown-package" &&
+                    unknown_package.version == "3.0-2" &&
+                    unknown_package.reason ==
+                            InstalledPackageReason::Unknown,
+            "state snapshot rewrote Unknown install reason");
+}
+
+void test_installed_package_state_snapshot_rejects_malformed_metadata() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+    {
+        PackageMetadataSession session =
+                PackageMetadataSession::open(valid_database_paths());
+        static_cast<void>(require_state_snapshot_failure(
+                session.snapshot_installed_package_states(),
+                PackageMetadataErrorCode::MalformedMetadata,
+                "state snapshot empty package name"));
+    }
+
+    stub::reset_alpm_stub();
+    stub::set_local_packages(
+            {{"valid-package", "", ALPM_PKG_REASON_DEPEND}});
+    {
+        PackageMetadataSession session =
+                PackageMetadataSession::open(valid_database_paths());
+        static_cast<void>(require_state_snapshot_failure(
+                session.snapshot_installed_package_states(),
+                PackageMetadataErrorCode::MalformedMetadata,
+                "state snapshot empty package version"));
+    }
+
+    stub::reset_alpm_stub();
+    stub::set_local_packages({
+            {"duplicate-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT},
+            {"duplicate-package", "2.0-1", ALPM_PKG_REASON_DEPEND}});
+    {
+        PackageMetadataSession session =
+                PackageMetadataSession::open(valid_database_paths());
+        static_cast<void>(require_state_snapshot_failure(
+                session.snapshot_installed_package_states(),
+                PackageMetadataErrorCode::MalformedMetadata,
+                "state snapshot duplicate package name"));
+    }
+}
+
+void test_installed_package_state_snapshot_failure_is_not_empty_inventory() {
+    stub::reset_alpm_stub();
+    stub::set_initialize_failure(ALPM_ERR_SYSTEM);
+    static_cast<void>(require_state_snapshot_failure(
+            snapshot_installed_package_states(valid_database_paths()),
+            PackageMetadataErrorCode::InitializationFailed,
+            "state snapshot session initialization failure"));
+
+    stub::reset_alpm_stub();
+    PackageMetadataSession source =
+            PackageMetadataSession::open(valid_database_paths());
+    PackageMetadataSession destination(std::move(source));
+    static_cast<void>(destination);
+    static_cast<void>(require_state_snapshot_failure(
+            source.snapshot_installed_package_states(),
+            PackageMetadataErrorCode::QueryFailed,
+            "state snapshot moved-from query failure"));
+}
+
+void test_empty_installed_package_state_snapshot_confirms_no_entries() {
+    stub::reset_alpm_stub();
+    stub::set_empty_package_cache();
+
+    InstalledPackageStateSnapshotResult result =
+            snapshot_installed_package_states(valid_database_paths());
+    InstalledPackageStateSnapshot snapshot =
+            require_result_alternative<InstalledPackageStateSnapshot>(
+                    result, "empty installed package state snapshot");
+    expect(snapshot.empty(), "empty local DB produced state snapshot entries");
 }
 
 void test_package_absent() {
@@ -2343,6 +2474,10 @@ int main() {
         test_local_package_version_snapshot_rejects_duplicate_names();
         test_local_package_version_snapshot_reports_invalid_cache_entry();
         test_moved_from_session_snapshot_reports_query_failure();
+        test_installed_package_state_snapshot_is_owned_and_keeps_reasons();
+        test_installed_package_state_snapshot_rejects_malformed_metadata();
+        test_installed_package_state_snapshot_failure_is_not_empty_inventory();
+        test_empty_installed_package_state_snapshot_confirms_no_entries();
 
         test_package_absent();
         test_package_present();

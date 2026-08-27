@@ -42,6 +42,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/filtered_aur_update_operation.cpp
     source/installed_package_relation_inventory.cpp
     source/interactive_confirmation.cpp
+    source/invocation_owned_cleanup_adapter.cpp
     source/invocation_owned_cleanup_model.cpp
     source/local_dependency_plan_projection.cpp
     source/local_package_metadata.cpp
