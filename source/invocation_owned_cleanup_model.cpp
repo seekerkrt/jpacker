@@ -3,10 +3,67 @@
 #include "package_identifier.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <set>
+#include <string>
 #include <utility>
 #include <variant>
 
 namespace {
+
+constexpr std::size_t PACMAN_TRANSACTION_TOKEN_HEX_LENGTH = 64;
+
+void add_receipt_issue(
+        std::vector<PacmanTransactionReceiptIssueKind>& issues,
+        PacmanTransactionReceiptIssueKind issue) {
+    if(std::find(issues.begin(), issues.end(), issue) == issues.end()) {
+        issues.push_back(issue);
+    }
+}
+
+void canonicalize_receipt_issues(
+        std::vector<PacmanTransactionReceiptIssueKind>& issues) {
+    std::sort(issues.begin(), issues.end(), [](auto lhs, auto rhs) {
+        return static_cast<int>(lhs) < static_cast<int>(rhs);
+    });
+}
+
+bool is_valid_transaction_owner(
+        InvocationDependencyTransactionOwner owner) noexcept {
+    switch(owner) {
+    case InvocationDependencyTransactionOwner::SelectedRepositoryProvider:
+    case InvocationDependencyTransactionOwner::SourceArtifactInstall:
+    case InvocationDependencyTransactionOwner::MakepkgSyncDependencies:
+        return true;
+    case InvocationDependencyTransactionOwner::Unknown:
+        return false;
+    }
+    return false;
+}
+
+bool is_valid_receipt_observation_state(
+        PacmanTransactionReceiptObservationState state) noexcept {
+    switch(state) {
+    case PacmanTransactionReceiptObservationState::Missing:
+    case PacmanTransactionReceiptObservationState::Incomplete:
+    case PacmanTransactionReceiptObservationState::Complete:
+        return true;
+    }
+    return false;
+}
+
+bool is_supported_install_transaction_operation(
+        PacmanTransactionPackageOperation operation) noexcept {
+    switch(operation) {
+    case PacmanTransactionPackageOperation::Install:
+    case PacmanTransactionPackageOperation::Upgrade:
+        return true;
+    case PacmanTransactionPackageOperation::Remove:
+    case PacmanTransactionPackageOperation::Unknown:
+        return false;
+    }
+    return false;
+}
 
 void add_reason(
         std::vector<CleanupClassificationReason>& reasons,
@@ -466,6 +523,207 @@ std::vector<CleanupClassificationReason> unknown_reasons(
 }
 
 } // namespace
+
+PacmanTransactionReceipt::PacmanTransactionReceipt(
+        PacmanTransactionReceiptState state,
+        std::optional<std::string> transaction_token,
+        std::optional<InvocationDependencyTransactionOwner> owner,
+        std::vector<PacmanTransactionPackageObservation> package_operations,
+        std::vector<PacmanInstalledPackageReceipt> newly_installed_packages,
+        std::vector<PacmanTransactionReceiptIssueKind> issues) noexcept
+    : state_(state), transaction_token_(std::move(transaction_token)),
+      owner_(owner), package_operations_(std::move(package_operations)),
+      newly_installed_packages_(std::move(newly_installed_packages)),
+      issues_(std::move(issues)) {}
+
+PacmanTransactionReceiptState PacmanTransactionReceipt::state()
+        const noexcept {
+    return state_;
+}
+
+const std::optional<std::string>&
+PacmanTransactionReceipt::transaction_token() const noexcept {
+    return transaction_token_;
+}
+
+const std::optional<InvocationDependencyTransactionOwner>&
+PacmanTransactionReceipt::owner() const noexcept {
+    return owner_;
+}
+
+const std::vector<PacmanTransactionPackageObservation>&
+PacmanTransactionReceipt::package_operations() const noexcept {
+    return package_operations_;
+}
+
+const std::vector<PacmanInstalledPackageReceipt>&
+PacmanTransactionReceipt::newly_installed_packages() const noexcept {
+    return newly_installed_packages_;
+}
+
+const std::vector<PacmanTransactionReceiptIssueKind>&
+PacmanTransactionReceipt::issues() const noexcept {
+    return issues_;
+}
+
+bool PacmanTransactionReceipt::is_complete_for(
+        const std::string& expected_transaction_token,
+        InvocationDependencyTransactionOwner expected_owner) const noexcept {
+    return state_ == PacmanTransactionReceiptState::Complete &&
+           issues_.empty() && transaction_token_.has_value() &&
+           transaction_token_.value() == expected_transaction_token &&
+           owner_.has_value() && owner_.value() == expected_owner &&
+           is_valid_pacman_transaction_token(expected_transaction_token) &&
+           is_valid_transaction_owner(expected_owner);
+}
+
+bool PacmanTransactionReceipt::contains_newly_installed_package(
+        const std::string& package_name) const noexcept {
+    if(state_ != PacmanTransactionReceiptState::Complete ||
+       !issues_.empty()) {
+        return false;
+    }
+    return std::any_of(
+            newly_installed_packages_.begin(),
+            newly_installed_packages_.end(),
+            [&package_name](const PacmanInstalledPackageReceipt& package) {
+                return package.package_name == package_name;
+            });
+}
+
+bool is_valid_pacman_transaction_token(
+        const std::string& transaction_token) noexcept {
+    if(transaction_token.size() != PACMAN_TRANSACTION_TOKEN_HEX_LENGTH) {
+        return false;
+    }
+    return std::all_of(
+            transaction_token.begin(), transaction_token.end(),
+            [](unsigned char character) {
+                return std::isdigit(character) != 0 ||
+                       (character >= 'a' && character <= 'f');
+            });
+}
+
+PacmanTransactionReceipt validate_pacman_transaction_receipt(
+        const std::string& expected_transaction_token,
+        InvocationDependencyTransactionOwner expected_owner,
+        const PacmanTransactionReceiptObservation& observation) {
+    std::vector<PacmanTransactionReceiptIssueKind> issues;
+    bool is_invalid = false;
+    const auto invalidate = [&issues, &is_invalid](
+                                    PacmanTransactionReceiptIssueKind issue) {
+        add_receipt_issue(issues, issue);
+        is_invalid = true;
+    };
+
+    if(!is_valid_pacman_transaction_token(expected_transaction_token)) {
+        invalidate(
+                PacmanTransactionReceiptIssueKind::
+                        InvalidExpectedTransactionToken);
+    }
+    if(!is_valid_transaction_owner(expected_owner)) {
+        invalidate(
+                PacmanTransactionReceiptIssueKind::
+                        InvalidExpectedTransactionOwner);
+    }
+    if(!is_valid_receipt_observation_state(observation.state)) {
+        invalidate(
+                PacmanTransactionReceiptIssueKind::InvalidObservationState);
+    }
+
+    if(observation.state ==
+       PacmanTransactionReceiptObservationState::Missing) {
+        add_receipt_issue(
+                issues, PacmanTransactionReceiptIssueKind::ReceiptMissing);
+        if(observation.transaction_token.has_value() ||
+           observation.owner.has_value() ||
+           !observation.package_operations.empty()) {
+            invalidate(
+                    PacmanTransactionReceiptIssueKind::
+                            UnexpectedReceiptData);
+        }
+        canonicalize_receipt_issues(issues);
+        return PacmanTransactionReceipt(
+                is_invalid ? PacmanTransactionReceiptState::Invalid
+                           : PacmanTransactionReceiptState::Unavailable,
+                observation.transaction_token, observation.owner,
+                observation.package_operations, {}, std::move(issues));
+    }
+
+    if(!observation.transaction_token.has_value()) {
+        invalidate(
+                PacmanTransactionReceiptIssueKind::
+                        ObservedTransactionTokenMissing);
+    } else if(!is_valid_pacman_transaction_token(
+                      observation.transaction_token.value())) {
+        invalidate(
+                PacmanTransactionReceiptIssueKind::
+                        InvalidObservedTransactionToken);
+    } else if(observation.transaction_token.value() !=
+              expected_transaction_token) {
+        invalidate(
+                PacmanTransactionReceiptIssueKind::TransactionTokenMismatch);
+    }
+
+    if(!observation.owner.has_value()) {
+        invalidate(
+                PacmanTransactionReceiptIssueKind::
+                        ObservedTransactionOwnerMissing);
+    } else if(!is_valid_transaction_owner(observation.owner.value())) {
+        invalidate(
+                PacmanTransactionReceiptIssueKind::
+                        InvalidObservedTransactionOwner);
+    } else if(observation.owner.value() != expected_owner) {
+        invalidate(
+                PacmanTransactionReceiptIssueKind::TransactionOwnerMismatch);
+    }
+
+    std::set<std::string> observed_package_names;
+    std::vector<PacmanInstalledPackageReceipt> newly_installed_packages;
+    for(const PacmanTransactionPackageObservation& package :
+        observation.package_operations) {
+        if(!is_supported_install_transaction_operation(package.operation)) {
+            invalidate(
+                    PacmanTransactionReceiptIssueKind::
+                            InvalidPackageOperation);
+        }
+        if(!is_valid_package_name(package.package_name)) {
+            invalidate(
+                    PacmanTransactionReceiptIssueKind::InvalidPackageName);
+        }
+        if(!observed_package_names.insert(package.package_name).second) {
+            invalidate(
+                    PacmanTransactionReceiptIssueKind::DuplicatePackageName);
+        }
+        if(package.operation == PacmanTransactionPackageOperation::Install &&
+           is_valid_package_name(package.package_name)) {
+            newly_installed_packages.push_back(
+                    PacmanInstalledPackageReceipt{package.package_name});
+        }
+    }
+
+    PacmanTransactionReceiptState state =
+            PacmanTransactionReceiptState::Complete;
+    if(observation.state ==
+       PacmanTransactionReceiptObservationState::Incomplete) {
+        add_receipt_issue(
+                issues,
+                PacmanTransactionReceiptIssueKind::ReceiptIncomplete);
+        state = PacmanTransactionReceiptState::Incomplete;
+    }
+    if(is_invalid) state = PacmanTransactionReceiptState::Invalid;
+    if(state != PacmanTransactionReceiptState::Complete) {
+        // Partial or malformed observations never expose a package as an
+        // authoritative Install receipt.
+        newly_installed_packages.clear();
+    }
+
+    canonicalize_receipt_issues(issues);
+    return PacmanTransactionReceipt(
+            state, observation.transaction_token, observation.owner,
+            observation.package_operations,
+            std::move(newly_installed_packages), std::move(issues));
+}
 
 CleanupClassificationResult::CleanupClassificationResult(
         CleanupClassification classification,

@@ -4,13 +4,13 @@
 
 この文書は、separated AUR / source-build lifecycleにおける`--rmdeps`の意味、拒否境界、pacman-only routeでの消費を定めるnormative production contractである。あわせてIssue #404で将来のsupportへ進むために必要なcleanup ownershipとinteractionのstaged authorityを定める。文書の規範上の正本は日本語本文である。
 
-current production behaviorとstaged targetは混同しない。Issue #404 Slice 3完了後も、production source-buildの`--rmdeps`はunsupportedかつfail closedであり、dependency removal、preview、promptは接続されていない。production removalを接続できる最初の段階はSlice 4として計画していたが、Slice 3 readiness判定は後述のとおりNO-GOであり、causal authorityを追加する別Sliceなしにremovalへ進まない。
+current production behaviorとstaged targetは混同しない。Issue #404 Slice 3.5完了後も、production source-buildの`--rmdeps`はunsupportedかつfail closedであり、dependency removal、preview、promptは接続されていない。production removalを接続できる最初の段階はSlice 4として計画していたが、Slice 3.5 readiness判定は後述のとおりNO-GOであり、安全なproduction causal receipt transportなしにremovalへ進まない。
 
 - Origin Issue: [#269](https://github.com/seekerkrt/moguet/issues/269)
 - Staged extension: [#404](https://github.com/seekerkrt/moguet/issues/404)
 - Related Issues: [#123](https://github.com/seekerkrt/moguet/issues/123)、[#152](https://github.com/seekerkrt/moguet/issues/152)、[#218](https://github.com/seekerkrt/moguet/issues/218)、[#242](https://github.com/seekerkrt/moguet/issues/242)、[#266](https://github.com/seekerkrt/moguet/issues/266)、[#267](https://github.com/seekerkrt/moguet/issues/267)、[#271](https://github.com/seekerkrt/moguet/issues/271)、[#350](https://github.com/seekerkrt/moguet/issues/350)
 - Related PRs: #298（#269 policy）、#241、#257〜#261（#242 separated lifecycle）
-- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。Slice 3でinstall-reason付きfull local snapshotとproduction未接続のmetadata / lifecycle adapterを追加し、current causal authority不足をNO-GOとして固定。
+- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。Slice 3でinstall-reason付きfull local snapshotとproduction未接続のmetadata / lifecycle adapterを追加し、current causal authority不足をNO-GOとして固定。Slice 3.5でtransaction token、owner、command outcome、machine receipt completeness、package operation、invocation ledgerをpure typed contractとして追加し、completeなactual `Install` receiptだけをcausal dimensionの`InvocationOwned`へprojectできるようにした。一方、安全なroot hook transportは未接続のためproduction causal readinessはNO-GOを維持する。
 - Related upper decisions: [decision 1](../DECISIONS.md#decision-1)、[decision 2](../DECISIONS.md#decision-2)、[decision 4](../DECISIONS.md#decision-4)、[decision 5](../DECISIONS.md#decision-5)、[decision 6](../DECISIONS.md#decision-6)、[decision 7](../DECISIONS.md#decision-7)
 
 ## Contract本文（日本語normative source of truth）
@@ -134,15 +134,78 @@ causal ownershipはbaselineやshared lifetimeとは独立してprojectする。c
 
 Slice 3にはgroup等のcomplete policy inventory authorityがないため、policy protectionは`Unknown`である。このためcurrent adapterはproduction evidenceから`Eligible`を生成しない。
 
-### Slice 4 production cleanup readiness: NO-GO
+### Slice 3.5 causal transaction receipt authority（production transport未接続）
 
-current production lifecycleからpackage単位の`CleanupCausalOwnership::InvocationOwned`をauthoritatively生成できる実在pathはない。Slice 4 removalへ進む前に、少なくとも次のいずれかを提供する別Slice / redesignが必要である。
+Slice 3.5は、snapshot、command success、transaction targetをcausal proofへ昇格させず、package manager transactionから得るmachine receiptの必要条件をpure typed contractとして固定する。
+
+pacman 7.1.0 / libalpm 16.0.1のinstalled manualと、host package databaseを共有しないisolated Arch transaction fixtureで、ALPM hookの次のsemanticsを確認した。
+
+- `Operation = Install`はtransaction開始時点で存在しないpackageに一致する。versionが同じか新しいかにかかわらず、既に存在するpackageは`Upgrade`であり`Install`ではない。
+- `Type = Package`、`Target = *`、`NeedsTargets`はmatched package nameをstdinへ渡す。localized pacman prose、stdout / stderr、pacman logではない。
+- `PostTransaction` hookはtransaction commit failure時に実行されない。
+- `pacman --hookdir`はabsoluteな追加hook directoryであり、複数指定時は後のdirectoryが同名hookをoverrideする。custom hookを指定したpacman invocationへだけ追加できるが、directoryとhook executableのtrustはpacmanをrootで実行する前に別途証明する必要がある。
+
+pure receipt modelは少なくとも次を別dimensionとして保持する。
+
+- `InvocationDependencyTransactionOwner`: selected repository provider、source artifact install、makepkg syncdeps、unknown。
+- `InvocationDependencyTransactionCommandOutcome`: not attempted、succeeded、failed、unknown。
+- 64 lowercase hexのtransaction token。token generationやtransportはこのpure modelの責務ではない。
+- `PacmanTransactionReceiptState`: unavailable、incomplete、complete、invalid。
+- package単位の`Install` / `Upgrade` operation。`Remove` / unknown operation、invalid package name、duplicate package name、token / owner mismatchはinvalidである。
+- `InvocationDependencyTransactionLedger`: requested package identity、command outcome、receiptをtransaction順に保持する。requested targetとactual `Install` packageを同一視せず、solver-introduced packageもreceipt evidenceとして保持できる。後続transactionの`Upgrade`やreceipt failureで、先行transactionの`Install` evidenceを上書きしない。
+
+receipt completenessは「hookらしい出力があった」ことではない。exact transaction tokenとownerが一致し、machine protocolがexplicitなfinal recordへ到達し、全recordがvalidかつduplicateなしの場合だけ`Complete`である。missing、partial / truncated、unexpected pre-existing data、malformed record、identity mismatchは`Unavailable` / `Incomplete` / `Invalid`として保持し、packageをnewly installedへ公開しない。command outcomeはreceipt completenessと独立しており、command failureではcomplete-looking receiptがあってもownershipを認めない。
+
+Slice 3 adapterは、次の全条件が揃う場合だけcausal dimensionを`InvocationOwned`へprojectできる。
+
+- baselineが`NewlyObserved`であり、これ自体はownership proofとして使用しない。
+- current packageが`Present`かつverifiedで、candidate nameおよびknown versionと矛盾しない。
+- ledger entryのcommand outcomeが`Succeeded`である。
+- ledger token、owner、requested package identityがstructurally validである。
+- receiptがそのexact token / ownerに対して`Complete`である。
+- candidate packageがactual `Install` recordに存在する。
+
+complete receiptでcandidateが省略された場合、`Upgrade`だけが存在する場合、receiptがmissing / incomplete / invalidの場合、command failure、token / owner mismatch、legacy `PackageStateChange::Changed`の場合は`NotInvocationOwned`へ推測せず`Unknown`へ倒す。pre-existing packageと`Install` receiptが矛盾する場合も`InvocationOwned`へ上げず、既存classifierの`PreExisting` protectionを維持する。
+
+#### Privilege / transport boundary
+
+ALPM hook actionはpacman transaction内でrootとして実行され得る。current Moguet packageは、causal receipt専用のroot-owned helper、root-owned hook directory、privileged IPC、root-owned `/run` stateをinstallしていない。このためSlice 3.5ではproduction hook transportを接続しない。
+
+次は安全な代替ではなく禁止する。
+
+- user-writable temporary hook fileまたはhook directoryを`sudo pacman --hookdir`へ渡すこと。pacmanが読む前の差し替えによりarbitrary root executableを起動できる。
+- current running Moguet path、build treeの`./build/moguet`、user-writable wrapper / helperをhook `Exec`にすること。
+- root hookがuser指定path、predictable `/tmp` path、symlink-following pathをopen / truncate / createすること。
+- stdout / stderr、pacman log、timestamp、pre/post snapshotへreceiptを混在させ、parserで拾うこと。
+- `sh -c`、`tee`、shell quotingによってarbitrary root writeを安全化したとみなすこと。
+
+安全なproduction transportを追加するには、少なくともroot-owned installed hook / dedicated helperのprovenance、arbitrary pathを受けないfenced protocol、transaction tokenをexact pacman processへ束縛するprivileged IPC、symlink / owner / mode / inode replacement防止、partial write検出、install / uninstall payload contract、actual installed-package validationが必要である。これはcurrent single-binary packaging contractを変更する独立したsecurity-sensitive Sliceであり、開発treeのhelperをroot実行するtestでは代替できない。
+
+#### Mutation pathごとの結果
+
+- selected repository provider: Moguet-owned `sudo pacman -S [--asdeps] --needed`なのでALPM receipt instrumentation候補ではあるが、上記trusted transportがない。current `SelectedRepositoryProviderTransactionResult::Succeeded`、exit 0、`PackageStateChange::Unknown` / aggregate `Changed`からownershipを生成しない。
+- typed artifact install: singular / PackageBase setのexact artifact identity、desired reason、`--needed` policy、transaction resultは保持するが、pre-transaction installed observationとpacman successだけではexternal transaction raceを排除できない。trusted receipt transportなしでは`pacman -U`の`Installed` outcomeをnewly installed ownershipへ読み替えない。
+- makepkg syncdeps: current `makepkg -sc`内部の`pacman -S --asdeps`へcustom hookを安全にattachするproduction pathはない。`PACMAN` / `PACMAN_AUTH` override、wrapper、injected configをuser-writableな形で追加しない。
+
+makepkg `-s`分離もSlice 3.5では行わない。current BuildPlanはdepends / makedepends / checkdepends、repository / AUR / local candidate、typed constraint、provider、PackageBase / split child、multi-root、local architectureを広く保持するが、remote AUR RPC projectionはmakepkgのcurrent PKGBUILD / architecture-qualified evaluationそのものではなく、direct repository dependency transaction全体もMoguet-owned phaseへ移されていない。pacman solverを再実装せず、already-satisfied state、provider、version constraint、split / architecture semanticsをmakepkgと同等に保つ証明がないため、`makepkg -s`を外さない。
+
+`makepkg -r` / `-scr`へ戻すこともIssue #404のseparated artifact install、preview、explicit confirmation、phase separationを満たさないため採用しない。
+
+### Slice 3.5 causal authority readiness: NO-GO
+
+pure typed receiptとadapter projectionは、authoritative inputを与えるtest上でpackage単位の`CleanupCausalOwnership::InvocationOwned`を生成できる。しかしcurrent production lifecycleからその`Complete` receiptを安全に構成するtransportはなく、実在production evidence pathからは`InvocationOwned`を1件も生成できない。したがってcausal authority readinessはNO-GOである。
+
+Slice 4 removalへ進む前に、少なくとも次のいずれかを提供する別Slice / redesignが必要である。
 
 - package単位のmachine-readable changed-setとtransaction result。
 - external transaction raceを排除できるtransaction ownership tokenまたはpackage-manager lock / transaction authority。
 - makepkg syncdepsをMoguet-owned dependency install phaseへ分離し、そのexact inputとactual changed packageを相関するlifecycle。
 
 stdout / stderr、localized output、pacman log、timestamp近接、orphan state、BuildPlan上のpackage名はこの不足を埋めるauthorityではない。
+
+### Slice 4 production cleanup readiness: NO-GO
+
+causal authorityとは別に、Slice 3.5でもgroup / `base-devel`等のcomplete policy inventory authorityはなく、`CleanupPolicyProtection::Unknown`を維持する。source / correlation completeness、local routeのcomplete ownership、shared lifetime、current identity / reason / state、future mutation-time revalidationもそれぞれ独立したgateである。causal transportだけを将来追加しても、policyが`Unknown`のままならclassifierは`Eligible`を生成せず、Slice 4 GOにはしない。
 
 ### Source-build route
 

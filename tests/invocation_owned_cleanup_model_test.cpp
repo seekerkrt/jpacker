@@ -1,5 +1,6 @@
 #include "invocation_owned_cleanup_model.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <exception>
 #include <iostream>
@@ -35,6 +36,7 @@ static_assert(!std::is_default_constructible_v<
               InvocationOwnedCleanupCandidate>);
 static_assert(
         !std::is_default_constructible_v<CleanupClassificationResult>);
+static_assert(!std::is_default_constructible_v<PacmanTransactionReceipt>);
 
 void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
@@ -47,6 +49,31 @@ bool has_reason(
         if(candidate == reason) return true;
     }
     return false;
+}
+
+bool has_receipt_issue(
+        const PacmanTransactionReceipt& receipt,
+        PacmanTransactionReceiptIssueKind issue) {
+    return std::find(
+                   receipt.issues().begin(), receipt.issues().end(), issue) !=
+           receipt.issues().end();
+}
+
+std::string transaction_token(char digit = 'a') {
+    return std::string(64, digit);
+}
+
+PacmanTransactionReceipt complete_receipt(
+        std::vector<PacmanTransactionPackageObservation> operations,
+        InvocationDependencyTransactionOwner owner =
+                InvocationDependencyTransactionOwner::
+                        SelectedRepositoryProvider,
+        const std::string& expected_token = transaction_token()) {
+    return validate_pacman_transaction_receipt(
+            expected_token, owner,
+            PacmanTransactionReceiptObservation{
+                    PacmanTransactionReceiptObservationState::Complete,
+                    expected_token, owner, std::move(operations)});
 }
 
 void expect_classification(
@@ -165,6 +192,134 @@ void test_make_or_check_only_is_eligible() {
                 {CleanupClassificationReason::EligibleEvidenceComplete},
                 "Eligible classification reason is not canonical.");
     }
+}
+
+void test_complete_transaction_receipt_tracks_actual_installs() {
+    const std::string token = transaction_token();
+    PacmanTransactionReceipt receipt = complete_receipt({
+            {PacmanTransactionPackageOperation::Install, "first-tool"},
+            {PacmanTransactionPackageOperation::Install, "second-tool"},
+            {PacmanTransactionPackageOperation::Upgrade, "existing-tool"},
+    });
+
+    expect(
+            receipt.state() == PacmanTransactionReceiptState::Complete &&
+                    receipt.issues().empty() &&
+                    receipt.is_complete_for(
+                            token,
+                            InvocationDependencyTransactionOwner::
+                                    SelectedRepositoryProvider),
+            "complete transaction receipt was not authoritative");
+    expect(
+            receipt.package_operations().size() == 3 &&
+                    receipt.newly_installed_packages() ==
+                            std::vector<PacmanInstalledPackageReceipt>{
+                                    {"first-tool"}, {"second-tool"}} &&
+                    receipt.contains_newly_installed_package("first-tool") &&
+                    !receipt.contains_newly_installed_package(
+                            "existing-tool"),
+            "Install and Upgrade receipt operations were flattened");
+}
+
+void test_malformed_transaction_receipts_are_invalid() {
+    PacmanTransactionReceipt duplicate = complete_receipt({
+            {PacmanTransactionPackageOperation::Install, "duplicate-tool"},
+            {PacmanTransactionPackageOperation::Install, "duplicate-tool"},
+    });
+    expect(
+            duplicate.state() == PacmanTransactionReceiptState::Invalid &&
+                    has_receipt_issue(
+                            duplicate,
+                            PacmanTransactionReceiptIssueKind::
+                                    DuplicatePackageName) &&
+                    duplicate.newly_installed_packages().empty(),
+            "duplicate package receipt was not invalid");
+
+    PacmanTransactionReceipt invalid_name = complete_receipt({
+            {PacmanTransactionPackageOperation::Install, "../unsafe"},
+    });
+    expect(
+            invalid_name.state() == PacmanTransactionReceiptState::Invalid &&
+                    has_receipt_issue(
+                            invalid_name,
+                            PacmanTransactionReceiptIssueKind::
+                                    InvalidPackageName),
+            "invalid package receipt was not invalid");
+
+    PacmanTransactionReceipt unexpected_operation = complete_receipt({
+            {PacmanTransactionPackageOperation::Remove, "removed-tool"},
+    });
+    expect(
+            unexpected_operation.state() ==
+                            PacmanTransactionReceiptState::Invalid &&
+                    has_receipt_issue(
+                            unexpected_operation,
+                            PacmanTransactionReceiptIssueKind::
+                                    InvalidPackageOperation),
+            "unexpected transaction operation was not invalid");
+}
+
+void test_missing_incomplete_and_mismatched_receipts_fail_closed() {
+    const std::string token = transaction_token();
+    const auto owner = InvocationDependencyTransactionOwner::
+            SelectedRepositoryProvider;
+    PacmanTransactionReceipt missing = validate_pacman_transaction_receipt(
+            token, owner,
+            PacmanTransactionReceiptObservation{
+                    PacmanTransactionReceiptObservationState::Missing,
+                    std::nullopt, std::nullopt, {}});
+    expect(
+            missing.state() == PacmanTransactionReceiptState::Unavailable &&
+                    has_receipt_issue(
+                            missing,
+                            PacmanTransactionReceiptIssueKind::ReceiptMissing),
+            "missing receipt did not remain unavailable");
+
+    PacmanTransactionReceipt incomplete = validate_pacman_transaction_receipt(
+            token, owner,
+            PacmanTransactionReceiptObservation{
+                    PacmanTransactionReceiptObservationState::Incomplete,
+                    token, owner,
+                    {{PacmanTransactionPackageOperation::Install,
+                      "partial-tool"}}});
+    expect(
+            incomplete.state() == PacmanTransactionReceiptState::Incomplete &&
+                    incomplete.newly_installed_packages().empty() &&
+                    has_receipt_issue(
+                            incomplete,
+                            PacmanTransactionReceiptIssueKind::
+                                    ReceiptIncomplete),
+            "partial receipt exposed an Install package");
+
+    PacmanTransactionReceipt mismatch = validate_pacman_transaction_receipt(
+            token, owner,
+            PacmanTransactionReceiptObservation{
+                    PacmanTransactionReceiptObservationState::Complete,
+                    transaction_token('b'), owner,
+                    {{PacmanTransactionPackageOperation::Install,
+                      "mismatch-tool"}}});
+    expect(
+            mismatch.state() == PacmanTransactionReceiptState::Invalid &&
+                    has_receipt_issue(
+                            mismatch,
+                            PacmanTransactionReceiptIssueKind::
+                                    TransactionTokenMismatch),
+            "transaction token mismatch was not invalid");
+
+    PacmanTransactionReceipt unexpected_missing_data =
+            validate_pacman_transaction_receipt(
+                    token, owner,
+                    PacmanTransactionReceiptObservation{
+                            PacmanTransactionReceiptObservationState::Missing,
+                            token, owner, {}});
+    expect(
+            unexpected_missing_data.state() ==
+                            PacmanTransactionReceiptState::Invalid &&
+                    has_receipt_issue(
+                            unexpected_missing_data,
+                            PacmanTransactionReceiptIssueKind::
+                                    UnexpectedReceiptData),
+            "unexpected pre-existing receipt data was accepted as missing");
 }
 
 void test_current_package_version_identity() {
@@ -652,6 +807,9 @@ void test_precedence_and_reason_ordering() {
 
 int main() {
     try {
+        test_complete_transaction_receipt_tracks_actual_installs();
+        test_malformed_transaction_receipts_are_invalid();
+        test_missing_incomplete_and_mismatched_receipts_fail_closed();
         test_make_or_check_only_is_eligible();
         test_current_package_version_identity();
         test_correlation_coverage_authority();

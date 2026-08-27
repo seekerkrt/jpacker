@@ -300,6 +300,42 @@ InstalledPackageStateSnapshotResult failed_snapshot() {
             "typed metadata failure"};
 }
 
+std::string transaction_token(char digit = 'a') {
+    return std::string(64, digit);
+}
+
+PacmanTransactionReceipt transaction_receipt(
+        const std::string& token,
+        InvocationDependencyTransactionOwner owner,
+        std::vector<PacmanTransactionPackageObservation> operations,
+        PacmanTransactionReceiptObservationState state =
+                PacmanTransactionReceiptObservationState::Complete) {
+    return validate_pacman_transaction_receipt(
+            token, owner,
+            PacmanTransactionReceiptObservation{
+                    state,
+                    state == PacmanTransactionReceiptObservationState::Missing
+                            ? std::nullopt
+                            : std::optional<std::string>{token},
+                    state == PacmanTransactionReceiptObservationState::Missing
+                            ? std::nullopt
+                            : std::optional<
+                                      InvocationDependencyTransactionOwner>{
+                                      owner},
+                    std::move(operations)});
+}
+
+InvocationDependencyTransaction dependency_transaction(
+        std::string token,
+        InvocationDependencyTransactionOwner owner,
+        std::vector<std::string> requested_package_names,
+        InvocationDependencyTransactionCommandOutcome command_outcome,
+        PacmanTransactionReceipt receipt) {
+    return InvocationDependencyTransaction{
+            std::move(token), owner, std::move(requested_package_names),
+            command_outcome, std::move(receipt)};
+}
+
 InvocationOwnedCleanupCandidateProjectionSuccess require_projection(
         InvocationOwnedCleanupCandidateProjectionResult result,
         const std::string& context) {
@@ -320,11 +356,12 @@ InvocationOwnedCleanupCandidateProjectionSuccess project_basic_candidate(
                 "build-tool", "1.0-1",
                 InstalledPackageReason::Dependency),
         const std::vector<SelectedRepositoryProviderTransactionResult>&
-                provider_transactions = {}) {
+                provider_transactions = {},
+        const InvocationDependencyTransactionLedger& transaction_ledger = {}) {
     return require_projection(
             project_invocation_owned_cleanup_candidate(
                     baseline, current, plan, candidate_authority, lifecycle,
-                    provider_transactions),
+                    provider_transactions, transaction_ledger),
             "basic cleanup candidate");
 }
 
@@ -431,6 +468,300 @@ void test_current_lifecycle_never_proves_causal_ownership() {
                     lifecycle, {aggregate_changed}) ==
                     CleanupCausalOwnership::Unknown,
             "multi-provider aggregate Changed proved package ownership");
+}
+
+void test_authoritative_install_receipt_projects_only_causal_dimension() {
+    BuildPlan plan = basic_plan();
+    PreparedProductionSourceBuildInvocation invocation =
+            prepared_invocation(plan);
+    ProductionSourceBuildInvocationResult result =
+            successful_result(invocation);
+    CleanupInvocationLifecycleEvidence lifecycle =
+            CleanupInvocationLifecycleEvidence::after_successful_invocation(
+                    invocation, result);
+    const ResolvedDependencyCandidate& candidate =
+            plan.dependency_edges.front().resolved_candidate.value();
+    const std::string token = transaction_token();
+    const auto owner = InvocationDependencyTransactionOwner::
+            SourceArtifactInstall;
+    InvocationDependencyTransactionLedger ledger{{dependency_transaction(
+            token, owner, {"requested-parent"},
+            InvocationDependencyTransactionCommandOutcome::Succeeded,
+            transaction_receipt(
+                    token, owner,
+                    {{PacmanTransactionPackageOperation::Install,
+                      "build-tool"}}))}};
+
+    InvocationOwnedCleanupCandidateProjectionSuccess projection =
+            project_basic_candidate(
+                    plan, candidate, lifecycle, absent_snapshot(),
+                    present_snapshot(
+                            "build-tool", "1.0-1",
+                            InstalledPackageReason::Dependency),
+                    {}, ledger);
+    expect(
+            projection.candidate.causal_ownership ==
+                            CleanupCausalOwnership::InvocationOwned &&
+                    !has_issue(
+                            projection,
+                            CleanupLifecycleProjectionIssueKind::
+                                    CausalOwnershipUnavailable),
+            "complete transaction-local Install receipt did not project InvocationOwned");
+
+    const CleanupClassificationResult classified =
+            classify_invocation_owned_cleanup(projection.candidate);
+    expect(
+            projection.candidate.policy_protection ==
+                            CleanupPolicyProtection::Unknown &&
+                    classified.classification() ==
+                            CleanupClassification::Unknown &&
+                    has_reason(
+                            classified,
+                            CleanupClassificationReason::
+                                    PolicyProtectionUnknown),
+            "causal InvocationOwned bypassed Unknown policy authority");
+}
+
+void test_upgrade_and_external_install_race_do_not_project_ownership() {
+    BuildPlan plan = basic_plan();
+    PreparedProductionSourceBuildInvocation invocation =
+            prepared_invocation(plan);
+    ProductionSourceBuildInvocationResult result =
+            successful_result(invocation);
+    CleanupInvocationLifecycleEvidence lifecycle =
+            CleanupInvocationLifecycleEvidence::after_successful_invocation(
+                    invocation, result);
+    const ResolvedDependencyCandidate& candidate =
+            plan.dependency_edges.front().resolved_candidate.value();
+    const std::string token = transaction_token();
+    const auto owner = InvocationDependencyTransactionOwner::
+            SelectedRepositoryProvider;
+    InvocationDependencyTransactionLedger ledger{{dependency_transaction(
+            token, owner, {"build-tool"},
+            InvocationDependencyTransactionCommandOutcome::Succeeded,
+            transaction_receipt(
+                    token, owner,
+                    {{PacmanTransactionPackageOperation::Upgrade,
+                      "build-tool"},
+                     {PacmanTransactionPackageOperation::Install,
+                      "solver-introduced-tool"}}))}};
+
+    InvocationOwnedCleanupCandidateProjectionSuccess projection =
+            project_basic_candidate(
+                    plan, candidate, lifecycle, absent_snapshot(),
+                    present_snapshot(
+                            "build-tool", "1.0-1",
+                            InstalledPackageReason::Dependency),
+                    {}, ledger);
+    expect(
+            projection.candidate.causal_ownership ==
+                            CleanupCausalOwnership::Unknown &&
+                    has_issue(
+                            projection,
+                            CleanupLifecycleProjectionIssueKind::
+                                    CausalOwnershipUnavailable),
+            "Upgrade after an external Install became invocation ownership");
+}
+
+void test_failed_missing_and_mismatched_receipts_remain_unknown() {
+    BuildPlan plan = basic_plan();
+    PreparedProductionSourceBuildInvocation invocation =
+            prepared_invocation(plan);
+    ProductionSourceBuildInvocationResult result =
+            successful_result(invocation);
+    CleanupInvocationLifecycleEvidence lifecycle =
+            CleanupInvocationLifecycleEvidence::after_successful_invocation(
+                    invocation, result);
+    const ResolvedDependencyCandidate& candidate =
+            plan.dependency_edges.front().resolved_candidate.value();
+    const std::string token = transaction_token();
+    const auto owner = InvocationDependencyTransactionOwner::
+            SelectedRepositoryProvider;
+    PacmanTransactionReceipt install_receipt = transaction_receipt(
+            token, owner,
+            {{PacmanTransactionPackageOperation::Install, "build-tool"}});
+
+    const auto expect_unknown = [&](InvocationDependencyTransaction transaction,
+                                    const std::string& context) {
+        InvocationDependencyTransactionLedger ledger{
+                {std::move(transaction)}};
+        InvocationOwnedCleanupCandidateProjectionSuccess projection =
+                project_basic_candidate(
+                        plan, candidate, lifecycle, absent_snapshot(),
+                        present_snapshot(
+                                "build-tool", "1.0-1",
+                                InstalledPackageReason::Dependency),
+                        {}, ledger);
+        expect(
+                projection.candidate.causal_ownership ==
+                        CleanupCausalOwnership::Unknown,
+                context);
+    };
+
+    expect_unknown(
+            dependency_transaction(
+                    token, owner, {"build-tool"},
+                    InvocationDependencyTransactionCommandOutcome::Failed,
+                    install_receipt),
+            "failed transaction command projected InvocationOwned");
+    expect_unknown(
+            dependency_transaction(
+                    token, owner, {"build-tool"},
+                    InvocationDependencyTransactionCommandOutcome::Succeeded,
+                    transaction_receipt(
+                            token, owner, {},
+                            PacmanTransactionReceiptObservationState::Missing)),
+            "missing receipt projected InvocationOwned");
+    expect_unknown(
+            dependency_transaction(
+                    transaction_token('b'), owner, {"build-tool"},
+                    InvocationDependencyTransactionCommandOutcome::Succeeded,
+                    install_receipt),
+            "ledger/receipt transaction token mismatch projected InvocationOwned");
+}
+
+void test_multiple_transaction_attribution_is_not_flattened() {
+    BuildPlan plan = basic_plan();
+    PreparedProductionSourceBuildInvocation invocation =
+            prepared_invocation(plan);
+    ProductionSourceBuildInvocationResult result =
+            successful_result(invocation);
+    CleanupInvocationLifecycleEvidence lifecycle =
+            CleanupInvocationLifecycleEvidence::after_successful_invocation(
+                    invocation, result);
+    const ResolvedDependencyCandidate& candidate =
+            plan.dependency_edges.front().resolved_candidate.value();
+    const auto owner = InvocationDependencyTransactionOwner::
+            SourceArtifactInstall;
+    const std::string install_token = transaction_token('a');
+    const std::string other_token = transaction_token('b');
+    const std::string upgrade_token = transaction_token('c');
+    InvocationDependencyTransactionLedger ledger{{
+            dependency_transaction(
+                    install_token, owner, {"build-tool"},
+                    InvocationDependencyTransactionCommandOutcome::Succeeded,
+                    transaction_receipt(
+                            install_token, owner,
+                            {{PacmanTransactionPackageOperation::Install,
+                              "build-tool"}})),
+            dependency_transaction(
+                    other_token, owner, {"other-tool"},
+                    InvocationDependencyTransactionCommandOutcome::Succeeded,
+                    transaction_receipt(
+                            other_token, owner,
+                            {{PacmanTransactionPackageOperation::Install,
+                              "other-tool"}})),
+            dependency_transaction(
+                    upgrade_token, owner, {"build-tool"},
+                    InvocationDependencyTransactionCommandOutcome::Succeeded,
+                    transaction_receipt(
+                            upgrade_token, owner,
+                            {{PacmanTransactionPackageOperation::Upgrade,
+                              "build-tool"}})),
+    }};
+
+    InvocationOwnedCleanupCandidateProjectionSuccess projection =
+            project_basic_candidate(
+                    plan, candidate, lifecycle, absent_snapshot(),
+                    present_snapshot(
+                            "build-tool", "1.0-1",
+                            InstalledPackageReason::Dependency),
+                    {}, ledger);
+    expect(
+            ledger.transactions.size() == 3 &&
+                    ledger.transactions[0]
+                            .receipt.package_operations().front().operation ==
+                            PacmanTransactionPackageOperation::Install &&
+                    ledger.transactions[2]
+                            .receipt.package_operations().front().operation ==
+                            PacmanTransactionPackageOperation::Upgrade &&
+                    projection.candidate.causal_ownership ==
+                            CleanupCausalOwnership::InvocationOwned,
+            "Install and later Upgrade evidence was flattened or misattributed");
+}
+
+void test_receipt_does_not_bypass_protection_precedence() {
+    BuildPlan plan = basic_plan();
+    PreparedProductionSourceBuildInvocation invocation =
+            prepared_invocation(plan);
+    ProductionSourceBuildInvocationResult result =
+            successful_result(invocation);
+    CleanupInvocationLifecycleEvidence lifecycle =
+            CleanupInvocationLifecycleEvidence::after_successful_invocation(
+                    invocation, result);
+    const ResolvedDependencyCandidate& candidate =
+            plan.dependency_edges.front().resolved_candidate.value();
+    const std::string token = transaction_token();
+    const auto owner = InvocationDependencyTransactionOwner::
+            SourceArtifactInstall;
+    InvocationDependencyTransactionLedger ledger{{dependency_transaction(
+            token, owner, {"build-tool"},
+            InvocationDependencyTransactionCommandOutcome::Succeeded,
+            transaction_receipt(
+                    token, owner,
+                    {{PacmanTransactionPackageOperation::Install,
+                      "build-tool"}}))}};
+
+    InvocationOwnedCleanupCandidateProjectionSuccess preexisting =
+            project_basic_candidate(
+                    plan, candidate, lifecycle,
+                    present_snapshot(
+                            "build-tool", "1.0-1",
+                            InstalledPackageReason::Dependency),
+                    present_snapshot(
+                            "build-tool", "1.0-1",
+                            InstalledPackageReason::Dependency),
+                    {}, ledger);
+    expect(
+            preexisting.candidate.causal_ownership ==
+                            CleanupCausalOwnership::Unknown &&
+                    classify_invocation_owned_cleanup(preexisting.candidate)
+                                    .classification() ==
+                            CleanupClassification::Protected,
+            "pre-existing package receipt contradiction bypassed protection");
+
+    InvocationOwnedCleanupCandidateProjectionSuccess explicit_package =
+            project_basic_candidate(
+                    plan, candidate, lifecycle, absent_snapshot(),
+                    present_snapshot(
+                            "build-tool", "1.0-1",
+                            InstalledPackageReason::Explicit),
+                    {}, ledger);
+    expect(
+            explicit_package.candidate.causal_ownership ==
+                            CleanupCausalOwnership::InvocationOwned &&
+                    classify_invocation_owned_cleanup(
+                            explicit_package.candidate)
+                                    .classification() ==
+                            CleanupClassification::Protected,
+            "Explicit package with receipt was not Protected");
+
+    BuildPlan runtime_plan = mixed_runtime_plan();
+    PreparedProductionSourceBuildInvocation runtime_invocation =
+            prepared_invocation(runtime_plan);
+    ProductionSourceBuildInvocationResult runtime_result =
+            successful_result(runtime_invocation);
+    CleanupInvocationLifecycleEvidence runtime_lifecycle =
+            CleanupInvocationLifecycleEvidence::after_successful_invocation(
+                    runtime_invocation, runtime_result);
+    const ResolvedDependencyCandidate& runtime_candidate =
+            runtime_plan.dependency_edges.front()
+                    .resolved_candidate.value();
+    InvocationOwnedCleanupCandidateProjectionSuccess runtime =
+            project_basic_candidate(
+                    runtime_plan, runtime_candidate, runtime_lifecycle,
+                    absent_snapshot(),
+                    present_snapshot(
+                            "build-tool", "1.0-1",
+                            InstalledPackageReason::Dependency),
+                    {}, ledger);
+    expect(
+            runtime.candidate.causal_ownership ==
+                            CleanupCausalOwnership::InvocationOwned &&
+                    classify_invocation_owned_cleanup(runtime.candidate)
+                                    .classification() ==
+                            CleanupClassification::Protected,
+            "Runtime dependency with receipt was not Protected");
 }
 
 void test_complete_plan_projects_complete_correlations_and_lifetime() {
@@ -832,6 +1163,11 @@ void test_newly_observed_dependency_with_success_is_never_eligible() {
 void run_invocation_owned_cleanup_adapter_tests() {
     test_snapshot_observation_projection();
     test_current_lifecycle_never_proves_causal_ownership();
+    test_authoritative_install_receipt_projects_only_causal_dimension();
+    test_upgrade_and_external_install_race_do_not_project_ownership();
+    test_failed_missing_and_mismatched_receipts_remain_unknown();
+    test_multiple_transaction_attribution_is_not_flattened();
+    test_receipt_does_not_bypass_protection_precedence();
     test_complete_plan_projects_complete_correlations_and_lifetime();
     test_incomplete_plan_states_never_project_complete_coverage();
     test_repository_provider_without_package_base_is_unverified();

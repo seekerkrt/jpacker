@@ -6,7 +6,169 @@
 
 #include <cstddef>
 #include <optional>
+#include <string>
 #include <vector>
+
+// The owner identifies the mutation path, not the package selected by its
+// solver. A complete receipt may therefore contain packages that were not
+// requested targets.
+enum class InvocationDependencyTransactionOwner {
+    SelectedRepositoryProvider,
+    SourceArtifactInstall,
+    MakepkgSyncDependencies,
+    Unknown,
+};
+
+enum class InvocationDependencyTransactionCommandOutcome {
+    NotAttempted,
+    Succeeded,
+    Failed,
+    Unknown,
+};
+
+enum class PacmanTransactionPackageOperation {
+    Install,
+    Upgrade,
+    Remove,
+    Unknown,
+};
+
+enum class PacmanTransactionReceiptObservationState {
+    Missing,
+    Incomplete,
+    Complete,
+};
+
+struct PacmanTransactionPackageObservation {
+    PacmanTransactionPackageOperation operation;
+    std::string                       package_name;
+};
+
+// This is machine protocol input, not pacman stdout/stderr or log text.
+// A transport must set Complete only after its transaction-local protocol has
+// reached an explicit final record.
+struct PacmanTransactionReceiptObservation {
+    PacmanTransactionReceiptObservationState state;
+    std::optional<std::string>                transaction_token;
+    std::optional<InvocationDependencyTransactionOwner> owner;
+    std::vector<PacmanTransactionPackageObservation> package_operations;
+};
+
+enum class PacmanTransactionReceiptState {
+    Unavailable,
+    Incomplete,
+    Complete,
+    Invalid,
+};
+
+// Declaration order is the canonical issue order.
+enum class PacmanTransactionReceiptIssueKind {
+    InvalidObservationState,
+    InvalidExpectedTransactionToken,
+    InvalidExpectedTransactionOwner,
+    ReceiptMissing,
+    ReceiptIncomplete,
+    UnexpectedReceiptData,
+    ObservedTransactionTokenMissing,
+    InvalidObservedTransactionToken,
+    TransactionTokenMismatch,
+    ObservedTransactionOwnerMissing,
+    InvalidObservedTransactionOwner,
+    TransactionOwnerMismatch,
+    InvalidPackageOperation,
+    InvalidPackageName,
+    DuplicatePackageName,
+};
+
+struct PacmanInstalledPackageReceipt {
+    std::string package_name;
+
+    bool operator==(const PacmanInstalledPackageReceipt&) const = default;
+};
+
+// The class is created only through the validator below. Complete means the
+// machine receipt itself is structurally complete; command success remains a
+// separate transaction dimension.
+class PacmanTransactionReceipt final {
+public:
+    PacmanTransactionReceipt() = delete;
+    PacmanTransactionReceipt(const PacmanTransactionReceipt&) = default;
+    PacmanTransactionReceipt(PacmanTransactionReceipt&&) noexcept = default;
+    PacmanTransactionReceipt& operator=(
+            const PacmanTransactionReceipt&) = default;
+    PacmanTransactionReceipt& operator=(
+            PacmanTransactionReceipt&&) noexcept = default;
+    ~PacmanTransactionReceipt() = default;
+
+    [[nodiscard]] PacmanTransactionReceiptState state() const noexcept;
+    [[nodiscard]] const std::optional<std::string>& transaction_token()
+            const noexcept;
+    [[nodiscard]] const std::optional<InvocationDependencyTransactionOwner>&
+    owner() const noexcept;
+    [[nodiscard]] const std::vector<PacmanTransactionPackageObservation>&
+    package_operations() const noexcept;
+    [[nodiscard]] const std::vector<PacmanInstalledPackageReceipt>&
+    newly_installed_packages() const noexcept;
+    [[nodiscard]] const std::vector<PacmanTransactionReceiptIssueKind>&
+    issues() const noexcept;
+
+    [[nodiscard]] bool is_complete_for(
+            const std::string& expected_transaction_token,
+            InvocationDependencyTransactionOwner expected_owner)
+            const noexcept;
+    [[nodiscard]] bool contains_newly_installed_package(
+            const std::string& package_name) const noexcept;
+
+private:
+    PacmanTransactionReceipt(
+            PacmanTransactionReceiptState state,
+            std::optional<std::string> transaction_token,
+            std::optional<InvocationDependencyTransactionOwner> owner,
+            std::vector<PacmanTransactionPackageObservation>
+                    package_operations,
+            std::vector<PacmanInstalledPackageReceipt>
+                    newly_installed_packages,
+            std::vector<PacmanTransactionReceiptIssueKind> issues) noexcept;
+
+    PacmanTransactionReceiptState state_;
+    std::optional<std::string> transaction_token_;
+    std::optional<InvocationDependencyTransactionOwner> owner_;
+    std::vector<PacmanTransactionPackageObservation> package_operations_;
+    std::vector<PacmanInstalledPackageReceipt> newly_installed_packages_;
+    std::vector<PacmanTransactionReceiptIssueKind> issues_;
+
+    friend PacmanTransactionReceipt validate_pacman_transaction_receipt(
+            const std::string& expected_transaction_token,
+            InvocationDependencyTransactionOwner expected_owner,
+            const PacmanTransactionReceiptObservation& observation);
+};
+
+// The canonical token is a lowercase 256-bit nonce encoded as 64 hex digits.
+// This validates protocol identity only; it does not generate a nonce.
+[[nodiscard]] bool is_valid_pacman_transaction_token(
+        const std::string& transaction_token) noexcept;
+
+[[nodiscard]] PacmanTransactionReceipt validate_pacman_transaction_receipt(
+        const std::string& expected_transaction_token,
+        InvocationDependencyTransactionOwner expected_owner,
+        const PacmanTransactionReceiptObservation& observation);
+
+struct InvocationDependencyTransaction {
+    std::string transaction_token;
+    InvocationDependencyTransactionOwner owner;
+    // These are exact planned package identities, not proof that the package
+    // manager changed them. Solver-introduced Install records may be absent
+    // from this vector and remain valid causal evidence.
+    std::vector<std::string> requested_package_names;
+    InvocationDependencyTransactionCommandOutcome command_outcome;
+    PacmanTransactionReceipt receipt;
+};
+
+struct InvocationDependencyTransactionLedger {
+    // Transaction order is evidence order. A later Upgrade or unavailable
+    // receipt never erases an earlier authoritative Install receipt.
+    std::vector<InvocationDependencyTransaction> transactions;
+};
 
 enum class CleanupBaselineObservation {
     PreExisting,
