@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <set>
@@ -557,6 +558,10 @@ using RepositoryProvidedPackageMetadataResult = std::variant<
         std::vector<RepositoryProvidedPackageMetadata>,
         PackageMetadataFailure>;
 
+using InstalledRuntimeDependencySpecificationsResult = std::variant<
+        std::vector<std::string>,
+        PackageMetadataFailure>;
+
 using RepositoryPackageBaseSnapshotResult = std::variant<
         std::string,
         PackageMetadataFailure>;
@@ -597,6 +602,32 @@ RepositoryProvidedPackageMetadataResult snapshot_package_provides(
                 map_provided_package_relation(dependency->mod)});
     }
     return provides;
+}
+
+InstalledRuntimeDependencySpecificationsResult
+snapshot_package_runtime_dependency_specifications(alpm_pkg_t* package) {
+    std::vector<std::string> dependencies;
+    for(alpm_list_t* node = alpm_pkg_get_depends(package);
+        node != nullptr;
+        node = node->next) {
+        if(node->data == nullptr) {
+            return PackageMetadataFailure{
+                    PackageMetadataErrorCode::MalformedMetadata,
+                    "Installed package metadata contains an invalid runtime dependency."};
+        }
+
+        const auto* dependency =
+                static_cast<const alpm_depend_t*>(node->data);
+        std::unique_ptr<char, decltype(&std::free)> specification(
+                alpm_dep_compute_string(dependency), &std::free);
+        if(specification == nullptr || specification.get()[0] == '\0') {
+            return PackageMetadataFailure{
+                    PackageMetadataErrorCode::MalformedMetadata,
+                    "Installed package metadata contains an invalid runtime dependency."};
+        }
+        dependencies.emplace_back(specification.get());
+    }
+    return dependencies;
 }
 
 PackageMetadataFailure query_failure(
@@ -1331,6 +1362,87 @@ PackageMetadataSession::snapshot_installed_package_relation_metadata() const {
                         std::move(provides_result))});
     }
     return inventory;
+}
+
+InstalledPackageRuntimeDependencyMetadataInventoryResult
+PackageMetadataSession::
+snapshot_installed_package_runtime_dependency_metadata() const {
+    if(impl_ == nullptr) {
+        return InstalledPackageRuntimeDependencyMetadataInventoryFailure{
+                {},
+                std::nullopt,
+                query_failure(
+                        PackageMetadataErrorCode::QueryFailed,
+                        localization::translate_message(
+                                "Package metadata session is not open."))};
+    }
+
+    InstalledPackageRuntimeDependencyMetadataInventory inventory;
+    std::set<std::string> observed_package_names;
+    std::size_t package_index = 0;
+    for(alpm_list_t* node = impl_->local_package_cache;
+        node != nullptr;
+        node = node->next, ++package_index) {
+        if(node->data == nullptr) {
+            return InstalledPackageRuntimeDependencyMetadataInventoryFailure{
+                    std::move(inventory),
+                    package_index,
+                    query_failure(
+                            PackageMetadataErrorCode::QueryFailed,
+                            localization::translate_message(
+                                    "Local package cache contains an invalid package entry."))};
+        }
+
+        auto* package = static_cast<alpm_pkg_t*>(node->data);
+        const char* raw_package_name = alpm_pkg_get_name(package);
+        if(raw_package_name == nullptr ||
+           !is_valid_package_name(raw_package_name)) {
+            return InstalledPackageRuntimeDependencyMetadataInventoryFailure{
+                    std::move(inventory),
+                    package_index,
+                    query_failure(
+                            PackageMetadataErrorCode::MalformedMetadata,
+                            localization::translate_message(
+                                    "Local package metadata contains an invalid package name."))};
+        }
+        std::string package_name(raw_package_name);
+        if(!observed_package_names.insert(package_name).second) {
+            return InstalledPackageRuntimeDependencyMetadataInventoryFailure{
+                    std::move(inventory),
+                    package_index,
+                    query_failure(
+                            PackageMetadataErrorCode::MalformedMetadata,
+                            localization::translate_message(
+                                    "Local package metadata contains a duplicate package name."))};
+        }
+
+        InstalledRuntimeDependencySpecificationsResult dependencies =
+                snapshot_package_runtime_dependency_specifications(package);
+        if(const auto* failure =
+                   std::get_if<PackageMetadataFailure>(&dependencies);
+           failure != nullptr) {
+            return InstalledPackageRuntimeDependencyMetadataInventoryFailure{
+                    std::move(inventory), package_index, *failure};
+        }
+
+        inventory.push_back(InstalledPackageRuntimeDependencyMetadata{
+                std::move(package_name),
+                std::get<std::vector<std::string>>(
+                        std::move(dependencies))});
+    }
+    return inventory;
+}
+
+InstalledPackageRuntimeDependencyMetadataInventoryResult
+query_installed_package_runtime_dependency_metadata(
+        const PacmanDatabasePaths& paths) {
+    try {
+        PackageMetadataSession session = PackageMetadataSession::open(paths);
+        return session.snapshot_installed_package_runtime_dependency_metadata();
+    } catch(const PackageMetadataError& error) {
+        return InstalledPackageRuntimeDependencyMetadataInventoryFailure{
+                {}, std::nullopt, error.failure()};
+    }
 }
 
 struct RepositoryPackageMetadataSession::Impl {

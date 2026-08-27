@@ -12,6 +12,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -938,6 +939,85 @@ void test_empty_installed_package_state_snapshot_confirms_no_entries() {
             require_result_alternative<InstalledPackageStateSnapshot>(
                     result, "empty installed package state snapshot");
     expect(snapshot.empty(), "empty local DB produced state snapshot entries");
+}
+
+void test_installed_runtime_dependency_metadata_is_owned_and_canonical() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({
+            {"virtualbox", "7.2.14-1", ALPM_PKG_REASON_EXPLICIT},
+            {"virtualbox-ext-oracle",
+             "7.2.14-1",
+             ALPM_PKG_REASON_EXPLICIT,
+             {},
+             {{std::string("virtualbox"),
+               std::string("7.2.14"),
+               ALPM_DEP_MOD_EQ},
+              {std::string("glibc"), std::nullopt, ALPM_DEP_MOD_ANY},
+              {std::string("linux"),
+               std::string("6.0"),
+               ALPM_DEP_MOD_GE}}}});
+
+    InstalledPackageRuntimeDependencyMetadataInventoryResult result =
+            query_installed_package_runtime_dependency_metadata(
+                    valid_database_paths());
+    InstalledPackageRuntimeDependencyMetadataInventory inventory =
+            require_result_alternative<
+                    InstalledPackageRuntimeDependencyMetadataInventory>(
+                    result, "installed runtime dependency inventory");
+    expect(
+            stub::created_handle_count() == 1 &&
+                    stub::release_count_for_handle(0) == 1,
+            "Runtime dependency inventory did not release its read handle");
+
+    stub::reset_alpm_stub();
+    expect(inventory.size() == 2,
+           "Runtime dependency inventory package count differs");
+    expect(
+            inventory[0].package_name == "virtualbox" &&
+                    inventory[0].dependency_specifications.empty(),
+            "Dependency-free installed package acquired dependencies");
+    expect(
+            inventory[1].package_name == "virtualbox-ext-oracle" &&
+                    inventory[1].dependency_specifications ==
+                            std::vector<std::string>{
+                                    "virtualbox=7.2.14",
+                                    "glibc",
+                                    "linux>=6.0"},
+            "libalpm runtime dependencies were not retained canonically");
+}
+
+void test_installed_runtime_dependency_failure_is_not_empty_inventory() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({
+            {"observed-package",
+             "1.0-1",
+             ALPM_PKG_REASON_EXPLICIT,
+             {},
+             {{std::string("glibc"), std::nullopt, ALPM_DEP_MOD_ANY}}},
+            {"malformed-package",
+             "2.0-1",
+             ALPM_PKG_REASON_EXPLICIT,
+             {},
+             {{std::nullopt, std::string("1"), ALPM_DEP_MOD_EQ}}}});
+
+    InstalledPackageRuntimeDependencyMetadataInventoryResult result =
+            query_installed_package_runtime_dependency_metadata(
+                    valid_database_paths());
+    const auto& failure =
+            require_result_alternative<
+                    InstalledPackageRuntimeDependencyMetadataInventoryFailure>(
+                    result, "installed runtime dependency failure");
+    expect(
+            failure.package_index == std::optional<std::size_t>(1) &&
+                    failure.failure.code ==
+                            PackageMetadataErrorCode::MalformedMetadata &&
+                    failure.observed_packages.size() == 1 &&
+                    failure.observed_packages.front().package_name ==
+                            "observed-package" &&
+                    failure.observed_packages.front()
+                                    .dependency_specifications ==
+                            std::vector<std::string>{"glibc"},
+            "Runtime dependency failure was flattened or lost its prefix");
 }
 
 void test_package_absent() {
@@ -2478,6 +2558,8 @@ int main() {
         test_installed_package_state_snapshot_rejects_malformed_metadata();
         test_installed_package_state_snapshot_failure_is_not_empty_inventory();
         test_empty_installed_package_state_snapshot_confirms_no_entries();
+        test_installed_runtime_dependency_metadata_is_owned_and_canonical();
+        test_installed_runtime_dependency_failure_is_not_empty_inventory();
 
         test_package_absent();
         test_package_present();

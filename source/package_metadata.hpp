@@ -123,6 +123,27 @@ using InstalledPackageRelationMetadataInventoryResult = std::variant<
         InstalledPackageRelationMetadataInventory,
         InstalledPackageRelationMetadataInventoryFailure>;
 
+// Issue #460のcandidate observation専用read phase。既存relation inventoryを
+// 肥大化させず、libalpmが所有するdirect runtime dependencyだけをcanonicalな
+// specificationとしてowned保持する。source/provenanceやresolutionは表さない。
+struct InstalledPackageRuntimeDependencyMetadata {
+    std::string              package_name;
+    std::vector<std::string> dependency_specifications;
+};
+
+using InstalledPackageRuntimeDependencyMetadataInventory =
+        std::vector<InstalledPackageRuntimeDependencyMetadata>;
+
+struct InstalledPackageRuntimeDependencyMetadataInventoryFailure {
+    InstalledPackageRuntimeDependencyMetadataInventory observed_packages;
+    std::optional<std::size_t> package_index;
+    PackageMetadataFailure failure;
+};
+
+using InstalledPackageRuntimeDependencyMetadataInventoryResult = std::variant<
+        InstalledPackageRuntimeDependencyMetadataInventory,
+        InstalledPackageRuntimeDependencyMetadataInventoryFailure>;
+
 using InstalledExactPackageMetadataQueryResult = std::variant<
         InstalledExactPackageMetadata,
         PackageNotFound,
@@ -291,6 +312,9 @@ public:
     InstalledPackageRelationMetadataInventoryResult
     snapshot_installed_package_relation_metadata() const;
 
+    InstalledPackageRuntimeDependencyMetadataInventoryResult
+    snapshot_installed_package_runtime_dependency_metadata() const;
+
 private:
     struct Impl;
 
@@ -301,6 +325,11 @@ private:
 
 // Session open failureもempty inventoryへ丸めず、同じtyped resultへ戻す。
 InstalledPackageStateSnapshotResult snapshot_installed_package_states(
+        const PacmanDatabasePaths& paths);
+
+// Session open failureもsuccessful empty inventoryへ丸めない。
+InstalledPackageRuntimeDependencyMetadataInventoryResult
+query_installed_package_runtime_dependency_metadata(
         const PacmanDatabasePaths& paths);
 
 // repository sync DB専用のread phaseを所有し、installed/local sessionとは分離する。

@@ -119,15 +119,9 @@ bool is_repo_package(const std::string& pkg_name) {
 }
 
 StrictRepositoryPackageQueryResult query_repository_package_strict(
+        const PacmanRepositoryConfiguration& configuration,
         const std::string& package_name) {
     require_valid_package_name(package_name);
-
-    PacmanRepositoryConfiguration configuration;
-    try {
-        configuration = resolve_pacman_repository_configuration();
-    } catch(const PackageMetadataError& error) {
-        return repository_failure(error.failure());
-    }
 
     RepositoryExactPackageObservationResult result =
             observe_repository_exact_package(configuration, package_name);
@@ -176,6 +170,19 @@ StrictRepositoryPackageQueryResult query_repository_package_strict(
     }
     return RepositoryPackageNotFound{
             observation.configured_repository_order};
+}
+
+StrictRepositoryPackageQueryResult query_repository_package_strict(
+        const std::string& package_name) {
+    require_valid_package_name(package_name);
+
+    PacmanRepositoryConfiguration configuration;
+    try {
+        configuration = resolve_pacman_repository_configuration();
+    } catch(const PackageMetadataError& error) {
+        return repository_failure(error.failure());
+    }
+    return query_repository_package_strict(configuration, package_name);
 }
 
 StrictRepositoryProvidersQueryResult query_repository_providers_strict(

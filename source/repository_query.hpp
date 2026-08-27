@@ -80,6 +80,11 @@ bool is_repo_package(const std::string& pkg_name);
 std::vector<ProvidedDependency> find_repo_providers(const std::string& dependency_name);
 StrictRepositoryPackageQueryResult query_repository_package_strict(
         const std::string& package_name);
+// Reuses one already-resolved read-only repository configuration. The result
+// remains repository metadata evidence and is not a pacman transaction target.
+StrictRepositoryPackageQueryResult query_repository_package_strict(
+        const PacmanRepositoryConfiguration& configuration,
+        const std::string& package_name);
 StrictRepositoryProvidersQueryResult query_repository_providers_strict(
         const std::string& dependency_name);
 InstalledExactPackageObservationResult query_installed_exact_package_strict(

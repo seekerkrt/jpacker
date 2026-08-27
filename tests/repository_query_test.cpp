@@ -194,6 +194,29 @@ void test_configured_repository_order() {
                     package.package_version->version() != nullptr &&
                     *package.package_version->version() == "3.0-1",
             "Exact lookup lost configured repository precedence");
+
+    const std::vector<std::string> commands_before_explicit_query =
+            process_stub::captured_commands();
+    const RepositoryPackagePresent& explicitly_configured =
+            require_alternative<RepositoryPackagePresent>(
+                    query_repository_package_strict(
+                            PacmanRepositoryConfiguration{
+                                    PacmanDatabasePaths{
+                                            "/", database.database_path()},
+                                    {"core", "extra"}},
+                            "shared-package"),
+                    "explicitly configured repository query");
+    expect(
+            explicitly_configured.repository_name == "core" &&
+                    explicitly_configured.configured_order == 0 &&
+                    explicitly_configured.configured_repository_order ==
+                            std::optional<std::vector<std::string>>{
+                                    {"core", "extra"}},
+            "Explicit repository configuration changed candidate authority");
+    expect(
+            process_stub::captured_commands() ==
+                    commands_before_explicit_query,
+            "Explicit repository query re-resolved pacman configuration");
 }
 
 void test_split_child_preserves_package_base() {
