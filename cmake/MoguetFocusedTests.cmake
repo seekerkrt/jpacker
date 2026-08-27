@@ -29,6 +29,7 @@ foreach(_moguet_direct_focus IN ITEMS
     source-package-identity
     source-package-identity-projection
     source-package-compatibility
+    invocation-owned-cleanup-model
     reviewed-source-state
     reviewed-source-state-store
     reviewed-source-lifecycle

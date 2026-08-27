@@ -298,8 +298,8 @@ makepkg -si
 system with `pacman -U` in the same step. This differs from `make` and
 `./moguet --help` above, which only build and inspect the development tree
 in place and install nothing. The `PKGBUILD` is the canonical production
-CMake build/install consumer and configures `BUILD_TESTING=OFF`; the 94
-developer C++ test executables and 117 CTest registrations remain in host,
+CMake build/install consumer and configures `BUILD_TESTING=OFF`; the 95
+developer C++ test executables and 118 CTest registrations remain in host,
 CI, and release validation. This `PKGBUILD` is a repository-provided
 packaging path, not an AUR submission; Moguet still has no published AUR
 page.

@@ -4,13 +4,13 @@
 
 この文書は、separated AUR / source-build lifecycleにおける`--rmdeps`の意味、拒否境界、pacman-only routeでの消費を定めるnormative production contractである。あわせてIssue #404で将来のsupportへ進むために必要なcleanup ownershipとinteractionのstaged authorityを定める。文書の規範上の正本は日本語本文である。
 
-current production behaviorとstaged targetは混同しない。Issue #404 Slice 1完了後も、production source-buildの`--rmdeps`はunsupportedかつfail closedであり、dependency removal、preview、promptは接続されていない。production removalを接続できる最初の段階はSlice 4である。
+current production behaviorとstaged targetは混同しない。Issue #404 Slice 2完了後も、production source-buildの`--rmdeps`はunsupportedかつfail closedであり、dependency removal、preview、promptは接続されていない。production removalを接続できる最初の段階はSlice 4である。
 
 - Origin Issue: [#269](https://github.com/seekerkrt/moguet/issues/269)
 - Staged extension: [#404](https://github.com/seekerkrt/moguet/issues/404)
 - Related Issues: [#123](https://github.com/seekerkrt/moguet/issues/123)、[#152](https://github.com/seekerkrt/moguet/issues/152)、[#218](https://github.com/seekerkrt/moguet/issues/218)、[#242](https://github.com/seekerkrt/moguet/issues/242)、[#266](https://github.com/seekerkrt/moguet/issues/266)、[#267](https://github.com/seekerkrt/moguet/issues/267)、[#271](https://github.com/seekerkrt/moguet/issues/271)、[#350](https://github.com/seekerkrt/moguet/issues/350)
 - Related PRs: #298（#269 policy）、#241、#257〜#261（#242 separated lifecycle）
-- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。
+- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。
 - Related upper decisions: [decision 1](../DECISIONS.md#decision-1)、[decision 2](../DECISIONS.md#decision-2)、[decision 4](../DECISIONS.md#decision-4)、[decision 5](../DECISIONS.md#decision-5)、[decision 6](../DECISIONS.md#decision-6)、[decision 7](../DECISIONS.md#decision-7)
 
 ## Contract本文（日本語normative source of truth）
@@ -75,6 +75,34 @@ cleanup eligibleへ昇格できるのは、Moguetがauthoritativeに所有する
 
 Slice 1では、このcausal proofやtyped modelの具体的方式を実装・固定しない。Slice 2はfilesystem / pacman mutationへ未接続のpure model、Slice 3はmetadata / lifecycle correlation adapterであり、snapshot差分単独をownership authorityにしてはならない。
 
+### Slice 2 pure cleanup classification authority（production未接続）
+
+Slice 2のcleanup modelは、filesystem、environment、libalpm session、pacman、makepkg、process、sudo、prompt、cleanup executorを参照しないpure value / pure classifierである。production source-build lifecycleからは呼び出さず、cleanup candidateやremoval capabilityをcurrent runtimeへ公開しない。
+
+入力evidenceは少なくとも次を独立したtyped dimensionとして保持する。
+
+- baseline observation: `PreExisting` / `NewlyObserved` / `Unknown`。
+- current installed state: `Present` / `Absent` / `Unknown`。current metadataが得られた場合も、既存の`Explicit` / `Dependency` / `Unknown` install reasonを別stateとして保持する。source-aware candidateのpackage versionは`Known` / `Unknown` / `Unavailable`を保持し、`Present`なcurrent metadataのversionとknown valueが異なる場合だけ明白なidentity contradictionとする。`Unknown` / `Unavailable`を不一致へ変換しない。
+- causal ownership: authoritativeな`InvocationOwned` / known `NotInvocationOwned` / `Unknown`。baseline observationとは別型であり、`NewlyObserved`から変換しない。
+- role / correlation: requested root、source-aware package child、PackageBase、BuildPlan dependency edge identity、typed dependency requirement、provider identityとresolution、`Root` / `RuntimeDependency` / `BuildDependency` / `CheckDependency`を保持する。同一packageの複数role、root、PackageBase、edgeを単一roleやpackage nameへflattenしない。
+- correlation-set coverage: `Complete` / `Incomplete` / `Unknown`。これはcandidateに関係する全root、PackageBase、role、BuildPlan dependency edgeをcleanup classificationに必要な範囲でauthoritativeにprojectできたかを表すcandidate-level authorityである。
+- shared lifetime: `StillRequired` / `NoLongerRequired` / `Unknown`。correlation数や実行順だけからshared lifetimeを推測しない。
+- evidence quality: current package evidenceと各correlationを`Verified` / `Unverified`として保持する。per-correlation `Verified`は、その1件についてrole、edge、typed requirement、selected / resolved providerとprovided dependency identityのassociationをadapterがauthoritative inputへ照合済みであることを表す。別のroot、role、edgeが存在しないことやcorrelation集合全体の完全性は証明しない。これはcleanup classificationでも、Slice 4のmutation直前revalidationでもない。
+- policy protection: package名heuristicではなく、adapter / policyが与えるtyped `Protected` / `NotProtected` / `Unknown`を保持できる。Slice 2は`base-devel` group queryを行わない。
+
+classificationは`Eligible` / `Protected` / `Unknown` / `Invalid`を返し、次のprecedenceを固定する。
+
+1. typed stateの範囲外、known candidate versionと`Present`なcurrent metadata versionの不一致、correlation package / provider identityの不一致、consumer requirementとdirect packageまたはproviderのprovided dependency identityの明白な不一致等、structurally malformedな入力は`Invalid`。
+2. `PreExisting`、current `Absent`、`Explicit`、known `NotInvocationOwned`、root、runtime dependency、`StillRequired`、typed policy protectionのいずれかがあれば`Protected`。
+3. positive protectionがなく、baseline、current installed state / reason、package version authority、causal ownership、identity / edge correlation verification、correlation-set coverage、build / check role correlation、shared lifetime、policy evidenceの必要なproofが不足すれば`Unknown`。coverage `Incomplete` / `Unknown`もこのarmであり、verifiedな1 edgeから残りのedge不在を推測しない。
+4. すべてのproofが揃った場合だけ`Eligible`。
+
+`Eligible`には、少なくとも`NewlyObserved`、current `Present`、`Dependency` reason、current metadataと一致するknown package version、authoritative `InvocationOwned`、verified current identity、verifiedなbuild / check dependency edge correlation、correlation-set coverage `Complete`、runtime / root roleなし、`NoLongerRequired`、追加policy protectionなしがすべて必要である。selected providerであるという事実自体はclassificationを変えない。selected providerがruntime roleを持てば`Protected`であり、build / checkだけで他のproofも揃う場合に限り`Eligible`となり得る。
+
+Slice 3 adapterは、BuildPlan自体のcompletenessと、このcandidateに到達する全root、PackageBase、role、dependency edgeのprojectionを確認できる場合だけcoverage `Complete`を生成できる。partial BuildPlan、root subset、edge observation failure、completeness authority不在のいずれかがあれば`Complete`を生成してはならず、判明している範囲に応じて`Incomplete`または`Unknown`を使う。consumer requirementとprovider capabilityのversion constraintやSONAME semanticsはSlice 2 pure classifierで再評価せず、adapterがassociationを証明できないcorrelationは`Unverified`として`Unknown`へ倒す。pure classifierがtyped identity同士から直接確認できる明白なname contradictionだけは`Invalid`とする。
+
+結果reasonはuser-facing proseではないtyped valueであり、選択されたprecedence armのreasonだけをcanonical enum orderで返す。`Invalid`は情報不足の別名にせず、情報不足は`Unknown`へ倒す。Slice 2のverificationはcurrent evidenceのqualityまでであり、Slice 4が所有するmutation直前revalidationを表したり代替したりしない。
+
 ### Source-build route
 
 source-build routeでは、今回のinvocationが導入したmake / check dependency集合をMoguetがauthoritativeに所有できない。build前後のinstalled package差分だけでは、次を安全に区別できない。
@@ -136,9 +164,9 @@ production preview、prompt、mutation直前revalidation、exact candidate remov
 
 ## Non-scope / implementationを固定しない範囲
 
-- Slice 1でのdependency cleanup support、remove executor、orphan cleanup、broad autoremove。
+- Slice 1〜2でのdependency cleanup support、remove executor、orphan cleanup、broad autoremove。
 - `pacman -R` / `-Rs` / `-Rns`、`pacman -Qdt` / `-Qdtq`、`makepkg -r`の追加。
-- cleanup candidate model、install-reason付きfull snapshot adapter、causal correlation adapterの先行実装。
+- Slice 2でのinstall-reason付きfull snapshot adapter、causal correlation adapter、production lifecycle接続。
 - production preview / prompt / revalidation / removal、local / upgrade系supportの先行開放。
 - runtime parser、route selection、makepkg / pacman argv、current exit codeの変更。
 - current lifecycle監査で確認した実装moduleや`-sc` argvを将来の恒久実装として固定すること。
