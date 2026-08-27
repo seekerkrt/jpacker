@@ -4,13 +4,13 @@
 
 この文書は、separated AUR / source-build lifecycleにおける`--rmdeps`の意味、拒否境界、pacman-only routeでの消費を定めるnormative production contractである。あわせてIssue #404で将来のsupportへ進むために必要なcleanup ownershipとinteractionのstaged authorityを定める。文書の規範上の正本は日本語本文である。
 
-current production behaviorとstaged targetは混同しない。Issue #404 Slice 2完了後も、production source-buildの`--rmdeps`はunsupportedかつfail closedであり、dependency removal、preview、promptは接続されていない。production removalを接続できる最初の段階はSlice 4である。
+current production behaviorとstaged targetは混同しない。Issue #404 Slice 3完了後も、production source-buildの`--rmdeps`はunsupportedかつfail closedであり、dependency removal、preview、promptは接続されていない。production removalを接続できる最初の段階はSlice 4として計画していたが、Slice 3 readiness判定は後述のとおりNO-GOであり、causal authorityを追加する別Sliceなしにremovalへ進まない。
 
 - Origin Issue: [#269](https://github.com/seekerkrt/moguet/issues/269)
 - Staged extension: [#404](https://github.com/seekerkrt/moguet/issues/404)
 - Related Issues: [#123](https://github.com/seekerkrt/moguet/issues/123)、[#152](https://github.com/seekerkrt/moguet/issues/152)、[#218](https://github.com/seekerkrt/moguet/issues/218)、[#242](https://github.com/seekerkrt/moguet/issues/242)、[#266](https://github.com/seekerkrt/moguet/issues/266)、[#267](https://github.com/seekerkrt/moguet/issues/267)、[#271](https://github.com/seekerkrt/moguet/issues/271)、[#350](https://github.com/seekerkrt/moguet/issues/350)
 - Related PRs: #298（#269 policy）、#241、#257〜#261（#242 separated lifecycle）
-- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。
+- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。Slice 3でinstall-reason付きfull local snapshotとproduction未接続のmetadata / lifecycle adapterを追加し、current causal authority不足をNO-GOとして固定。
 - Related upper decisions: [decision 1](../DECISIONS.md#decision-1)、[decision 2](../DECISIONS.md#decision-2)、[decision 4](../DECISIONS.md#decision-4)、[decision 5](../DECISIONS.md#decision-5)、[decision 6](../DECISIONS.md#decision-6)、[decision 7](../DECISIONS.md#decision-7)
 
 ## Contract本文（日本語normative source of truth）
@@ -36,8 +36,9 @@ makepkg -sc
 current metadata境界には次の能力と不足がある。
 
 - 個別installed package queryはownedなname、version、`Explicit` / `Dependency` / `Unknown` install reasonを返す。
-- current full local package snapshotは同一read phaseのname / versionを保持するが、全packageのinstall reasonを含まない。
-- source-build invocationは、makepkg dependency transactionを跨ぐinstall-reason付きpre/post ownership snapshotやtransaction correlationを現在構成しない。
+- Slice 3のfull local package state snapshotは、1つの`PackageMetadataSession`がpreloadしたlocal DB cacheを1回だけ走査し、全entryのownedなname、version、`Explicit` / `Dependency` / `Unknown` install reasonを同じread phaseとして保持する。invalid / empty name、empty version、duplicate name、invalid cache entryはsnapshot failureであり、skipやlast-write-winsにしない。
+- full snapshot成功時にkeyが存在しない場合だけ、そのread phaseでのconfirmed absenceである。session open、local DB、cache、query、metadata validationのfailureはtyped failureであり、empty inventoryやabsenceへ変換しない。
+- production source-build invocationは、このsnapshotをmakepkg dependency transaction前後でcaptureしたり、transaction ownershipへ接続したりしていない。Slice 3 adapter APIもproduction routeから未使用である。
 - metadata query failure、`PackageNotFound`、`Unknown` reasonは区別されるが、その区別だけでinvocation ownershipは証明されない。
 
 利用者が明示選択したrepository providerは、invocation全体でdeduplicateしたexact `pacman -S [--asdeps] --needed` transactionへ別phaseとして渡される。ただしcurrent resultはactual package state changeを`Unknown`として保持し、cleanup inventoryを作らない。Moguetがphaseを開始した事実と、削除可能なpackage単位のcausal ownership proofは別である。
@@ -103,6 +104,46 @@ Slice 3 adapterは、BuildPlan自体のcompletenessと、このcandidateに到�
 
 結果reasonはuser-facing proseではないtyped valueであり、選択されたprecedence armのreasonだけをcanonical enum orderで返す。`Invalid`は情報不足の別名にせず、情報不足は`Unknown`へ倒す。Slice 2のverificationはcurrent evidenceのqualityまでであり、Slice 4が所有するmutation直前revalidationを表したり代替したりしない。
 
+### Slice 3 metadata / lifecycle adapter authority（production未接続）
+
+Slice 3 adapterは、install-reason付きbaseline/current snapshot、typed `BuildPlan`、source-aware resolved candidate、prepared production work item、work-item outcome、selected repository provider transaction resultをread-onlyで受け取り、Slice 2の`InvocationOwnedCleanupCandidate`へprojectする。pacman、makepkg、filesystem、sudo、prompt、removeを呼ばず、production source-build / local build / CLI routeからは呼ばない。
+
+baseline/current projectionは次を固定する。
+
+- baseline snapshot成功 + package存在は`PreExisting`。
+- baseline snapshot成功 + package不在は`NewlyObserved`。これはownershipではない。
+- baseline snapshot failureは`Unknown`。
+- current snapshot成功 + package存在は`Present`とexact current metadata。
+- current snapshot成功 + package不在は`Absent`。
+- current snapshot failureは`Unknown`かつmetadata authorityなし。
+
+source-aware candidateは`ResolvedDependencyCandidate`またはrepository exact observation等のtyped authorityからのみ構成し、installed name/versionやpackage名からsource / PackageBaseを補完しない。repository providerのcurrent identityはPackageBaseを保持しないため、そのprovider edgeは`Unverified`かつcoverage `Incomplete`である。authoritative candidate identity自体を構成できない場合はcandidateを捏造せずtyped projection failureを返す。known candidate versionとcurrent installed versionの不一致はSlice 2 classifierの`Invalid`へ渡し、`Unknown` / `Unavailable` versionは推測でknownへ変換しない。
+
+correlation coverage `Complete`は少なくとも次の全条件が揃う場合だけ生成する。
+
+- `project_build_plan_state()`がconstructed / completeであり、provider decisionがuniqueまたはselectedとして確定している。
+- required artifact target projectionが成功し、全root、PackageBase、package target、role、execution orderが相互に整合する。
+- prepared work itemがBuildPlan orderと1対1で対応し、各PackageBaseのtyped source identityとrequired targetを保持する。
+- candidateに関係する全dependency edgeがtyped requirement、resolved source-aware candidate、successful constraint evaluation、requiring package、root attribution、provider associationを保持する。
+
+resolution failureやprovider candidate observation failureで全集合自体を断言できない場合は`Unknown`、unresolved / ambiguous / cancelled provider、missing source context、missing requirement / resolved identity、repository provider PackageBase不足等の既知gapは`Incomplete`へ倒す。verifiedな1 edge、vector件数、package名一致だけから`Complete`を作らない。baseline/current metadata failureはcorrelation集合の列挙可否とは別dimensionであり、集合を列挙できても各correlationとcurrent package evidenceを`Unverified`へ倒してclassifierの`Eligible`を禁止する。
+
+shared lifetimeはtyped lifecycle boundaryを`BeforeBuildCompletion` / `AfterWorkItem` / `AfterSuccessfulInvocation` / `Unknown`として区別する。後続work itemのverified edgeがcandidateを必要とする場合とroot / runtime roleは`StillRequired`、全work itemのbuild / install success、coverage `Complete`、build / check-only、後続利用なしをすべて確認できる場合だけ`NoLongerRequired`とする。それ以外は`Unknown`である。local routeはcurrent prepared remote dependency invocationがlocal root unitの完全集合を所有しないため、Slice 3ではcoverage / shared lifetimeを安全側へ倒す。
+
+causal ownershipはbaselineやshared lifetimeとは独立してprojectする。current `makepkg -s` outcome、`SelectedRepositoryProviderTransactionResult::Succeeded`、`PackageStateChange::Unknown`、command exit 0、または将来のtransaction-level aggregate `Changed`からpackage単位`InvocationOwned`を生成しない。authoritativeにpre-existingと確認したpackageもcausal stateを推測せず、baseline `PreExisting`によって`Protected`とし、causal ownershipは`Unknown`を保つ。
+
+Slice 3にはgroup等のcomplete policy inventory authorityがないため、policy protectionは`Unknown`である。このためcurrent adapterはproduction evidenceから`Eligible`を生成しない。
+
+### Slice 4 production cleanup readiness: NO-GO
+
+current production lifecycleからpackage単位の`CleanupCausalOwnership::InvocationOwned`をauthoritatively生成できる実在pathはない。Slice 4 removalへ進む前に、少なくとも次のいずれかを提供する別Slice / redesignが必要である。
+
+- package単位のmachine-readable changed-setとtransaction result。
+- external transaction raceを排除できるtransaction ownership tokenまたはpackage-manager lock / transaction authority。
+- makepkg syncdepsをMoguet-owned dependency install phaseへ分離し、そのexact inputとactual changed packageを相関するlifecycle。
+
+stdout / stderr、localized output、pacman log、timestamp近接、orphan state、BuildPlan上のpackage名はこの不足を埋めるauthorityではない。
+
 ### Source-build route
 
 source-build routeでは、今回のinvocationが導入したmake / check dependency集合をMoguetがauthoritativeに所有できない。build前後のinstalled package差分だけでは、次を安全に区別できない。
@@ -166,7 +207,8 @@ production preview、prompt、mutation直前revalidation、exact candidate remov
 
 - Slice 1〜2でのdependency cleanup support、remove executor、orphan cleanup、broad autoremove。
 - `pacman -R` / `-Rs` / `-Rns`、`pacman -Qdt` / `-Qdtq`、`makepkg -r`の追加。
-- Slice 2でのinstall-reason付きfull snapshot adapter、causal correlation adapter、production lifecycle接続。
+- Slice 1〜2でのinstall-reason付きfull snapshot adapter、causal correlation adapter、production lifecycle接続。
+- Slice 3 adapterのproduction lifecycle / public route接続と、causal authority不足のままのpreview / executor接続。
 - production preview / prompt / revalidation / removal、local / upgrade系supportの先行開放。
 - runtime parser、route selection、makepkg / pacman argv、current exit codeの変更。
 - current lifecycle監査で確認した実装moduleや`-sc` argvを将来の恒久実装として固定すること。

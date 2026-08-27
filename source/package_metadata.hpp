@@ -219,6 +219,15 @@ using LocalPackageVersionSnapshotResult = std::variant<
         LocalPackageVersionSnapshot,
         PackageMetadataFailure>;
 
+// cleanup baseline/current observation向けのfull local DB snapshot。
+// keyとvalueはともにownedで、1 read phaseのname/version/reasonを保持する。
+using InstalledPackageStateSnapshot =
+        std::map<std::string, InstalledPackageMetadata>;
+
+using InstalledPackageStateSnapshotResult = std::variant<
+        InstalledPackageStateSnapshot,
+        PackageMetadataFailure>;
+
 // resolver/session openの失敗を、CLI境界でstd::exceptionとして扱える形で伝播する。
 class PackageMetadataError : public std::runtime_error {
 public:
@@ -276,6 +285,9 @@ public:
 
     LocalPackageVersionSnapshotResult snapshot_local_package_versions() const;
 
+    InstalledPackageStateSnapshotResult
+    snapshot_installed_package_states() const;
+
     InstalledPackageRelationMetadataInventoryResult
     snapshot_installed_package_relation_metadata() const;
 
@@ -286,6 +298,10 @@ private:
 
     std::unique_ptr<Impl> impl_;
 };
+
+// Session open failureもempty inventoryへ丸めず、同じtyped resultへ戻す。
+InstalledPackageStateSnapshotResult snapshot_installed_package_states(
+        const PacmanDatabasePaths& paths);
 
 // repository sync DB専用のread phaseを所有し、installed/local sessionとは分離する。
 class RepositoryPackageMetadataSession {

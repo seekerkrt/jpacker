@@ -52,6 +52,26 @@ void run_pacman_metadata_smoke_test() {
                     metadata.reason == InstalledPackageReason::Dependency ||
                     metadata.reason == InstalledPackageReason::Unknown,
             "pacman metadata returned an unknown public install reason");
+
+    InstalledPackageStateSnapshotResult snapshot_result =
+            session.snapshot_installed_package_states();
+    if(const auto* failure =
+               std::get_if<PackageMetadataFailure>(&snapshot_result)) {
+        throw std::runtime_error(
+                "installed package state snapshot failed: " +
+                failure->diagnostic);
+    }
+    const InstalledPackageStateSnapshot& snapshot =
+            std::get<InstalledPackageStateSnapshot>(snapshot_result);
+    const auto pacman = snapshot.find("pacman");
+    expect(
+            pacman != snapshot.end(),
+            "installed package state snapshot omitted pacman");
+    expect(
+            pacman->second.name == metadata.name &&
+                    pacman->second.version == metadata.version &&
+                    pacman->second.reason == metadata.reason,
+            "installed package state snapshot differs from exact metadata");
 }
 
 void run_repository_metadata_smoke_test() {
