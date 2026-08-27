@@ -10,7 +10,7 @@ current production behaviorとstaged targetは混同しない。Issue #404 Slice
 - Staged extension: [#404](https://github.com/seekerkrt/moguet/issues/404)
 - Related Issues: [#123](https://github.com/seekerkrt/moguet/issues/123)、[#152](https://github.com/seekerkrt/moguet/issues/152)、[#218](https://github.com/seekerkrt/moguet/issues/218)、[#242](https://github.com/seekerkrt/moguet/issues/242)、[#266](https://github.com/seekerkrt/moguet/issues/266)、[#267](https://github.com/seekerkrt/moguet/issues/267)、[#271](https://github.com/seekerkrt/moguet/issues/271)、[#350](https://github.com/seekerkrt/moguet/issues/350)
 - Related PRs: #298（#269 policy）、#241、#257〜#261（#242 separated lifecycle）
-- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。Slice 3でinstall-reason付きfull local snapshotとproduction未接続のmetadata / lifecycle adapterを追加し、current causal authority不足をNO-GOとして固定。Slice 3.5でtransaction token、owner、command outcome、machine receipt completeness、package operation、invocation ledgerをpure typed contractとして追加した。Slice 3.6でpackage-installed root helper、root-owned transaction state、transaction-local Install hook、one-shot machine receipt、selected-provider typed transportを追加し、Slice 3.5 ledgerへactual `Install` setをprojectできるproduction-capable pathを成立させた。public cleanup routeと他mutation ownerは未接続である。
+- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。Slice 3でinstall-reason付きfull local snapshotとproduction未接続のmetadata / lifecycle adapterを追加し、current causal authority不足をNO-GOとして固定。Slice 3.5でtransaction token、owner、command outcome、machine receipt completeness、package operation、invocation ledgerをpure typed contractとして追加した。Slice 3.6でpackage-installed root helper、root-owned transaction state、transaction-local Install hook、one-shot machine receipt、selected-provider typed transportを追加し、Slice 3.5 ledgerへactual `Install` setをprojectできるproduction-capable pathを成立させた。Slice 3.7でmakepkg syncdepsのpublic instrumentation authorityを監査し、安全なroot-owned adapter案は独立security redesignが必要なためDEFER、Issue #404はRETURN-HOMEと判定した。public cleanup routeと他mutation ownerは未接続である。
 - Related upper decisions: [decision 1](../DECISIONS.md#decision-1)、[decision 2](../DECISIONS.md#decision-2)、[decision 4](../DECISIONS.md#decision-4)、[decision 5](../DECISIONS.md#decision-5)、[decision 6](../DECISIONS.md#decision-6)、[decision 7](../DECISIONS.md#decision-7)
 
 ## Contract本文（日本語normative source of truth）
@@ -301,6 +301,43 @@ stdout / stderr、localized output、pacman log、timestamp近接、orphan state
 - selected-provider causal readiness: **GO**。production-capable selected-provider typed pathからSlice 3.5 ledgerを構成し、actual Install packageを`InvocationOwned`へprojectできる。
 - overall causal authority: **PARTIAL**。`pacman -U` / source artifact installと`makepkg -s` syncdepsはUnknownのままである。
 - Slice 4 readiness: **NO-GO**。policy protection、route completeness、shared lifetime、mutation直前revalidation等が独立blockerとして残る。
+
+### Slice 3.7 makepkg syncdeps causal authority audit（2026-08-28）
+
+current Moguetは、validated checkoutをcurrent directoryとして、custom `V=K`をfirst-seen orderで渡し、invocation-ownedなabsolute `PKGDEST`を最後のassignmentとして追加した上で、次のbuild-only baselineを実行する。
+
+```text
+makepkg -sc
+```
+
+`--noconfirm`、`-f`、`-C`は対応するcurrent optionが有効な場合だけこの順で追加する。`-c`はsuccessful build後のwork file cleanupであり、`-C` / `--cleanbuild`や`-r` / `--rmdeps`ではない。Moguetはpacman用`--config` / `--hookdir`、makepkg用`--config`、`PACMAN`、`PACMAN_AUTH`を通常buildへ追加しない。makepkgは既定ではsystem makepkg config、drop-in、user configを読み、明示された`MAKEPKG_CONF`等のcurrent environment authorityも保持する。
+
+pacman 7.1.0 / makepkg 7.1.0のpublic manual、installed makepkg implementation、host package databaseを使わないfake pacman / auth characterizationから、current syncdeps flowを次のとおり確認した。
+
+- makepkg自身がPKGBUILDをsourceし、current `CARCH`の`depends_<arch>`、`makedepends_<arch>`、`checkdepends_<arch>`をglobal arrayへmergeする。
+- runtime `depends`を先に`pacman -T`で確認し、不足時だけ`pacman -S --asdeps`へ渡す。その後、`makedepends`と、有効な`check()`に対応する`checkdepends`を同様に確認する。したがって1回のmakepkg buildはsync dependency install transactionを0〜2回開始し得る。
+- current Moguetは`--check` / `--nocheck`を追加しないため、`check()` / `checkdepends`の有効性はmakepkg configとPKGBUILDが所有する。characterizationではdefault check有効時に`makedepends + checkdepends`が同じ2回目のtransactionへ入り、`--nocheck`では`checkdepends`だけが除外された。
+- already-satisfied dependencyは`pacman -T`後にinstall transactionを開始しない。version constraint、installed provider / versioned providesのsatisfactionと、不足時のrepository provider選択、solver-introduced dependency、conflict等はpacman / libalpmが所有する。
+- split package固有の`package_<name>()`内`depends`はsyncdeps対象ではなく、buildに必要なdependencyはglobal `depends` / `makedepends`へ置くというupstream contractを維持する。
+- dependency transaction failureはmakepkg failureとしてbuild前に停止する。command failureとreceipt completenessは別dimensionのままである。
+
+#### Instrumentation candidate result
+
+- Candidate A（dedicated pacman config / HookDir）: **NO-GO**。pacmanの`--config` / `--hookdir`と`pacman.conf`の`HookDir`はpublic contractだが、makepkgには内部pacmanへこれらを渡すpublic pass-throughがない。global hook directoryへdynamic hookを置く方式もunrelated pacman transactionからexact tokenを分離できない。internal `PACMAN_OPTS`等のcurrent shell implementationへ依存しない。
+- Candidate B（`PACMAN` / `PACMAN_AUTH`）: user-writable wrapper / config / build treeをroot pathへ到達させる形は**NO-GO**。両者はpublic overrideだがhook専用authorityではなく、`PACMAN`はpacman互換command全体、`PACMAN_AUTH`はroot command prefix全体を置き換える。PKGBUILDも同じshell contextでsourceされ、characterizationではPKGBUILD側`PACMAN_AUTH`がactual dependency install prefixへ伝播した。package-installed root-owned dedicated adapterなら理論上はfail-closedに構成できるが、transactionごとのtoken生成、0〜2回のinternal transaction集約、root-owned multi-receipt state、parent makepkg outcomeとのcorrelation、owner拡張、adapter bypass時のMissing処理が必要であり、独立security Sliceへ**DEFER**する。
+- Candidate C（`makepkg -s`を外してMoguetがsyncdeps）: **NO-GO**。current BuildPlanはcurrent checkoutのPKGBUILD evaluation、effective makepkg config、architecture merge、check enablement、split-package syncdeps rule、already-satisfied/provider/version semanticsをmakepkgと同一authorityで再現しない。`makepkg --printsrcinfo`等の追加評価だけでもcurrent flow全体の代替proofにはならない。makepkg / pacman semanticsをMoguetへ複製しない。
+- Candidate D（pre/post snapshot + selected-provider receipt）: **NO-GO**。selected-provider receiptが証明するのはそのdirect transactionだけであり、makepkg内部transactionのsnapshot差分を`InvocationOwned`へ昇格しない。
+- Candidate E（pacman log / stdout parser）: **NO-GO**。localized prose、log、timestampはtransaction-local causal receiptではない。
+
+Slice 3.5のpure ledgerと`InvocationDependencyTransactionOwner::MakepkgSyncDependencies`は将来adapterから再利用できる。一方、Slice 3.6 protocol / helper / transportはownerをselected repository providerへ固定し、1 token / 1 Complete receiptをone-shotで扱う。makepkg内部の複数transactionへそのまま接続できず、概念の再利用とproduction transportの小変更を同一視しない。
+
+#### Slice 3.7 readiness / return-home decision
+
+- makepkg syncdeps causal readiness: **DEFER**。安全なroot-owned adapterの方向は存在するが、限定的なintegrationではなくSlice 3.6同等以上のprivileged adapter / IPC redesignを必要とする。
+- selected-provider causal readiness: **GO**のまま維持する。
+- overall causal authority: **PARTIAL**。makepkg syncdepsとtyped dependency artifactの`pacman -U`はUnknownのままである。
+- Slice 4 production cleanup readiness: **NO-GO**。causal authorityに加えてpolicy protection、route / correlation completeness、shared lifetime、mutation直前revalidationが未成立である。
+- Issue #404 continuation recommendation: **RETURN-HOME**。v2.5.0では成立済みのmodel / adapter / selected-provider trusted receipt foundationを保持し、public source-build `--rmdeps`はunsupported / fail-closedのままとする。makepkg syncdeps authority、残るcleanup candidate authority、preview / confirmation / mutation executorは最大3件のfollow-up候補へ分離し、Issue #404内で新しいsecurity subsystemを開始しない。
 
 ### Slice 4 production cleanup readiness: NO-GO
 
