@@ -11,6 +11,7 @@ foreach(_moguet_direct_focus IN ITEMS
     provider-selection
     provider-installed-state
     dependency-constraint
+    cross-source-version-lock
     package-relation
     package-relation-observation
     package-relation-assessment
