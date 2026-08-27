@@ -43,6 +43,7 @@ CMAKE_FOCUSED_ALIASES := \
 	test-provider-selection \
 	test-provider-installed-state \
 	test-dependency-constraint \
+	test-cross-source-version-lock \
 	test-package-relation \
 	test-package-relation-observation \
 	test-package-relation-assessment \

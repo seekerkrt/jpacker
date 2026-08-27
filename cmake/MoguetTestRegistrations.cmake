@@ -156,6 +156,10 @@ _moguet_add_direct_ctest(
     provider-installed-state-test
 )
 _moguet_add_direct_ctest(cpp.dependency_constraint dependency-constraint-test)
+_moguet_add_direct_ctest(
+    cpp.cross_source_version_lock
+    cross-source-version-lock-test
+)
 _moguet_add_direct_ctest(cpp.package_relation package-relation-test)
 _moguet_add_direct_ctest(
     cpp.package_relation_observation
@@ -320,7 +324,7 @@ unset(_moguet_repository_query_case)
 
 # Existing shell and PTY drivers remain the behavioral authority.  TARGETS
 # lists only C++ test executables; the production `moguet` target used by the
-# runtime-identity driver is intentionally outside the 95-target test ledger.
+# runtime-identity driver is intentionally outside the 96-target test ledger.
 moguet_add_ctest(
     NAME localization.contract
     TARGETS
