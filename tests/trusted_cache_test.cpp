@@ -26,22 +26,22 @@
 
 namespace trusted_cache_test_metadata {
 
-bool        inject_staged_owner_mismatch = false;
+bool inject_staged_owner_mismatch = false;
 std::string staged_leaf;
 std::size_t owner_mismatch_observations = 0;
 
 } // namespace trusted_cache_test_metadata
 
 extern "C" int fstatat(
-        int directory_descriptor, const char* path, struct stat* status,
-        int flags) noexcept {
+    int directory_descriptor, const char* path, struct stat* status,
+    int flags) noexcept {
     const int result = static_cast<int>(syscall(
-            SYS_newfstatat, directory_descriptor, path, status, flags));
+        SYS_newfstatat, directory_descriptor, path, status, flags));
     if(result == 0 && path != nullptr &&
        trusted_cache_test_metadata::inject_staged_owner_mismatch &&
        std::strcmp(
-               path,
-               trusted_cache_test_metadata::staged_leaf.c_str()) == 0) {
+           path,
+           trusted_cache_test_metadata::staged_leaf.c_str()) == 0) {
         status->st_uid = static_cast<uid_t>(status->st_uid ^ 1U);
         ++trusted_cache_test_metadata::owner_mismatch_observations;
     }
@@ -68,8 +68,8 @@ class TemporaryTree final {
 public:
     TemporaryTree() {
         std::string pattern =
-                (fs::temp_directory_path() / "moguet-trusted-cache-test-XXXXXX")
-                        .string();
+            (fs::temp_directory_path() / "moguet-trusted-cache-test-XXXXXX")
+                .string();
         std::vector<char> writable(pattern.begin(), pattern.end());
         writable.push_back('\0');
         char* created = mkdtemp(writable.data());
@@ -78,8 +78,8 @@ public:
         }
         path_ = created;
         fs::permissions(
-                path_, fs::perms::owner_all,
-                fs::perm_options::replace);
+            path_, fs::perms::owner_all,
+            fs::perm_options::replace);
     }
 
     TemporaryTree(const TemporaryTree&) = delete;
@@ -112,13 +112,13 @@ public:
 class StagedDirectoryHookScope final {
 public:
     explicit StagedDirectoryHookScope(
-            TrustedCacheStagedDirectoryTestHook hook) {
+        TrustedCacheStagedDirectoryTestHook hook) {
         set_trusted_cache_staged_directory_test_hook(std::move(hook));
     }
 
     StagedDirectoryHookScope(const StagedDirectoryHookScope&) = delete;
     StagedDirectoryHookScope& operator=(
-            const StagedDirectoryHookScope&) = delete;
+        const StagedDirectoryHookScope&) = delete;
 
     ~StagedDirectoryHookScope() noexcept {
         set_trusted_cache_staged_directory_test_hook({});
@@ -129,9 +129,9 @@ class StagedOwnerMetadataOverrideScope final {
 public:
     StagedOwnerMetadataOverrideScope() = default;
     StagedOwnerMetadataOverrideScope(
-            const StagedOwnerMetadataOverrideScope&) = delete;
+        const StagedOwnerMetadataOverrideScope&) = delete;
     StagedOwnerMetadataOverrideScope& operator=(
-            const StagedOwnerMetadataOverrideScope&) = delete;
+        const StagedOwnerMetadataOverrideScope&) = delete;
 
     ~StagedOwnerMetadataOverrideScope() noexcept {
         trusted_cache_test_metadata::inject_staged_owner_mismatch = false;
@@ -140,7 +140,7 @@ public:
 
     void enable_for(const fs::path& path) {
         trusted_cache_test_metadata::staged_leaf =
-                path.filename().string();
+            path.filename().string();
         trusted_cache_test_metadata::owner_mismatch_observations = 0;
         trusted_cache_test_metadata::inject_staged_owner_mismatch = true;
     }
@@ -152,7 +152,7 @@ public:
 
 class StandardOutputCapture final {
     std::ostringstream output_;
-    std::streambuf*     original_ = nullptr;
+    std::streambuf* original_ = nullptr;
 
 public:
     StandardOutputCapture()
@@ -176,8 +176,8 @@ public:
 };
 
 class FileDescriptorLimitScope final {
-    struct rlimit original_ {};
-    bool          changed_ = false;
+    struct rlimit original_{};
+    bool changed_ = false;
 
 public:
     explicit FileDescriptorLimitScope(rlim_t soft_limit) {
@@ -186,20 +186,20 @@ public:
         }
         if(original_.rlim_cur <= soft_limit) {
             throw std::runtime_error(
-                    "File descriptor limit is too low for the focused test.");
+                "File descriptor limit is too low for the focused test.");
         }
         struct rlimit lowered = original_;
         lowered.rlim_cur = soft_limit;
         if(setrlimit(RLIMIT_NOFILE, &lowered) != 0) {
             throw std::runtime_error(
-                    "Failed to lower the file descriptor limit.");
+                "Failed to lower the file descriptor limit.");
         }
         changed_ = true;
     }
 
     FileDescriptorLimitScope(const FileDescriptorLimitScope&) = delete;
     FileDescriptorLimitScope& operator=(
-            const FileDescriptorLimitScope&) = delete;
+        const FileDescriptorLimitScope&) = delete;
 
     ~FileDescriptorLimitScope() noexcept {
         if(changed_) static_cast<void>(setrlimit(RLIMIT_NOFILE, &original_));
@@ -224,27 +224,27 @@ xdg_paths::CachePaths cache_paths_for(const fs::path& cache_home) {
 ValidatedCacheRoot prepare_root(const fs::path& cache_home) {
     xdg_paths::CachePaths paths = cache_paths_for(cache_home);
     xdg_directory_safety::PreparedDirectory directory =
-            xdg_directory_safety::prepare_directory(paths);
+        xdg_directory_safety::prepare_directory(paths);
     return adopt_trusted_cache_root(paths, std::move(directory));
 }
 
 template <typename Callable>
 TrustedCacheFailure expect_cache_error(
-        Callable&& callable, TrustedCacheErrorCode expected_code,
-        const std::string& context) {
+    Callable&& callable, TrustedCacheErrorCode expected_code,
+    const std::string& context) {
     try {
         std::forward<Callable>(callable)();
     } catch(const TrustedCacheError& error) {
         expect(
-                error.failure().code == expected_code,
-                context + ": unexpected typed error code");
+            error.failure().code == expected_code,
+            context + ": unexpected typed error code");
         return error.failure();
     }
     throw std::runtime_error(context + ": expected TrustedCacheError");
 }
 
 mode_t path_mode(const fs::path& path) {
-    struct stat status {};
+    struct stat status{};
     if(lstat(path.c_str(), &status) != 0) {
         throw std::runtime_error("Failed to stat test path.");
     }
@@ -257,18 +257,18 @@ struct PathIdentity {
 };
 
 PathIdentity path_identity(const fs::path& path) {
-    struct stat status {};
+    struct stat status{};
     if(lstat(path.c_str(), &status) != 0) {
         throw std::runtime_error("Failed to inspect test path identity.");
     }
     return PathIdentity{
-            static_cast<std::uintmax_t>(status.st_dev),
-            static_cast<std::uintmax_t>(status.st_ino)};
+        static_cast<std::uintmax_t>(status.st_dev),
+        static_cast<std::uintmax_t>(status.st_ino)};
 }
 
 bool process_holds_identity(
-        const PathIdentity& expected, std::optional<nlink_t> link_count =
-                                              std::nullopt) {
+    const PathIdentity& expected, std::optional<nlink_t> link_count =
+                                      std::nullopt) {
     for(const fs::directory_entry& entry :
         fs::directory_iterator("/proc/self/fd")) {
         int descriptor = -1;
@@ -277,7 +277,7 @@ bool process_holds_identity(
         } catch(const std::exception&) {
             continue;
         }
-        struct stat status {};
+        struct stat status{};
         if(fstat(descriptor, &status) != 0) continue;
         if(static_cast<std::uintmax_t>(status.st_dev) == expected.device &&
            static_cast<std::uintmax_t>(status.st_ino) == expected.inode &&
@@ -291,43 +291,43 @@ bool process_holds_identity(
 
 std::size_t open_descriptor_count() {
     return static_cast<std::size_t>(std::distance(
-            fs::directory_iterator("/proc/self/fd"),
-            fs::directory_iterator()));
+        fs::directory_iterator("/proc/self/fd"),
+        fs::directory_iterator()));
 }
 
 struct TreeEntrySnapshot {
-    fs::path       relative_path;
-    mode_t         type_and_mode = 0;
+    fs::path relative_path;
+    mode_t type_and_mode = 0;
     std::uintmax_t device = 0;
     std::uintmax_t inode = 0;
     std::uintmax_t owner = 0;
-    std::string    symlink_target;
-    std::string    contents;
+    std::string symlink_target;
+    std::string contents;
 
     bool operator==(const TreeEntrySnapshot&) const = default;
 };
 
 TreeEntrySnapshot snapshot_entry(
-        const fs::path& root, const fs::path& path) {
-    struct stat status {};
+    const fs::path& root, const fs::path& path) {
+    struct stat status{};
     if(lstat(path.c_str(), &status) != 0) {
         throw std::runtime_error("Failed to snapshot legacy entry.");
     }
     TreeEntrySnapshot snapshot{
-            path.lexically_relative(root.parent_path()),
-            status.st_mode,
-            static_cast<std::uintmax_t>(status.st_dev),
-            static_cast<std::uintmax_t>(status.st_ino),
-            static_cast<std::uintmax_t>(status.st_uid),
-            {},
-            {}};
+        path.lexically_relative(root.parent_path()),
+        status.st_mode,
+        static_cast<std::uintmax_t>(status.st_dev),
+        static_cast<std::uintmax_t>(status.st_ino),
+        static_cast<std::uintmax_t>(status.st_uid),
+        {},
+        {}};
     if(S_ISLNK(status.st_mode)) {
         snapshot.symlink_target = fs::read_symlink(path).string();
     } else if(S_ISREG(status.st_mode)) {
         std::ifstream input(path, std::ios::binary);
         snapshot.contents.assign(
-                std::istreambuf_iterator<char>(input),
-                std::istreambuf_iterator<char>());
+            std::istreambuf_iterator<char>(input),
+            std::istreambuf_iterator<char>());
     }
     return snapshot;
 }
@@ -340,10 +340,10 @@ std::vector<TreeEntrySnapshot> snapshot_tree(const fs::path& root) {
         snapshot.push_back(snapshot_entry(root, entry.path()));
     }
     std::sort(
-            snapshot.begin(), snapshot.end(),
-            [](const TreeEntrySnapshot& lhs, const TreeEntrySnapshot& rhs) {
-                return lhs.relative_path < rhs.relative_path;
-            });
+        snapshot.begin(), snapshot.end(),
+        [](const TreeEntrySnapshot& lhs, const TreeEntrySnapshot& rhs) {
+            return lhs.relative_path < rhs.relative_path;
+        });
     return snapshot;
 }
 
@@ -363,18 +363,18 @@ void test_bridge_layout_and_cwd_independence() {
     fs::current_path(unrelated_cwd);
     try {
         ValidatedCachePath child =
-                create_trusted_cache_directory(root, "checkout");
+            create_trusted_cache_directory(root, "checkout");
         expect(
-                child.path() == cache_home / "moguet" / "checkout",
-                "Relative child used current working directory.");
+            child.path() == cache_home / "moguet" / "checkout",
+            "Relative child used current working directory.");
         expect(!fs::exists(unrelated_cwd / "checkout"),
                "Cache child escaped into current working directory.");
         for(const fs::directory_entry& entry :
             fs::directory_iterator(root.path())) {
             expect(
-                    !entry.path().filename().string().starts_with(
-                            ".moguet-cache-create-"),
-                    "Successful child creation retained its staging leaf.");
+                !entry.path().filename().string().starts_with(
+                    ".moguet-cache-create-"),
+                "Successful child creation retained its staging leaf.");
         }
     } catch(...) {
         fs::current_path(original_cwd);
@@ -383,13 +383,13 @@ void test_bridge_layout_and_cwd_independence() {
     fs::current_path(original_cwd);
 
     expect_cache_error(
-            [&]() {
-                static_cast<void>(require_trusted_cache_path(
-                        root, "../escape",
-                        CachePathRequirement::ExistingOrMissing));
-            },
-            TrustedCacheErrorCode::ChildEscape,
-            "direct child escape");
+        [&]() {
+            static_cast<void>(require_trusted_cache_path(
+                root, "../escape",
+                CachePathRequirement::ExistingOrMissing));
+        },
+        TrustedCacheErrorCode::ChildEscape,
+        "direct child escape");
 }
 
 void test_prepared_directory_adoption_is_single_consume() {
@@ -400,9 +400,9 @@ void test_prepared_directory_adoption_is_single_consume() {
 
     xdg_paths::CachePaths paths = cache_paths_for(cache_home);
     xdg_directory_safety::PreparedDirectory directory =
-            xdg_directory_safety::prepare_directory(paths);
+        xdg_directory_safety::prepare_directory(paths);
     ValidatedCacheRoot root = adopt_trusted_cache_root(
-            paths, std::move(directory));
+        paths, std::move(directory));
     root.require_unchanged_identity();
 
     bool source_is_invalid = false;
@@ -415,12 +415,12 @@ void test_prepared_directory_adoption_is_single_consume() {
            "PreparedDirectory source remained valid after cache adoption.");
 
     expect_cache_error(
-            [&]() {
-                static_cast<void>(adopt_trusted_cache_root(
-                        paths, std::move(directory)));
-            },
-            TrustedCacheErrorCode::InvalidBoundary,
-            "second PreparedDirectory adoption");
+        [&]() {
+            static_cast<void>(adopt_trusted_cache_root(
+                paths, std::move(directory)));
+        },
+        TrustedCacheErrorCode::InvalidBoundary,
+        "second PreparedDirectory adoption");
     root.require_unchanged_identity();
 }
 
@@ -438,9 +438,9 @@ void test_root_and_child_replacement_refusal() {
         fs::permissions(root.path(), fs::perms::owner_all,
                         fs::perm_options::replace);
         expect_cache_error(
-                [&]() { root.require_unchanged_identity(); },
-                TrustedCacheErrorCode::ConcurrentReplacement,
-                "root replacement");
+            [&]() { root.require_unchanged_identity(); },
+            TrustedCacheErrorCode::ConcurrentReplacement,
+            "root replacement");
         expect(fs::is_directory(moved_root), "Original root was removed.");
         expect(fs::is_directory(root.path()), "Replacement root was removed.");
     }
@@ -448,7 +448,7 @@ void test_root_and_child_replacement_refusal() {
     fs::remove_all(cache_home / "moguet");
     ValidatedCacheRoot root = prepare_root(cache_home);
     ValidatedCachePath original =
-            create_trusted_cache_directory(root, "checkout");
+        create_trusted_cache_directory(root, "checkout");
     write_file(original.path() / "sentinel", "original\n");
     fs::path moved_child = tree.path() / "moved-original-checkout";
     fs::rename(original.path(), moved_child);
@@ -456,9 +456,9 @@ void test_root_and_child_replacement_refusal() {
     write_file(original.path() / "replacement", "replacement\n");
 
     expect_cache_error(
-            [&]() { remove_trusted_cache_path(original); },
-            TrustedCacheErrorCode::ConcurrentReplacement,
-            "child replacement removal");
+        [&]() { remove_trusted_cache_path(original); },
+        TrustedCacheErrorCode::ConcurrentReplacement,
+        "child replacement removal");
     expect(fs::exists(moved_child / "sentinel"),
            "Moved original child was followed and deleted.");
     expect(fs::exists(original.path() / "replacement"),
@@ -479,12 +479,12 @@ void test_symlink_and_cleanup_preflight() {
     fs::create_directory_symlink(outside, root.path() / "unsafe");
 
     TrustedCacheFailure failure = expect_cache_error(
-            [&]() { static_cast<void>(preflight_cache_cleanup(root)); },
-            TrustedCacheErrorCode::Symlink,
-            "cleanup symlink preflight");
+        [&]() { static_cast<void>(preflight_cache_cleanup(root)); },
+        TrustedCacheErrorCode::Symlink,
+        "cleanup symlink preflight");
     expect(
-            failure.stage == TrustedCacheStage::CleanupPreflight,
-            "Cleanup preflight failure has the wrong stage.");
+        failure.stage == TrustedCacheStage::CleanupPreflight,
+        "Cleanup preflight failure has the wrong stage.");
     expect(fs::is_directory(safe.path()),
            "Cleanup preflight failure deleted a safe target.");
     expect(fs::is_symlink(root.path() / "unsafe"),
@@ -500,7 +500,7 @@ void test_nested_symlink_cleanup_pins_link_without_following() {
     fs::permissions(cache_home, fs::perms::owner_all, fs::perm_options::replace);
     ValidatedCacheRoot root = prepare_root(cache_home);
     ValidatedCachePath target =
-            create_trusted_cache_directory(root, "checkout");
+        create_trusted_cache_directory(root, "checkout");
     fs::path outside = tree.path() / "outside";
     fs::create_directory(outside);
     write_file(outside / "sentinel", "outside\n");
@@ -534,9 +534,9 @@ void test_cleanup_capability_revalidation_is_global() {
     fs::create_directory_symlink(tree.path(), root.path() / "alpha");
 
     expect_cache_error(
-            [&]() { remove_preflighted_cache_paths(std::move(cleanup)); },
-            TrustedCacheErrorCode::ConcurrentReplacement,
-            "global cleanup capability revalidation");
+        [&]() { remove_preflighted_cache_paths(std::move(cleanup)); },
+        TrustedCacheErrorCode::ConcurrentReplacement,
+        "global cleanup capability revalidation");
     expect(fs::is_directory(root.path() / "beta"),
            "Cleanup deleted beta before every target revalidated.");
     expect(fs::is_directory(moved_alpha),
@@ -565,24 +565,24 @@ void test_cleanup_refuses_held_package_base_lease() {
     fs::path cache_home = tree.path() / "cache-anchor";
     fs::create_directory(cache_home);
     fs::permissions(
-            cache_home, fs::perms::owner_all,
-            fs::perm_options::replace);
+        cache_home, fs::perms::owner_all,
+        fs::perm_options::replace);
     ValidatedCacheRoot root = prepare_root(cache_home);
     ValidatedCachePath checkout =
-            create_trusted_cache_directory(root, "leased-checkout");
+        create_trusted_cache_directory(root, "leased-checkout");
 
     const int descriptor = open(
-            checkout.path().c_str(),
-            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        checkout.path().c_str(),
+        O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     expect(descriptor >= 0, "Failed to open cleanup lease fixture");
     expect(flock(descriptor, LOCK_EX | LOCK_NB) == 0,
            "Failed to hold cleanup lease fixture");
     TrustedCacheFailure failure = expect_cache_error(
-            [&]() {
-                static_cast<void>(preflight_cache_cleanup(root));
-            },
-            TrustedCacheErrorCode::ConcurrentReplacement,
-            "cleanup PackageBase lease contention");
+        [&]() {
+            static_cast<void>(preflight_cache_cleanup(root));
+        },
+        TrustedCacheErrorCode::ConcurrentReplacement,
+        "cleanup PackageBase lease contention");
     expect(failure.stage == TrustedCacheStage::CleanupPreflight,
            "Cleanup lease contention has the wrong stage.");
     expect(fs::is_directory(checkout.path()),
@@ -623,27 +623,27 @@ void test_cleanup_capability_reports_fd_exhaustion_before_removal() {
     ValidatedCacheRoot root = prepare_root(cache_home);
     for(std::size_t index = 0; index < 32; ++index) {
         write_file(
-                root.path() / ("entry-" + std::to_string(index)),
-                "retained\n");
+            root.path() / ("entry-" + std::to_string(index)),
+            "retained\n");
     }
     const std::vector<TreeEntrySnapshot> before = snapshot_tree(root.path());
     const std::size_t descriptors_before = open_descriptor_count();
     TrustedCacheFailure failure;
     {
         FileDescriptorLimitScope lowered_limit(
-                static_cast<rlim_t>(descriptors_before + 6));
+            static_cast<rlim_t>(descriptors_before + 6));
         failure = expect_cache_error(
-                [&]() {
-                    static_cast<void>(preflight_cache_cleanup(root));
-                },
-                TrustedCacheErrorCode::MetadataFailure,
-                "cleanup aggregate file descriptor exhaustion");
+            [&]() {
+                static_cast<void>(preflight_cache_cleanup(root));
+            },
+            TrustedCacheErrorCode::MetadataFailure,
+            "cleanup aggregate file descriptor exhaustion");
     }
 
     expect(failure.stage == TrustedCacheStage::CleanupPreflight,
            "FD exhaustion was not reported during cleanup preflight.");
     expect(failure.system_error.has_value() &&
-                   failure.system_error->value() == EMFILE,
+               failure.system_error->value() == EMFILE,
            "FD exhaustion did not retain the Too many open files error.");
     expect(snapshot_tree(root.path()) == before,
            "FD exhaustion removed cache data during capability construction.");
@@ -657,11 +657,11 @@ void test_cleanup_capability_pins_nodes_until_consumed() {
         fs::path cache_home = tree.path() / "top-level-cache-anchor";
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         ValidatedCacheRoot root = prepare_root(cache_home);
         ValidatedCachePath checkout =
-                create_trusted_cache_directory(root, "alpha");
+            create_trusted_cache_directory(root, "alpha");
         write_file(checkout.path() / "sentinel", "original\n");
         create_trusted_cache_directory(root, "unrelated");
         const PathIdentity original = path_identity(checkout.path());
@@ -674,16 +674,16 @@ void test_cleanup_capability_pins_nodes_until_consumed() {
         fs::rename(checkout.path(), moved_original);
         fs::create_directory(checkout.path());
         fs::permissions(
-                checkout.path(), fs::perms::owner_all,
-                fs::perm_options::replace);
+            checkout.path(), fs::perms::owner_all,
+            fs::perm_options::replace);
         write_file(checkout.path() / "replacement", "replacement\n");
 
         expect_cache_error(
-                [&]() {
-                    remove_preflighted_cache_paths(std::move(cleanup));
-                },
-                TrustedCacheErrorCode::ConcurrentReplacement,
-                "top-level replacement before cleanup consumption");
+            [&]() {
+                remove_preflighted_cache_paths(std::move(cleanup));
+            },
+            TrustedCacheErrorCode::ConcurrentReplacement,
+            "top-level replacement before cleanup consumption");
         expect(fs::exists(moved_original / "sentinel"),
                "Cleanup followed the top-level original outside the root.");
         expect(fs::exists(checkout.path() / "replacement"),
@@ -699,11 +699,11 @@ void test_cleanup_capability_pins_nodes_until_consumed() {
         fs::path cache_home = tree.path() / "nested-cache-anchor";
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         ValidatedCacheRoot root = prepare_root(cache_home);
         ValidatedCachePath checkout =
-                create_trusted_cache_directory(root, "checkout");
+            create_trusted_cache_directory(root, "checkout");
         fs::path nested = checkout.path() / "nested";
         fs::create_directory(nested);
         write_file(nested / "sentinel", "original\n");
@@ -718,15 +718,15 @@ void test_cleanup_capability_pins_nodes_until_consumed() {
         fs::rename(nested, moved_original);
         fs::create_directory(nested);
         fs::permissions(
-                nested, fs::perms::owner_all, fs::perm_options::replace);
+            nested, fs::perms::owner_all, fs::perm_options::replace);
         write_file(nested / "replacement", "replacement\n");
 
         expect_cache_error(
-                [&]() {
-                    remove_preflighted_cache_paths(std::move(cleanup));
-                },
-                TrustedCacheErrorCode::ConcurrentReplacement,
-                "nested replacement before cleanup consumption");
+            [&]() {
+                remove_preflighted_cache_paths(std::move(cleanup));
+            },
+            TrustedCacheErrorCode::ConcurrentReplacement,
+            "nested replacement before cleanup consumption");
         expect(fs::exists(moved_original / "sentinel"),
                "Cleanup followed the nested original outside the root.");
         expect(fs::exists(nested / "replacement"),
@@ -742,8 +742,8 @@ void test_cleanup_capability_pins_nodes_until_consumed() {
         fs::path cache_home = tree.path() / "file-cache-anchor";
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         ValidatedCacheRoot root = prepare_root(cache_home);
         fs::path original_path = root.path() / "ordinary-file";
         write_file(original_path, "original\n");
@@ -759,16 +759,16 @@ void test_cleanup_capability_pins_nodes_until_consumed() {
         write_file(original_path, "replacement\n");
 
         expect_cache_error(
-                [&]() {
-                    remove_preflighted_cache_paths(std::move(cleanup));
-                },
-                TrustedCacheErrorCode::ConcurrentReplacement,
-                "file replacement before cleanup consumption");
+            [&]() {
+                remove_preflighted_cache_paths(std::move(cleanup));
+            },
+            TrustedCacheErrorCode::ConcurrentReplacement,
+            "file replacement before cleanup consumption");
         expect(snapshot_entry(tree.path(), moved_original).contents ==
-                       "original\n",
+                   "original\n",
                "Cleanup changed the moved regular-file original.");
         expect(snapshot_entry(root.path(), original_path).contents ==
-                       "replacement\n",
+                   "replacement\n",
                "Cleanup removed or changed the regular-file replacement.");
         expect(fs::exists(root.path() / "unrelated"),
                "Cleanup removed an unrelated file before failure.");
@@ -781,11 +781,11 @@ void test_cleanup_capability_pins_nodes_until_consumed() {
         fs::path cache_home = tree.path() / "symlink-cache-anchor";
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         ValidatedCacheRoot root = prepare_root(cache_home);
         ValidatedCachePath checkout =
-                create_trusted_cache_directory(root, "checkout");
+            create_trusted_cache_directory(root, "checkout");
         fs::path outside_original = tree.path() / "outside-original";
         fs::path outside_replacement = tree.path() / "outside-replacement";
         fs::create_directory(outside_original);
@@ -806,17 +806,17 @@ void test_cleanup_capability_pins_nodes_until_consumed() {
         fs::create_directory_symlink(outside_replacement, link);
 
         expect_cache_error(
-                [&]() {
-                    remove_preflighted_cache_paths(std::move(cleanup));
-                },
-                TrustedCacheErrorCode::ConcurrentReplacement,
-                "symlink replacement before cleanup consumption");
+            [&]() {
+                remove_preflighted_cache_paths(std::move(cleanup));
+            },
+            TrustedCacheErrorCode::ConcurrentReplacement,
+            "symlink replacement before cleanup consumption");
         expect(fs::read_symlink(moved_link) == outside_original,
                "Cleanup changed the moved original symlink.");
         expect(fs::read_symlink(link) == outside_replacement,
                "Cleanup removed or changed the replacement symlink.");
         expect(fs::exists(outside_original / "sentinel") &&
-                       fs::exists(outside_replacement / "sentinel"),
+                   fs::exists(outside_replacement / "sentinel"),
                "Cleanup followed a symlink outside the cache root.");
         expect(fs::exists(checkout.path() / "unrelated"),
                "Cleanup removed a symlink sibling before failure.");
@@ -831,15 +831,15 @@ void test_removal_plan_pins_original_nodes() {
         fs::path cache_home = tree.path() / "top-level-cache-anchor";
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         ValidatedCacheRoot root = prepare_root(cache_home);
         ValidatedCachePath target =
-                create_trusted_cache_directory(root, "checkout");
+            create_trusted_cache_directory(root, "checkout");
         const PathIdentity original = path_identity(target.path());
         const std::size_t descriptors_before = open_descriptor_count();
         PreparedCacheCleanup cleanup =
-                preflight_cache_cleanup(root);
+            preflight_cache_cleanup(root);
 
         bool hook_ran = false;
         RemovalHookScope hook([&](std::size_t depth) {
@@ -853,11 +853,11 @@ void test_removal_plan_pins_original_nodes() {
             write_file(target.path() / "replacement", "replacement\n");
         });
         expect_cache_error(
-                [&]() {
-                    remove_preflighted_cache_paths(std::move(cleanup));
-                },
-                TrustedCacheErrorCode::ConcurrentReplacement,
-                "pinned top-level directory replacement");
+            [&]() {
+                remove_preflighted_cache_paths(std::move(cleanup));
+            },
+            TrustedCacheErrorCode::ConcurrentReplacement,
+            "pinned top-level directory replacement");
         expect(hook_ran, "Top-level replacement hook did not run.");
         expect(fs::exists(target.path() / "replacement"),
                "Replacement top-level directory was deleted.");
@@ -870,16 +870,16 @@ void test_removal_plan_pins_original_nodes() {
         fs::path cache_home = tree.path() / "nested-cache-anchor";
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         ValidatedCacheRoot root = prepare_root(cache_home);
         ValidatedCachePath target =
-                create_trusted_cache_directory(root, "checkout");
+            create_trusted_cache_directory(root, "checkout");
         fs::path nested = target.path() / "nested";
         fs::create_directory(nested);
         const PathIdentity original = path_identity(nested);
         PreparedCacheCleanup cleanup =
-                preflight_cache_cleanup(root);
+            preflight_cache_cleanup(root);
 
         bool hook_ran = false;
         RemovalHookScope hook([&](std::size_t depth) {
@@ -893,11 +893,11 @@ void test_removal_plan_pins_original_nodes() {
             write_file(nested / "replacement", "replacement\n");
         });
         expect_cache_error(
-                [&]() {
-                    remove_preflighted_cache_paths(std::move(cleanup));
-                },
-                TrustedCacheErrorCode::ConcurrentReplacement,
-                "pinned nested directory replacement");
+            [&]() {
+                remove_preflighted_cache_paths(std::move(cleanup));
+            },
+            TrustedCacheErrorCode::ConcurrentReplacement,
+            "pinned nested directory replacement");
         expect(hook_ran, "Nested replacement hook did not run.");
         expect(fs::exists(nested / "replacement"),
                "Replacement nested directory was deleted.");
@@ -908,14 +908,14 @@ void test_removal_plan_pins_original_nodes() {
         fs::path cache_home = tree.path() / "file-cache-anchor";
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         ValidatedCacheRoot root = prepare_root(cache_home);
         fs::path target = root.path() / "ordinary-file";
         write_file(target, "original\n");
         const PathIdentity original = path_identity(target);
         PreparedCacheCleanup cleanup =
-                preflight_cache_cleanup(root);
+            preflight_cache_cleanup(root);
 
         bool hook_ran = false;
         RemovalHookScope hook([&](std::size_t depth) {
@@ -928,11 +928,11 @@ void test_removal_plan_pins_original_nodes() {
             write_file(target, "replacement\n");
         });
         expect_cache_error(
-                [&]() {
-                    remove_preflighted_cache_paths(std::move(cleanup));
-                },
-                TrustedCacheErrorCode::ConcurrentReplacement,
-                "pinned regular-file replacement");
+            [&]() {
+                remove_preflighted_cache_paths(std::move(cleanup));
+            },
+            TrustedCacheErrorCode::ConcurrentReplacement,
+            "pinned regular-file replacement");
         expect(hook_ran, "Regular-file replacement hook did not run.");
         expect(snapshot_entry(root.path(), target).contents == "replacement\n",
                "Replacement regular file was deleted or changed.");
@@ -943,11 +943,11 @@ void test_removal_plan_pins_original_nodes() {
         fs::path cache_home = tree.path() / "rollback-cache-anchor";
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         ValidatedCacheRoot root = prepare_root(cache_home);
         ValidatedCachePath target =
-                create_trusted_cache_directory(root, "checkout");
+            create_trusted_cache_directory(root, "checkout");
         const PathIdentity original = path_identity(target.path());
 
         bool hook_ran = false;
@@ -979,10 +979,10 @@ void test_removal_refuses_revoked_root_and_ancestor_lineage() {
     {
         ValidatedCacheRoot root = prepare_root(cache_home);
         ValidatedCachePath target =
-                create_trusted_cache_directory(root, "checkout");
+            create_trusted_cache_directory(root, "checkout");
         write_file(target.path() / "sentinel", "root lineage\n");
         PreparedCacheCleanup cleanup =
-                preflight_cache_cleanup(root);
+            preflight_cache_cleanup(root);
         fs::path moved_root = tree.path() / "moved-cache-root";
         bool mutated = false;
         RemovalHookScope hook([&](std::size_t depth) {
@@ -991,11 +991,11 @@ void test_removal_refuses_revoked_root_and_ancestor_lineage() {
             fs::rename(root.path(), moved_root);
         });
         expect_cache_error(
-                [&]() {
-                    remove_preflighted_cache_paths(std::move(cleanup));
-                },
-                TrustedCacheErrorCode::ConcurrentReplacement,
-                "revoked root removal");
+            [&]() {
+                remove_preflighted_cache_paths(std::move(cleanup));
+            },
+            TrustedCacheErrorCode::ConcurrentReplacement,
+            "revoked root removal");
         expect(fs::exists(moved_root / "checkout" / "sentinel"),
                "Removal followed a cache root renamed outside its lineage.");
     }
@@ -1003,7 +1003,7 @@ void test_removal_refuses_revoked_root_and_ancestor_lineage() {
     fs::remove_all(cache_home / "moguet");
     ValidatedCacheRoot root = prepare_root(cache_home);
     ValidatedCachePath target =
-            create_trusted_cache_directory(root, "checkout");
+        create_trusted_cache_directory(root, "checkout");
     write_file(target.path() / "sentinel", "child lineage\n");
     fs::path moved_child = tree.path() / "moved-checkout";
     bool mutated = false;
@@ -1013,9 +1013,9 @@ void test_removal_refuses_revoked_root_and_ancestor_lineage() {
         fs::rename(target.path(), moved_child);
     });
     expect_cache_error(
-            [&]() { remove_trusted_cache_path(target); },
-            TrustedCacheErrorCode::ConcurrentReplacement,
-            "revoked child lineage removal");
+        [&]() { remove_trusted_cache_path(target); },
+        TrustedCacheErrorCode::ConcurrentReplacement,
+        "revoked child lineage removal");
     expect(fs::exists(moved_child / "sentinel"),
            "Removal followed a checkout renamed outside the cache root.");
 }
@@ -1027,89 +1027,89 @@ void test_clean_and_rollback_refuse_revoked_authority_lineage() {
         fs::path cache_home = tree.path() / "clean-cache-anchor";
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         ValidatedCacheRoot root = prepare_root(cache_home);
         ValidatedCachePath checkout =
-                create_trusted_cache_directory(root, "checkout");
+            create_trusted_cache_directory(root, "checkout");
         write_file(checkout.path() / "sentinel", "clean original\n");
         PreparedCacheCleanup cleanup =
-                preflight_cache_cleanup(root);
+            preflight_cache_cleanup(root);
 
         fs::path moved_anchor = tree.path() / "moved-clean-cache-anchor";
         fs::rename(cache_home, moved_anchor);
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         fs::create_directory(cache_home / "moguet");
         fs::permissions(
-                cache_home / "moguet", fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home / "moguet", fs::perms::owner_all,
+            fs::perm_options::replace);
         write_file(cache_home / "moguet" / "replacement", "replacement\n");
 
         expect_cache_error(
-                [&]() {
-                    remove_preflighted_cache_paths(std::move(cleanup));
-                },
-                TrustedCacheErrorCode::ConcurrentReplacement,
-                "clean after cache anchor replacement");
+            [&]() {
+                remove_preflighted_cache_paths(std::move(cleanup));
+            },
+            TrustedCacheErrorCode::ConcurrentReplacement,
+            "clean after cache anchor replacement");
         expect(
-                fs::exists(
-                        moved_anchor / "moguet" / "checkout" / "sentinel"),
-                "Clean followed the original cache root after its XDG "
-                "anchor moved.");
+            fs::exists(
+                moved_anchor / "moguet" / "checkout" / "sentinel"),
+            "Clean followed the original cache root after its XDG "
+            "anchor moved.");
         expect(
-                fs::exists(cache_home / "moguet" / "replacement"),
-                "Clean removed data from the replacement cache lineage.");
+            fs::exists(cache_home / "moguet" / "replacement"),
+            "Clean removed data from the replacement cache lineage.");
     }
 
     {
         fs::path authority_parent =
-                tree.path() / "rollback-authority-parent";
+            tree.path() / "rollback-authority-parent";
         fs::path cache_home = authority_parent / "cache-anchor";
         fs::create_directory(authority_parent);
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         ValidatedCacheRoot root = prepare_root(cache_home);
         ValidatedCachePath checkout =
-                create_trusted_cache_directory(root, "checkout");
+            create_trusted_cache_directory(root, "checkout");
         write_file(checkout.path() / "partial", "rollback original\n");
 
         fs::path moved_parent =
-                tree.path() / "moved-rollback-authority-parent";
+            tree.path() / "moved-rollback-authority-parent";
         {
             DirCleanupGuard rollback(checkout);
             fs::rename(authority_parent, moved_parent);
             fs::create_directory(authority_parent);
             fs::create_directory(cache_home);
             fs::permissions(
-                    cache_home, fs::perms::owner_all,
-                    fs::perm_options::replace);
+                cache_home, fs::perms::owner_all,
+                fs::perm_options::replace);
             fs::create_directory(cache_home / "moguet");
             fs::permissions(
-                    cache_home / "moguet", fs::perms::owner_all,
-                    fs::perm_options::replace);
+                cache_home / "moguet", fs::perms::owner_all,
+                fs::perm_options::replace);
             fs::create_directory(cache_home / "moguet" / "checkout");
             write_file(
-                    cache_home / "moguet" / "checkout" / "replacement",
-                    "replacement\n");
+                cache_home / "moguet" / "checkout" / "replacement",
+                "replacement\n");
         }
 
         expect(
-                fs::exists(
-                        moved_parent / "cache-anchor" / "moguet" /
-                        "checkout" / "partial"),
-                "Rollback followed an original checkout whose retained "
-                "authority ancestor moved.");
+            fs::exists(
+                moved_parent / "cache-anchor" / "moguet" /
+                "checkout" / "partial"),
+            "Rollback followed an original checkout whose retained "
+            "authority ancestor moved.");
         expect(
-                fs::exists(
-                        cache_home / "moguet" / "checkout" /
-                        "replacement"),
-                "Rollback removed the checkout in a replacement authority "
-                "lineage.");
+            fs::exists(
+                cache_home / "moguet" / "checkout" /
+                "replacement"),
+            "Rollback removed the checkout in a replacement authority "
+            "lineage.");
     }
 }
 
@@ -1120,31 +1120,31 @@ void test_cleanup_and_open_reject_unsafe_mode_changes() {
     fs::permissions(cache_home, fs::perms::owner_all, fs::perm_options::replace);
     ValidatedCacheRoot root = prepare_root(cache_home);
     ValidatedCachePath checkout =
-            create_trusted_cache_directory(root, "checkout");
+        create_trusted_cache_directory(root, "checkout");
 
     fs::create_directory(checkout.path() / "unsafe-nested");
     fs::permissions(
-            checkout.path() / "unsafe-nested", fs::perms::all,
-            fs::perm_options::replace);
+        checkout.path() / "unsafe-nested", fs::perms::all,
+        fs::perm_options::replace);
     expect_cache_error(
-            [&]() { static_cast<void>(preflight_cache_cleanup(root)); },
-            TrustedCacheErrorCode::UnsafePermissions,
-            "unsafe nested cleanup preflight");
+        [&]() { static_cast<void>(preflight_cache_cleanup(root)); },
+        TrustedCacheErrorCode::UnsafePermissions,
+        "unsafe nested cleanup preflight");
     expect(fs::is_directory(checkout.path() / "unsafe-nested"),
            "Unsafe nested preflight mutated the tree.");
 
     fs::permissions(
-            checkout.path() / "unsafe-nested", fs::perms::owner_all,
-            fs::perm_options::replace);
+        checkout.path() / "unsafe-nested", fs::perms::owner_all,
+        fs::perm_options::replace);
     fs::permissions(
-            checkout.path(), fs::perms::owner_all | fs::perms::group_write,
-            fs::perm_options::replace);
+        checkout.path(), fs::perms::owner_all | fs::perms::group_write,
+        fs::perm_options::replace);
     expect_cache_error(
-            [&]() {
-                WorkDirGuard changed_mode(checkout);
-            },
-            TrustedCacheErrorCode::UnsafePermissions,
-            "post-validation unsafe child mode");
+        [&]() {
+            WorkDirGuard changed_mode(checkout);
+        },
+        TrustedCacheErrorCode::UnsafePermissions,
+        "post-validation unsafe child mode");
 }
 
 void test_staged_rollback_refuses_mode_change() {
@@ -1158,18 +1158,18 @@ void test_staged_rollback_refuses_mode_change() {
     StagedDirectoryHookScope hook([&](const fs::path& path) {
         staged_path = path;
         fs::permissions(
-                path,
-                fs::perms::owner_all | fs::perms::group_read |
-                        fs::perms::group_exec,
-                fs::perm_options::replace);
+            path,
+            fs::perms::owner_all | fs::perms::group_read |
+                fs::perms::group_exec,
+            fs::perm_options::replace);
     });
     expect_cache_error(
-            [&]() {
-                static_cast<void>(create_trusted_cache_directory(
-                        root, "checkout"));
-            },
-            TrustedCacheErrorCode::UnsafePermissions,
-            "staged rollback after mode change");
+        [&]() {
+            static_cast<void>(create_trusted_cache_directory(
+                root, "checkout"));
+        },
+        TrustedCacheErrorCode::UnsafePermissions,
+        "staged rollback after mode change");
 
     expect(!staged_path.empty(), "Staged-directory hook did not run.");
     expect(fs::is_directory(staged_path),
@@ -1196,12 +1196,12 @@ void test_staged_rollback_refuses_owner_mismatch() {
             owner_override.enable_for(path);
         });
         expect_cache_error(
-                [&]() {
-                    static_cast<void>(create_trusted_cache_directory(
-                            root, "checkout"));
-                },
-                TrustedCacheErrorCode::OwnershipMismatch,
-                "staged rollback after owner mismatch");
+            [&]() {
+                static_cast<void>(create_trusted_cache_directory(
+                    root, "checkout"));
+            },
+            TrustedCacheErrorCode::OwnershipMismatch,
+            "staged rollback after owner mismatch");
         owner_mismatch_observations = owner_override.observations();
     }
 
@@ -1231,7 +1231,7 @@ void test_failed_clone_rollback_refuses_replacement() {
     bool original_failure_preserved = false;
     try {
         ValidatedCachePath clone =
-                create_trusted_cache_directory(root, "checkout");
+            create_trusted_cache_directory(root, "checkout");
         const PathIdentity original = path_identity(clone.path());
         DirCleanupGuard rollback(clone);
         expect(process_holds_identity(original),
@@ -1244,7 +1244,7 @@ void test_failed_clone_rollback_refuses_replacement() {
         throw std::runtime_error("original clone failure");
     } catch(const std::runtime_error& error) {
         original_failure_preserved =
-                std::string(error.what()) == "original clone failure";
+            std::string(error.what()) == "original clone failure";
     }
 
     expect(original_failure_preserved,
@@ -1265,11 +1265,11 @@ void test_clone_rollback_guard_retained_identity_refusals() {
         fs::path cache_home = tree.path() / "rename-cache-anchor";
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         ValidatedCacheRoot root = prepare_root(cache_home);
         ValidatedCachePath clone =
-                create_trusted_cache_directory(root, "checkout");
+            create_trusted_cache_directory(root, "checkout");
         write_file(clone.path() / "partial", "original\n");
         const PathIdentity original = path_identity(clone.path());
         const std::size_t descriptors_before = open_descriptor_count();
@@ -1281,8 +1281,8 @@ void test_clone_rollback_guard_retained_identity_refusals() {
             fs::rename(clone.path(), moved_original);
             fs::create_directory(clone.path());
             fs::permissions(
-                    clone.path(), fs::perms::owner_all,
-                    fs::perm_options::replace);
+                clone.path(), fs::perms::owner_all,
+                fs::perm_options::replace);
             write_file(clone.path() / "replacement", "replacement\n");
         }
         expect(fs::exists(moved_original / "partial"),
@@ -1298,11 +1298,11 @@ void test_clone_rollback_guard_retained_identity_refusals() {
         fs::path cache_home = tree.path() / "unlink-cache-anchor";
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         ValidatedCacheRoot root = prepare_root(cache_home);
         ValidatedCachePath clone =
-                create_trusted_cache_directory(root, "checkout");
+            create_trusted_cache_directory(root, "checkout");
         const PathIdentity original = path_identity(clone.path());
         const std::size_t descriptors_before = open_descriptor_count();
         {
@@ -1313,8 +1313,8 @@ void test_clone_rollback_guard_retained_identity_refusals() {
                    "Rollback guard did not retain the unlinked original inode.");
             fs::create_directory(clone.path());
             fs::permissions(
-                    clone.path(), fs::perms::owner_all,
-                    fs::perm_options::replace);
+                clone.path(), fs::perms::owner_all,
+                fs::perm_options::replace);
             write_file(clone.path() / "replacement", "replacement\n");
         }
         expect(fs::exists(clone.path() / "replacement"),
@@ -1328,11 +1328,11 @@ void test_clone_rollback_guard_retained_identity_refusals() {
         fs::path cache_home = tree.path() / "mode-cache-anchor";
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         ValidatedCacheRoot root = prepare_root(cache_home);
         ValidatedCachePath clone =
-                create_trusted_cache_directory(root, "checkout");
+            create_trusted_cache_directory(root, "checkout");
         const PathIdentity original = path_identity(clone.path());
         const std::size_t descriptors_before = open_descriptor_count();
         StandardOutputCapture warning;
@@ -1341,16 +1341,16 @@ void test_clone_rollback_guard_retained_identity_refusals() {
             expect(process_holds_identity(original),
                    "Rollback guard did not retain the mode-change target.");
             fs::permissions(
-                    clone.path(),
-                    fs::perms::owner_all | fs::perms::group_read |
-                            fs::perms::group_exec,
-                    fs::perm_options::replace);
+                clone.path(),
+                fs::perms::owner_all | fs::perms::group_read |
+                    fs::perms::group_exec,
+                fs::perm_options::replace);
         }
         const std::string warning_text = warning.finish();
         expect(fs::is_directory(clone.path()) && path_mode(clone.path()) == 0750,
                "Rollback removed or changed a mode-mutated clone.");
         expect(warning_text.find("Refusing unsafe clone rollback") !=
-                       std::string::npos,
+                   std::string::npos,
                "Mode-change rollback refusal did not emit a warning.");
         expect(warning_text.find(clone.path().string()) == std::string::npos,
                "Rollback refusal warning disclosed the raw cache path.");
@@ -1363,11 +1363,11 @@ void test_clone_rollback_guard_retained_identity_refusals() {
         fs::path cache_home = tree.path() / "owner-cache-anchor";
         fs::create_directory(cache_home);
         fs::permissions(
-                cache_home, fs::perms::owner_all,
-                fs::perm_options::replace);
+            cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
         ValidatedCacheRoot root = prepare_root(cache_home);
         ValidatedCachePath clone =
-                create_trusted_cache_directory(root, "checkout");
+            create_trusted_cache_directory(root, "checkout");
         const PathIdentity original = path_identity(clone.path());
         const std::size_t descriptors_before = open_descriptor_count();
         std::size_t owner_mismatch_observations = 0;
@@ -1388,7 +1388,7 @@ void test_clone_rollback_guard_retained_identity_refusals() {
         expect(fs::is_directory(clone.path()),
                "Rollback removed a clone with mismatched owner metadata.");
         expect(warning_text.find("Refusing unsafe clone rollback") !=
-                       std::string::npos,
+                   std::string::npos,
                "Owner-mismatch rollback refusal did not emit a warning.");
         expect(warning_text.find(clone.path().string()) == std::string::npos,
                "Owner-mismatch warning disclosed the raw cache path.");
@@ -1409,13 +1409,10 @@ void test_new_clean_policy_preserves_legacy_boundary() {
     write_file(legacy_root / "jpacker.log", "legacy log\n");
     write_file(legacy_root / "checkout" / "PKGBUILD", "pkgname=legacy\n");
     write_file(
-            legacy_root / ".artifact-workspace~-legacy" / "artifact",
-            "legacy artifact\n");
+        legacy_root / ".artifact-workspace~-legacy" / "artifact",
+        "legacy artifact\n");
     fs::create_symlink("jpacker.log", legacy_root / "log-link");
-    fs::permissions(legacy_root, fs::perms::owner_all | fs::perms::group_read |
-                                      fs::perms::group_exec |
-                                      fs::perms::others_read |
-                                      fs::perms::others_exec,
+    fs::permissions(legacy_root, fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec | fs::perms::others_read | fs::perms::others_exec,
                     fs::perm_options::replace);
     std::vector<TreeEntrySnapshot> legacy_before = snapshot_tree(legacy_root);
 
@@ -1426,9 +1423,9 @@ void test_new_clean_policy_preserves_legacy_boundary() {
     write_file(state_root / "moguet.log", "state log\n");
     write_file(config_root / "config.toml", "config\n");
     TreeEntrySnapshot state_before =
-            snapshot_entry(state_root, state_root / "moguet.log");
+        snapshot_entry(state_root, state_root / "moguet.log");
     TreeEntrySnapshot config_before =
-            snapshot_entry(config_root, config_root / "config.toml");
+        snapshot_entry(config_root, config_root / "config.toml");
 
     ValidatedCacheRoot root = prepare_root(cache_home);
     create_trusted_cache_directory(root, "checkout");

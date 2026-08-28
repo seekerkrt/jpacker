@@ -32,39 +32,39 @@ void require_supported_separated_install_options(bool) {
 }
 
 SeparatedSourceBuildExecutionResult execute_separated_source_build_unit(
-        SeparatedSourceBuildUnitRequest request,
-        const SeparatedSourceBuildUnitOptions&) {
+    SeparatedSourceBuildUnitRequest request,
+    const SeparatedSourceBuildUnitOptions&) {
     ProductionSourceBuildStagedOutcome production_outcome{
-            request.source_tree.provenance(),
-            ProductionSourceBuildCommandOutcome::Succeeded,
-            ProductionSourceInstallOutcome::Failed};
+        request.source_tree.provenance(),
+        ProductionSourceBuildCommandOutcome::Succeeded,
+        ProductionSourceInstallOutcome::Failed};
     const FailureMode failure_mode = g_failure_mode;
     g_failure_mode = FailureMode::Unexpected;
     if(failure_mode == FailureMode::InstallTransaction) {
         throw SeparatedSourceBuildPhaseError(
-                SeparatedSourceBuildFailurePhase::InstallTransaction,
-                std::move(production_outcome),
-                "scripted pacman transaction failure");
+            SeparatedSourceBuildFailurePhase::InstallTransaction,
+            std::move(production_outcome),
+            "scripted pacman transaction failure");
     }
     if(failure_mode == FailureMode::PackageMetadata) {
         const PackageMetadataFailure failure{
-                PackageMetadataErrorCode::QueryFailed,
-                "scripted PackageMetadataError"};
+            PackageMetadataErrorCode::QueryFailed,
+            "scripted PackageMetadataError"};
         throw SeparatedSourceBuildPhaseError(
-                SeparatedSourceBuildFailurePhase::InstallPreparation,
-                std::move(production_outcome), failure.diagnostic,
-                failure);
+            SeparatedSourceBuildFailurePhase::InstallPreparation,
+            std::move(production_outcome), failure.diagnostic,
+            failure);
     }
     throw std::logic_error(
-            "Reviewed source production preparation test reached execution.");
+        "Reviewed source production preparation test reached execution.");
 }
 
 SeparatedSourceBuildPhaseError::SeparatedSourceBuildPhaseError(
-        SeparatedSourceBuildFailurePhase phase,
-        ProductionSourceBuildStagedOutcome production_outcome,
-        const std::string& diagnostic,
-        std::optional<PackageMetadataFailure> package_metadata_failure,
-        std::exception_ptr failure_exception)
+    SeparatedSourceBuildFailurePhase phase,
+    ProductionSourceBuildStagedOutcome production_outcome,
+    const std::string& diagnostic,
+    std::optional<PackageMetadataFailure> package_metadata_failure,
+    std::exception_ptr failure_exception)
     : std::runtime_error(diagnostic), phase_(phase),
       production_outcome_(std::move(production_outcome)),
       package_metadata_failure_(std::move(package_metadata_failure)),
@@ -73,23 +73,23 @@ SeparatedSourceBuildPhaseError::SeparatedSourceBuildPhaseError(
 
 PackageBaseSourceBuildExecutionResult
 execute_separated_package_base_source_build(
-        SeparatedPackageBaseSourceBuildRequest,
-        const SeparatedSourceBuildUnitOptions&) {
+    SeparatedPackageBaseSourceBuildRequest,
+    const SeparatedSourceBuildUnitOptions&) {
     throw std::logic_error(
-            "Reviewed source production preparation test reached PackageBase execution.");
+        "Reviewed source production preparation test reached PackageBase execution.");
 }
 
 SeparatedPackageBaseSourceBuildPhaseError::
-        SeparatedPackageBaseSourceBuildPhaseError(
-                SeparatedPackageBaseSourceBuildFailurePhase phase,
-                const std::string& diagnostic,
-                std::optional<ReviewedSourceProductionFailure>
-                        reviewed_source_failure,
-                std::optional<PackageMetadataFailure>
-                        package_metadata_failure,
-                std::optional<ProductionSourceBuildStagedOutcome>
-                        production_outcome,
-                std::exception_ptr failure_exception)
+    SeparatedPackageBaseSourceBuildPhaseError(
+        SeparatedPackageBaseSourceBuildFailurePhase phase,
+        const std::string& diagnostic,
+        std::optional<ReviewedSourceProductionFailure>
+            reviewed_source_failure,
+        std::optional<PackageMetadataFailure>
+            package_metadata_failure,
+        std::optional<ProductionSourceBuildStagedOutcome>
+            production_outcome,
+        std::exception_ptr failure_exception)
     : std::runtime_error(diagnostic), phase_(phase),
       reviewed_source_failure_(std::move(reviewed_source_failure)),
       package_metadata_failure_(std::move(package_metadata_failure)),
@@ -104,18 +104,18 @@ SeparatedPackageBaseSourceBuildPhaseError::phase() const noexcept {
 
 const std::optional<ReviewedSourceProductionFailure>&
 SeparatedPackageBaseSourceBuildPhaseError::reviewed_source_failure()
-        const noexcept {
+    const noexcept {
     return reviewed_source_failure_;
 }
 
 const std::optional<PackageMetadataFailure>&
 SeparatedPackageBaseSourceBuildPhaseError::package_metadata_failure()
-        const noexcept {
+    const noexcept {
     return package_metadata_failure_;
 }
 
 const std::optional<ProductionSourceBuildStagedOutcome>&
 SeparatedPackageBaseSourceBuildPhaseError::production_outcome()
-        const noexcept {
+    const noexcept {
     return production_outcome_;
 }

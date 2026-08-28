@@ -21,7 +21,7 @@
 #include <unistd.h>
 
 using ArtifactIdentityQuery = ArtifactPackageIdentity (*)(
-        const ValidatedPackageArtifactPath&);
+    const ValidatedPackageArtifactPath&);
 static_assert(!std::is_invocable_v<ArtifactIdentityQuery, const std::filesystem::path&>);
 
 namespace {
@@ -41,22 +41,22 @@ void expect_runtime_error(Callable callable, const std::string& context) {
         return;
     } catch(const std::exception& error) {
         throw std::runtime_error(
-                context + ": unexpected exception category: " + error.what());
+            context + ": unexpected exception category: " + error.what());
     }
     throw std::runtime_error(context + ": expected runtime_error");
 }
 
 class TemporaryCacheHome final {
-    fs::path                   path_;
+    fs::path path_;
     std::optional<std::string> previous_xdg_cache_home_;
 
 public:
     TemporaryCacheHome() {
         std::vector<char> path_template;
         const std::string template_text =
-                (fs::temp_directory_path() /
-                 "moguet-artifact-identity-test-XXXXXX")
-                        .string();
+            (fs::temp_directory_path() /
+             "moguet-artifact-identity-test-XXXXXX")
+                .string();
         path_template.assign(template_text.begin(), template_text.end());
         path_template.push_back('\0');
 
@@ -81,7 +81,7 @@ public:
     ~TemporaryCacheHome() {
         if(previous_xdg_cache_home_.has_value())
             static_cast<void>(setenv(
-                    "XDG_CACHE_HOME", previous_xdg_cache_home_->c_str(), 1));
+                "XDG_CACHE_HOME", previous_xdg_cache_home_->c_str(), 1));
         else
             static_cast<void>(unsetenv("XDG_CACHE_HOME"));
 
@@ -91,19 +91,19 @@ public:
 };
 
 class ArtifactFixture final {
-    TemporaryCacheHome                              cache_home_;
+    TemporaryCacheHome cache_home_;
     std::unique_ptr<ValidatedPackageArtifactPath> artifact_;
 
 public:
     explicit ArtifactFixture(const std::string& artifact_leaf_name) {
         ArtifactWorkspace workspace = create_artifact_workspace(
-                prepare_private_trusted_cache_root(
-                        prepare_test_trusted_cache_root()));
-        fs::path           artifact_path = workspace.path() / artifact_leaf_name;
+            prepare_private_trusted_cache_root(
+                prepare_test_trusted_cache_root()));
+        fs::path artifact_path = workspace.path() / artifact_leaf_name;
 
         ExpectedPackageArtifactPath expected =
-                validate_makepkg_packagelist_output(
-                        workspace, artifact_path.string() + "\n");
+            validate_makepkg_packagelist_output(
+                workspace, artifact_path.string() + "\n");
         std::ofstream artifact_file(artifact_path, std::ios::binary);
         if(!artifact_file) {
             throw std::runtime_error("Failed to create artifact identity fixture.");
@@ -115,10 +115,10 @@ public:
         }
 
         ValidatedPackageArtifactPath artifact =
-                validate_post_build_package_artifact(
-                        std::move(workspace), expected);
+            validate_post_build_package_artifact(
+                std::move(workspace), expected);
         artifact_ = std::make_unique<ValidatedPackageArtifactPath>(
-                std::move(artifact));
+            std::move(artifact));
     }
 
     ArtifactFixture(const ArtifactFixture&) = delete;
@@ -134,12 +134,12 @@ public:
 };
 
 ArtifactPackageIdentity query_with_result(
-        const ValidatedPackageArtifactPath& artifact,
-        const std::string& output,
-        int exit_code = 0) {
+    const ValidatedPackageArtifactPath& artifact,
+    const std::string& output,
+    int exit_code = 0) {
     stub::reset_process_stub();
     stub::set_captured_command_result(
-            CapturedCommandResult{output, exit_code});
+        CapturedCommandResult{output, exit_code});
     return query_artifact_package_identity(artifact);
 }
 
@@ -161,9 +161,9 @@ std::string expected_identity_command(const fs::path& artifact_path) {
 }
 
 void test_name_and_epoch_full_version_success(
-        const ValidatedPackageArtifactPath& artifact) {
+    const ValidatedPackageArtifactPath& artifact) {
     ArtifactPackageIdentity identity =
-            query_with_result(artifact, "sample-package 2:1.4.0-3\n");
+        query_with_result(artifact, "sample-package 2:1.4.0-3\n");
 
     expect(identity.package_name == "sample-package", "Package name differs");
     expect(identity.full_version == "2:1.4.0-3", "Epoch full version differs");
@@ -171,70 +171,70 @@ void test_name_and_epoch_full_version_success(
 
     identity = query_with_result(artifact, "sample-package 1.4.0-3");
     expect(
-            identity.full_version == "1.4.0-3",
-            "Single record without line terminator was not preserved");
+        identity.full_version == "1.4.0-3",
+        "Single record without line terminator was not preserved");
 }
 
 void test_command_failure(const ValidatedPackageArtifactPath& artifact) {
     expect_runtime_error(
-            [&artifact]() {
-                static_cast<void>(query_with_result(
-                        artifact, "sample-package 1-1\n", 127));
-            },
-            "command failure");
+        [&artifact]() {
+            static_cast<void>(query_with_result(
+                artifact, "sample-package 1-1\n", 127));
+        },
+        "command failure");
 }
 
 void test_invalid_archive_result(const ValidatedPackageArtifactPath& artifact) {
     expect_runtime_error(
-            [&artifact]() {
-                static_cast<void>(query_with_result(
-                        artifact, "Unrecognized archive format\n", 1));
-            },
-            "invalid archive result");
+        [&artifact]() {
+            static_cast<void>(query_with_result(
+                artifact, "Unrecognized archive format\n", 1));
+        },
+        "invalid archive result");
 }
 
 void test_malformed_outputs(const ValidatedPackageArtifactPath& artifact) {
     const std::vector<std::pair<std::string, std::string>> cases = {
-            {"empty output", ""},
-            {"blank-only output", "\n"},
-            {"space-only output", "   \n"},
-            {"extra output line", "sample-package 1-1\nother-package 2-1\n"},
-            {"trailing blank line", "sample-package 1-1\n\n"},
-            {"missing space", "sample-package-1-1\n"},
-            {"tab separator", "sample-package\t1-1\n"},
-            {"multiple spaces", "sample-package  1-1\n"},
-            {"empty name", " 1-1\n"},
-            {"empty version", "sample-package \n"},
-            {"invalid package name", "-sample-package 1-1\n"},
-            {"carriage return", "sample-package 1-1\r\n"},
-            {"vertical tab", "sample-package 1-1\v\n"},
+        {"empty output", ""},
+        {"blank-only output", "\n"},
+        {"space-only output", "   \n"},
+        {"extra output line", "sample-package 1-1\nother-package 2-1\n"},
+        {"trailing blank line", "sample-package 1-1\n\n"},
+        {"missing space", "sample-package-1-1\n"},
+        {"tab separator", "sample-package\t1-1\n"},
+        {"multiple spaces", "sample-package  1-1\n"},
+        {"empty name", " 1-1\n"},
+        {"empty version", "sample-package \n"},
+        {"invalid package name", "-sample-package 1-1\n"},
+        {"carriage return", "sample-package 1-1\r\n"},
+        {"vertical tab", "sample-package 1-1\v\n"},
     };
 
     for(const auto& [context, output] : cases) {
         expect_runtime_error(
-                [&artifact, &output]() {
-                    static_cast<void>(query_with_result(artifact, output));
-                },
-                context);
+            [&artifact, &output]() {
+                static_cast<void>(query_with_result(artifact, output));
+            },
+            context);
     }
 
     std::string null_output = "sample-package 1";
     null_output.push_back('\0');
     null_output += "-1\n";
     expect_runtime_error(
-            [&artifact, &null_output]() {
-                static_cast<void>(query_with_result(artifact, null_output));
-            },
-            "null control character");
+        [&artifact, &null_output]() {
+            static_cast<void>(query_with_result(artifact, null_output));
+        },
+        "null control character");
 
     std::string delete_output = "sample-package 1";
     delete_output.push_back(static_cast<char>(0x7f));
     delete_output += "-1\n";
     expect_runtime_error(
-            [&artifact, &delete_output]() {
-                static_cast<void>(query_with_result(artifact, delete_output));
-            },
-            "delete control character");
+        [&artifact, &delete_output]() {
+            static_cast<void>(query_with_result(artifact, delete_output));
+        },
+        "delete control character");
 }
 
 void test_exact_safe_command(const ValidatedPackageArtifactPath& artifact) {
@@ -242,31 +242,31 @@ void test_exact_safe_command(const ValidatedPackageArtifactPath& artifact) {
 
     const std::string command = stub::last_captured_command();
     expect(
-            command == expected_identity_command(artifact.path()),
-            "Artifact identity command differs");
+        command == expected_identity_command(artifact.path()),
+        "Artifact identity command differs");
     expect(
-            command.find("'-Qp' '--color' 'never'") != std::string::npos,
-            "Archive-only query or deterministic color option is missing");
+        command.find("'-Qp' '--color' 'never'") != std::string::npos,
+        "Archive-only query or deterministic color option is missing");
     expect(
-            command.find("'--' " + expected_shell_quote(artifact.path().string())) !=
-                    std::string::npos,
-            "Semantic -- is not immediately before artifact path");
+        command.find("'--' " + expected_shell_quote(artifact.path().string())) !=
+            std::string::npos,
+        "Semantic -- is not immediately before artifact path");
     expect(command.find("sudo") == std::string::npos, "Identity command contains sudo");
     expect(
-            command.find("'-U'") == std::string::npos &&
-                    command.find("'--print'") == std::string::npos &&
-                    command.find("'--print-format'") == std::string::npos,
-            "Identity command contains transaction projection options");
+        command.find("'-U'") == std::string::npos &&
+            command.find("'--print'") == std::string::npos &&
+            command.find("'--print-format'") == std::string::npos,
+        "Identity command contains transaction projection options");
 }
 
 void test_special_artifact_path_command(const std::string& artifact_leaf_name) {
     ArtifactFixture fixture(artifact_leaf_name);
     static_cast<void>(query_with_result(
-            fixture.artifact(), "sample-package 1-1\n"));
+        fixture.artifact(), "sample-package 1-1\n"));
     expect(
-            stub::last_captured_command() ==
-                    expected_identity_command(fixture.artifact_path()),
-            "Special artifact path command differs for " + artifact_leaf_name);
+        stub::last_captured_command() ==
+            expected_identity_command(fixture.artifact_path()),
+        "Special artifact path command differs for " + artifact_leaf_name);
 }
 
 fs::path g_artifact_path_to_replace;
@@ -292,16 +292,16 @@ void test_pre_command_artifact_revalidation() {
 
     stub::reset_process_stub();
     stub::set_captured_command_result(
-            CapturedCommandResult{"sample-package 1-1\n", 0});
+        CapturedCommandResult{"sample-package 1-1\n", 0});
     expect_runtime_error(
-            [&fixture]() {
-                static_cast<void>(query_artifact_package_identity(
-                        fixture.artifact()));
-            },
-            "pre-command artifact revalidation");
+        [&fixture]() {
+            static_cast<void>(query_artifact_package_identity(
+                fixture.artifact()));
+        },
+        "pre-command artifact revalidation");
     expect(
-            stub::capture_command_call_count() == 0,
-            "pacman ran after pre-command artifact identity mismatch");
+        stub::capture_command_call_count() == 0,
+        "pacman ran after pre-command artifact identity mismatch");
 }
 
 void test_post_command_artifact_revalidation() {
@@ -310,17 +310,17 @@ void test_post_command_artifact_revalidation() {
 
     stub::reset_process_stub();
     stub::set_captured_command_result(
-            CapturedCommandResult{"sample-package 1-1\n", 0});
+        CapturedCommandResult{"sample-package 1-1\n", 0});
     stub::set_capture_hook(replace_artifact_during_capture);
     expect_runtime_error(
-            [&fixture]() {
-                static_cast<void>(query_artifact_package_identity(
-                        fixture.artifact()));
-            },
-            "post-command artifact revalidation");
+        [&fixture]() {
+            static_cast<void>(query_artifact_package_identity(
+                fixture.artifact()));
+        },
+        "post-command artifact revalidation");
     expect(
-            stub::capture_command_call_count() == 1,
-            "pacman call count differs for post-command replacement");
+        stub::capture_command_call_count() == 1,
+        "pacman call count differs for post-command replacement");
 
     g_artifact_path_to_replace.clear();
     stub::reset_process_stub();
@@ -340,11 +340,11 @@ int main() {
         }
 
         test_special_artifact_path_command(
-                "sample package-1-1-x86_64.pkg.tar.zst");
+            "sample package-1-1-x86_64.pkg.tar.zst");
         test_special_artifact_path_command(
-                "sample'package-1-1-x86_64.pkg.tar.zst");
+            "sample'package-1-1-x86_64.pkg.tar.zst");
         test_special_artifact_path_command(
-                "-sample-package-1-1-x86_64.pkg.tar.zst");
+            "-sample-package-1-1-x86_64.pkg.tar.zst");
         test_pre_command_artifact_revalidation();
         test_post_command_artifact_revalidation();
     } catch(const std::exception& error) {

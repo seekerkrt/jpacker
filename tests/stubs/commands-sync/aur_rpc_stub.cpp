@@ -44,7 +44,7 @@ AurPackageInfo package_info(const std::string& name) {
 }
 
 AurPackageInfo package_info_with_base(
-        const std::string& name, const std::string& package_base) {
+    const std::string& name, const std::string& package_base) {
     AurPackageInfo info = package_info(name);
     info.PackageBase = package_base;
     return info;
@@ -147,14 +147,14 @@ std::vector<AurPackageInfo> AurClient::search(const std::string& query) {
 }
 
 std::vector<AurPackageInfo> AurClient::search_strict(
-        const std::string& query) {
+    const std::string& query) {
     append_command_log("aur search-strict " + query);
     throw std::runtime_error(
-            "Unexpected commands-sync strict search call: " + query);
+        "Unexpected commands-sync strict search call: " + query);
 }
 
 std::vector<std::string> AurClient::search_names_by_provides(
-        const std::string& provided_name) {
+    const std::string& provided_name) {
     append_command_log("aur provides " + provided_name);
     if(provided_name == "install-partial-virtual") {
         return {"install-partial-provider-a", "install-partial-provider-b"};
@@ -166,7 +166,7 @@ std::vector<std::string> AurClient::search_names_by_provides(
 }
 
 std::vector<std::string> AurClient::search_names_by_provides_strict(
-        const std::string& provided_name) {
+    const std::string& provided_name) {
     return search_names_by_provides(provided_name);
 }
 
@@ -179,15 +179,16 @@ std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_
     append_command_log("aur info-strict " + package_name);
     if(package_name == "install-partial-provider-b") {
         throw std::runtime_error(
-                "partial provider candidate metadata failure");
+            "partial provider candidate metadata failure");
     }
     return fixture_info(package_name);
 }
 
 std::map<std::string, AurPackageInfo> AurClient::info_many(
-        const std::vector<std::string>& package_names) {
+    const std::vector<std::string>& package_names) {
     std::string line = "aur info-many";
-    for(const auto& package_name : package_names) line += " " + package_name;
+    for(const auto& package_name : package_names)
+        line += " " + package_name;
     append_command_log(line);
 
     std::map<std::string, AurPackageInfo> package_by_name;

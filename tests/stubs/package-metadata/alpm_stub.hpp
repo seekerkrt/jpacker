@@ -11,7 +11,7 @@ namespace package_metadata_test_stub {
 
 struct SyncDatabaseRegistration {
     std::string repository_name;
-    int         signature_level;
+    int signature_level;
 };
 
 struct RepositoryPackageQuery {
@@ -38,18 +38,18 @@ struct RepositoryGroupQuery {
 struct RepositoryProvidedPackageMetadata {
     std::optional<std::string> package_name;
     std::optional<std::string> version;
-    alpm_depmod_t              relation = ALPM_DEP_MOD_ANY;
+    alpm_depmod_t relation = ALPM_DEP_MOD_ANY;
 };
 
 struct PackageDependencyMetadata {
     std::optional<std::string> package_name;
     std::optional<std::string> version;
-    alpm_depmod_t              relation = ALPM_DEP_MOD_ANY;
+    alpm_depmod_t relation = ALPM_DEP_MOD_ANY;
 };
 
 struct LocalPackageMetadata {
-    std::string       name;
-    std::string       version;
+    std::string name;
+    std::string version;
     alpm_pkgreason_t reason = ALPM_PKG_REASON_EXPLICIT;
     std::vector<RepositoryProvidedPackageMetadata> provides = {};
     std::vector<PackageDependencyMetadata> dependencies = {};
@@ -68,25 +68,25 @@ void set_package_query_failure(alpm_errno_t error);
 void set_package_query_null_without_error();
 void preserve_error_on_next_package_query();
 void set_package_metadata(
-        const std::string& name, const std::string& version,
-        alpm_pkgreason_t reason);
+    const std::string& name, const std::string& version,
+    alpm_pkgreason_t reason);
 void enqueue_local_package_query_present(
-        std::string expected_package_name,
-        std::string returned_name,
-        std::string version,
-        alpm_pkgreason_t reason);
+    std::string expected_package_name,
+    std::string returned_name,
+    std::string version,
+    alpm_pkgreason_t reason);
 void enqueue_local_package_query_absent(std::string expected_package_name);
 void enqueue_local_package_query_failure(
-        std::string expected_package_name,
-        alpm_errno_t error = ALPM_ERR_DB_OPEN);
+    std::string expected_package_name,
+    alpm_errno_t error = ALPM_ERR_DB_OPEN);
 void require_local_package_query_expectations_consumed();
 void set_local_packages(const std::vector<LocalPackageMetadata>& packages);
 void set_local_package_provides(
-        std::size_t package_index,
-        const std::vector<RepositoryProvidedPackageMetadata>& provides);
+    std::size_t package_index,
+    const std::vector<RepositoryProvidedPackageMetadata>& provides);
 void set_local_package_dependencies(
-        std::size_t package_index,
-        const std::vector<PackageDependencyMetadata>& dependencies);
+    std::size_t package_index,
+    const std::vector<PackageDependencyMetadata>& dependencies);
 void set_local_package_cache_entry_null(std::size_t package_index);
 void set_local_package_name_null(std::size_t package_index);
 void set_local_package_version_null(std::size_t package_index);
@@ -94,95 +94,95 @@ void set_null_package_name();
 void set_null_package_version();
 
 void preserve_error_on_next_local_database(
-        alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
+    alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
 void preserve_error_on_next_package_cache(
-        alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
+    alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
 
 void set_sync_database_register_failure(
-        const std::string& repository_name,
-        alpm_errno_t error = ALPM_ERR_DB_OPEN);
+    const std::string& repository_name,
+    alpm_errno_t error = ALPM_ERR_DB_OPEN);
 void set_sync_database_validation_failure(
-        const std::string& repository_name,
-        alpm_errno_t error = ALPM_ERR_DB_INVALID);
+    const std::string& repository_name,
+    alpm_errno_t error = ALPM_ERR_DB_INVALID);
 void set_sync_database_cache_failure(
-        const std::string& repository_name,
-        alpm_errno_t error = ALPM_ERR_DB_OPEN);
+    const std::string& repository_name,
+    alpm_errno_t error = ALPM_ERR_DB_OPEN);
 void set_sync_database_empty_cache(const std::string& repository_name);
 void preserve_error_on_next_sync_database_registration(
-        const std::string& repository_name,
-        alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
+    const std::string& repository_name,
+    alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
 void preserve_error_on_next_sync_database_cache(
-        const std::string& repository_name,
-        alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
+    const std::string& repository_name,
+    alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
 
 void set_repository_package_absent(
-        const std::string& repository_name,
-        const std::string& package_name);
+    const std::string& repository_name,
+    const std::string& package_name);
 void set_repository_package_query_failure(
-        const std::string& repository_name,
-        const std::string& package_name,
-        alpm_errno_t error = ALPM_ERR_DB_OPEN);
+    const std::string& repository_name,
+    const std::string& package_name,
+    alpm_errno_t error = ALPM_ERR_DB_OPEN);
 void set_repository_package_query_null_without_error(
-        const std::string& repository_name,
-        const std::string& package_name);
+    const std::string& repository_name,
+    const std::string& package_name);
 void set_repository_package_metadata(
-        const std::string& repository_name,
-        const std::string& package_name,
-        off_t package_size,
-        off_t installed_size);
+    const std::string& repository_name,
+    const std::string& package_name,
+    off_t package_size,
+    off_t installed_size);
 void set_repository_package_version(
-        const std::string& repository_name,
-        const std::string& package_name,
-        const std::string& version);
+    const std::string& repository_name,
+    const std::string& package_name,
+    const std::string& version);
 void set_repository_package_version_null(
-        const std::string& repository_name,
-        const std::string& package_name);
+    const std::string& repository_name,
+    const std::string& package_name);
 void set_repository_package_base(
-        const std::string& repository_name,
-        const std::string& package_name,
-        const std::string& package_base);
+    const std::string& repository_name,
+    const std::string& package_name,
+    const std::string& package_base);
 void set_repository_package_base_null(
-        const std::string& repository_name,
-        const std::string& package_name);
+    const std::string& repository_name,
+    const std::string& package_name);
 void set_repository_package_provides(
-        const std::string& repository_name,
-        const std::string& package_name,
-        const std::vector<RepositoryProvidedPackageMetadata>& provides);
+    const std::string& repository_name,
+    const std::string& package_name,
+    const std::vector<RepositoryProvidedPackageMetadata>& provides);
 void set_repository_package_returned_name(
-        const std::string& repository_name,
-        const std::string& package_name,
-        const std::string& returned_name);
+    const std::string& repository_name,
+    const std::string& package_name,
+    const std::string& returned_name);
 void set_repository_package_name_null(
-        const std::string& repository_name,
-        const std::string& package_name);
+    const std::string& repository_name,
+    const std::string& package_name);
 void preserve_error_on_next_repository_package_query(
-        const std::string& repository_name,
-        const std::string& package_name,
-        alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
+    const std::string& repository_name,
+    const std::string& package_name,
+    alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
 
 void set_repository_search_results(
-        const std::string& repository_name,
-        const std::string& query,
-        const std::vector<RepositorySearchPackageMetadata>& packages);
+    const std::string& repository_name,
+    const std::string& query,
+    const std::vector<RepositorySearchPackageMetadata>& packages);
 void set_repository_search_failure(
-        const std::string& repository_name,
-        const std::string& query,
-        alpm_errno_t error = ALPM_ERR_INVALID_REGEX);
+    const std::string& repository_name,
+    const std::string& query,
+    alpm_errno_t error = ALPM_ERR_INVALID_REGEX);
 void preserve_error_on_next_repository_search(
-        const std::string& repository_name,
-        const std::string& query,
-        alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
+    const std::string& repository_name,
+    const std::string& query,
+    alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
 void set_repository_exact_group(
-        const std::string& repository_name,
-        const std::string& group_name,
-        const std::vector<RepositorySearchPackageMetadata>& packages);
+    const std::string& repository_name,
+    const std::string& group_name,
+    const std::vector<RepositorySearchPackageMetadata>& packages);
 void set_repository_group_returned_name(
-        const std::string& repository_name,
-        const std::string& group_name,
-        const std::string& returned_name);
+    const std::string& repository_name,
+    const std::string& group_name,
+    const std::string& returned_name);
 void append_null_repository_group_member(
-        const std::string& repository_name,
-        const std::string& group_name);
+    const std::string& repository_name,
+    const std::string& group_name);
 
 std::size_t initialize_call_count();
 std::size_t local_database_call_count();
@@ -190,7 +190,7 @@ std::size_t database_valid_call_count();
 std::size_t package_cache_call_count();
 std::size_t package_query_call_count();
 std::size_t sync_package_cache_call_count(
-        const std::string& repository_name);
+    const std::string& repository_name);
 std::size_t created_handle_count();
 std::size_t release_call_count();
 std::size_t release_count_for_handle(std::size_t creation_index);

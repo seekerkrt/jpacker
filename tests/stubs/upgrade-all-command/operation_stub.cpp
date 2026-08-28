@@ -25,273 +25,273 @@ ProductionSourceBuildProvenance localized_reviewed_source_provenance() {
     ProductionSourceBuildProvenance provenance;
     provenance.review_status = ProductionSourceReviewStatus::Reviewed;
     provenance.editor_overlay =
-            ReviewedSourceEditorOverlayStatus::InvocationLocal;
+        ReviewedSourceEditorOverlayStatus::InvocationLocal;
     provenance.reviewed_upstream_base_revision =
-            SourceRevisionIdentity::git_commit(
-                    "4444444444444444444444444444444444444444");
+        SourceRevisionIdentity::git_commit(
+            "4444444444444444444444444444444444444444");
     provenance.publication_status =
-            ReviewedSourcePublicationStatus::Published;
+        ReviewedSourcePublicationStatus::Published;
     provenance.reviewed_outcome =
-            ProductionReviewedSourceOutcome::UpdateReview;
+        ProductionReviewedSourceOutcome::UpdateReview;
     provenance.reviewed_state_generation = 31;
     return provenance;
 }
 
 ProductionSourceBuildStagedOutcome localized_reviewed_source_outcome() {
     return ProductionSourceBuildStagedOutcome{
-            localized_reviewed_source_provenance(),
-            ProductionSourceBuildCommandOutcome::Succeeded,
-            ProductionSourceInstallOutcome::Succeeded};
+        localized_reviewed_source_provenance(),
+        ProductionSourceBuildCommandOutcome::Succeeded,
+        ProductionSourceInstallOutcome::Succeeded};
 }
 
 std::string current_scenario() {
     const char* value = std::getenv("MOGUET_TEST_UPGRADE_ALL_SCENARIO");
     if(value == nullptr || value[0] == '\0') {
         throw std::logic_error(
-                "MOGUET_TEST_UPGRADE_ALL_SCENARIO is required.");
+            "MOGUET_TEST_UPGRADE_ALL_SCENARIO is required.");
     }
     return value;
 }
 
 std::string current_matrix_kind() {
     const char* value =
-            std::getenv("MOGUET_TEST_UPGRADE_ALL_MATRIX_KIND");
+        std::getenv("MOGUET_TEST_UPGRADE_ALL_MATRIX_KIND");
     if(value == nullptr || value[0] == '\0') {
         throw std::logic_error(
-                "MOGUET_TEST_UPGRADE_ALL_MATRIX_KIND is required.");
+            "MOGUET_TEST_UPGRADE_ALL_MATRIX_KIND is required.");
     }
     return value;
 }
 
 std::size_t current_matrix_index() {
     const char* value =
-            std::getenv("MOGUET_TEST_UPGRADE_ALL_MATRIX_INDEX");
+        std::getenv("MOGUET_TEST_UPGRADE_ALL_MATRIX_INDEX");
     if(value == nullptr || value[0] == '\0') {
         throw std::logic_error(
-                "MOGUET_TEST_UPGRADE_ALL_MATRIX_INDEX is required.");
+            "MOGUET_TEST_UPGRADE_ALL_MATRIX_INDEX is required.");
     }
 
     std::size_t parsed_length = 0;
     const unsigned long long parsed =
-            std::stoull(value, &parsed_length, 10);
+        std::stoull(value, &parsed_length, 10);
     if(value[parsed_length] != '\0' ||
        parsed > std::numeric_limits<std::size_t>::max()) {
         throw std::logic_error(
-                "MOGUET_TEST_UPGRADE_ALL_MATRIX_INDEX is invalid.");
+            "MOGUET_TEST_UPGRADE_ALL_MATRIX_INDEX is invalid.");
     }
     return static_cast<std::size_t>(parsed);
 }
 
-template<typename Enum, std::size_t Size>
+template <typename Enum, std::size_t Size>
 Enum matrix_enum_value(
-        const std::array<Enum, Size>& values,
-        std::size_t index) {
+    const std::array<Enum, Size>& values,
+    std::size_t index) {
     if(index < values.size()) return values[index];
     if(index == values.size()) return static_cast<Enum>(-1);
     throw std::logic_error(
-            "Upgrade-all presentation matrix index is out of range.");
+        "Upgrade-all presentation matrix index is out of range.");
 }
 
 // POLICY(#281): production formatterのswitchと同じconcrete enumerator集合を
 // test dataとして明示する。各array直後の1 indexは未知値fail-closed用。
 constexpr std::array UPGRADE_ALL_AUR_PHASE_STATUSES{
-        UpgradeAllAurPhaseStatus::NotAttempted,
-        UpgradeAllAurPhaseStatus::NoUpdates,
-        UpgradeAllAurPhaseStatus::Completed,
-        UpgradeAllAurPhaseStatus::BlockedBeforeExecution,
-        UpgradeAllAurPhaseStatus::StoppedOnProviderTransactionFailure,
-        UpgradeAllAurPhaseStatus::StoppedOnWorkItemFailure,
-        UpgradeAllAurPhaseStatus::StoppedAfterCleanupFailure,
-        UpgradeAllAurPhaseStatus::InconsistentResult};
+    UpgradeAllAurPhaseStatus::NotAttempted,
+    UpgradeAllAurPhaseStatus::NoUpdates,
+    UpgradeAllAurPhaseStatus::Completed,
+    UpgradeAllAurPhaseStatus::BlockedBeforeExecution,
+    UpgradeAllAurPhaseStatus::StoppedOnProviderTransactionFailure,
+    UpgradeAllAurPhaseStatus::StoppedOnWorkItemFailure,
+    UpgradeAllAurPhaseStatus::StoppedAfterCleanupFailure,
+    UpgradeAllAurPhaseStatus::InconsistentResult};
 
 constexpr std::array UPGRADE_ALL_NOT_ATTEMPTED_REASONS{
-        UpgradeAllNotAttemptedReason::PreparationBlocked,
-        UpgradeAllNotAttemptedReason::SystemFailure,
-        UpgradeAllNotAttemptedReason::SourceFailure,
-        UpgradeAllNotAttemptedReason::SourceCleanupFailure,
-        UpgradeAllNotAttemptedReason::SystemSourceIncomplete,
-        UpgradeAllNotAttemptedReason::ForeignInventoryFailure,
-        UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
-        UpgradeAllNotAttemptedReason::PriorAggregateInconsistency};
+    UpgradeAllNotAttemptedReason::PreparationBlocked,
+    UpgradeAllNotAttemptedReason::SystemFailure,
+    UpgradeAllNotAttemptedReason::SourceFailure,
+    UpgradeAllNotAttemptedReason::SourceCleanupFailure,
+    UpgradeAllNotAttemptedReason::SystemSourceIncomplete,
+    UpgradeAllNotAttemptedReason::ForeignInventoryFailure,
+    UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
+    UpgradeAllNotAttemptedReason::PriorAggregateInconsistency};
 
 constexpr std::array AUR_TARGET_STATUSES{
-        AurUpdateOperationTargetStatus::Updated,
-        AurUpdateOperationTargetStatus::NoChange,
-        AurUpdateOperationTargetStatus::Skipped,
-        AurUpdateOperationTargetStatus::Unsupported,
-        AurUpdateOperationTargetStatus::Incomplete,
-        AurUpdateOperationTargetStatus::Failed,
-        AurUpdateOperationTargetStatus::UpdatedCleanupFailed,
-        AurUpdateOperationTargetStatus::NoChangeCleanupFailed,
-        AurUpdateOperationTargetStatus::NotAttempted};
+    AurUpdateOperationTargetStatus::Updated,
+    AurUpdateOperationTargetStatus::NoChange,
+    AurUpdateOperationTargetStatus::Skipped,
+    AurUpdateOperationTargetStatus::Unsupported,
+    AurUpdateOperationTargetStatus::Incomplete,
+    AurUpdateOperationTargetStatus::Failed,
+    AurUpdateOperationTargetStatus::UpdatedCleanupFailed,
+    AurUpdateOperationTargetStatus::NoChangeCleanupFailed,
+    AurUpdateOperationTargetStatus::NotAttempted};
 
 constexpr std::array AUR_OPERATION_STATUSES{
-        AurUpdateOperationStatus::NoUpdates,
-        AurUpdateOperationStatus::Completed,
-        AurUpdateOperationStatus::BlockedBeforeExecution,
-        AurUpdateOperationStatus::StoppedOnProviderTransactionFailure,
-        AurUpdateOperationStatus::StoppedOnWorkItemFailure,
-        AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure,
-        AurUpdateOperationStatus::InconsistentResult};
+    AurUpdateOperationStatus::NoUpdates,
+    AurUpdateOperationStatus::Completed,
+    AurUpdateOperationStatus::BlockedBeforeExecution,
+    AurUpdateOperationStatus::StoppedOnProviderTransactionFailure,
+    AurUpdateOperationStatus::StoppedOnWorkItemFailure,
+    AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure,
+    AurUpdateOperationStatus::InconsistentResult};
 
 constexpr std::array AUR_PREFLIGHT_REASONS{
-        AurUpdateExecutionReason::None,
-        AurUpdateExecutionReason::UpToDate,
-        AurUpdateExecutionReason::DevelRequiresCheck,
-        AurUpdateExecutionReason::NonAurForeign,
-        AurUpdateExecutionReason::AurMetadataUnavailable,
-        AurUpdateExecutionReason::VersionComparisonUnavailable,
-        AurUpdateExecutionReason::InstalledReasonUnknown,
-        AurUpdateExecutionReason::UpdatePlanInconsistent,
-        AurUpdateExecutionReason::DuplicateUpdateTarget,
-        AurUpdateExecutionReason::RepositoryMetadataUnavailable,
-        AurUpdateExecutionReason::AurDependencyMetadataUnavailable,
-        AurUpdateExecutionReason::ProviderMetadataUnavailable,
-        AurUpdateExecutionReason::UnresolvedDependency,
-        AurUpdateExecutionReason::VersionConstraintUnverified,
-        AurUpdateExecutionReason::DependencyCycle,
-        AurUpdateExecutionReason::BuildPlanInconsistent,
-        AurUpdateExecutionReason::PackageBaseMismatch,
-        AurUpdateExecutionReason::SplitPackageSelectionRequired,
-        AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase,
-        AurUpdateExecutionReason::AmbiguousProvider,
-        AurUpdateExecutionReason::ConflictsOrReplacesUnresolved,
-        AurUpdateExecutionReason::InstalledPackageMetadataUnavailable};
+    AurUpdateExecutionReason::None,
+    AurUpdateExecutionReason::UpToDate,
+    AurUpdateExecutionReason::DevelRequiresCheck,
+    AurUpdateExecutionReason::NonAurForeign,
+    AurUpdateExecutionReason::AurMetadataUnavailable,
+    AurUpdateExecutionReason::VersionComparisonUnavailable,
+    AurUpdateExecutionReason::InstalledReasonUnknown,
+    AurUpdateExecutionReason::UpdatePlanInconsistent,
+    AurUpdateExecutionReason::DuplicateUpdateTarget,
+    AurUpdateExecutionReason::RepositoryMetadataUnavailable,
+    AurUpdateExecutionReason::AurDependencyMetadataUnavailable,
+    AurUpdateExecutionReason::ProviderMetadataUnavailable,
+    AurUpdateExecutionReason::UnresolvedDependency,
+    AurUpdateExecutionReason::VersionConstraintUnverified,
+    AurUpdateExecutionReason::DependencyCycle,
+    AurUpdateExecutionReason::BuildPlanInconsistent,
+    AurUpdateExecutionReason::PackageBaseMismatch,
+    AurUpdateExecutionReason::SplitPackageSelectionRequired,
+    AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase,
+    AurUpdateExecutionReason::AmbiguousProvider,
+    AurUpdateExecutionReason::ConflictsOrReplacesUnresolved,
+    AurUpdateExecutionReason::InstalledPackageMetadataUnavailable};
 
 constexpr std::array AUR_PREPARATION_REASONS{
-        AurUpdatePreparationReason::None,
-        AurUpdatePreparationReason::BlockingPreflight,
-        AurUpdatePreparationReason::PreflightInconsistent,
-        AurUpdatePreparationReason::BuildPlanMissing,
-        AurUpdatePreparationReason::BuildPlanOrderEmpty,
-        AurUpdatePreparationReason::RootAttributionInconsistent,
-        AurUpdatePreparationReason::PackageTargetAttributionInconsistent,
-        AurUpdatePreparationReason::DesiredInstallReasonMissing,
-        AurUpdatePreparationReason::SourcePreferenceUnavailable,
-        AurUpdatePreparationReason::SourcePreferencePkgdestConflict,
-        AurUpdatePreparationReason::StaticWorkItemInvalid,
-        AurUpdatePreparationReason::PacmanDatabaseUnavailable,
-        AurUpdatePreparationReason::GenericPreparationInconsistent,
-        AurUpdatePreparationReason::BuildUnitSelectionInconsistent,
-        AurUpdatePreparationReason::ExternalSatisfactionInconsistent};
+    AurUpdatePreparationReason::None,
+    AurUpdatePreparationReason::BlockingPreflight,
+    AurUpdatePreparationReason::PreflightInconsistent,
+    AurUpdatePreparationReason::BuildPlanMissing,
+    AurUpdatePreparationReason::BuildPlanOrderEmpty,
+    AurUpdatePreparationReason::RootAttributionInconsistent,
+    AurUpdatePreparationReason::PackageTargetAttributionInconsistent,
+    AurUpdatePreparationReason::DesiredInstallReasonMissing,
+    AurUpdatePreparationReason::SourcePreferenceUnavailable,
+    AurUpdatePreparationReason::SourcePreferencePkgdestConflict,
+    AurUpdatePreparationReason::StaticWorkItemInvalid,
+    AurUpdatePreparationReason::PacmanDatabaseUnavailable,
+    AurUpdatePreparationReason::GenericPreparationInconsistent,
+    AurUpdatePreparationReason::BuildUnitSelectionInconsistent,
+    AurUpdatePreparationReason::ExternalSatisfactionInconsistent};
 
 constexpr std::array AUR_EXECUTION_FAILURE_KINDS{
-        AurUpdateWorkItemFailureKind::None,
-        AurUpdateWorkItemFailureKind::BuildOrInstallFailed,
-        AurUpdateWorkItemFailureKind::CleanupFailedAfterPackageTransaction,
-        AurUpdateWorkItemFailureKind::UnknownException,
-        AurUpdateWorkItemFailureKind::PriorWorkItemStopped};
+    AurUpdateWorkItemFailureKind::None,
+    AurUpdateWorkItemFailureKind::BuildOrInstallFailed,
+    AurUpdateWorkItemFailureKind::CleanupFailedAfterPackageTransaction,
+    AurUpdateWorkItemFailureKind::UnknownException,
+    AurUpdateWorkItemFailureKind::PriorWorkItemStopped};
 
 constexpr std::array AUR_REDUCTION_STAGES{
-        AurUpdateOperationReductionStage::Preflight,
-        AurUpdateOperationReductionStage::Preparation,
-        AurUpdateOperationReductionStage::Execution};
+    AurUpdateOperationReductionStage::Preflight,
+    AurUpdateOperationReductionStage::Preparation,
+    AurUpdateOperationReductionStage::Execution};
 
 constexpr std::array AUR_REDUCTION_REASONS{
-        AurUpdateOperationReductionReason::
-                DuplicatePreflightUpdatePlanIndex,
-        AurUpdateOperationReductionReason::
-                OutOfRangePreflightUpdatePlanIndex,
-        AurUpdateOperationReductionReason::PreflightTargetOrderInconsistent,
-        AurUpdateOperationReductionReason::DuplicatePreparationAttribution,
-        AurUpdateOperationReductionReason::UnknownPreparationUpdatePlanIndex,
-        AurUpdateOperationReductionReason::PreparationAttributionInconsistent,
-        AurUpdateOperationReductionReason::
-                PreparationTargetSnapshotInconsistent,
-        AurUpdateOperationReductionReason::DuplicateExecutionWorkItemIndex,
-        AurUpdateOperationReductionReason::
-                ExecutionWorkItemOrderInconsistent,
-        AurUpdateOperationReductionReason::DuplicateExecutionAttribution,
-        AurUpdateOperationReductionReason::UnknownExecutionUpdatePlanIndex,
-        AurUpdateOperationReductionReason::MissingExecutionAttribution,
-        AurUpdateOperationReductionReason::
-                DuplicateExecutionChildAttribution,
-        AurUpdateOperationReductionReason::
-                MissingExecutionChildAttribution,
-        AurUpdateOperationReductionReason::
-                UnexpectedExecutionChildAttribution,
-        AurUpdateOperationReductionReason::
-                UnknownExecutionChildUpdatePlanIndex,
-        AurUpdateOperationReductionReason::
-                ExecutionChildSnapshotInconsistent,
-        AurUpdateOperationReductionReason::UnexpectedSelectedArtifact,
-        AurUpdateOperationReductionReason::
-                UnexpectedUnselectedArtifactIdentity,
-        AurUpdateOperationReductionReason::
-                ExecutionResultWithPreparationIssues,
-        AurUpdateOperationReductionReason::MissingExecutionResult,
-        AurUpdateOperationReductionReason::UnknownEnumValue,
-        AurUpdateOperationReductionReason::WorkItemResultInconsistent,
-        AurUpdateOperationReductionReason::InvocationResultInconsistent,
-        AurUpdateOperationReductionReason::OtherCorrelationInconsistent};
+    AurUpdateOperationReductionReason::
+        DuplicatePreflightUpdatePlanIndex,
+    AurUpdateOperationReductionReason::
+        OutOfRangePreflightUpdatePlanIndex,
+    AurUpdateOperationReductionReason::PreflightTargetOrderInconsistent,
+    AurUpdateOperationReductionReason::DuplicatePreparationAttribution,
+    AurUpdateOperationReductionReason::UnknownPreparationUpdatePlanIndex,
+    AurUpdateOperationReductionReason::PreparationAttributionInconsistent,
+    AurUpdateOperationReductionReason::
+        PreparationTargetSnapshotInconsistent,
+    AurUpdateOperationReductionReason::DuplicateExecutionWorkItemIndex,
+    AurUpdateOperationReductionReason::
+        ExecutionWorkItemOrderInconsistent,
+    AurUpdateOperationReductionReason::DuplicateExecutionAttribution,
+    AurUpdateOperationReductionReason::UnknownExecutionUpdatePlanIndex,
+    AurUpdateOperationReductionReason::MissingExecutionAttribution,
+    AurUpdateOperationReductionReason::
+        DuplicateExecutionChildAttribution,
+    AurUpdateOperationReductionReason::
+        MissingExecutionChildAttribution,
+    AurUpdateOperationReductionReason::
+        UnexpectedExecutionChildAttribution,
+    AurUpdateOperationReductionReason::
+        UnknownExecutionChildUpdatePlanIndex,
+    AurUpdateOperationReductionReason::
+        ExecutionChildSnapshotInconsistent,
+    AurUpdateOperationReductionReason::UnexpectedSelectedArtifact,
+    AurUpdateOperationReductionReason::
+        UnexpectedUnselectedArtifactIdentity,
+    AurUpdateOperationReductionReason::
+        ExecutionResultWithPreparationIssues,
+    AurUpdateOperationReductionReason::MissingExecutionResult,
+    AurUpdateOperationReductionReason::UnknownEnumValue,
+    AurUpdateOperationReductionReason::WorkItemResultInconsistent,
+    AurUpdateOperationReductionReason::InvocationResultInconsistent,
+    AurUpdateOperationReductionReason::OtherCorrelationInconsistent};
 
 constexpr std::array FILTERED_AUR_ISSUE_KINDS{
-        FilteredAurUpdateOperationIssueKind::UnknownUpdateClassification,
-        FilteredAurUpdateOperationIssueKind::
-                TargetPlannerMappingInconsistent,
-        FilteredAurUpdateOperationIssueKind::
-                FilteredTargetMappingInconsistent,
-        FilteredAurUpdateOperationIssueKind::
-                PreflightTargetMappingInconsistent,
-        FilteredAurUpdateOperationIssueKind::
-                PreflightInvocationIndexOutOfRange,
-        FilteredAurUpdateOperationIssueKind::
-                PreflightInvocationIdentityMismatch,
-        FilteredAurUpdateOperationIssueKind::BuildPlanRootIndexMissing,
-        FilteredAurUpdateOperationIssueKind::BuildPlanRootIndexOutOfRange,
-        FilteredAurUpdateOperationIssueKind::BuildPlanRootIdentityMismatch,
-        FilteredAurUpdateOperationIssueKind::
-                BuildPlanRootPackageIdentityMismatch,
-        FilteredAurUpdateOperationIssueKind::BuildUnitOrderIdentityMismatch,
-        FilteredAurUpdateOperationIssueKind::
-                BuildUnitRootAttributionInconsistent,
-        FilteredAurUpdateOperationIssueKind::
-                BuildUnitSelectionMappingInconsistent,
-        FilteredAurUpdateOperationIssueKind::
-                ExecutionBuildUnitMappingInconsistent,
-        FilteredAurUpdateOperationIssueKind::ReducedTargetMappingInconsistent};
+    FilteredAurUpdateOperationIssueKind::UnknownUpdateClassification,
+    FilteredAurUpdateOperationIssueKind::
+        TargetPlannerMappingInconsistent,
+    FilteredAurUpdateOperationIssueKind::
+        FilteredTargetMappingInconsistent,
+    FilteredAurUpdateOperationIssueKind::
+        PreflightTargetMappingInconsistent,
+    FilteredAurUpdateOperationIssueKind::
+        PreflightInvocationIndexOutOfRange,
+    FilteredAurUpdateOperationIssueKind::
+        PreflightInvocationIdentityMismatch,
+    FilteredAurUpdateOperationIssueKind::BuildPlanRootIndexMissing,
+    FilteredAurUpdateOperationIssueKind::BuildPlanRootIndexOutOfRange,
+    FilteredAurUpdateOperationIssueKind::BuildPlanRootIdentityMismatch,
+    FilteredAurUpdateOperationIssueKind::
+        BuildPlanRootPackageIdentityMismatch,
+    FilteredAurUpdateOperationIssueKind::BuildUnitOrderIdentityMismatch,
+    FilteredAurUpdateOperationIssueKind::
+        BuildUnitRootAttributionInconsistent,
+    FilteredAurUpdateOperationIssueKind::
+        BuildUnitSelectionMappingInconsistent,
+    FilteredAurUpdateOperationIssueKind::
+        ExecutionBuildUnitMappingInconsistent,
+    FilteredAurUpdateOperationIssueKind::ReducedTargetMappingInconsistent};
 
 constexpr std::array UPGRADE_ALL_PLANNING_ISSUE_KINDS{
-        UpgradeAllPlanningIssueKind::ExplicitPreferencePackageNameMissing,
-        UpgradeAllPlanningIssueKind::ExplicitProducedPackageNameMissing,
-        UpgradeAllPlanningIssueKind::ExplicitPackageBaseAbsent,
-        UpgradeAllPlanningIssueKind::ExplicitPackageBaseResolutionFailed,
-        UpgradeAllPlanningIssueKind::ExplicitPackageBaseEmpty,
-        UpgradeAllPlanningIssueKind::ExplicitSourceIdentityAbsent,
-        UpgradeAllPlanningIssueKind::ExplicitSourceIdentityResolutionFailed,
-        UpgradeAllPlanningIssueKind::ExplicitSourceIdentityEmpty,
-        UpgradeAllPlanningIssueKind::
-                ConflictingExplicitSourceIdentityDefinition,
-        UpgradeAllPlanningIssueKind::ConflictingExplicitPackageName,
-        UpgradeAllPlanningIssueKind::ConflictingExplicitPackageBase,
-        UpgradeAllPlanningIssueKind::AurTargetPackageNameMissing,
-        UpgradeAllPlanningIssueKind::AurTargetPackageBaseAbsent,
-        UpgradeAllPlanningIssueKind::AurTargetPackageBaseResolutionFailed,
-        UpgradeAllPlanningIssueKind::AurTargetPackageBaseEmpty,
-        UpgradeAllPlanningIssueKind::UnsupportedAurTarget,
-        UpgradeAllPlanningIssueKind::IncompleteAurTarget,
-        UpgradeAllPlanningIssueKind::BuildUnitPackageBaseAbsent,
-        UpgradeAllPlanningIssueKind::BuildUnitPackageBaseResolutionFailed,
-        UpgradeAllPlanningIssueKind::BuildUnitPackageBaseEmpty,
-        UpgradeAllPlanningIssueKind::BuildUnitHasNoRootAttribution,
-        UpgradeAllPlanningIssueKind::BuildUnitTargetIndexOutOfRange,
-        UpgradeAllPlanningIssueKind::DuplicateSelectedTargetPackageBase,
-        UpgradeAllPlanningIssueKind::DuplicateSelectedBuildUnitPackageBase};
+    UpgradeAllPlanningIssueKind::ExplicitPreferencePackageNameMissing,
+    UpgradeAllPlanningIssueKind::ExplicitProducedPackageNameMissing,
+    UpgradeAllPlanningIssueKind::ExplicitPackageBaseAbsent,
+    UpgradeAllPlanningIssueKind::ExplicitPackageBaseResolutionFailed,
+    UpgradeAllPlanningIssueKind::ExplicitPackageBaseEmpty,
+    UpgradeAllPlanningIssueKind::ExplicitSourceIdentityAbsent,
+    UpgradeAllPlanningIssueKind::ExplicitSourceIdentityResolutionFailed,
+    UpgradeAllPlanningIssueKind::ExplicitSourceIdentityEmpty,
+    UpgradeAllPlanningIssueKind::
+        ConflictingExplicitSourceIdentityDefinition,
+    UpgradeAllPlanningIssueKind::ConflictingExplicitPackageName,
+    UpgradeAllPlanningIssueKind::ConflictingExplicitPackageBase,
+    UpgradeAllPlanningIssueKind::AurTargetPackageNameMissing,
+    UpgradeAllPlanningIssueKind::AurTargetPackageBaseAbsent,
+    UpgradeAllPlanningIssueKind::AurTargetPackageBaseResolutionFailed,
+    UpgradeAllPlanningIssueKind::AurTargetPackageBaseEmpty,
+    UpgradeAllPlanningIssueKind::UnsupportedAurTarget,
+    UpgradeAllPlanningIssueKind::IncompleteAurTarget,
+    UpgradeAllPlanningIssueKind::BuildUnitPackageBaseAbsent,
+    UpgradeAllPlanningIssueKind::BuildUnitPackageBaseResolutionFailed,
+    UpgradeAllPlanningIssueKind::BuildUnitPackageBaseEmpty,
+    UpgradeAllPlanningIssueKind::BuildUnitHasNoRootAttribution,
+    UpgradeAllPlanningIssueKind::BuildUnitTargetIndexOutOfRange,
+    UpgradeAllPlanningIssueKind::DuplicateSelectedTargetPackageBase,
+    UpgradeAllPlanningIssueKind::DuplicateSelectedBuildUnitPackageBase};
 
 constexpr std::array UPGRADE_ALL_TARGET_DISPOSITIONS{
-        UpgradeAllTargetDisposition::Selected,
-        UpgradeAllTargetDisposition::ExcludedByExplicitPackageName,
-        UpgradeAllTargetDisposition::ExcludedByExplicitPackageBase,
-        UpgradeAllTargetDisposition::Unsupported,
-        UpgradeAllTargetDisposition::IdentityIncomplete,
-        UpgradeAllTargetDisposition::ConflictingExplicitSourceIdentity,
-        UpgradeAllTargetDisposition::ConflictingSelectedPackageBase};
+    UpgradeAllTargetDisposition::Selected,
+    UpgradeAllTargetDisposition::ExcludedByExplicitPackageName,
+    UpgradeAllTargetDisposition::ExcludedByExplicitPackageBase,
+    UpgradeAllTargetDisposition::Unsupported,
+    UpgradeAllTargetDisposition::IdentityIncomplete,
+    UpgradeAllTargetDisposition::ConflictingExplicitSourceIdentity,
+    UpgradeAllTargetDisposition::ConflictingSelectedPackageBase};
 
 constexpr std::array UPGRADE_ALL_BUILD_UNIT_ROLES{
-        UpgradeAllBuildUnitRole::Root,
-        UpgradeAllBuildUnitRole::RuntimeDependency,
-        UpgradeAllBuildUnitRole::BuildDependency,
-        UpgradeAllBuildUnitRole::CheckDependency};
+    UpgradeAllBuildUnitRole::Root,
+    UpgradeAllBuildUnitRole::RuntimeDependency,
+    UpgradeAllBuildUnitRole::BuildDependency,
+    UpgradeAllBuildUnitRole::CheckDependency};
 
 void append_event(const std::string& event) {
     const char* event_log_path = std::getenv("MOGUET_TEST_COMMAND_LOG");
@@ -302,7 +302,7 @@ void append_event(const std::string& event) {
     std::ofstream event_log(event_log_path, std::ios::app);
     if(!event_log) {
         throw std::runtime_error(
-                "Cannot open the upgrade-all command event log.");
+            "Cannot open the upgrade-all command event log.");
     }
     event_log << event << '\n';
 }
@@ -312,25 +312,17 @@ const char* bool_text(bool value) {
 }
 
 std::string config_snapshot(const AppConfig& config) {
-    return "noedit=" + std::string(bool_text(
-                                   config.user_config.review.pkgbuild ==
-                                   ReviewPolicy::Skip)) +
-            " nodiff=" + bool_text(
-                                config.user_config.review.diff ==
-                                ReviewPolicy::Skip) +
-            " noconfirm=" + bool_text(config.no_confirm) +
-            " rebuild=" + bool_text(
-                                  config.user_config.build.mode ==
-                                  BuildMode::Rebuild) +
-            " cleanbuild=" + bool_text(
-                                     config.user_config.build.mode ==
-                                     BuildMode::Clean) +
-            " rmdeps=" + bool_text(config.rm_deps);
+    return "noedit=" + std::string(bool_text(config.user_config.review.pkgbuild == ReviewPolicy::Skip)) +
+           " nodiff=" + bool_text(config.user_config.review.diff == ReviewPolicy::Skip) +
+           " noconfirm=" + bool_text(config.no_confirm) +
+           " rebuild=" + bool_text(config.user_config.build.mode == BuildMode::Rebuild) +
+           " cleanbuild=" + bool_text(config.user_config.build.mode == BuildMode::Clean) +
+           " rmdeps=" + bool_text(config.rm_deps);
 }
 
 AurUpdatePlanEntry make_update_entry(
-        std::string package_name,
-        std::string package_base = {}) {
+    std::string package_name,
+    std::string package_base = {}) {
     if(package_base.empty()) package_base = package_name;
 
     AurUpdatePlanEntry entry;
@@ -339,63 +331,63 @@ AurUpdatePlanEntry make_update_entry(
     entry.install_reason = InstalledPackageReason::Explicit;
     entry.classification = AurUpdateClassification::UpdateAvailable;
     entry.aur_package = AurUpdateRemotePackage{
-            entry.installed_name,
-            std::move(package_base),
-            "2.0-1",
-            AurVersionRelation::NewerThanInstalled};
+        entry.installed_name,
+        std::move(package_base),
+        "2.0-1",
+        AurVersionRelation::NewerThanInstalled};
     return entry;
 }
 
 AurUpdateOperationTargetResult make_aur_target(
-        std::string package_name,
-        AurUpdateOperationTargetStatus status,
-        std::string package_base = {}) {
+    std::string package_name,
+    AurUpdateOperationTargetStatus status,
+    std::string package_base = {}) {
     AurUpdateOperationTargetResult target;
     target.update_plan_index = 0;
     target.update = make_update_entry(
-            std::move(package_name), std::move(package_base));
+        std::move(package_name), std::move(package_base));
     target.package_base = target.update.aur_package->package_base;
     target.status = status;
     return target;
 }
 
 AurUpdateOperationTargetResult make_issue_449_split_up_to_date_target(
-        std::size_t update_plan_index) {
+    std::size_t update_plan_index) {
     AurUpdateOperationTargetResult target = make_aur_target(
-            "ttf-noto-sans-mono-cjk-vf",
-            AurUpdateOperationTargetStatus::Skipped,
-            "ttf-noto-sans-cjk-vf");
+        "ttf-noto-sans-mono-cjk-vf",
+        AurUpdateOperationTargetStatus::Skipped,
+        "ttf-noto-sans-cjk-vf");
     target.update_plan_index = update_plan_index;
     target.update.installed_version = "2.004-1";
     target.update.classification = AurUpdateClassification::UpToDate;
     target.update.aur_package->version = "2.004-1";
     target.update.aur_package->version_relation =
-            AurVersionRelation::SameAsInstalled;
+        AurVersionRelation::SameAsInstalled;
     target.preflight_issues.emplace_back(
-            AurUpdateExecutionReason::UpToDate,
-            "ttf-noto-sans-mono-cjk-vf",
-            "ttf-noto-sans-cjk-vf",
-            std::nullopt,
-            "fixture wording is not the UpToDate classification authority");
+        AurUpdateExecutionReason::UpToDate,
+        "ttf-noto-sans-mono-cjk-vf",
+        "ttf-noto-sans-cjk-vf",
+        std::nullopt,
+        "fixture wording is not the UpToDate classification authority");
     return target;
 }
 
 FilteredAurUpdateExecutionResult make_filtered_result(
-        AurUpdateOperationStatus status) {
+    AurUpdateOperationStatus status) {
     FilteredAurUpdateExecutionResult filtered;
     filtered.reduced_operation_result.status = status;
     if(status == AurUpdateOperationStatus::Completed) {
         filtered.reduced_operation_result.execution_status =
-                AurUpdateInvocationExecutionStatus::Completed;
+            AurUpdateInvocationExecutionStatus::Completed;
     }
     return filtered;
 }
 
 UpgradeAllOperationResult make_base_result(
-        UpgradeAllOperationStatus status,
-        PackageStateChange system_package_state,
-        UpgradeAllAurPhaseStatus aur_status,
-        AurUpdateOperationStatus nested_aur_status) {
+    UpgradeAllOperationStatus status,
+    PackageStateChange system_package_state,
+    UpgradeAllAurPhaseStatus aur_status,
+    AurUpdateOperationStatus nested_aur_status) {
     UpgradeAllOperationResult result;
     result.status = status;
     result.stopped_phase = UpgradeAllOperationPhase::None;
@@ -404,36 +396,36 @@ UpgradeAllOperationResult make_base_result(
     result.system_source.system.status = SystemUpgradePhaseStatus::Completed;
     result.system_source.system.package_state_change = system_package_state;
     result.foreign_inventory.status =
-            UpgradeAllForeignInventoryPhaseStatus::Completed;
+        UpgradeAllForeignInventoryPhaseStatus::Completed;
     result.aur.status = aur_status;
     result.aur.operation_result.emplace(
-            make_filtered_result(nested_aur_status));
+        make_filtered_result(nested_aur_status));
     return result;
 }
 
 UpgradeAllOperationResult make_success_result(
-        UpgradeAllOperationStatus status,
-        PackageStateChange package_state) {
+    UpgradeAllOperationStatus status,
+    PackageStateChange package_state) {
     const bool no_updates = status == UpgradeAllOperationStatus::NoUpdates;
     return make_base_result(
-            status,
-            package_state,
-            no_updates ? UpgradeAllAurPhaseStatus::NoUpdates
-                       : UpgradeAllAurPhaseStatus::Completed,
-            no_updates ? AurUpdateOperationStatus::NoUpdates
-                       : AurUpdateOperationStatus::Completed);
+        status,
+        package_state,
+        no_updates ? UpgradeAllAurPhaseStatus::NoUpdates
+                   : UpgradeAllAurPhaseStatus::Completed,
+        no_updates ? AurUpdateOperationStatus::NoUpdates
+                   : AurUpdateOperationStatus::Completed);
 }
 
 UpgradeAllOperationResult make_snapshot_unavailable_result(
-        bool is_before_snapshot) {
+    bool is_before_snapshot) {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::Unknown);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::Unknown);
     const std::string snapshot_position =
-            is_before_snapshot ? "before" : "after";
+        is_before_snapshot ? "before" : "after";
     const PackageMetadataFailure failure{
-            PackageMetadataErrorCode::QueryFailed,
-            "fixture " + snapshot_position + " snapshot unavailable"};
+        PackageMetadataErrorCode::QueryFailed,
+        "fixture " + snapshot_position + " snapshot unavailable"};
     if(is_before_snapshot) {
         result.system_source.system.before_snapshot_failure = failure;
     } else {
@@ -441,12 +433,12 @@ UpgradeAllOperationResult make_snapshot_unavailable_result(
     }
 
     const std::string diagnostic =
-            "Failed to snapshot local package versions " +
-            snapshot_position + " the system upgrade: " +
-            failure.diagnostic;
+        "Failed to snapshot local package versions " +
+        snapshot_position + " the system upgrade: " +
+        failure.diagnostic;
     SystemSourceUpgradeIssue issue;
     issue.kind =
-            SystemSourceUpgradeIssueKind::SystemPackageSnapshotUnavailable;
+        SystemSourceUpgradeIssueKind::SystemPackageSnapshotUnavailable;
     issue.impact = SystemSourceUpgradeIssueImpact::ObservabilityOnly;
     issue.phase = SystemSourceUpgradePhase::System;
     issue.package_metadata_failure = failure;
@@ -462,35 +454,35 @@ UpgradeAllOperationResult make_snapshot_unavailable_result(
 }
 
 RegisteredSourcePreferenceSnapshot make_source_snapshot(
-        std::size_t index,
-        const std::string& package_name,
-        const std::optional<std::string>& resolved_package_base) {
+    std::size_t index,
+    const std::string& package_name,
+    const std::optional<std::string>& resolved_package_base) {
     RegisteredSourcePreferenceSnapshot snapshot;
     snapshot.original_preference_index = index;
     snapshot.preference_package_name = package_name;
     snapshot.entry_path = "/fixture/preferences/" + package_name;
     snapshot.canonical_source_identity_key =
-            "repository:https://sources.example/" + package_name;
+        "repository:https://sources.example/" + package_name;
     snapshot.resolved_package_base = resolved_package_base;
     return snapshot;
 }
 
 RegisteredSourceUpgradeResult make_source_result(
-        std::size_t index,
-        std::string package_name,
-        RegisteredSourceUpgradeStatus status,
-        RegisteredSourceUpgradeFailureKind failure_kind,
-        PackageStateChange package_state,
-        std::optional<std::string> diagnostic = std::nullopt,
-        std::optional<std::string> cleanup_diagnostic = std::nullopt) {
+    std::size_t index,
+    std::string package_name,
+    RegisteredSourceUpgradeStatus status,
+    RegisteredSourceUpgradeFailureKind failure_kind,
+    PackageStateChange package_state,
+    std::optional<std::string> diagnostic = std::nullopt,
+    std::optional<std::string> cleanup_diagnostic = std::nullopt) {
     RegisteredSourceUpgradeResult source;
     source.original_preference_index = index;
     source.preference_package_name = std::move(package_name);
     source.canonical_source_identity_key =
-            "repository:https://sources.example/" +
-            source.preference_package_name;
+        "repository:https://sources.example/" +
+        source.preference_package_name;
     source.resolved_package_base =
-            source.preference_package_name + "-base";
+        source.preference_package_name + "-base";
     source.status = status;
     source.failure_kind = failure_kind;
     source.package_state_change = package_state;
@@ -500,26 +492,26 @@ RegisteredSourceUpgradeResult make_source_result(
 }
 
 void add_source(
-        UpgradeAllOperationResult& result,
-        RegisteredSourceUpgradeResult source) {
+    UpgradeAllOperationResult& result,
+    RegisteredSourceUpgradeResult source) {
     result.prepared_snapshot.system_source.registered_sources.push_back(
-            make_source_snapshot(
-                    source.original_preference_index,
-                    source.preference_package_name,
-                    source.resolved_package_base));
+        make_source_snapshot(
+            source.original_preference_index,
+            source.preference_package_name,
+            source.resolved_package_base));
     result.system_source.prepared_snapshot.registered_sources.push_back(
-            make_source_snapshot(
-                    source.original_preference_index,
-                    source.preference_package_name,
-                    source.resolved_package_base));
+        make_source_snapshot(
+            source.original_preference_index,
+            source.preference_package_name,
+            source.resolved_package_base));
     result.system_source.registered_source_results.push_back(
-            std::move(source));
+        std::move(source));
 }
 
 UpgradeAllOperationIssue make_aggregate_issue(
-        UpgradeAllOperationIssueKind kind,
-        UpgradeAllOperationPhase phase,
-        std::string diagnostic) {
+    UpgradeAllOperationIssueKind kind,
+    UpgradeAllOperationPhase phase,
+    std::string diagnostic) {
     UpgradeAllOperationIssue issue;
     issue.kind = kind;
     issue.phase = phase;
@@ -528,101 +520,101 @@ UpgradeAllOperationIssue make_aggregate_issue(
 }
 
 void add_stopping_diagnostic(
-        UpgradeAllOperationResult& result,
-        UpgradeAllOperationPhase phase,
-        const std::string& diagnostic) {
+    UpgradeAllOperationResult& result,
+    UpgradeAllOperationPhase phase,
+    const std::string& diagnostic) {
     result.diagnostics.push_back(
-            UpgradeAllOperationDiagnostic{phase, true, diagnostic});
+        UpgradeAllOperationDiagnostic{phase, true, diagnostic});
 }
 
 AurUpdateWorkItemExecutionResult make_work_item_result(
-        std::size_t index,
-        const std::string& package_name,
-        AurUpdateWorkItemExecutionStatus status,
-        AurUpdateWorkItemFailureKind failure_kind,
-        std::optional<std::string> diagnostic);
+    std::size_t index,
+    const std::string& package_name,
+    AurUpdateWorkItemExecutionStatus status,
+    AurUpdateWorkItemFailureKind failure_kind,
+    std::optional<std::string> diagnostic);
 
 UpgradeAllOperationResult make_completed_changed_result() {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::Changed);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::Changed);
     add_source(
-            result,
-            make_source_result(
-                    0,
-                    "source-updated",
-                    RegisteredSourceUpgradeStatus::Updated,
-                    RegisteredSourceUpgradeFailureKind::None,
-                    PackageStateChange::Changed));
-    add_source(
-            result,
-            make_source_result(
-                    1,
-                    "source-no-change",
-                    RegisteredSourceUpgradeStatus::NoChange,
-                    RegisteredSourceUpgradeFailureKind::None,
-                    PackageStateChange::NoChange));
-
-    FilteredAurUpdateExecutionResult& filtered =
-            *result.aur.operation_result;
-    filtered.reduced_operation_result.targets.push_back(
-            make_aur_target(
-                    "aur-updated",
-                    AurUpdateOperationTargetStatus::Updated));
-    filtered.reduced_operation_result.targets.push_back(
-            make_aur_target(
-                    "aur-no-change",
-                    AurUpdateOperationTargetStatus::NoChange));
-    filtered.reduced_operation_result.execution_work_items.push_back(
-            make_work_item_result(
-                    0,
-                    "aur-updated",
-                    AurUpdateWorkItemExecutionStatus::Updated,
-                    AurUpdateWorkItemFailureKind::None,
-                    std::nullopt));
-    filtered.reduced_operation_result.execution_work_items.push_back(
-            make_work_item_result(
-                    1,
-                    "aur-no-change",
-                    AurUpdateWorkItemExecutionStatus::NoChange,
-                    AurUpdateWorkItemFailureKind::None,
-                    std::nullopt));
-
-    result.warnings.push_back(UpgradeAllOperationWarning{
-            UpgradeAllOperationWarningKind::RegisteredSourcePreference,
-            UpgradeAllOperationPhase::Preparation,
+        result,
+        make_source_result(
             0,
             "source-updated",
-            "fixture registered source warning"});
-    result.warnings.push_back(UpgradeAllOperationWarning{
-            UpgradeAllOperationWarningKind::AurPreparation,
-            UpgradeAllOperationPhase::AurPreparation,
-            std::nullopt,
+            RegisteredSourceUpgradeStatus::Updated,
+            RegisteredSourceUpgradeFailureKind::None,
+            PackageStateChange::Changed));
+    add_source(
+        result,
+        make_source_result(
+            1,
+            "source-no-change",
+            RegisteredSourceUpgradeStatus::NoChange,
+            RegisteredSourceUpgradeFailureKind::None,
+            PackageStateChange::NoChange));
+
+    FilteredAurUpdateExecutionResult& filtered =
+        *result.aur.operation_result;
+    filtered.reduced_operation_result.targets.push_back(
+        make_aur_target(
             "aur-updated",
-            "fixture AUR preparation warning"});
+            AurUpdateOperationTargetStatus::Updated));
+    filtered.reduced_operation_result.targets.push_back(
+        make_aur_target(
+            "aur-no-change",
+            AurUpdateOperationTargetStatus::NoChange));
+    filtered.reduced_operation_result.execution_work_items.push_back(
+        make_work_item_result(
+            0,
+            "aur-updated",
+            AurUpdateWorkItemExecutionStatus::Updated,
+            AurUpdateWorkItemFailureKind::None,
+            std::nullopt));
+    filtered.reduced_operation_result.execution_work_items.push_back(
+        make_work_item_result(
+            1,
+            "aur-no-change",
+            AurUpdateWorkItemExecutionStatus::NoChange,
+            AurUpdateWorkItemFailureKind::None,
+            std::nullopt));
+
+    result.warnings.push_back(UpgradeAllOperationWarning{
+        UpgradeAllOperationWarningKind::RegisteredSourcePreference,
+        UpgradeAllOperationPhase::Preparation,
+        0,
+        "source-updated",
+        "fixture registered source warning"});
+    result.warnings.push_back(UpgradeAllOperationWarning{
+        UpgradeAllOperationWarningKind::AurPreparation,
+        UpgradeAllOperationPhase::AurPreparation,
+        std::nullopt,
+        "aur-updated",
+        "fixture AUR preparation warning"});
     return result;
 }
 
 UpgradeAllDuplicateExcludedAurTarget make_duplicate_exclusion(
-        std::size_t index,
-        const std::string& package_name,
-        const std::string& package_base,
-        UpgradeAllTargetDisposition disposition,
-        std::optional<std::string> matched_package_name,
-        std::optional<std::string> matched_package_base,
-        std::string source_identity) {
+    std::size_t index,
+    const std::string& package_name,
+    const std::string& package_base,
+    UpgradeAllTargetDisposition disposition,
+    std::optional<std::string> matched_package_name,
+    std::optional<std::string> matched_package_base,
+    std::string source_identity) {
     UpgradeAllTargetPlanEntry planner_entry;
     planner_entry.original_target_index = index;
     planner_entry.target.package_name = package_name;
     planner_entry.target.package_base =
-            UpgradeAllResolvedPackageBase{package_base};
+        UpgradeAllResolvedPackageBase{package_base};
     planner_entry.target.status = UpgradeAllAurTargetStatus::Candidate;
     planner_entry.disposition = disposition;
     planner_entry.explicit_source = UpgradeAllExplicitSourceAttribution{
-            {index},
-            {std::move(source_identity)},
-            std::move(matched_package_name),
-            std::move(matched_package_base)};
+        {index},
+        {std::move(source_identity)},
+        std::move(matched_package_name),
+        std::move(matched_package_base)};
 
     UpgradeAllDuplicateExcludedAurTarget exclusion;
     exclusion.planner_target_index = index;
@@ -634,46 +626,46 @@ UpgradeAllDuplicateExcludedAurTarget make_duplicate_exclusion(
 
 UpgradeAllOperationResult make_duplicate_exclusion_result() {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     result.duplicate_excluded_aur_targets.push_back(
-            make_duplicate_exclusion(
-                    0,
-                    "duplicate-by-name",
-                    "name-base",
-                    UpgradeAllTargetDisposition::
-                            ExcludedByExplicitPackageName,
-                    "duplicate-by-name",
-                    std::nullopt,
-                    "repository:https://sources.example/duplicate-by-name"));
+        make_duplicate_exclusion(
+            0,
+            "duplicate-by-name",
+            "name-base",
+            UpgradeAllTargetDisposition::
+                ExcludedByExplicitPackageName,
+            "duplicate-by-name",
+            std::nullopt,
+            "repository:https://sources.example/duplicate-by-name"));
     result.duplicate_excluded_aur_targets.push_back(
-            make_duplicate_exclusion(
-                    1,
-                    "duplicate-by-base-child",
-                    "shared-base",
-                    UpgradeAllTargetDisposition::
-                            ExcludedByExplicitPackageBase,
-                    std::nullopt,
-                    "shared-base",
-                    "repository:https://sources.example/shared-base"));
+        make_duplicate_exclusion(
+            1,
+            "duplicate-by-base-child",
+            "shared-base",
+            UpgradeAllTargetDisposition::
+                ExcludedByExplicitPackageBase,
+            std::nullopt,
+            "shared-base",
+            "repository:https://sources.example/shared-base"));
     return result;
 }
 
 UpgradeAllOperationResult make_external_satisfaction_result() {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
 
     UpgradeAllExplicitSourceAdapterEntry source;
     source.adapter_index = 0;
     source.original_preference_index = 0;
     source.preference_package_name = "explicit-provider";
     source.canonical_source_identity_key =
-            "repository:https://sources.example/explicit-provider";
+        "repository:https://sources.example/explicit-provider";
     source.resolved_package_base = "external-base";
     source.affected_package_names = {"explicit-provider"};
     result.prepared_snapshot.explicit_source_adapter.entries.push_back(
-            std::move(source));
+        std::move(source));
 
     AurUpdateExternallySatisfiedBuildUnit operation_unit;
     operation_unit.build_plan_order_index = 0;
@@ -685,9 +677,9 @@ UpgradeAllOperationResult make_external_satisfaction_result() {
     operation_unit.roles = {PackageRole::BuildDependency};
     operation_unit.external_satisfaction.explicit_source_indexes = {0};
     operation_unit.external_satisfaction.source_identity_keys = {
-            "repository:https://sources.example/explicit-provider"};
+        "repository:https://sources.example/explicit-provider"};
     operation_unit.external_satisfaction.matched_package_base =
-            "external-base";
+        "external-base";
 
     FilteredAurUpdateBuildUnitRootCorrelation root;
     root.preflight_root = {0, "aur-root"};
@@ -696,8 +688,8 @@ UpgradeAllOperationResult make_external_satisfaction_result() {
     root.selected_target_index = 0;
     root.role = UpgradeAllBuildUnitRole::BuildDependency;
     result.externally_satisfied_aur_build_units.push_back(
-            UpgradeAllExternallySatisfiedAurBuildUnit{
-                    std::move(operation_unit), {std::move(root)}});
+        UpgradeAllExternallySatisfiedAurBuildUnit{
+            std::move(operation_unit), {std::move(root)}});
     return result;
 }
 
@@ -706,34 +698,34 @@ UpgradeAllOperationResult make_blocked_result() {
     result.status = UpgradeAllOperationStatus::BlockedBeforeMutation;
     result.stopped_phase = UpgradeAllOperationPhase::Preparation;
     result.system_source.status =
-            SystemSourceUpgradeStatus::BlockedBeforeMutation;
+        SystemSourceUpgradeStatus::BlockedBeforeMutation;
     result.system_source.stopped_phase =
-            SystemSourceUpgradePhase::Preparation;
+        SystemSourceUpgradePhase::Preparation;
     result.system_source.system.status =
-            SystemUpgradePhaseStatus::NotAttempted;
+        SystemUpgradePhaseStatus::NotAttempted;
     add_source(
-            result,
-            make_source_result(
-                    0,
-                    "source-unsupported",
-                    RegisteredSourceUpgradeStatus::Unsupported,
-                    RegisteredSourceUpgradeFailureKind::InvalidPreferenceName,
-                    PackageStateChange::NoChange,
-                    "fixture unsupported source preference"));
+        result,
+        make_source_result(
+            0,
+            "source-unsupported",
+            RegisteredSourceUpgradeStatus::Unsupported,
+            RegisteredSourceUpgradeFailureKind::InvalidPreferenceName,
+            PackageStateChange::NoChange,
+            "fixture unsupported source preference"));
     add_source(
-            result,
-            make_source_result(
-                    1,
-                    "source-incomplete",
-                    RegisteredSourceUpgradeStatus::Incomplete,
-                    RegisteredSourceUpgradeFailureKind::PreferenceUnavailable,
-                    PackageStateChange::NoChange,
-                    "fixture source preparation failed"));
+        result,
+        make_source_result(
+            1,
+            "source-incomplete",
+            RegisteredSourceUpgradeStatus::Incomplete,
+            RegisteredSourceUpgradeFailureKind::PreferenceUnavailable,
+            PackageStateChange::NoChange,
+            "fixture source preparation failed"));
     SystemSourceUpgradeIssue blocking_issue;
     blocking_issue.kind =
-            SystemSourceUpgradeIssueKind::SourceWorkItemPreparationFailed;
+        SystemSourceUpgradeIssueKind::SourceWorkItemPreparationFailed;
     blocking_issue.impact =
-            SystemSourceUpgradeIssueImpact::BlocksExecution;
+        SystemSourceUpgradeIssueImpact::BlocksExecution;
     blocking_issue.phase = SystemSourceUpgradePhase::Preparation;
     blocking_issue.original_preference_index = 1;
     blocking_issue.preference_package_name = "source-incomplete";
@@ -750,20 +742,20 @@ UpgradeAllOperationResult make_blocked_result() {
     blocking_detail.diagnostic = blocking_issue.diagnostic;
     result.system_source.diagnostics.push_back(std::move(blocking_detail));
     result.foreign_inventory.status =
-            UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
+        UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
     result.foreign_inventory.not_attempted_reason =
-            UpgradeAllNotAttemptedReason::PreparationBlocked;
+        UpgradeAllNotAttemptedReason::PreparationBlocked;
     result.aur.status = UpgradeAllAurPhaseStatus::NotAttempted;
     result.aur.not_attempted_reason =
-            UpgradeAllNotAttemptedReason::PreparationBlocked;
+        UpgradeAllNotAttemptedReason::PreparationBlocked;
     result.issues.push_back(make_aggregate_issue(
-            UpgradeAllOperationIssueKind::ExplicitSourceAdapterInvalid,
-            UpgradeAllOperationPhase::Preparation,
-            "fixture aggregate preparation blocked"));
+        UpgradeAllOperationIssueKind::ExplicitSourceAdapterInvalid,
+        UpgradeAllOperationPhase::Preparation,
+        "fixture aggregate preparation blocked"));
     add_stopping_diagnostic(
-            result,
-            UpgradeAllOperationPhase::Preparation,
-            "fixture aggregate preparation blocked");
+        result,
+        UpgradeAllOperationPhase::Preparation,
+        "fixture aggregate preparation blocked");
     return result;
 }
 
@@ -772,33 +764,33 @@ UpgradeAllOperationResult make_system_failure_result() {
     result.status = UpgradeAllOperationStatus::StoppedOnSystemFailure;
     result.stopped_phase = UpgradeAllOperationPhase::System;
     result.system_source.status =
-            SystemSourceUpgradeStatus::StoppedOnSystemFailure;
+        SystemSourceUpgradeStatus::StoppedOnSystemFailure;
     result.system_source.stopped_phase = SystemSourceUpgradePhase::System;
     result.system_source.system.status = SystemUpgradePhaseStatus::Failed;
     result.system_source.system.package_state_change =
-            PackageStateChange::Unknown;
+        PackageStateChange::Unknown;
     result.system_source.system.command_exit_status = 42;
     result.system_source.system.diagnostic =
-            "fixture system upgrade failed";
+        "fixture system upgrade failed";
     add_source(
-            result,
-            make_source_result(
-                    0,
-                    "source-after-system",
-                    RegisteredSourceUpgradeStatus::NotAttempted,
-                    RegisteredSourceUpgradeFailureKind::PriorPhaseStopped,
-                    PackageStateChange::NoChange));
+        result,
+        make_source_result(
+            0,
+            "source-after-system",
+            RegisteredSourceUpgradeStatus::NotAttempted,
+            RegisteredSourceUpgradeFailureKind::PriorPhaseStopped,
+            PackageStateChange::NoChange));
     result.foreign_inventory.status =
-            UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
+        UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
     result.foreign_inventory.not_attempted_reason =
-            UpgradeAllNotAttemptedReason::SystemFailure;
+        UpgradeAllNotAttemptedReason::SystemFailure;
     result.aur.status = UpgradeAllAurPhaseStatus::NotAttempted;
     result.aur.not_attempted_reason =
-            UpgradeAllNotAttemptedReason::SystemFailure;
+        UpgradeAllNotAttemptedReason::SystemFailure;
     add_stopping_diagnostic(
-            result,
-            UpgradeAllOperationPhase::System,
-            "fixture system upgrade failed");
+        result,
+        UpgradeAllOperationPhase::System,
+        "fixture system upgrade failed");
     return result;
 }
 
@@ -816,163 +808,160 @@ struct CrossSourceVersionLockFixture {
 
 CrossSourceVersionLockFixture virtualbox_version_lock_fixture() {
     return CrossSourceVersionLockFixture{
-            "extra",
-            "virtualbox",
-            "7.2.14-1",
-            "7.2.16-1",
-            "virtualbox-ext-oracle",
-            "7.2.14-1",
-            "virtualbox=7.2.14",
-            "7.2.16-1",
-            "virtualbox=7.2.16"};
+        "extra",
+        "virtualbox",
+        "7.2.14-1",
+        "7.2.16-1",
+        "virtualbox-ext-oracle",
+        "7.2.14-1",
+        "virtualbox=7.2.14",
+        "7.2.16-1",
+        "virtualbox=7.2.16"};
 }
 
 ConsumerDependencyRequirement fixture_consumer_requirement(
-        const std::string& specification) {
+    const std::string& specification) {
     const DependencyRequirementParseResult parsed =
-            parse_dependency_requirement(specification);
+        parse_dependency_requirement(specification);
     if(parsed.failure() != nullptr || parsed.requirement() == nullptr) {
         throw std::logic_error(
-                "Version-lock fixture dependency could not be parsed: " +
-                specification);
+            "Version-lock fixture dependency could not be parsed: " +
+            specification);
     }
     const auto* requirement =
-            std::get_if<ConsumerDependencyRequirement>(parsed.requirement());
+        std::get_if<ConsumerDependencyRequirement>(parsed.requirement());
     if(requirement == nullptr) {
         throw std::logic_error(
-                "Version-lock fixture dependency is not a package requirement: " +
-                specification);
+            "Version-lock fixture dependency is not a package requirement: " +
+            specification);
     }
     return *requirement;
 }
 
 AurPackageConstraintMetadata make_fixture_aur_replacement(
-        const CrossSourceVersionLockFixture& fixture,
-        const std::string& version,
-        const std::string& requirement) {
+    const CrossSourceVersionLockFixture& fixture,
+    const std::string& version,
+    const std::string& requirement) {
     return AurPackageConstraintMetadata{
-            fixture.installed_consumer_name,
-            fixture.installed_consumer_name,
-            ObservedVersion::available(
-                    ObservedVersionSource::AurExactPackage, version),
-            {fixture_consumer_requirement(requirement)},
-            {},
-            {},
-            {},
-            {}};
+        fixture.installed_consumer_name,
+        fixture.installed_consumer_name,
+        ObservedVersion::available(
+            ObservedVersionSource::AurExactPackage, version),
+        {fixture_consumer_requirement(requirement)},
+        {},
+        {},
+        {},
+        {}};
 }
 
 CrossSourceVersionLockAssessment make_possible_version_lock_assessment(
-        CrossSourceVersionLockStatus status,
-        const CrossSourceVersionLockFixture& fixture) {
+    CrossSourceVersionLockStatus status,
+    const CrossSourceVersionLockFixture& fixture) {
     std::optional<ConsumerDependencyRequirement> replacement_requirement;
     std::optional<ConstraintEvaluation> replacement_evaluation;
     AurReplacementCandidateQueryResult aur_replacement =
-            AurReplacementCandidateMetadataUnavailable{
-                    fixture.installed_consumer_name,
-                    fixture.installed_consumer_name,
-                    ObservedVersionUnknownReason::PartialSourceFailure};
+        AurReplacementCandidateMetadataUnavailable{
+            fixture.installed_consumer_name,
+            fixture.installed_consumer_name,
+            ObservedVersionUnknownReason::PartialSourceFailure};
 
     switch(status) {
-    case CrossSourceVersionLockStatus::CompatibleReplacement:
-        replacement_requirement = fixture_consumer_requirement(
+        case CrossSourceVersionLockStatus::CompatibleReplacement:
+            replacement_requirement = fixture_consumer_requirement(
                 fixture.replacement_requirement);
-        replacement_evaluation = ConstraintEvaluation::satisfied();
-        aur_replacement = AurReplacementCandidateQuerySuccess{{
-                make_fixture_aur_replacement(
-                        fixture,
-                        fixture.replacement_version,
-                        fixture.replacement_requirement)}};
-        break;
-    case CrossSourceVersionLockStatus::IncompatibleReplacement: {
-        const std::string incompatible_requirement =
+            replacement_evaluation = ConstraintEvaluation::satisfied();
+            aur_replacement = AurReplacementCandidateQuerySuccess{{make_fixture_aur_replacement(
+                fixture,
+                fixture.replacement_version,
+                fixture.replacement_requirement)}};
+            break;
+        case CrossSourceVersionLockStatus::IncompatibleReplacement: {
+            const std::string incompatible_requirement =
                 fixture.repository_package_name + "=7.2.15";
-        replacement_requirement = fixture_consumer_requirement(
+            replacement_requirement = fixture_consumer_requirement(
                 incompatible_requirement);
-        replacement_evaluation = ConstraintEvaluation::unsatisfied();
-        aur_replacement = AurReplacementCandidateQuerySuccess{{
-                make_fixture_aur_replacement(
-                        fixture,
-                        fixture.replacement_version,
-                        incompatible_requirement)}};
-        break;
-    }
-    case CrossSourceVersionLockStatus::MissingReplacement:
-        aur_replacement = AurReplacementCandidateNotFound{
+            replacement_evaluation = ConstraintEvaluation::unsatisfied();
+            aur_replacement = AurReplacementCandidateQuerySuccess{{make_fixture_aur_replacement(
+                fixture,
+                fixture.replacement_version,
+                incompatible_requirement)}};
+            break;
+        }
+        case CrossSourceVersionLockStatus::MissingReplacement:
+            aur_replacement = AurReplacementCandidateNotFound{
                 fixture.installed_consumer_name};
-        break;
-    case CrossSourceVersionLockStatus::Unknown:
-        break;
-    case CrossSourceVersionLockStatus::QueryFailure:
-        aur_replacement = AurReplacementCandidateQueryFailure{
+            break;
+        case CrossSourceVersionLockStatus::Unknown:
+            break;
+        case CrossSourceVersionLockStatus::QueryFailure:
+            aur_replacement = AurReplacementCandidateQueryFailure{
                 {fixture.installed_consumer_name},
                 "fixture replacement query failure"};
-        break;
-    case CrossSourceVersionLockStatus::Ambiguous:
-        aur_replacement = AurReplacementCandidateQuerySuccess{{
-                make_fixture_aur_replacement(
-                        fixture,
-                        fixture.replacement_version,
-                        fixture.replacement_requirement),
-                make_fixture_aur_replacement(
-                        fixture,
-                        fixture.replacement_version + ".ambiguous",
-                        fixture.replacement_requirement)}};
-        break;
+            break;
+        case CrossSourceVersionLockStatus::Ambiguous:
+            aur_replacement = AurReplacementCandidateQuerySuccess{{make_fixture_aur_replacement(
+                                                                       fixture,
+                                                                       fixture.replacement_version,
+                                                                       fixture.replacement_requirement),
+                                                                   make_fixture_aur_replacement(
+                                                                       fixture,
+                                                                       fixture.replacement_version + ".ambiguous",
+                                                                       fixture.replacement_requirement)}};
+            break;
     }
 
     const ConsumerDependencyRequirement installed_requirement =
-            fixture_consumer_requirement(fixture.installed_requirement);
+        fixture_consumer_requirement(fixture.installed_requirement);
     return CrossSourceVersionLockAssessment{
-            status,
-            CrossSourceVersionLockCandidateEvidence{
-                    RepositoryUpgradeCandidate{
-                            InstalledExactPackage{
-                                    fixture.repository_package_name,
-                                    ObservedVersion::available(
-                                            ObservedVersionSource::
-                                                    InstalledExactPackage,
-                                            fixture.installed_repository_version)},
-                            RepositoryPackagePresent{
-                                    fixture.repository_name,
-                                    0,
-                                    fixture.repository_package_name,
-                                    fixture.repository_package_name,
-                                    ObservedVersion::available(
-                                            ObservedVersionSource::
-                                                    RepositoryExactPackage,
-                                            fixture.repository_candidate_version),
-                                    std::vector<std::string>{
-                                            fixture.repository_name},
-                                    {}}},
-                    InstalledCrossSourceVersionLockConsumer{
-                            PackageRelationObservedPackage{
-                                    fixture.installed_consumer_name,
-                                    fixture.installed_consumer_name,
-                                    ObservedVersion::available(
-                                            ObservedVersionSource::
-                                                    InstalledExactPackage,
-                                            fixture.installed_consumer_version),
-                                    {},
-                                    PackageRelationInstalledDatabaseIdentity{
-                                            "/fixture/root",
-                                            "/fixture/database"},
-                                    PackageRelationObservationRole::Installed,
-                                    {}},
-                            installed_requirement},
-                    std::move(aur_replacement)},
-            ConstraintEvaluation::satisfied(),
-            ConstraintEvaluation::unsatisfied(),
-            std::move(replacement_requirement),
-            std::move(replacement_evaluation)};
+        status,
+        CrossSourceVersionLockCandidateEvidence{
+            RepositoryUpgradeCandidate{
+                InstalledExactPackage{
+                    fixture.repository_package_name,
+                    ObservedVersion::available(
+                        ObservedVersionSource::
+                            InstalledExactPackage,
+                        fixture.installed_repository_version)},
+                RepositoryPackagePresent{
+                    fixture.repository_name,
+                    0,
+                    fixture.repository_package_name,
+                    fixture.repository_package_name,
+                    ObservedVersion::available(
+                        ObservedVersionSource::
+                            RepositoryExactPackage,
+                        fixture.repository_candidate_version),
+                    std::vector<std::string>{
+                        fixture.repository_name},
+                    {}}},
+            InstalledCrossSourceVersionLockConsumer{
+                PackageRelationObservedPackage{
+                    fixture.installed_consumer_name,
+                    fixture.installed_consumer_name,
+                    ObservedVersion::available(
+                        ObservedVersionSource::
+                            InstalledExactPackage,
+                        fixture.installed_consumer_version),
+                    {},
+                    PackageRelationInstalledDatabaseIdentity{
+                        "/fixture/root",
+                        "/fixture/database"},
+                    PackageRelationObservationRole::Installed,
+                    {}},
+                installed_requirement},
+            std::move(aur_replacement)},
+        ConstraintEvaluation::satisfied(),
+        ConstraintEvaluation::unsatisfied(),
+        std::move(replacement_requirement),
+        std::move(replacement_evaluation)};
 }
 
 UpgradeAllOperationResult make_no_possible_version_lock_result(
-        CrossSourceVersionLockObservationStatus observation_status) {
+    CrossSourceVersionLockObservationStatus observation_status) {
     UpgradeAllOperationResult result = make_system_failure_result();
     UpgradeAllCrossSourceVersionLockCorrelationResult correlation;
     correlation.observation = CrossSourceVersionLockObservationResult{
-            observation_status, {}, {}};
+        observation_status, {}, {}};
     result.cross_source_version_lock_correlation = std::move(correlation);
     return result;
 }
@@ -981,24 +970,24 @@ UpgradeAllOperationResult make_secondary_correlation_failure_result() {
     UpgradeAllOperationResult result = make_system_failure_result();
     UpgradeAllCrossSourceVersionLockCorrelationResult correlation;
     correlation.failure = UpgradeAllCrossSourceVersionLockCorrelationFailure{
-            UpgradeAllCrossSourceVersionLockCorrelationFailureKind::
-                    ResourceExhaustion,
-            std::nullopt};
+        UpgradeAllCrossSourceVersionLockCorrelationFailureKind::
+            ResourceExhaustion,
+        std::nullopt};
     result.cross_source_version_lock_correlation = std::move(correlation);
     return result;
 }
 
 UpgradeAllOperationResult make_possible_version_lock_result(
-        CrossSourceVersionLockStatus status,
-        CrossSourceVersionLockObservationStatus observation_status =
-                CrossSourceVersionLockObservationStatus::Complete) {
+    CrossSourceVersionLockStatus status,
+    CrossSourceVersionLockObservationStatus observation_status =
+        CrossSourceVersionLockObservationStatus::Complete) {
     UpgradeAllOperationResult result = make_system_failure_result();
     CrossSourceVersionLockAssessment assessment =
-            make_possible_version_lock_assessment(
-                    status, virtualbox_version_lock_fixture());
+        make_possible_version_lock_assessment(
+            status, virtualbox_version_lock_fixture());
     UpgradeAllCrossSourceVersionLockCorrelationResult correlation;
     correlation.observation = CrossSourceVersionLockObservationResult{
-            observation_status, {assessment.evidence}, {}};
+        observation_status, {assessment.evidence}, {}};
     correlation.assessments.push_back(std::move(assessment));
     correlation.possible_blocker_assessment_indices.push_back(0);
     result.cross_source_version_lock_correlation = std::move(correlation);
@@ -1008,28 +997,28 @@ UpgradeAllOperationResult make_possible_version_lock_result(
 UpgradeAllOperationResult make_multiple_possible_version_lock_result() {
     UpgradeAllOperationResult result = make_system_failure_result();
     CrossSourceVersionLockFixture second_fixture{
-            "core",
-            "example-api",
-            "1.4.0-1",
-            "1.5.0-1",
-            "example-addon",
-            "1.4.0-2",
-            "example-api=1.4.0",
-            "1.5.0-1",
-            "example-api=1.5.0"};
+        "core",
+        "example-api",
+        "1.4.0-1",
+        "1.5.0-1",
+        "example-addon",
+        "1.4.0-2",
+        "example-api=1.4.0",
+        "1.5.0-1",
+        "example-api=1.5.0"};
     CrossSourceVersionLockAssessment first =
-            make_possible_version_lock_assessment(
-                    CrossSourceVersionLockStatus::CompatibleReplacement,
-                    virtualbox_version_lock_fixture());
+        make_possible_version_lock_assessment(
+            CrossSourceVersionLockStatus::CompatibleReplacement,
+            virtualbox_version_lock_fixture());
     CrossSourceVersionLockAssessment second =
-            make_possible_version_lock_assessment(
-                    CrossSourceVersionLockStatus::CompatibleReplacement,
-                    second_fixture);
+        make_possible_version_lock_assessment(
+            CrossSourceVersionLockStatus::CompatibleReplacement,
+            second_fixture);
     UpgradeAllCrossSourceVersionLockCorrelationResult correlation;
     correlation.observation = CrossSourceVersionLockObservationResult{
-            CrossSourceVersionLockObservationStatus::Complete,
-            {first.evidence, second.evidence},
-            {}};
+        CrossSourceVersionLockObservationStatus::Complete,
+        {first.evidence, second.evidence},
+        {}};
     correlation.assessments.push_back(std::move(first));
     correlation.assessments.push_back(std::move(second));
     correlation.possible_blocker_assessment_indices = {0, 1};
@@ -1039,78 +1028,78 @@ UpgradeAllOperationResult make_multiple_possible_version_lock_result() {
 
 UpgradeAllOperationResult make_invalid_version_lock_index_result() {
     UpgradeAllOperationResult result = make_possible_version_lock_result(
-            CrossSourceVersionLockStatus::CompatibleReplacement);
+        CrossSourceVersionLockStatus::CompatibleReplacement);
     result.cross_source_version_lock_correlation
-            ->possible_blocker_assessment_indices = {1};
+        ->possible_blocker_assessment_indices = {1};
     return result;
 }
 
 UpgradeAllOperationResult make_source_failure_result(
-        bool cleanup_failure,
-        bool no_change_cleanup_failure = false) {
+    bool cleanup_failure,
+    bool no_change_cleanup_failure = false) {
     UpgradeAllOperationResult result;
     result.status = cleanup_failure
-            ? UpgradeAllOperationStatus::StoppedAfterSourceCleanupFailure
-            : UpgradeAllOperationStatus::StoppedOnSourceFailure;
+                        ? UpgradeAllOperationStatus::StoppedAfterSourceCleanupFailure
+                        : UpgradeAllOperationStatus::StoppedOnSourceFailure;
     result.stopped_phase = UpgradeAllOperationPhase::RegisteredSource;
     result.system_source.status = cleanup_failure
-            ? SystemSourceUpgradeStatus::StoppedAfterSourceCleanupFailure
-            : SystemSourceUpgradeStatus::StoppedOnSourceFailure;
+                                      ? SystemSourceUpgradeStatus::StoppedAfterSourceCleanupFailure
+                                      : SystemSourceUpgradeStatus::StoppedOnSourceFailure;
     result.system_source.stopped_phase =
-            SystemSourceUpgradePhase::RegisteredSource;
+        SystemSourceUpgradePhase::RegisteredSource;
     result.system_source.system.status = SystemUpgradePhaseStatus::Completed;
     result.system_source.system.package_state_change =
-            no_change_cleanup_failure ? PackageStateChange::NoChange
-                                      : PackageStateChange::Changed;
+        no_change_cleanup_failure ? PackageStateChange::NoChange
+                                  : PackageStateChange::Changed;
     add_source(
-            result,
-            cleanup_failure
-                    ? make_source_result(
-                              0,
-                              no_change_cleanup_failure
-                                      ? "source-no-change-cleanup-failed"
-                                      : "source-cleanup-failed",
-                              no_change_cleanup_failure
-                                      ? RegisteredSourceUpgradeStatus::
-                                                NoChangeCleanupFailed
-                                      : RegisteredSourceUpgradeStatus::
-                                                UpdatedCleanupFailed,
-                              RegisteredSourceUpgradeFailureKind::
-                                      CleanupFailedAfterPackageTransaction,
-                              no_change_cleanup_failure
-                                      ? PackageStateChange::NoChange
-                                      : PackageStateChange::Changed,
-                              std::nullopt,
-                              "fixture source cleanup failed")
-                    : make_source_result(
-                              0,
-                              "source-failed",
-                              RegisteredSourceUpgradeStatus::Failed,
-                              RegisteredSourceUpgradeFailureKind::
-                                      BuildOrInstallFailed,
-                              PackageStateChange::Unknown,
-                              "fixture source build or install failed"));
+        result,
+        cleanup_failure
+            ? make_source_result(
+                  0,
+                  no_change_cleanup_failure
+                      ? "source-no-change-cleanup-failed"
+                      : "source-cleanup-failed",
+                  no_change_cleanup_failure
+                      ? RegisteredSourceUpgradeStatus::
+                            NoChangeCleanupFailed
+                      : RegisteredSourceUpgradeStatus::
+                            UpdatedCleanupFailed,
+                  RegisteredSourceUpgradeFailureKind::
+                      CleanupFailedAfterPackageTransaction,
+                  no_change_cleanup_failure
+                      ? PackageStateChange::NoChange
+                      : PackageStateChange::Changed,
+                  std::nullopt,
+                  "fixture source cleanup failed")
+            : make_source_result(
+                  0,
+                  "source-failed",
+                  RegisteredSourceUpgradeStatus::Failed,
+                  RegisteredSourceUpgradeFailureKind::
+                      BuildOrInstallFailed,
+                  PackageStateChange::Unknown,
+                  "fixture source build or install failed"));
     result.foreign_inventory.status =
-            UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
+        UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
     result.foreign_inventory.not_attempted_reason = cleanup_failure
-            ? UpgradeAllNotAttemptedReason::SourceCleanupFailure
-            : UpgradeAllNotAttemptedReason::SourceFailure;
+                                                        ? UpgradeAllNotAttemptedReason::SourceCleanupFailure
+                                                        : UpgradeAllNotAttemptedReason::SourceFailure;
     result.aur.status = UpgradeAllAurPhaseStatus::NotAttempted;
     result.aur.not_attempted_reason = cleanup_failure
-            ? UpgradeAllNotAttemptedReason::SourceCleanupFailure
-            : UpgradeAllNotAttemptedReason::SourceFailure;
+                                          ? UpgradeAllNotAttemptedReason::SourceCleanupFailure
+                                          : UpgradeAllNotAttemptedReason::SourceFailure;
     add_stopping_diagnostic(
-            result,
-            UpgradeAllOperationPhase::RegisteredSource,
-            cleanup_failure ? "fixture source cleanup failed"
-                            : "fixture source build or install failed");
+        result,
+        UpgradeAllOperationPhase::RegisteredSource,
+        cleanup_failure ? "fixture source cleanup failed"
+                        : "fixture source build or install failed");
     return result;
 }
 
 AurUpdateExecutionIssue make_preflight_issue() {
     AurUpdateExecutionIssue issue;
     issue.reason =
-            AurUpdateExecutionReason::SplitPackageSelectionRequired;
+        AurUpdateExecutionReason::SplitPackageSelectionRequired;
     issue.package_name = "aur-preflight-blocked";
     issue.package_base = "aur-preflight-base";
     issue.diagnostic = "fixture AUR preflight blocker";
@@ -1129,68 +1118,68 @@ AurUpdatePreparationIssue make_preparation_issue() {
 
 UpgradeAllOperationResult make_stopped_before_aur_result() {
     UpgradeAllOperationResult result = make_base_result(
-            UpgradeAllOperationStatus::StoppedBeforeAurExecution,
-            PackageStateChange::NoChange,
-            UpgradeAllAurPhaseStatus::BlockedBeforeExecution,
-            AurUpdateOperationStatus::BlockedBeforeExecution);
+        UpgradeAllOperationStatus::StoppedBeforeAurExecution,
+        PackageStateChange::NoChange,
+        UpgradeAllAurPhaseStatus::BlockedBeforeExecution,
+        AurUpdateOperationStatus::BlockedBeforeExecution);
     result.stopped_phase = UpgradeAllOperationPhase::AurPreparation;
     FilteredAurUpdateExecutionResult& filtered =
-            *result.aur.operation_result;
+        *result.aur.operation_result;
 
     AurUpdateOperationTargetResult unsupported = make_aur_target(
-            "aur-preflight-blocked",
-            AurUpdateOperationTargetStatus::Unsupported,
-            "aur-preflight-base");
+        "aur-preflight-blocked",
+        AurUpdateOperationTargetStatus::Unsupported,
+        "aur-preflight-base");
     unsupported.update_plan_index = 0;
     unsupported.preflight_issues.push_back(make_preflight_issue());
     filtered.reduced_operation_result.targets.push_back(
-            std::move(unsupported));
+        std::move(unsupported));
 
     AurUpdateOperationTargetResult incomplete = make_aur_target(
-            "aur-preparation-blocked",
-            AurUpdateOperationTargetStatus::Incomplete,
-            "aur-preparation-base");
+        "aur-preparation-blocked",
+        AurUpdateOperationTargetStatus::Incomplete,
+        "aur-preparation-base");
     incomplete.update_plan_index = 1;
     incomplete.preparation_issues.push_back(make_preparation_issue());
     filtered.reduced_operation_result.targets.push_back(
-            std::move(incomplete));
+        std::move(incomplete));
     filtered.reduced_operation_result.preparation_issues.push_back(
-            make_preparation_issue());
+        make_preparation_issue());
 
     result.issues.push_back(make_aggregate_issue(
-            UpgradeAllOperationIssueKind::FilteredAurPreparationFailed,
-            UpgradeAllOperationPhase::AurPreparation,
-            "fixture filtered AUR preparation failed"));
+        UpgradeAllOperationIssueKind::FilteredAurPreparationFailed,
+        UpgradeAllOperationPhase::AurPreparation,
+        "fixture filtered AUR preparation failed"));
     add_stopping_diagnostic(
-            result,
-            UpgradeAllOperationPhase::AurPreparation,
-            "fixture filtered AUR preparation failed");
+        result,
+        UpgradeAllOperationPhase::AurPreparation,
+        "fixture filtered AUR preparation failed");
     return result;
 }
 
 UpgradeAllOperationResult make_aur_skip_result() {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     FilteredAurUpdateExecutionResult& filtered =
-            *result.aur.operation_result;
+        *result.aur.operation_result;
 
     AurUpdateOperationTargetResult up_to_date = make_aur_target(
-            "aur-up-to-date", AurUpdateOperationTargetStatus::Skipped);
+        "aur-up-to-date", AurUpdateOperationTargetStatus::Skipped);
     up_to_date.update.classification = AurUpdateClassification::UpToDate;
     up_to_date.update.aur_package->version_relation =
-            AurVersionRelation::SameAsInstalled;
+        AurVersionRelation::SameAsInstalled;
     AurUpdateExecutionIssue up_to_date_issue;
     up_to_date_issue.reason = AurUpdateExecutionReason::UpToDate;
     up_to_date_issue.package_name = "aur-up-to-date";
     up_to_date.preflight_issues.push_back(std::move(up_to_date_issue));
     filtered.reduced_operation_result.targets.push_back(
-            std::move(up_to_date));
+        std::move(up_to_date));
 
     AurUpdateOperationTargetResult non_aur = make_aur_target(
-            "non-aur-foreign", AurUpdateOperationTargetStatus::Skipped);
+        "non-aur-foreign", AurUpdateOperationTargetStatus::Skipped);
     non_aur.update.classification =
-            AurUpdateClassification::NonAurForeign;
+        AurUpdateClassification::NonAurForeign;
     non_aur.update.aur_package.reset();
     non_aur.package_base.reset();
     AurUpdateExecutionIssue non_aur_issue;
@@ -1204,35 +1193,35 @@ UpgradeAllOperationResult make_aur_skip_result() {
 UpgradeAllOperationResult make_many_current_one_attention_result() {
     UpgradeAllOperationResult result = make_aur_skip_result();
     FilteredAurUpdateExecutionResult& filtered =
-            *result.aur.operation_result;
+        *result.aur.operation_result;
     for(std::size_t index = 0; index < 48; ++index) {
         AurUpdateOperationTargetResult current = make_aur_target(
-                "current-package-" + std::to_string(index),
-                AurUpdateOperationTargetStatus::Skipped);
+            "current-package-" + std::to_string(index),
+            AurUpdateOperationTargetStatus::Skipped);
         current.update.classification = AurUpdateClassification::UpToDate;
         current.update.aur_package->version_relation =
-                AurVersionRelation::SameAsInstalled;
+            AurVersionRelation::SameAsInstalled;
         filtered.reduced_operation_result.targets.push_back(
-                std::move(current));
+            std::move(current));
     }
 
     AurUpdateOperationTargetResult attention = make_aur_target(
-            "attention-package",
-            AurUpdateOperationTargetStatus::Unsupported,
-            "attention-suite");
+        "attention-package",
+        AurUpdateOperationTargetStatus::Unsupported,
+        "attention-suite");
     attention.update.classification =
-            AurUpdateClassification::MetadataUnavailable;
+        AurUpdateClassification::MetadataUnavailable;
     filtered.reduced_operation_result.targets.push_back(
-            std::move(attention));
+        std::move(attention));
     return result;
 }
 
 AurUpdateWorkItemExecutionResult make_work_item_result(
-        std::size_t index,
-        const std::string& package_name,
-        AurUpdateWorkItemExecutionStatus status,
-        AurUpdateWorkItemFailureKind failure_kind,
-        std::optional<std::string> diagnostic = std::nullopt) {
+    std::size_t index,
+    const std::string& package_name,
+    AurUpdateWorkItemExecutionStatus status,
+    AurUpdateWorkItemFailureKind failure_kind,
+    std::optional<std::string> diagnostic = std::nullopt) {
     AurUpdateWorkItemExecutionResult work_item;
     work_item.work_item_index = index;
     work_item.build_plan_order_index = index;
@@ -1256,46 +1245,46 @@ AurUpdateWorkItemExecutionResult make_work_item_result(
     child.affected_roots = {{index, package_name}};
     child.roles = {PackageRole::Root};
     switch(status) {
-    case AurUpdateWorkItemExecutionStatus::Updated:
-        child.selected_artifact =
+        case AurUpdateWorkItemExecutionStatus::Updated:
+            child.selected_artifact =
                 ArtifactPackageIdentity{package_name, "2.0-1"};
-        child.status = AurUpdateChildExecutionStatus::Installed;
-        break;
-    case AurUpdateWorkItemExecutionStatus::NoChange:
-        child.selected_artifact =
+            child.status = AurUpdateChildExecutionStatus::Installed;
+            break;
+        case AurUpdateWorkItemExecutionStatus::NoChange:
+            child.selected_artifact =
                 ArtifactPackageIdentity{package_name, "2.0-1"};
-        child.status = AurUpdateChildExecutionStatus::SkippedAsNeeded;
-        break;
-    case AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed:
-        child.selected_artifact =
+            child.status = AurUpdateChildExecutionStatus::SkippedAsNeeded;
+            break;
+        case AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed:
+            child.selected_artifact =
                 ArtifactPackageIdentity{package_name, "2.0-1"};
-        child.status =
+            child.status =
                 AurUpdateChildExecutionStatus::InstalledCleanupFailed;
-        break;
-    case AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed:
-        child.selected_artifact =
+            break;
+        case AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed:
+            child.selected_artifact =
                 ArtifactPackageIdentity{package_name, "2.0-1"};
-        child.status = AurUpdateChildExecutionStatus::
+            child.status = AurUpdateChildExecutionStatus::
                 SkippedAsNeededCleanupFailed;
-        break;
-    case AurUpdateWorkItemExecutionStatus::Failed:
-    case AurUpdateWorkItemExecutionStatus::NotAttempted:
-        child.status = AurUpdateChildExecutionStatus::NotAttempted;
-        break;
+            break;
+        case AurUpdateWorkItemExecutionStatus::Failed:
+        case AurUpdateWorkItemExecutionStatus::NotAttempted:
+            child.status = AurUpdateChildExecutionStatus::NotAttempted;
+            break;
     }
     work_item.child_results.push_back(std::move(child));
     return work_item;
 }
 
 AurUpdateChildExecutionResult make_child_result(
-        std::size_t work_item_index,
-        std::size_t required_child_index,
-        const std::string& package_base,
-        std::string package_name,
-        DesiredInstallReason desired_reason,
-        AurUpdateChildExecutionStatus status,
-        std::size_t update_plan_index,
-        std::string full_version) {
+    std::size_t work_item_index,
+    std::size_t required_child_index,
+    const std::string& package_base,
+    std::string package_name,
+    DesiredInstallReason desired_reason,
+    AurUpdateChildExecutionStatus status,
+    std::size_t update_plan_index,
+    std::string full_version) {
     AurUpdateChildExecutionResult child;
     child.work_item_index = work_item_index;
     child.build_plan_order_index = work_item_index;
@@ -1306,23 +1295,23 @@ AurUpdateChildExecutionResult make_child_result(
     child.affected_update_plan_indices = {update_plan_index};
     child.affected_roots = {{update_plan_index, child.required_package_name}};
     child.roles = {desired_reason == DesiredInstallReason::Explicit
-                           ? PackageRole::Root
-                           : PackageRole::RuntimeDependency};
+                       ? PackageRole::Root
+                       : PackageRole::RuntimeDependency};
     child.status = status;
     if(status != AurUpdateChildExecutionStatus::NotAttempted) {
         child.selected_artifact = ArtifactPackageIdentity{
-                child.required_package_name, std::move(full_version)};
+            child.required_package_name, std::move(full_version)};
     }
     return child;
 }
 
 AurUpdateWorkItemExecutionResult make_multi_child_work_item(
-        std::size_t work_item_index,
-        std::string package_base,
-        std::vector<AurUpdateChildExecutionResult> children,
-        AurUpdateWorkItemExecutionStatus status,
-        AurUpdateWorkItemFailureKind failure_kind,
-        std::optional<std::string> diagnostic = std::nullopt) {
+    std::size_t work_item_index,
+    std::string package_base,
+    std::vector<AurUpdateChildExecutionResult> children,
+    AurUpdateWorkItemExecutionStatus status,
+    AurUpdateWorkItemFailureKind failure_kind,
+    std::optional<std::string> diagnostic = std::nullopt) {
     AurUpdateWorkItemExecutionResult work_item;
     work_item.work_item_index = work_item_index;
     work_item.build_plan_order_index = work_item_index;
@@ -1333,12 +1322,12 @@ AurUpdateWorkItemExecutionResult make_multi_child_work_item(
     for(const AurUpdateChildExecutionResult& child : children) {
         work_item.plan_package_names.push_back(child.required_package_name);
         work_item.affected_update_plan_indices.insert(
-                work_item.affected_update_plan_indices.end(),
-                child.affected_update_plan_indices.begin(),
-                child.affected_update_plan_indices.end());
+            work_item.affected_update_plan_indices.end(),
+            child.affected_update_plan_indices.begin(),
+            child.affected_update_plan_indices.end());
         work_item.affected_roots.insert(
-                work_item.affected_roots.end(),
-                child.affected_roots.begin(), child.affected_roots.end());
+            work_item.affected_roots.end(),
+            child.affected_roots.begin(), child.affected_roots.end());
     }
     if(children.size() == 1) {
         work_item.package_name = children.front().required_package_name;
@@ -1348,9 +1337,9 @@ AurUpdateWorkItemExecutionResult make_multi_child_work_item(
 }
 
 AurUpdateOperationExecutionContribution make_child_contribution(
-        const AurUpdateChildExecutionResult& child,
-        AurUpdateWorkItemExecutionStatus status,
-        AurUpdateWorkItemFailureKind failure_kind) {
+    const AurUpdateChildExecutionResult& child,
+    AurUpdateWorkItemExecutionStatus status,
+    AurUpdateWorkItemFailureKind failure_kind) {
     AurUpdateOperationExecutionContribution contribution;
     contribution.work_item_index = child.work_item_index;
     contribution.required_child_index = child.required_child_index;
@@ -1367,365 +1356,364 @@ AurUpdateOperationExecutionContribution make_child_contribution(
 
 UpgradeAllOperationResult make_aur_failure_result(bool cleanup_failure) {
     const AurUpdateOperationStatus nested_status = cleanup_failure
-            ? AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure
-            : AurUpdateOperationStatus::StoppedOnWorkItemFailure;
+                                                       ? AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure
+                                                       : AurUpdateOperationStatus::StoppedOnWorkItemFailure;
     UpgradeAllOperationResult result = make_base_result(
-            cleanup_failure
-                    ? UpgradeAllOperationStatus::
-                              StoppedAfterAurCleanupFailure
-                    : UpgradeAllOperationStatus::StoppedOnAurFailure,
-            PackageStateChange::Changed,
-            cleanup_failure
-                    ? UpgradeAllAurPhaseStatus::StoppedAfterCleanupFailure
-                    : UpgradeAllAurPhaseStatus::StoppedOnWorkItemFailure,
-            nested_status);
+        cleanup_failure
+            ? UpgradeAllOperationStatus::
+                  StoppedAfterAurCleanupFailure
+            : UpgradeAllOperationStatus::StoppedOnAurFailure,
+        PackageStateChange::Changed,
+        cleanup_failure
+            ? UpgradeAllAurPhaseStatus::StoppedAfterCleanupFailure
+            : UpgradeAllAurPhaseStatus::StoppedOnWorkItemFailure,
+        nested_status);
     result.stopped_phase = UpgradeAllOperationPhase::AurExecution;
 
     FilteredAurUpdateExecutionResult& filtered =
-            *result.aur.operation_result;
+        *result.aur.operation_result;
     filtered.reduced_operation_result.execution_status = cleanup_failure
-            ? AurUpdateInvocationExecutionStatus::
-                      StoppedAfterPackageCleanupFailure
-            : AurUpdateInvocationExecutionStatus::StoppedOnWorkItemFailure;
+                                                             ? AurUpdateInvocationExecutionStatus::
+                                                                   StoppedAfterPackageCleanupFailure
+                                                             : AurUpdateInvocationExecutionStatus::StoppedOnWorkItemFailure;
 
     AurUpdateOperationTargetResult first = make_aur_target(
-            "aur-first-updated",
-            AurUpdateOperationTargetStatus::Updated);
+        "aur-first-updated",
+        AurUpdateOperationTargetStatus::Updated);
     first.update_plan_index = 0;
     filtered.reduced_operation_result.targets.push_back(std::move(first));
 
     AurUpdateOperationTargetResult failed = make_aur_target(
-            cleanup_failure ? "aur-cleanup-failed" : "aur-failed",
-            cleanup_failure
-                    ? AurUpdateOperationTargetStatus::UpdatedCleanupFailed
-                    : AurUpdateOperationTargetStatus::Failed);
+        cleanup_failure ? "aur-cleanup-failed" : "aur-failed",
+        cleanup_failure
+            ? AurUpdateOperationTargetStatus::UpdatedCleanupFailed
+            : AurUpdateOperationTargetStatus::Failed);
     failed.update_plan_index = 1;
     failed.execution_work_item_index = 1;
     failed.execution_failure_kind = cleanup_failure
-            ? AurUpdateWorkItemFailureKind::
-                      CleanupFailedAfterPackageTransaction
-            : AurUpdateWorkItemFailureKind::BuildOrInstallFailed;
+                                        ? AurUpdateWorkItemFailureKind::
+                                              CleanupFailedAfterPackageTransaction
+                                        : AurUpdateWorkItemFailureKind::BuildOrInstallFailed;
     failed.execution_diagnostic = cleanup_failure
-            ? "fixture AUR cleanup failed"
-            : "/private/workspace/upgrade-all-secret/transaction failed";
+                                      ? "fixture AUR cleanup failed"
+                                      : "/private/workspace/upgrade-all-secret/transaction failed";
     filtered.reduced_operation_result.targets.push_back(std::move(failed));
 
     AurUpdateOperationTargetResult later = make_aur_target(
-            "aur-later",
-            AurUpdateOperationTargetStatus::NotAttempted);
+        "aur-later",
+        AurUpdateOperationTargetStatus::NotAttempted);
     later.update_plan_index = 2;
     later.execution_failure_kind =
-            AurUpdateWorkItemFailureKind::PriorWorkItemStopped;
+        AurUpdateWorkItemFailureKind::PriorWorkItemStopped;
     filtered.reduced_operation_result.targets.push_back(std::move(later));
 
     filtered.reduced_operation_result.execution_work_items.push_back(
-            make_work_item_result(
-                    0,
-                    "aur-first-updated",
-                    AurUpdateWorkItemExecutionStatus::Updated,
-                    AurUpdateWorkItemFailureKind::None));
+        make_work_item_result(
+            0,
+            "aur-first-updated",
+            AurUpdateWorkItemExecutionStatus::Updated,
+            AurUpdateWorkItemFailureKind::None));
     filtered.reduced_operation_result.execution_work_items.push_back(
-            make_work_item_result(
-                    1,
-                    cleanup_failure ? "aur-cleanup-failed" : "aur-failed",
-                    cleanup_failure
-                            ? AurUpdateWorkItemExecutionStatus::
-                                      UpdatedCleanupFailed
-                            : AurUpdateWorkItemExecutionStatus::Failed,
-                    cleanup_failure
-                            ? AurUpdateWorkItemFailureKind::
-                                      CleanupFailedAfterPackageTransaction
-                            : AurUpdateWorkItemFailureKind::
-                                      BuildOrInstallFailed,
-                    cleanup_failure
-                            ? "fixture AUR cleanup failed"
-                            : "/private/workspace/upgrade-all-secret/transaction failed"));
+        make_work_item_result(
+            1,
+            cleanup_failure ? "aur-cleanup-failed" : "aur-failed",
+            cleanup_failure
+                ? AurUpdateWorkItemExecutionStatus::
+                      UpdatedCleanupFailed
+                : AurUpdateWorkItemExecutionStatus::Failed,
+            cleanup_failure
+                ? AurUpdateWorkItemFailureKind::
+                      CleanupFailedAfterPackageTransaction
+                : AurUpdateWorkItemFailureKind::
+                      BuildOrInstallFailed,
+            cleanup_failure
+                ? "fixture AUR cleanup failed"
+                : "/private/workspace/upgrade-all-secret/transaction failed"));
     filtered.reduced_operation_result.execution_work_items.push_back(
-            make_work_item_result(
-                    2,
-                    "aur-later",
-                    AurUpdateWorkItemExecutionStatus::NotAttempted,
-                    AurUpdateWorkItemFailureKind::PriorWorkItemStopped));
+        make_work_item_result(
+            2,
+            "aur-later",
+            AurUpdateWorkItemExecutionStatus::NotAttempted,
+            AurUpdateWorkItemFailureKind::PriorWorkItemStopped));
     if(!cleanup_failure) {
         AurUpdatePackageTransactionFailureSnapshot transaction;
         transaction.category =
-                AurUpdatePackageTransactionFailureCategory::CommandFailed;
+            AurUpdatePackageTransactionFailureCategory::CommandFailed;
         transaction.attempted_artifacts = {
-                {{"aur-failed", "4.2.0-1"},
-                 DesiredInstallReason::Explicit}};
+            {{"aur-failed", "4.2.0-1"},
+             DesiredInstallReason::Explicit}};
         transaction.exit_code = 86;
         transaction.diagnostic =
-                "/private/artifacts/aur-failed-4.2.0-1.pkg.tar.zst";
+            "/private/artifacts/aur-failed-4.2.0-1.pkg.tar.zst";
         AurUpdateWorkItemExecutionResult& failed_work_item =
-                filtered.reduced_operation_result.execution_work_items[1];
+            filtered.reduced_operation_result.execution_work_items[1];
         failed_work_item.transaction_failure = transaction;
         failed_work_item.failure_detail = transaction;
         AurUpdateOperationTargetResult& failed_target =
-                filtered.reduced_operation_result.targets[1];
+            filtered.reduced_operation_result.targets[1];
         failed_target.execution_failure_detail = transaction;
     }
     add_stopping_diagnostic(
-            result,
-            UpgradeAllOperationPhase::AurExecution,
-            cleanup_failure ? "fixture AUR cleanup failed"
-                            : "/private/workspace/upgrade-all-secret/transaction failed");
+        result,
+        UpgradeAllOperationPhase::AurExecution,
+        cleanup_failure ? "fixture AUR cleanup failed"
+                        : "/private/workspace/upgrade-all-secret/transaction failed");
     return result;
 }
 
 UpgradeAllOperationResult make_aur_no_change_cleanup_failure_result() {
     UpgradeAllOperationResult result = make_aur_failure_result(true);
     FilteredAurUpdateExecutionResult& filtered =
-            *result.aur.operation_result;
+        *result.aur.operation_result;
     AurUpdateOperationTargetResult& failed =
-            filtered.reduced_operation_result.targets[1];
+        filtered.reduced_operation_result.targets[1];
     failed.update.installed_name = "aur-no-change-cleanup-failed";
     failed.update.aur_package->aur_name = "aur-no-change-cleanup-failed";
     failed.update.aur_package->package_base =
-            "aur-no-change-cleanup-failed";
+        "aur-no-change-cleanup-failed";
     failed.package_base = "aur-no-change-cleanup-failed";
     failed.status =
-            AurUpdateOperationTargetStatus::NoChangeCleanupFailed;
+        AurUpdateOperationTargetStatus::NoChangeCleanupFailed;
     AurUpdateWorkItemExecutionResult& work_item =
-            filtered.reduced_operation_result.execution_work_items[1];
+        filtered.reduced_operation_result.execution_work_items[1];
     work_item.package_name = "aur-no-change-cleanup-failed";
     work_item.package_base = "aur-no-change-cleanup-failed";
     work_item.plan_package_names = {"aur-no-change-cleanup-failed"};
     work_item.affected_roots = {{1, "aur-no-change-cleanup-failed"}};
     work_item.status =
-            AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed;
+        AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed;
     AurUpdateChildExecutionResult& child = work_item.child_results.front();
     child.package_base = "aur-no-change-cleanup-failed";
     child.required_package_name = "aur-no-change-cleanup-failed";
     child.affected_roots = {{1, "aur-no-change-cleanup-failed"}};
     child.selected_artifact = ArtifactPackageIdentity{
-            "aur-no-change-cleanup-failed", "2.0-1"};
+        "aur-no-change-cleanup-failed", "2.0-1"};
     child.status =
-            AurUpdateChildExecutionStatus::SkippedAsNeededCleanupFailed;
+        AurUpdateChildExecutionStatus::SkippedAsNeededCleanupFailed;
     return result;
 }
 
 UpgradeAllOperationResult make_aur_split_multiple_result() {
     UpgradeAllOperationResult result = make_completed_changed_result();
     FilteredAurUpdateExecutionResult& filtered =
-            *result.aur.operation_result;
+        *result.aur.operation_result;
 
     AurUpdateOperationTargetResult target = make_aur_target(
-            "aur-split-main",
-            AurUpdateOperationTargetStatus::Updated,
-            "aur-split-suite");
+        "aur-split-main",
+        AurUpdateOperationTargetStatus::Updated,
+        "aur-split-suite");
     target.update_plan_index = 2;
 
     AurUpdateWorkItemExecutionResult work_item = make_multi_child_work_item(
-            2,
-            "aur-split-suite",
-            {make_child_result(
-                     2,
-                     0,
-                     "aur-split-suite",
-                     "aur-split-main",
-                     DesiredInstallReason::Explicit,
-                     AurUpdateChildExecutionStatus::Installed,
-                     2,
-                     "7.0.1-2"),
-             make_child_result(
-                     2,
-                     1,
-                     "aur-split-suite",
-                     "aur-split-dependency",
-                     DesiredInstallReason::Dependency,
-                     AurUpdateChildExecutionStatus::SkippedAsNeeded,
-                     2,
-                     "7.0.1-2")},
-            AurUpdateWorkItemExecutionStatus::Updated,
-            AurUpdateWorkItemFailureKind::None);
+        2,
+        "aur-split-suite",
+        {make_child_result(
+             2,
+             0,
+             "aur-split-suite",
+             "aur-split-main",
+             DesiredInstallReason::Explicit,
+             AurUpdateChildExecutionStatus::Installed,
+             2,
+             "7.0.1-2"),
+         make_child_result(
+             2,
+             1,
+             "aur-split-suite",
+             "aur-split-dependency",
+             DesiredInstallReason::Dependency,
+             AurUpdateChildExecutionStatus::SkippedAsNeeded,
+             2,
+             "7.0.1-2")},
+        AurUpdateWorkItemExecutionStatus::Updated,
+        AurUpdateWorkItemFailureKind::None);
     work_item.unselected_artifacts = {
-            {"aur-split-sibling", "7.0.1-2"},
-            {"aur-split-suite-debug", "7.0.1-2"}};
+        {"aur-split-sibling", "7.0.1-2"},
+        {"aur-split-suite-debug", "7.0.1-2"}};
     target.execution_contributions.push_back(make_child_contribution(
-            work_item.child_results[0],
-            AurUpdateWorkItemExecutionStatus::Updated,
-            AurUpdateWorkItemFailureKind::None));
+        work_item.child_results[0],
+        AurUpdateWorkItemExecutionStatus::Updated,
+        AurUpdateWorkItemFailureKind::None));
     target.execution_contributions.push_back(make_child_contribution(
-            work_item.child_results[1],
-            AurUpdateWorkItemExecutionStatus::NoChange,
-            AurUpdateWorkItemFailureKind::None));
+        work_item.child_results[1],
+        AurUpdateWorkItemExecutionStatus::NoChange,
+        AurUpdateWorkItemFailureKind::None));
     filtered.reduced_operation_result.targets.push_back(std::move(target));
     filtered.reduced_operation_result.execution_work_items.push_back(
-            std::move(work_item));
+        std::move(work_item));
     return result;
 }
 
 UpgradeAllOperationResult make_issue_449_split_up_to_date_result() {
     UpgradeAllOperationResult result = make_aur_split_multiple_result();
     std::vector<AurUpdateOperationTargetResult>& targets =
-            result.aur.operation_result->reduced_operation_result.targets;
+        result.aur.operation_result->reduced_operation_result.targets;
     targets.push_back(
-            make_issue_449_split_up_to_date_target(targets.size()));
+        make_issue_449_split_up_to_date_target(targets.size()));
     return result;
 }
 
 UpgradeAllOperationResult
 make_issue_455_system_changed_aur_up_to_date_result() {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::Changed);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::Changed);
     result.aur.operation_result->reduced_operation_result.targets.push_back(
-            make_issue_449_split_up_to_date_target(0));
+        make_issue_449_split_up_to_date_target(0));
     return result;
 }
 
 UpgradeAllOperationResult make_issue_455_aur_changed_result() {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     result.aur.operation_result->reduced_operation_result.targets.push_back(
-            make_aur_target(
-                    "issue-455-aur-updated",
-                    AurUpdateOperationTargetStatus::Updated));
-    AurUpdateWorkItemExecutionResult work_item = make_work_item_result(
-            0,
+        make_aur_target(
             "issue-455-aur-updated",
-            AurUpdateWorkItemExecutionStatus::Updated,
-            AurUpdateWorkItemFailureKind::None,
-            std::nullopt);
+            AurUpdateOperationTargetStatus::Updated));
+    AurUpdateWorkItemExecutionResult work_item = make_work_item_result(
+        0,
+        "issue-455-aur-updated",
+        AurUpdateWorkItemExecutionStatus::Updated,
+        AurUpdateWorkItemFailureKind::None,
+        std::nullopt);
     work_item.production_outcome = localized_reviewed_source_outcome();
-    result.aur.operation_result->reduced_operation_result.
-            execution_work_items.push_back(std::move(work_item));
+    result.aur.operation_result->reduced_operation_result.execution_work_items.push_back(std::move(work_item));
     return result;
 }
 
 UpgradeAllOperationResult make_registered_package_base_result() {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::Changed);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::Changed);
 
     RegisteredSourceUpgradeResult distinct = make_source_result(
-            0,
-            "registered-child",
-            RegisteredSourceUpgradeStatus::Updated,
-            RegisteredSourceUpgradeFailureKind::None,
-            PackageStateChange::Changed);
+        0,
+        "registered-child",
+        RegisteredSourceUpgradeStatus::Updated,
+        RegisteredSourceUpgradeFailureKind::None,
+        PackageStateChange::Changed);
     distinct.resolved_package_base = "registered-suite";
     distinct.package_base_execution =
-            RegisteredSourcePackageBaseExecutionSnapshot{
-                    "registered-suite",
-                    PackageBaseSourceBuildSelectedResult{
-                            ArtifactPackageIdentity{
-                                    "registered-child", "4.2-3"},
-                            DesiredInstallReason::Explicit,
-                            ArtifactInstallExecutionOutcome::Installed},
-                    {ArtifactPackageIdentity{
-                             "registered-sibling", "4.2-3"},
-                     ArtifactPackageIdentity{
-                             "registered-child-debug", "4.2-3"}}};
+        RegisteredSourcePackageBaseExecutionSnapshot{
+            "registered-suite",
+            PackageBaseSourceBuildSelectedResult{
+                ArtifactPackageIdentity{
+                    "registered-child", "4.2-3"},
+                DesiredInstallReason::Explicit,
+                ArtifactInstallExecutionOutcome::Installed},
+            {ArtifactPackageIdentity{
+                 "registered-sibling", "4.2-3"},
+             ArtifactPackageIdentity{
+                 "registered-child-debug", "4.2-3"}}};
     add_source(result, std::move(distinct));
 
     RegisteredSourceUpgradeResult ordinary = make_source_result(
-            1,
-            "registered-ordinary",
-            RegisteredSourceUpgradeStatus::Updated,
-            RegisteredSourceUpgradeFailureKind::None,
-            PackageStateChange::Changed);
+        1,
+        "registered-ordinary",
+        RegisteredSourceUpgradeStatus::Updated,
+        RegisteredSourceUpgradeFailureKind::None,
+        PackageStateChange::Changed);
     ordinary.resolved_package_base = "registered-ordinary";
     ordinary.package_base_execution =
-            RegisteredSourcePackageBaseExecutionSnapshot{
-                    "registered-ordinary",
-                    PackageBaseSourceBuildSelectedResult{
-                            ArtifactPackageIdentity{
-                                    "registered-ordinary", "1.0-2"},
-                            DesiredInstallReason::Explicit,
-                            ArtifactInstallExecutionOutcome::Installed},
-                    {}};
+        RegisteredSourcePackageBaseExecutionSnapshot{
+            "registered-ordinary",
+            PackageBaseSourceBuildSelectedResult{
+                ArtifactPackageIdentity{
+                    "registered-ordinary", "1.0-2"},
+                DesiredInstallReason::Explicit,
+                ArtifactInstallExecutionOutcome::Installed},
+            {}};
     add_source(result, std::move(ordinary));
     return result;
 }
 
 UpgradeAllOperationResult make_aur_mixed_cleanup_failure_result() {
     UpgradeAllOperationResult result = make_base_result(
-            UpgradeAllOperationStatus::StoppedAfterAurCleanupFailure,
-            PackageStateChange::Changed,
-            UpgradeAllAurPhaseStatus::StoppedAfterCleanupFailure,
-            AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure);
+        UpgradeAllOperationStatus::StoppedAfterAurCleanupFailure,
+        PackageStateChange::Changed,
+        UpgradeAllAurPhaseStatus::StoppedAfterCleanupFailure,
+        AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure);
     result.stopped_phase = UpgradeAllOperationPhase::AurExecution;
     FilteredAurUpdateExecutionResult& filtered =
-            *result.aur.operation_result;
+        *result.aur.operation_result;
     filtered.reduced_operation_result.execution_status =
-            AurUpdateInvocationExecutionStatus::
-                    StoppedAfterPackageCleanupFailure;
+        AurUpdateInvocationExecutionStatus::
+            StoppedAfterPackageCleanupFailure;
 
     AurUpdateOperationTargetResult target = make_aur_target(
-            "aur-cleanup-main",
-            AurUpdateOperationTargetStatus::UpdatedCleanupFailed,
-            "aur-cleanup-suite");
+        "aur-cleanup-main",
+        AurUpdateOperationTargetStatus::UpdatedCleanupFailed,
+        "aur-cleanup-suite");
     target.update_plan_index = 0;
     target.execution_work_item_index = 0;
     target.execution_failure_kind = AurUpdateWorkItemFailureKind::
-            CleanupFailedAfterPackageTransaction;
+        CleanupFailedAfterPackageTransaction;
     target.execution_failure_detail =
-            AurUpdateWorkItemFailureDetail{std::monostate{}};
+        AurUpdateWorkItemFailureDetail{std::monostate{}};
     target.execution_diagnostic =
-            "/private/workspace/upgrade-all-secret/cleanup failed";
+        "/private/workspace/upgrade-all-secret/cleanup failed";
 
     AurUpdateWorkItemExecutionResult cleanup = make_multi_child_work_item(
-            0,
-            "aur-cleanup-suite",
-            {make_child_result(
-                     0,
-                     0,
-                     "aur-cleanup-suite",
-                     "aur-cleanup-main",
-                     DesiredInstallReason::Explicit,
-                     AurUpdateChildExecutionStatus::InstalledCleanupFailed,
-                     0,
-                     "8.3.0-5"),
-             make_child_result(
-                     0,
-                     1,
-                     "aur-cleanup-suite",
-                     "aur-cleanup-dependency",
-                     DesiredInstallReason::Dependency,
-                     AurUpdateChildExecutionStatus::
-                             SkippedAsNeededCleanupFailed,
-                     0,
-                     "8.3.0-5")},
-            AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed,
-            AurUpdateWorkItemFailureKind::
-                    CleanupFailedAfterPackageTransaction,
-            "/private/workspace/upgrade-all-secret/cleanup failed");
+        0,
+        "aur-cleanup-suite",
+        {make_child_result(
+             0,
+             0,
+             "aur-cleanup-suite",
+             "aur-cleanup-main",
+             DesiredInstallReason::Explicit,
+             AurUpdateChildExecutionStatus::InstalledCleanupFailed,
+             0,
+             "8.3.0-5"),
+         make_child_result(
+             0,
+             1,
+             "aur-cleanup-suite",
+             "aur-cleanup-dependency",
+             DesiredInstallReason::Dependency,
+             AurUpdateChildExecutionStatus::
+                 SkippedAsNeededCleanupFailed,
+             0,
+             "8.3.0-5")},
+        AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed,
+        AurUpdateWorkItemFailureKind::
+            CleanupFailedAfterPackageTransaction,
+        "/private/workspace/upgrade-all-secret/cleanup failed");
     cleanup.unselected_artifacts = {
-            {"aur-cleanup-suite-debug", "8.3.0-5"}};
+        {"aur-cleanup-suite-debug", "8.3.0-5"}};
     target.execution_contributions.push_back(make_child_contribution(
-            cleanup.child_results[0],
-            AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed,
-            AurUpdateWorkItemFailureKind::
-                    CleanupFailedAfterPackageTransaction));
+        cleanup.child_results[0],
+        AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed,
+        AurUpdateWorkItemFailureKind::
+            CleanupFailedAfterPackageTransaction));
     target.execution_contributions.push_back(make_child_contribution(
-            cleanup.child_results[1],
-            AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed,
-            AurUpdateWorkItemFailureKind::
-                    CleanupFailedAfterPackageTransaction));
+        cleanup.child_results[1],
+        AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed,
+        AurUpdateWorkItemFailureKind::
+            CleanupFailedAfterPackageTransaction));
     filtered.reduced_operation_result.targets.push_back(std::move(target));
 
     AurUpdateOperationTargetResult later = make_aur_target(
-            "aur-cleanup-later",
-            AurUpdateOperationTargetStatus::NotAttempted);
+        "aur-cleanup-later",
+        AurUpdateOperationTargetStatus::NotAttempted);
     later.update_plan_index = 1;
     later.execution_work_item_index = 1;
     later.execution_failure_kind =
-            AurUpdateWorkItemFailureKind::PriorWorkItemStopped;
+        AurUpdateWorkItemFailureKind::PriorWorkItemStopped;
     filtered.reduced_operation_result.targets.push_back(std::move(later));
     filtered.reduced_operation_result.execution_work_items.push_back(
-            std::move(cleanup));
+        std::move(cleanup));
     filtered.reduced_operation_result.execution_work_items.push_back(
-            make_work_item_result(
-                    1,
-                    "aur-cleanup-later",
-                    AurUpdateWorkItemExecutionStatus::NotAttempted,
-                    AurUpdateWorkItemFailureKind::PriorWorkItemStopped));
+        make_work_item_result(
+            1,
+            "aur-cleanup-later",
+            AurUpdateWorkItemExecutionStatus::NotAttempted,
+            AurUpdateWorkItemFailureKind::PriorWorkItemStopped));
     add_stopping_diagnostic(
-            result,
-            UpgradeAllOperationPhase::AurExecution,
-            "/private/workspace/upgrade-all-secret/cleanup failed");
+        result,
+        UpgradeAllOperationPhase::AurExecution,
+        "/private/workspace/upgrade-all-secret/cleanup failed");
     return result;
 }
 
@@ -1737,38 +1725,38 @@ UpgradeAllOperationResult make_foreign_inventory_failure_result() {
     result.system_source.stopped_phase = SystemSourceUpgradePhase::None;
     result.system_source.system.status = SystemUpgradePhaseStatus::Completed;
     result.system_source.system.package_state_change =
-            PackageStateChange::NoChange;
+        PackageStateChange::NoChange;
     result.foreign_inventory.status =
-            UpgradeAllForeignInventoryPhaseStatus::Failed;
+        UpgradeAllForeignInventoryPhaseStatus::Failed;
     result.foreign_inventory.failure = PackageMetadataFailure{
-            PackageMetadataErrorCode::QueryFailed,
-            "fixture foreign inventory read failed"};
+        PackageMetadataErrorCode::QueryFailed,
+        "fixture foreign inventory read failed"};
     result.foreign_inventory.diagnostic =
-            "fixture foreign inventory read failed";
+        "fixture foreign inventory read failed";
     result.aur.status = UpgradeAllAurPhaseStatus::NotAttempted;
     result.aur.not_attempted_reason =
-            UpgradeAllNotAttemptedReason::ForeignInventoryFailure;
+        UpgradeAllNotAttemptedReason::ForeignInventoryFailure;
     result.issues.push_back(make_aggregate_issue(
-            UpgradeAllOperationIssueKind::ForeignInventoryReadFailed,
-            UpgradeAllOperationPhase::ForeignInventory,
-            "fixture foreign inventory read failed"));
+        UpgradeAllOperationIssueKind::ForeignInventoryReadFailed,
+        UpgradeAllOperationPhase::ForeignInventory,
+        "fixture foreign inventory read failed"));
     add_stopping_diagnostic(
-            result,
-            UpgradeAllOperationPhase::ForeignInventory,
-            "fixture foreign inventory read failed");
+        result,
+        UpgradeAllOperationPhase::ForeignInventory,
+        "fixture foreign inventory read failed");
     return result;
 }
 
 UpgradeAllOperationResult
 make_completed_direct_foreign_inventory_failure_result() {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     result.foreign_inventory.failure = PackageMetadataFailure{
-            PackageMetadataErrorCode::LocalDatabaseUnavailable,
-            "fixture direct foreign inventory failure"};
+        PackageMetadataErrorCode::LocalDatabaseUnavailable,
+        "fixture direct foreign inventory failure"};
     result.foreign_inventory.diagnostic =
-            "fixture direct foreign inventory failure";
+        "fixture direct foreign inventory failure";
     return result;
 }
 
@@ -1779,23 +1767,23 @@ UpgradeAllOperationResult make_inconsistent_result() {
     result.system_source.status = SystemSourceUpgradeStatus::Completed;
     result.system_source.system.status = SystemUpgradePhaseStatus::Completed;
     result.system_source.system.package_state_change =
-            PackageStateChange::Unknown;
+        PackageStateChange::Unknown;
     result.foreign_inventory.status =
-            UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
+        UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
     result.foreign_inventory.not_attempted_reason =
-            UpgradeAllNotAttemptedReason::PriorAggregateInconsistency;
+        UpgradeAllNotAttemptedReason::PriorAggregateInconsistency;
     result.aur.status = UpgradeAllAurPhaseStatus::NotAttempted;
     result.aur.not_attempted_reason =
-            UpgradeAllNotAttemptedReason::PriorAggregateInconsistency;
+        UpgradeAllNotAttemptedReason::PriorAggregateInconsistency;
     result.issues.push_back(make_aggregate_issue(
-            UpgradeAllOperationIssueKind::
-                    DuplicateExclusionCorrelationInconsistent,
-            UpgradeAllOperationPhase::Reduction,
-            "fixture aggregate correlation inconsistency"));
+        UpgradeAllOperationIssueKind::
+            DuplicateExclusionCorrelationInconsistent,
+        UpgradeAllOperationPhase::Reduction,
+        "fixture aggregate correlation inconsistency"));
     add_stopping_diagnostic(
-            result,
-            UpgradeAllOperationPhase::Reduction,
-            "fixture aggregate correlation inconsistency");
+        result,
+        UpgradeAllOperationPhase::Reduction,
+        "fixture aggregate correlation inconsistency");
     return result;
 }
 
@@ -1804,28 +1792,28 @@ UpgradeAllOperationResult make_nested_system_unavailable_result() {
     result.status = UpgradeAllOperationStatus::InconsistentResult;
     result.stopped_phase = UpgradeAllOperationPhase::System;
     result.system_source.status =
-            SystemSourceUpgradeStatus::InconsistentResult;
+        SystemSourceUpgradeStatus::InconsistentResult;
     result.system_source.stopped_phase = SystemSourceUpgradePhase::System;
     result.system_source.system.status = SystemUpgradePhaseStatus::Failed;
     result.system_source.system.package_state_change =
-            PackageStateChange::Unknown;
+        PackageStateChange::Unknown;
     result.system_source.system.diagnostic =
-            "The system result is unavailable because an unexpected exception occurred after the phase started.";
+        "The system result is unavailable because an unexpected exception occurred after the phase started.";
     add_source(
-            result,
-            make_source_result(
-                    0,
-                    "source-after-unavailable-system",
-                    RegisteredSourceUpgradeStatus::NotAttempted,
-                    RegisteredSourceUpgradeFailureKind::PriorPhaseStopped,
-                    PackageStateChange::NoChange));
+        result,
+        make_source_result(
+            0,
+            "source-after-unavailable-system",
+            RegisteredSourceUpgradeStatus::NotAttempted,
+            RegisteredSourceUpgradeFailureKind::PriorPhaseStopped,
+            PackageStateChange::NoChange));
     result.foreign_inventory.status =
-            UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
+        UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
     result.foreign_inventory.not_attempted_reason =
-            UpgradeAllNotAttemptedReason::PriorAggregateInconsistency;
+        UpgradeAllNotAttemptedReason::PriorAggregateInconsistency;
     result.aur.status = UpgradeAllAurPhaseStatus::NotAttempted;
     result.aur.not_attempted_reason =
-            UpgradeAllNotAttemptedReason::PriorAggregateInconsistency;
+        UpgradeAllNotAttemptedReason::PriorAggregateInconsistency;
     return result;
 }
 
@@ -1834,74 +1822,74 @@ UpgradeAllOperationResult make_nested_source_preserved_result() {
     result.status = UpgradeAllOperationStatus::InconsistentResult;
     result.stopped_phase = UpgradeAllOperationPhase::RegisteredSource;
     result.system_source.status =
-            SystemSourceUpgradeStatus::InconsistentResult;
+        SystemSourceUpgradeStatus::InconsistentResult;
     result.system_source.stopped_phase =
-            SystemSourceUpgradePhase::RegisteredSource;
+        SystemSourceUpgradePhase::RegisteredSource;
     result.system_source.system.status = SystemUpgradePhaseStatus::Completed;
     result.system_source.system.package_state_change =
-            PackageStateChange::NoChange;
+        PackageStateChange::NoChange;
     add_source(
-            result,
-            make_source_result(
-                    0,
-                    "source-recorded-before-exception",
-                    RegisteredSourceUpgradeStatus::Updated,
-                    RegisteredSourceUpgradeFailureKind::None,
-                    PackageStateChange::Changed));
+        result,
+        make_source_result(
+            0,
+            "source-recorded-before-exception",
+            RegisteredSourceUpgradeStatus::Updated,
+            RegisteredSourceUpgradeFailureKind::None,
+            PackageStateChange::Changed));
     add_source(
-            result,
-            make_source_result(
-                    1,
-                    "source-unavailable-after-start",
-                    RegisteredSourceUpgradeStatus::Incomplete,
-                    RegisteredSourceUpgradeFailureKind::UnknownException,
-                    PackageStateChange::Unknown,
-                    "The registered source result is unavailable because an unexpected exception occurred after the phase started."));
+        result,
+        make_source_result(
+            1,
+            "source-unavailable-after-start",
+            RegisteredSourceUpgradeStatus::Incomplete,
+            RegisteredSourceUpgradeFailureKind::UnknownException,
+            PackageStateChange::Unknown,
+            "The registered source result is unavailable because an unexpected exception occurred after the phase started."));
     add_source(
-            result,
-            make_source_result(
-                    2,
-                    "source-not-started",
-                    RegisteredSourceUpgradeStatus::NotAttempted,
-                    RegisteredSourceUpgradeFailureKind::PriorPhaseStopped,
-                    PackageStateChange::NoChange));
+        result,
+        make_source_result(
+            2,
+            "source-not-started",
+            RegisteredSourceUpgradeStatus::NotAttempted,
+            RegisteredSourceUpgradeFailureKind::PriorPhaseStopped,
+            PackageStateChange::NoChange));
     result.foreign_inventory.status =
-            UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
+        UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
     result.foreign_inventory.not_attempted_reason =
-            UpgradeAllNotAttemptedReason::PriorAggregateInconsistency;
+        UpgradeAllNotAttemptedReason::PriorAggregateInconsistency;
     result.aur.status = UpgradeAllAurPhaseStatus::NotAttempted;
     result.aur.not_attempted_reason =
-            UpgradeAllNotAttemptedReason::PriorAggregateInconsistency;
+        UpgradeAllNotAttemptedReason::PriorAggregateInconsistency;
     return result;
 }
 
 UpgradeAllOperationResult make_completed_query_failure_result() {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     result.aur.operation_result->query_result.recoverable_failures.push_back(
-            AurUpdateQueryFailure{
-                    {"query-broken", "query-also-broken"},
-                    "fixture AUR query timeout"});
+        AurUpdateQueryFailure{
+            {"query-broken", "query-also-broken"},
+            "fixture AUR query timeout"});
     return result;
 }
 
 UpgradeAllOperationResult make_completed_planning_issue_result() {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     FilteredAurUpdateExecutionResult& filtered =
-            *result.aur.operation_result;
+        *result.aur.operation_result;
     UpgradeAllPlanningIssue planning_issue;
     planning_issue.kind =
-            UpgradeAllPlanningIssueKind::ConflictingExplicitPackageBase;
+        UpgradeAllPlanningIssueKind::ConflictingExplicitPackageBase;
     planning_issue.explicit_source_indexes = {0, 1};
     planning_issue.package_base = "planning-conflict-base";
     filtered.upgrade_all_plan.issues.push_back(std::move(planning_issue));
 
     FilteredAurUpdateOperationIssue mapping_issue;
     mapping_issue.kind =
-            FilteredAurUpdateOperationIssueKind::TargetPlannerMappingInconsistent;
+        FilteredAurUpdateOperationIssueKind::TargetPlannerMappingInconsistent;
     mapping_issue.original_query_plan_index = 0;
     mapping_issue.package_name = "mapping-broken";
     mapping_issue.diagnostic = "fixture target mapping issue";
@@ -1911,60 +1899,59 @@ UpgradeAllOperationResult make_completed_planning_issue_result() {
 
 UpgradeAllOperationResult make_completed_inconsistency_result() {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     result.issues.push_back(make_aggregate_issue(
-            UpgradeAllOperationIssueKind::
-                    ExternalSatisfactionCorrelationInconsistent,
-            UpgradeAllOperationPhase::Reduction,
-            "fixture completed aggregate inconsistency"));
+        UpgradeAllOperationIssueKind::
+            ExternalSatisfactionCorrelationInconsistent,
+        UpgradeAllOperationPhase::Reduction,
+        "fixture completed aggregate inconsistency"));
 
     AurUpdateOperationReductionIssue reduction_issue;
     reduction_issue.reason =
-            AurUpdateOperationReductionReason::UnknownExecutionUpdatePlanIndex;
+        AurUpdateOperationReductionReason::UnknownExecutionUpdatePlanIndex;
     reduction_issue.stage = AurUpdateOperationReductionStage::Execution;
     reduction_issue.affected_update_plan_indices = {99};
     reduction_issue.diagnostic = "fixture AUR reduction issue";
-    result.aur.operation_result->reduced_operation_result.
-            reduction_issues.push_back(std::move(reduction_issue));
+    result.aur.operation_result->reduced_operation_result.reduction_issues.push_back(std::move(reduction_issue));
     return result;
 }
 
 UpgradeAllOperationResult make_completed_cleanup_failure_result() {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     FilteredAurUpdateExecutionResult& filtered =
-            *result.aur.operation_result;
+        *result.aur.operation_result;
     AurUpdateOperationTargetResult target = make_aur_target(
-            "defensive-cleanup",
-            AurUpdateOperationTargetStatus::NoChangeCleanupFailed);
+        "defensive-cleanup",
+        AurUpdateOperationTargetStatus::NoChangeCleanupFailed);
     target.execution_work_item_index = 0;
     target.execution_failure_kind =
-            AurUpdateWorkItemFailureKind::
-                    CleanupFailedAfterPackageTransaction;
+        AurUpdateWorkItemFailureKind::
+            CleanupFailedAfterPackageTransaction;
     target.execution_diagnostic =
-            "fixture completed cleanup failure";
+        "fixture completed cleanup failure";
     filtered.reduced_operation_result.targets.push_back(std::move(target));
     return result;
 }
 
 UpgradeAllOperationResult make_completed_not_attempted_result() {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     AurUpdateOperationTargetResult target = make_aur_target(
-            "defensive-not-attempted",
-            AurUpdateOperationTargetStatus::NotAttempted);
+        "defensive-not-attempted",
+        AurUpdateOperationTargetStatus::NotAttempted);
     target.execution_failure_kind =
-            AurUpdateWorkItemFailureKind::PriorWorkItemStopped;
+        AurUpdateWorkItemFailureKind::PriorWorkItemStopped;
     result.aur.operation_result->reduced_operation_result.targets.push_back(
-            std::move(target));
+        std::move(target));
     return result;
 }
 
 AurUpdateExecutionIssue make_matrix_preflight_issue(
-        AurUpdateExecutionReason reason) {
+    AurUpdateExecutionReason reason) {
     AurUpdateExecutionIssue issue;
     issue.reason = reason;
     issue.package_name = "matrix-target";
@@ -1974,7 +1961,7 @@ AurUpdateExecutionIssue make_matrix_preflight_issue(
 }
 
 AurUpdatePreparationIssue make_matrix_preparation_issue(
-        AurUpdatePreparationReason reason) {
+    AurUpdatePreparationReason reason) {
     AurUpdatePreparationIssue issue;
     issue.reason = reason;
     issue.affected_update_plan_indices = {0};
@@ -1985,146 +1972,146 @@ AurUpdatePreparationIssue make_matrix_preparation_issue(
 }
 
 UpgradeAllOperationResult make_aur_phase_matrix_result(
-        std::size_t index) {
+    std::size_t index) {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     result.aur.status = matrix_enum_value(
-            UPGRADE_ALL_AUR_PHASE_STATUSES, index);
+        UPGRADE_ALL_AUR_PHASE_STATUSES, index);
     if(result.aur.status == UpgradeAllAurPhaseStatus::NotAttempted) {
         result.aur.not_attempted_reason =
-                UpgradeAllNotAttemptedReason::PreparationBlocked;
+            UpgradeAllNotAttemptedReason::PreparationBlocked;
     }
     return result;
 }
 
 UpgradeAllOperationResult make_not_attempted_reason_matrix_result(
-        std::size_t index) {
+    std::size_t index) {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     result.aur.status = UpgradeAllAurPhaseStatus::NotAttempted;
     result.aur.not_attempted_reason = matrix_enum_value(
-            UPGRADE_ALL_NOT_ATTEMPTED_REASONS, index);
+        UPGRADE_ALL_NOT_ATTEMPTED_REASONS, index);
     return result;
 }
 
 UpgradeAllOperationResult make_target_status_matrix_result(
-        std::size_t index) {
+    std::size_t index) {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     const AurUpdateOperationTargetStatus status = matrix_enum_value(
-            AUR_TARGET_STATUSES, index);
+        AUR_TARGET_STATUSES, index);
     AurUpdateOperationTargetResult target = make_aur_target(
-            "matrix-target", status, "matrix-base");
+        "matrix-target", status, "matrix-base");
     switch(status) {
-    case AurUpdateOperationTargetStatus::Updated:
-    case AurUpdateOperationTargetStatus::NoChange:
-    case AurUpdateOperationTargetStatus::Skipped:
-    case AurUpdateOperationTargetStatus::Unsupported:
-    case AurUpdateOperationTargetStatus::Incomplete:
-        break;
-    case AurUpdateOperationTargetStatus::Failed:
-        target.execution_failure_kind =
+        case AurUpdateOperationTargetStatus::Updated:
+        case AurUpdateOperationTargetStatus::NoChange:
+        case AurUpdateOperationTargetStatus::Skipped:
+        case AurUpdateOperationTargetStatus::Unsupported:
+        case AurUpdateOperationTargetStatus::Incomplete:
+            break;
+        case AurUpdateOperationTargetStatus::Failed:
+            target.execution_failure_kind =
                 AurUpdateWorkItemFailureKind::BuildOrInstallFailed;
-        target.execution_diagnostic = "matrix execution diagnostic";
-        break;
-    case AurUpdateOperationTargetStatus::UpdatedCleanupFailed:
-    case AurUpdateOperationTargetStatus::NoChangeCleanupFailed:
-        target.execution_failure_kind = AurUpdateWorkItemFailureKind::
+            target.execution_diagnostic = "matrix execution diagnostic";
+            break;
+        case AurUpdateOperationTargetStatus::UpdatedCleanupFailed:
+        case AurUpdateOperationTargetStatus::NoChangeCleanupFailed:
+            target.execution_failure_kind = AurUpdateWorkItemFailureKind::
                 CleanupFailedAfterPackageTransaction;
-        target.execution_diagnostic = "matrix cleanup diagnostic";
-        break;
-    case AurUpdateOperationTargetStatus::NotAttempted:
-        target.execution_failure_kind =
+            target.execution_diagnostic = "matrix cleanup diagnostic";
+            break;
+        case AurUpdateOperationTargetStatus::NotAttempted:
+            target.execution_failure_kind =
                 AurUpdateWorkItemFailureKind::PriorWorkItemStopped;
-        break;
+            break;
     }
     result.aur.operation_result->reduced_operation_result.targets.push_back(
-            std::move(target));
+        std::move(target));
     return result;
 }
 
 UpgradeAllOperationResult make_operation_status_matrix_result(
-        std::size_t index) {
+    std::size_t index) {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     AurUpdateOperationResult& operation =
-            result.aur.operation_result->reduced_operation_result;
+        result.aur.operation_result->reduced_operation_result;
     operation.status = matrix_enum_value(AUR_OPERATION_STATUSES, index);
     operation.targets.push_back(make_aur_target(
-            "matrix-target",
-            AurUpdateOperationTargetStatus::NotAttempted,
-            "matrix-base"));
+        "matrix-target",
+        AurUpdateOperationTargetStatus::NotAttempted,
+        "matrix-base"));
     return result;
 }
 
 UpgradeAllOperationResult make_preflight_reason_matrix_result(
-        std::size_t index) {
+    std::size_t index) {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     const AurUpdateExecutionReason reason = matrix_enum_value(
-            AUR_PREFLIGHT_REASONS, index);
+        AUR_PREFLIGHT_REASONS, index);
     const bool is_normal_skip =
-            reason == AurUpdateExecutionReason::UpToDate ||
-            reason == AurUpdateExecutionReason::NonAurForeign;
+        reason == AurUpdateExecutionReason::UpToDate ||
+        reason == AurUpdateExecutionReason::NonAurForeign;
     AurUpdateOperationTargetResult target = make_aur_target(
-            "matrix-target",
-            is_normal_skip ? AurUpdateOperationTargetStatus::Skipped
-                           : AurUpdateOperationTargetStatus::Unsupported,
-            "matrix-base");
+        "matrix-target",
+        is_normal_skip ? AurUpdateOperationTargetStatus::Skipped
+                       : AurUpdateOperationTargetStatus::Unsupported,
+        "matrix-base");
     target.preflight_issues.push_back(
-            make_matrix_preflight_issue(reason));
+        make_matrix_preflight_issue(reason));
     result.aur.operation_result->reduced_operation_result.targets.push_back(
-            std::move(target));
+        std::move(target));
     return result;
 }
 
 UpgradeAllOperationResult make_preparation_reason_matrix_result(
-        std::size_t index) {
+    std::size_t index) {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     const AurUpdatePreparationReason reason = matrix_enum_value(
-            AUR_PREPARATION_REASONS, index);
+        AUR_PREPARATION_REASONS, index);
     AurUpdatePreparationIssue issue =
-            make_matrix_preparation_issue(reason);
+        make_matrix_preparation_issue(reason);
     AurUpdateOperationTargetResult target = make_aur_target(
-            "matrix-target",
-            AurUpdateOperationTargetStatus::Incomplete,
-            "matrix-base");
+        "matrix-target",
+        AurUpdateOperationTargetStatus::Incomplete,
+        "matrix-base");
     target.preparation_issues.push_back(issue);
     AurUpdateOperationResult& operation =
-            result.aur.operation_result->reduced_operation_result;
+        result.aur.operation_result->reduced_operation_result;
     operation.targets.push_back(std::move(target));
     operation.preparation_issues.push_back(std::move(issue));
     return result;
 }
 
 UpgradeAllOperationResult make_execution_failure_matrix_result(
-        std::size_t index) {
+    std::size_t index) {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     const AurUpdateWorkItemFailureKind kind = matrix_enum_value(
-            AUR_EXECUTION_FAILURE_KINDS, index);
+        AUR_EXECUTION_FAILURE_KINDS, index);
     AurUpdateOperationTargetStatus status =
-            AurUpdateOperationTargetStatus::Failed;
+        AurUpdateOperationTargetStatus::Failed;
     if(kind == AurUpdateWorkItemFailureKind::
-                       CleanupFailedAfterPackageTransaction) {
+                   CleanupFailedAfterPackageTransaction) {
         status = AurUpdateOperationTargetStatus::UpdatedCleanupFailed;
     } else if(kind == AurUpdateWorkItemFailureKind::PriorWorkItemStopped) {
         status = AurUpdateOperationTargetStatus::NotAttempted;
     }
     AurUpdateOperationTargetResult target = make_aur_target(
-            "matrix-target", status, "matrix-base");
+        "matrix-target", status, "matrix-base");
     target.execution_failure_kind = kind;
     target.execution_diagnostic = "matrix execution diagnostic";
     result.aur.operation_result->reduced_operation_result.targets.push_back(
-            std::move(target));
+        std::move(target));
     return result;
 }
 
@@ -2132,41 +2119,39 @@ AurUpdateOperationReductionIssue make_matrix_reduction_issue() {
     AurUpdateOperationReductionIssue issue;
     issue.stage = AurUpdateOperationReductionStage::Preflight;
     issue.reason = AurUpdateOperationReductionReason::
-            DuplicatePreflightUpdatePlanIndex;
+        DuplicatePreflightUpdatePlanIndex;
     issue.affected_update_plan_indices = {0};
     issue.diagnostic = "matrix reduction diagnostic";
     return issue;
 }
 
 UpgradeAllOperationResult make_reduction_stage_matrix_result(
-        std::size_t index) {
+    std::size_t index) {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     AurUpdateOperationReductionIssue issue = make_matrix_reduction_issue();
     issue.stage = matrix_enum_value(AUR_REDUCTION_STAGES, index);
-    result.aur.operation_result->reduced_operation_result.
-            reduction_issues.push_back(std::move(issue));
+    result.aur.operation_result->reduced_operation_result.reduction_issues.push_back(std::move(issue));
     return result;
 }
 
 UpgradeAllOperationResult make_reduction_reason_matrix_result(
-        std::size_t index) {
+    std::size_t index) {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     AurUpdateOperationReductionIssue issue = make_matrix_reduction_issue();
     issue.reason = matrix_enum_value(AUR_REDUCTION_REASONS, index);
-    result.aur.operation_result->reduced_operation_result.
-            reduction_issues.push_back(std::move(issue));
+    result.aur.operation_result->reduced_operation_result.reduction_issues.push_back(std::move(issue));
     return result;
 }
 
 UpgradeAllOperationResult make_filtered_issue_matrix_result(
-        std::size_t index) {
+    std::size_t index) {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     FilteredAurUpdateOperationIssue issue;
     issue.kind = matrix_enum_value(FILTERED_AUR_ISSUE_KINDS, index);
     issue.package_name = "matrix-target";
@@ -2177,68 +2162,65 @@ UpgradeAllOperationResult make_filtered_issue_matrix_result(
 }
 
 UpgradeAllOperationResult make_planning_issue_matrix_result(
-        std::size_t index) {
+    std::size_t index) {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     UpgradeAllPlanningIssue issue;
     issue.kind = matrix_enum_value(
-            UPGRADE_ALL_PLANNING_ISSUE_KINDS, index);
+        UPGRADE_ALL_PLANNING_ISSUE_KINDS, index);
     issue.package_name = "matrix-target";
     issue.package_base = "matrix-base";
     result.aur.operation_result->upgrade_all_plan.issues.push_back(
-            std::move(issue));
+        std::move(issue));
     return result;
 }
 
 UpgradeAllOperationResult make_target_disposition_matrix_result(
-        std::size_t index) {
+    std::size_t index) {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     result.duplicate_excluded_aur_targets.push_back(
-            make_duplicate_exclusion(
-                    0,
-                    "matrix-duplicate",
-                    "matrix-base",
-                    matrix_enum_value(
-                            UPGRADE_ALL_TARGET_DISPOSITIONS, index),
-                    "matrix-duplicate",
-                    "matrix-base",
-                    "repository:https://sources.example/matrix"));
+        make_duplicate_exclusion(
+            0,
+            "matrix-duplicate",
+            "matrix-base",
+            matrix_enum_value(
+                UPGRADE_ALL_TARGET_DISPOSITIONS, index),
+            "matrix-duplicate",
+            "matrix-base",
+            "repository:https://sources.example/matrix"));
     return result;
 }
 
 UpgradeAllOperationResult make_build_unit_role_matrix_result(
-        std::size_t index) {
+    std::size_t index) {
     UpgradeAllOperationResult result =
-            make_external_satisfaction_result();
-    result.externally_satisfied_aur_build_units.front().
-            root_correlations.front().role = matrix_enum_value(
-                    UPGRADE_ALL_BUILD_UNIT_ROLES, index);
+        make_external_satisfaction_result();
+    result.externally_satisfied_aur_build_units.front().root_correlations.front().role = matrix_enum_value(
+        UPGRADE_ALL_BUILD_UNIT_ROLES, index);
     return result;
 }
 
 UpgradeAllOperationResult make_preparation_warning_matrix_result() {
     UpgradeAllOperationResult result = make_success_result(
-            UpgradeAllOperationStatus::Completed,
-            PackageStateChange::NoChange);
+        UpgradeAllOperationStatus::Completed,
+        PackageStateChange::NoChange);
     AurUpdatePreparationWarning warning;
     warning.preference_name = "matrix-preference";
     warning.entry_path = "/fixture/preferences/matrix-preference";
     warning.affected_update_plan_indices = {0};
     warning.affected_roots = {{0, "matrix-target"}};
     warning.diagnostic = "matrix preparation warning diagnostic";
-    result.aur.operation_result->reduced_operation_result.
-            preparation_warnings.push_back(std::move(warning));
+    result.aur.operation_result->reduced_operation_result.preparation_warnings.push_back(std::move(warning));
     return result;
 }
 
 UpgradeAllOperationResult make_external_attribution_missing_matrix_result() {
     UpgradeAllOperationResult result =
-            make_external_satisfaction_result();
-    result.externally_satisfied_aur_build_units.front().operation_unit.
-            external_satisfaction.source_identity_keys.clear();
+        make_external_satisfaction_result();
+    result.externally_satisfied_aur_build_units.front().operation_unit.external_satisfaction.source_identity_keys.clear();
     return result;
 }
 
@@ -2287,26 +2269,26 @@ UpgradeAllOperationResult make_aur_presentation_matrix_result() {
     if(kind == "preparation-warning") {
         if(index != 0) {
             throw std::logic_error(
-                    "Preparation warning matrix index is out of range.");
+                "Preparation warning matrix index is out of range.");
         }
         return make_preparation_warning_matrix_result();
     }
     if(kind == "external-attribution-missing") {
         if(index != 0) {
             throw std::logic_error(
-                    "External attribution matrix index is out of range.");
+                "External attribution matrix index is out of range.");
         }
         return make_external_attribution_missing_matrix_result();
     }
     throw std::logic_error(
-            "Unknown upgrade-all presentation matrix kind: " + kind);
+        "Unknown upgrade-all presentation matrix kind: " + kind);
 }
 
 UpgradeAllOperationResult result_for_scenario(const std::string& scenario) {
     if(scenario == "no-updates") {
         return make_success_result(
-                UpgradeAllOperationStatus::NoUpdates,
-                PackageStateChange::NoChange);
+            UpgradeAllOperationStatus::NoUpdates,
+            PackageStateChange::NoChange);
     }
     if(scenario == "issue-455-system-changed-aur-up-to-date") {
         return make_issue_455_system_changed_aur_up_to_date_result();
@@ -2328,8 +2310,8 @@ UpgradeAllOperationResult result_for_scenario(const std::string& scenario) {
     }
     if(scenario == "completed-no-change") {
         return make_success_result(
-                UpgradeAllOperationStatus::Completed,
-                PackageStateChange::NoChange);
+            UpgradeAllOperationStatus::Completed,
+            PackageStateChange::NoChange);
     }
     if(scenario == "before-snapshot-unavailable") {
         return make_snapshot_unavailable_result(true);
@@ -2339,8 +2321,8 @@ UpgradeAllOperationResult result_for_scenario(const std::string& scenario) {
     }
     if(scenario == "completed-unknown") {
         return make_success_result(
-                UpgradeAllOperationStatus::Completed,
-                PackageStateChange::Unknown);
+            UpgradeAllOperationStatus::Completed,
+            PackageStateChange::Unknown);
     }
     if(scenario == "aur-skips") {
         return make_aur_skip_result();
@@ -2359,47 +2341,47 @@ UpgradeAllOperationResult result_for_scenario(const std::string& scenario) {
     }
     if(scenario == "stopped-system-version-lock-complete-zero") {
         return make_no_possible_version_lock_result(
-                CrossSourceVersionLockObservationStatus::Complete);
+            CrossSourceVersionLockObservationStatus::Complete);
     }
     if(scenario == "stopped-system-version-lock-partial-zero") {
         return make_no_possible_version_lock_result(
-                CrossSourceVersionLockObservationStatus::Partial);
+            CrossSourceVersionLockObservationStatus::Partial);
     }
     if(scenario == "stopped-system-version-lock-failed-zero") {
         return make_no_possible_version_lock_result(
-                CrossSourceVersionLockObservationStatus::Failed);
+            CrossSourceVersionLockObservationStatus::Failed);
     }
     if(scenario == "stopped-system-version-lock-correlation-failure") {
         return make_secondary_correlation_failure_result();
     }
     if(scenario == "stopped-system-version-lock-compatible") {
         return make_possible_version_lock_result(
-                CrossSourceVersionLockStatus::CompatibleReplacement);
+            CrossSourceVersionLockStatus::CompatibleReplacement);
     }
     if(scenario == "stopped-system-version-lock-incompatible") {
         return make_possible_version_lock_result(
-                CrossSourceVersionLockStatus::IncompatibleReplacement);
+            CrossSourceVersionLockStatus::IncompatibleReplacement);
     }
     if(scenario == "stopped-system-version-lock-missing") {
         return make_possible_version_lock_result(
-                CrossSourceVersionLockStatus::MissingReplacement);
+            CrossSourceVersionLockStatus::MissingReplacement);
     }
     if(scenario == "stopped-system-version-lock-unknown") {
         return make_possible_version_lock_result(
-                CrossSourceVersionLockStatus::Unknown);
+            CrossSourceVersionLockStatus::Unknown);
     }
     if(scenario == "stopped-system-version-lock-query-failure") {
         return make_possible_version_lock_result(
-                CrossSourceVersionLockStatus::QueryFailure);
+            CrossSourceVersionLockStatus::QueryFailure);
     }
     if(scenario == "stopped-system-version-lock-ambiguous") {
         return make_possible_version_lock_result(
-                CrossSourceVersionLockStatus::Ambiguous);
+            CrossSourceVersionLockStatus::Ambiguous);
     }
     if(scenario == "stopped-system-version-lock-partial-compatible") {
         return make_possible_version_lock_result(
-                CrossSourceVersionLockStatus::CompatibleReplacement,
-                CrossSourceVersionLockObservationStatus::Partial);
+            CrossSourceVersionLockStatus::CompatibleReplacement,
+            CrossSourceVersionLockObservationStatus::Partial);
     }
     if(scenario == "stopped-system-version-lock-multiple") {
         return make_multiple_possible_version_lock_result();
@@ -2465,15 +2447,15 @@ UpgradeAllOperationResult result_for_scenario(const std::string& scenario) {
         return make_aur_presentation_matrix_result();
     }
     throw std::logic_error(
-            "Unknown upgrade-all command test scenario: " + scenario);
+        "Unknown upgrade-all command test scenario: " + scenario);
 }
 
 } // namespace
 
 struct PreparedUpgradeAllOperation::Impl {
     Impl(
-            UpgradeAllOperationPreparedSnapshot prepared_snapshot,
-            std::string prepared_scenario)
+        UpgradeAllOperationPreparedSnapshot prepared_snapshot,
+        std::string prepared_scenario)
         : snapshot(std::move(prepared_snapshot)),
           scenario(std::move(prepared_scenario)) {
     }
@@ -2484,21 +2466,21 @@ struct PreparedUpgradeAllOperation::Impl {
 
 struct UpgradeAllOperationPreparationAccess {
     static PreparedUpgradeAllOperation make(
-            UpgradeAllOperationPreparedSnapshot snapshot,
-            std::string scenario) {
+        UpgradeAllOperationPreparedSnapshot snapshot,
+        std::string scenario) {
         return PreparedUpgradeAllOperation(
-                std::make_unique<PreparedUpgradeAllOperation::Impl>(
-                        std::move(snapshot), std::move(scenario)));
+            std::make_unique<PreparedUpgradeAllOperation::Impl>(
+                std::move(snapshot), std::move(scenario)));
     }
 };
 
 PreparedUpgradeAllOperation::PreparedUpgradeAllOperation(
-        std::unique_ptr<Impl> impl) noexcept
+    std::unique_ptr<Impl> impl) noexcept
     : impl_(std::move(impl)) {
 }
 
 PreparedUpgradeAllOperation::PreparedUpgradeAllOperation(
-        PreparedUpgradeAllOperation&&) noexcept = default;
+    PreparedUpgradeAllOperation&&) noexcept = default;
 
 PreparedUpgradeAllOperation::~PreparedUpgradeAllOperation() noexcept = default;
 
@@ -2517,14 +2499,14 @@ PreparedUpgradeAllOperation::projection_authority() const noexcept {
 }
 
 PreparedUpgradeAllAurPreflight prepare_upgrade_all_aur_preflight(
-        const UpgradeAllOperationPreparedSnapshot&,
-        const AppConfig&) {
+    const UpgradeAllOperationPreparedSnapshot&,
+    const AppConfig&) {
     throw std::logic_error(
-            "Upgrade-all command fixture does not provide dry-run preflight authority.");
+        "Upgrade-all command fixture does not provide dry-run preflight authority.");
 }
 
 UpgradeAllOperationPreparation prepare_upgrade_all_operation(
-        const AppConfig& config) {
+    const AppConfig& config) {
     const std::string scenario = current_scenario();
     append_event("upgrade-all prepare " + config_snapshot(config));
     if(scenario == "prepare-exception") {
@@ -2538,15 +2520,15 @@ UpgradeAllOperationPreparation prepare_upgrade_all_operation(
 }
 
 UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
-        PreparedUpgradeAllOperation prepared,
-        const AppConfig& config) {
+    PreparedUpgradeAllOperation prepared,
+    const AppConfig& config) {
     if(prepared.impl_ == nullptr) {
         throw std::logic_error(
-                "Upgrade-all command passed an invalid prepared capability.");
+            "Upgrade-all command passed an invalid prepared capability.");
     }
 
     std::unique_ptr<PreparedUpgradeAllOperation::Impl> state =
-            std::move(prepared.impl_);
+        std::move(prepared.impl_);
     append_event("upgrade-all execute " + config_snapshot(config));
     if(state->scenario == "execute-unknown-exception") {
         throw UnknownFixtureException{};

@@ -22,9 +22,9 @@ enum class EventKind {
 };
 
 struct Event {
-    EventKind                kind;
+    EventKind kind;
     std::vector<std::string> package_names;
-    std::string              detail;
+    std::string detail;
 
     bool operator==(const Event&) const = default;
 };
@@ -32,14 +32,14 @@ struct Event {
 void reset();
 
 void set_repository_configuration(
-        PacmanRepositoryConfiguration configuration);
+    PacmanRepositoryConfiguration configuration);
 void set_repository_configuration_failure(PackageMetadataFailure failure);
 
 void set_foreign_inventory(ForeignPackageInventory inventory);
 void set_foreign_inventory_failure(PackageMetadataFailure failure);
 
 void enqueue_info_many_result(
-        std::map<std::string, AurPackageInfo> result);
+    std::map<std::string, AurPackageInfo> result);
 void enqueue_info_many_failure(std::string diagnostic);
 
 void enqueue_info_strict_result(std::optional<AurPackageInfo> result);

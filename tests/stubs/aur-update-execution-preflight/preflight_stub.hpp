@@ -10,7 +10,7 @@
 namespace aur_update_execution_preflight_test_stub {
 
 using ResolverHandler =
-        std::function<BuildPlan(const std::vector<std::string>& targets)>;
+    std::function<BuildPlan(const std::vector<std::string>& targets)>;
 
 void reset_preflight_stub();
 void set_resolver_handler(ResolverHandler handler);

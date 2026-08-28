@@ -33,19 +33,19 @@ enum class EventKind {
 };
 
 struct Event {
-    EventKind   kind;
+    EventKind kind;
     std::string subject;
 
     bool operator==(const Event&) const = default;
 };
 
 struct ConfigSnapshot {
-    bool        no_edit = false;
-    bool        no_diff = false;
-    bool        no_confirm = false;
-    bool        rebuild = false;
-    bool        clean_build = false;
-    bool        rm_deps = false;
+    bool no_edit = false;
+    bool no_diff = false;
+    bool no_confirm = false;
+    bool rebuild = false;
+    bool clean_build = false;
+    bool rm_deps = false;
     std::string editor;
 
     bool operator==(const ConfigSnapshot&) const = default;
@@ -54,9 +54,9 @@ struct ConfigSnapshot {
 struct MetadataSessionScript {
     std::optional<PackageMetadataFailure> open_failure;
     LocalPackageVersionSnapshotResult local_package_snapshot =
-            LocalPackageVersionSnapshot{};
+        LocalPackageVersionSnapshot{};
     std::map<std::string, InstalledPackageQueryResult>
-            installed_package_results;
+        installed_package_results;
 };
 
 struct SourceExecutionCall {
@@ -71,7 +71,7 @@ struct SourcePreparationCall {
     std::string package_base;
     SourceBuildRequest request;
     SourceBuildUpdatePolicy update_policy =
-            SourceBuildUpdatePolicy::AlwaysBuild;
+        SourceBuildUpdatePolicy::AlwaysBuild;
     ConfigSnapshot config;
 };
 
@@ -87,24 +87,24 @@ void reset();
 void set_preference_directory(SourcePreferenceDirectorySnapshot snapshot);
 void fail_preference_directory(std::string diagnostic);
 void enqueue_preference_result(
-        const std::string& package_name,
-        StrictSourcePreferenceResult result);
+    const std::string& package_name,
+    StrictSourcePreferenceResult result);
 
 void set_source_identity(
-        const std::string& package_name,
-        ResolvedSourceBuildIdentity identity);
+    const std::string& package_name,
+    ResolvedSourceBuildIdentity identity);
 void fail_source_identity(
-        const std::string& package_name,
-        std::string diagnostic);
+    const std::string& package_name,
+    std::string diagnostic);
 void fail_source_work_item(
-        const std::string& package_name,
-        std::string diagnostic);
+    const std::string& package_name,
+    std::string diagnostic);
 void set_selected_repository_provider(
-        const std::string& package_name,
-        ProvidedDependency provider);
+    const std::string& package_name,
+    ProvidedDependency provider);
 void set_provider_candidates(
-        const std::string& package_name,
-        std::vector<ProvidedDependency> candidates);
+    const std::string& package_name,
+    std::vector<ProvidedDependency> candidates);
 void set_provider_selector(ProviderSelectionCallback select_provider);
 void set_aur_invocation_plan(BuildPlan plan);
 void fail_build_plan_guard(std::string diagnostic);
@@ -123,36 +123,36 @@ void enqueue_source_success(SourceBuildExecutionResult result);
 void enqueue_source_failure(std::string diagnostic);
 void enqueue_source_cache_failure();
 void enqueue_source_cleanup_failure(
-        ArtifactInstallExecutionOutcome outcome,
-        std::string diagnostic);
+    ArtifactInstallExecutionOutcome outcome,
+    std::string diagnostic);
 void enqueue_source_unknown_failure();
 void enqueue_package_base_success(
-        std::string package_base,
-        std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
-        std::vector<ArtifactPackageIdentity> unselected_artifacts = {},
-        ProductionSourceBuildProvenance source_provenance = {});
+    std::string package_base,
+    std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
+    std::vector<ArtifactPackageIdentity> unselected_artifacts = {},
+    ProductionSourceBuildProvenance source_provenance = {});
 void enqueue_package_base_cleanup_failure(
-        std::string package_base,
-        std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
-        std::vector<ArtifactPackageIdentity> unselected_artifacts,
-        std::string diagnostic);
+    std::string package_base,
+    std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
+    std::vector<ArtifactPackageIdentity> unselected_artifacts,
+    std::string diagnostic);
 void enqueue_package_base_selection_failure(
-        PackageBaseArtifactIdentitySelectionFailure failure,
-        std::string diagnostic);
+    PackageBaseArtifactIdentitySelectionFailure failure,
+    std::string diagnostic);
 void enqueue_package_base_mixed_reason_failure(
-        MixedPackageBaseInstallReasonUnsupported failure,
-        std::string diagnostic);
+    MixedPackageBaseInstallReasonUnsupported failure,
+    std::string diagnostic);
 void enqueue_package_base_phase_failure(
-        SeparatedPackageBaseSourceBuildFailurePhase phase,
-        std::string diagnostic);
+    SeparatedPackageBaseSourceBuildFailurePhase phase,
+    std::string diagnostic);
 void enqueue_package_base_transaction_failure(
-        PackageBaseArtifactInstallTransactionFailureKind failure_kind,
-        std::string package_base,
-        std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts,
-        std::optional<int> exit_code,
-        std::string diagnostic);
+    PackageBaseArtifactInstallTransactionFailureKind failure_kind,
+    std::string package_base,
+    std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts,
+    std::optional<int> exit_code,
+    std::string diagnostic);
 void enqueue_package_base_metadata_failure(
-        PackageMetadataFailure failure);
+    PackageMetadataFailure failure);
 
 void record_progress(const std::string& subject);
 

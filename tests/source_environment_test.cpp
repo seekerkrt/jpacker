@@ -51,14 +51,14 @@ public:
         }
         if(::setenv(name_.c_str(), value.c_str(), 1) != 0) {
             throw std::runtime_error(
-                    "Failed to set source preference test environment");
+                "Failed to set source preference test environment");
         }
     }
 
     ~ScopedEnvironmentVariable() noexcept {
         if(previous_value_.has_value()) {
             static_cast<void>(::setenv(
-                    name_.c_str(), previous_value_->c_str(), 1));
+                name_.c_str(), previous_value_->c_str(), 1));
         } else {
             static_cast<void>(::unsetenv(name_.c_str()));
         }
@@ -87,22 +87,22 @@ void write_race_contents(const fs::path& path) {
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if(!output) {
         throw std::runtime_error(
-                "Failed to open source preference race fixture " +
-                path.string());
+            "Failed to open source preference race fixture " +
+            path.string());
     }
     output.write(
-            g_race_contents.data(),
-            static_cast<std::streamsize>(g_race_contents.size()));
+        g_race_contents.data(),
+        static_cast<std::streamsize>(g_race_contents.size()));
     output.close();
     if(!output) {
         throw std::runtime_error(
-                "Failed to write source preference race fixture " +
-                path.string());
+            "Failed to write source preference race fixture " +
+            path.string());
     }
     fs::permissions(
-            path,
-            fs::perms::owner_read | fs::perms::owner_write,
-            fs::perm_options::replace);
+        path,
+        fs::perms::owner_read | fs::perms::owner_write,
+        fs::perm_options::replace);
 }
 
 void mutate_preference_in_place_for_race(const fs::path& entry_path) {
@@ -111,13 +111,13 @@ void mutate_preference_in_place_for_race(const fs::path& entry_path) {
 
 void replace_preference_for_race(const fs::path& entry_path) {
     const fs::path replacement =
-            entry_path.parent_path() / ".race-replacement-fixture";
+        entry_path.parent_path() / ".race-replacement-fixture";
     std::error_code remove_error;
     fs::remove(replacement, remove_error);
     if(remove_error) {
         throw std::runtime_error(
-                "Failed to reset source preference race replacement: " +
-                remove_error.message());
+            "Failed to reset source preference race replacement: " +
+            remove_error.message());
     }
     write_race_contents(replacement);
     fs::rename(replacement, entry_path);
@@ -128,10 +128,10 @@ void mutate_source_descriptor_for_race(const fs::path&) {
 }
 
 std::vector<fs::path> internal_artifacts_for_package(
-        const fs::path& entry_path) {
+    const fs::path& entry_path) {
     const std::string expected_prefix =
-            "-.moguet-source-preference-" +
-            entry_path.filename().string() + "-";
+        "-.moguet-source-preference-" +
+        entry_path.filename().string() + "-";
     std::vector<fs::path> artifacts;
     for(const fs::directory_entry& candidate :
         fs::directory_iterator(entry_path.parent_path())) {
@@ -144,7 +144,7 @@ std::vector<fs::path> internal_artifacts_for_package(
 
 void replace_internal_temporary_for_race(const fs::path& entry_path) {
     const std::vector<fs::path> artifacts =
-            internal_artifacts_for_package(entry_path);
+        internal_artifacts_for_package(entry_path);
     for(const fs::path& artifact : artifacts) {
         g_race_internal_path = artifact;
         fs::remove(g_race_internal_path);
@@ -152,16 +152,16 @@ void replace_internal_temporary_for_race(const fs::path& entry_path) {
         return;
     }
     throw std::runtime_error(
-            "Atomic source preference temporary entry was not found");
+        "Atomic source preference temporary entry was not found");
 }
 
 void mutate_internal_temporary_in_place_for_race(
-        const fs::path& entry_path) {
+    const fs::path& entry_path) {
     const std::vector<fs::path> artifacts =
-            internal_artifacts_for_package(entry_path);
+        internal_artifacts_for_package(entry_path);
     if(artifacts.size() != 1) {
         throw std::runtime_error(
-                "Atomic source preference temporary entry was not unique");
+            "Atomic source preference temporary entry was not unique");
     }
     g_race_internal_path = artifacts.front();
     write_race_contents(g_race_internal_path);
@@ -193,7 +193,7 @@ void hold_writer_lock_for_concurrency_test(const fs::path&) {
     write_pipe_byte(g_concurrent_writer_ready_descriptor, 'R');
     if(read_pipe_byte(g_concurrent_writer_release_descriptor) != 'G') {
         throw std::runtime_error(
-                "Unexpected concurrency test release signal");
+            "Unexpected concurrency test release signal");
     }
 }
 
@@ -254,53 +254,53 @@ enum class ConcurrentProbeKind {
 };
 
 bool run_concurrent_probe(
-        ConcurrentProbeKind kind,
-        const std::string& package_name) {
+    ConcurrentProbeKind kind,
+    const std::string& package_name) {
     switch(kind) {
-    case ConcurrentProbeKind::StrictRead: {
-        const StrictSourcePreferenceResult result =
+        case ConcurrentProbeKind::StrictRead: {
+            const StrictSourcePreferenceResult result =
                 read_source_preference_strict(package_name);
-        const SourcePreferenceLoaded* loaded =
+            const SourcePreferenceLoaded* loaded =
                 std::get_if<SourcePreferenceLoaded>(&result);
-        return loaded != nullptr &&
-               loaded->raw_contents.find("SERIALIZED=writer\n") !=
+            return loaded != nullptr &&
+                   loaded->raw_contents.find("SERIALIZED=writer\n") !=
                        std::string::npos;
-    }
-    case ConcurrentProbeKind::DirectorySnapshot: {
-        const SourcePreferenceDirectorySnapshot snapshot =
+        }
+        case ConcurrentProbeKind::DirectorySnapshot: {
+            const SourcePreferenceDirectorySnapshot snapshot =
                 snapshot_source_preference_directory();
-        return std::any_of(
+            return std::any_of(
                 snapshot.entries.begin(), snapshot.entries.end(),
                 [&package_name](const SourcePreferenceEntrySnapshot& entry) {
                     return entry.package_name == package_name;
                 });
-    }
-    case ConcurrentProbeKind::ListingSnapshot: {
-        const SourcePreferenceListSnapshot snapshot =
+        }
+        case ConcurrentProbeKind::ListingSnapshot: {
+            const SourcePreferenceListSnapshot snapshot =
                 snapshot_source_preferences_for_listing();
-        const auto entry = std::find_if(
+            const auto entry = std::find_if(
                 snapshot.entries.begin(), snapshot.entries.end(),
                 [&package_name](
-                        const SourcePreferenceListEntrySnapshot& candidate) {
+                    const SourcePreferenceListEntrySnapshot& candidate) {
                     return candidate.package_name == package_name;
                 });
-        return entry != snapshot.entries.end() &&
-               std::find(
+            return entry != snapshot.entries.end() &&
+                   std::find(
                        entry->display_lines.begin(),
                        entry->display_lines.end(),
                        "SERIALIZED=writer") != entry->display_lines.end();
-    }
-    case ConcurrentProbeKind::RemoveEntry:
-        return remove_source_preference_entry(package_name);
+        }
+        case ConcurrentProbeKind::RemoveEntry:
+            return remove_source_preference_entry(package_name);
     }
     return false;
 }
 
 [[noreturn]] void run_concurrent_probe_child(
-        ConcurrentProbeKind kind,
-        const std::string& package_name,
-        TestPipe& ready,
-        TestPipe& done) noexcept {
+    ConcurrentProbeKind kind,
+    const std::string& package_name,
+    TestPipe& ready,
+    TestPipe& done) noexcept {
     ready.close_read_descriptor();
     done.close_read_descriptor();
     bool succeeded = false;
@@ -317,17 +317,17 @@ bool run_concurrent_probe(
 }
 
 pid_t start_concurrent_probe(
-        ConcurrentProbeKind kind,
-        const std::string& package_name,
-        TestPipe& ready,
-        TestPipe& done) {
+    ConcurrentProbeKind kind,
+    const std::string& package_name,
+    TestPipe& ready,
+    TestPipe& done) {
     const pid_t child = ::fork();
     if(child < 0) {
         throw std::runtime_error("Failed to fork concurrency test probe");
     }
     if(child == 0) {
         run_concurrent_probe_child(
-                kind, package_name, ready, done);
+            kind, package_name, ready, done);
     }
     ready.close_write_descriptor();
     done.close_write_descriptor();
@@ -335,8 +335,8 @@ pid_t start_concurrent_probe(
 }
 
 bool any_probe_completed(
-        const std::vector<int>& done_descriptors,
-        int timeout_milliseconds) {
+    const std::vector<int>& done_descriptors,
+    int timeout_milliseconds) {
     std::vector<struct pollfd> poll_descriptors;
     poll_descriptors.reserve(done_descriptors.size());
     for(int descriptor : done_descriptors) {
@@ -345,8 +345,8 @@ bool any_probe_completed(
     int poll_result = -1;
     do {
         poll_result = ::poll(
-                poll_descriptors.data(), poll_descriptors.size(),
-                timeout_milliseconds);
+            poll_descriptors.data(), poll_descriptors.size(),
+            timeout_milliseconds);
     } while(poll_result < 0 && errno == EINTR);
     if(poll_result < 0) {
         throw std::runtime_error("Failed to poll concurrency test probes");
@@ -355,31 +355,31 @@ bool any_probe_completed(
 }
 
 void expect_source_preference_directory_lock_blocked(
-        int lock_operation,
-        const std::string& context) {
+    int lock_operation,
+    const std::string& context) {
     const int descriptor = ::open(
-            source_preference_root().c_str(),
-            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        source_preference_root().c_str(),
+        O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if(descriptor < 0) {
         throw std::runtime_error(
-                context + ": failed to open source preference directory");
+            context + ": failed to open source preference directory");
     }
 
     errno = 0;
     const int lock_result = ::flock(
-            descriptor, lock_operation | LOCK_NB);
+        descriptor, lock_operation | LOCK_NB);
     const int lock_error = errno;
     if(lock_result == 0) {
         static_cast<void>(::flock(descriptor, LOCK_UN));
     }
     const int close_result = ::close(descriptor);
     expect(
-            lock_result == -1 &&
-                    (lock_error == EWOULDBLOCK || lock_error == EAGAIN),
-            context + ": writer did not hold the expected directory lock");
+        lock_result == -1 &&
+            (lock_error == EWOULDBLOCK || lock_error == EAGAIN),
+        context + ": writer did not hold the expected directory lock");
     expect(
-            close_result == 0,
-            context + ": failed to close directory lock probe");
+        close_result == 0,
+        context + ": failed to close directory lock probe");
 }
 
 void expect_child_success(pid_t child, const std::string& context) {
@@ -394,52 +394,52 @@ void expect_child_success(pid_t child, const std::string& context) {
 }
 
 void expect_equal(
-        const std::string& test_case,
-        const std::string& actual,
-        const std::string& expected) {
+    const std::string& test_case,
+    const std::string& actual,
+    const std::string& expected) {
     if(actual == expected) return;
     throw std::runtime_error(
-            test_case + ": expected [" + expected + "], actual [" + actual + "]");
+        test_case + ": expected [" + expected + "], actual [" + actual + "]");
 }
 
 void expect_words(
-        const std::string& test_case,
-        const std::vector<std::string>& actual,
-        const std::vector<std::string>& expected) {
+    const std::string& test_case,
+    const std::vector<std::string>& actual,
+    const std::vector<std::string>& expected) {
     if(actual == expected) return;
     throw std::runtime_error(test_case + ": assignment words differ");
 }
 
-template<typename Alternative>
+template <typename Alternative>
 Alternative expect_strict_alternative(
-        const StrictSourcePreferenceResult& result,
-        const std::string& test_case) {
+    const StrictSourcePreferenceResult& result,
+    const std::string& test_case) {
     const Alternative* alternative = std::get_if<Alternative>(&result);
     expect(alternative != nullptr, test_case + ": unexpected strict result alternative");
     return *alternative;
 }
 
 SourcePreferenceFailure expect_strict_failure(
-        const StrictSourcePreferenceResult& result,
-        SourcePreferenceFailureKind expected_kind,
-        const std::string& test_case) {
+    const StrictSourcePreferenceResult& result,
+    SourcePreferenceFailureKind expected_kind,
+    const std::string& test_case) {
     SourcePreferenceFailure failure =
-            expect_strict_alternative<SourcePreferenceFailure>(result, test_case);
+        expect_strict_alternative<SourcePreferenceFailure>(result, test_case);
     expect(failure.kind == expected_kind, test_case + ": unexpected failure kind");
     expect(!failure.diagnostic.empty(), test_case + ": missing failure diagnostic");
     return failure;
 }
 
 void expect_assignment(
-        const SourceBuildEnvironment& environment,
-        size_t index,
-        const std::string& expected_key,
-        const std::string& expected_value) {
+    const SourceBuildEnvironment& environment,
+    size_t index,
+    const std::string& expected_key,
+    const std::string& expected_value) {
     expect(
-            index < environment.ordered_assignments.size(),
-            "Missing source environment assignment at index " + std::to_string(index));
+        index < environment.ordered_assignments.size(),
+        "Missing source environment assignment at index " + std::to_string(index));
     const SourceEnvironmentAssignment& assignment =
-            environment.ordered_assignments[index];
+        environment.ordered_assignments[index];
     expect_equal("assignment key", assignment.key, expected_key);
     expect_equal("assignment value for " + expected_key, assignment.value, expected_value);
 }
@@ -450,70 +450,70 @@ void remove_preference_entry(const std::string& package_name) {
     fs::remove_all(entry_path, remove_error);
     if(remove_error) {
         throw std::runtime_error(
-                "Failed to remove source preference fixture for " + package_name +
-                ": " + remove_error.message());
+            "Failed to remove source preference fixture for " + package_name +
+            ": " + remove_error.message());
     }
 }
 
 void require_mode(
-        const fs::path& path, mode_t expected_mode,
-        const std::string& context) {
-    struct stat status {};
+    const fs::path& path, mode_t expected_mode,
+    const std::string& context) {
+    struct stat status{};
     if(::lstat(path.c_str(), &status) != 0) {
         throw std::runtime_error(
-                context + ": failed to inspect " + path.string() + ": " +
-                std::strerror(errno));
+            context + ": failed to inspect " + path.string() + ": " +
+            std::strerror(errno));
     }
     expect(
-            (status.st_mode & 07777) == expected_mode,
-            context + ": unexpected mode for " + path.string());
+        (status.st_mode & 07777) == expected_mode,
+        context + ": unexpected mode for " + path.string());
 }
 
 void prepare_preference_root() {
     const fs::path root = source_preference_root();
     fs::create_directories(root);
     fs::permissions(
-            root.parent_path(), fs::perms::owner_all,
-            fs::perm_options::replace);
+        root.parent_path(), fs::perms::owner_all,
+        fs::perm_options::replace);
     fs::permissions(
-            root, fs::perms::owner_all,
-            fs::perm_options::replace);
+        root, fs::perms::owner_all,
+        fs::perm_options::replace);
 }
 
 void write_preference(
-        const std::string& package_name,
-        const std::string& contents) {
+    const std::string& package_name,
+    const std::string& contents) {
     prepare_preference_root();
     remove_preference_entry(package_name);
     const fs::path entry_path = source_preference_entry_path(package_name);
     std::ofstream file(entry_path, std::ios::binary);
     if(!file) {
         throw std::runtime_error(
-                "Failed to create source preference fixture for " + package_name);
+            "Failed to create source preference fixture for " + package_name);
     }
     file << contents;
     if(!file) {
         throw std::runtime_error(
-                "Failed to write source preference fixture for " + package_name);
+            "Failed to write source preference fixture for " + package_name);
     }
     file.close();
     fs::permissions(
-            entry_path,
-            fs::perms::owner_read | fs::perms::owner_write,
-            fs::perm_options::replace);
+        entry_path,
+        fs::perms::owner_read | fs::perms::owner_write,
+        fs::perm_options::replace);
 }
 
 std::string read_preference_contents(const std::string& package_name) {
     std::ifstream file(
-            source_preference_entry_path(package_name),
-            std::ios::binary);
+        source_preference_entry_path(package_name),
+        std::ios::binary);
     if(!file) {
         throw std::runtime_error(
-                "Failed to read source preference fixture for " + package_name);
+            "Failed to read source preference fixture for " + package_name);
     }
     return std::string(
-            std::istreambuf_iterator<char>(file),
-            std::istreambuf_iterator<char>());
+        std::istreambuf_iterator<char>(file),
+        std::istreambuf_iterator<char>());
 }
 
 SourceBuildEnvironment load_preference(const std::string& package_name) {
@@ -528,31 +528,31 @@ void test_absent_environment() {
     expect(environment.ordered_assignments.empty(), "Absent environment is not empty");
     expect(!environment.defines("PKGDEST"), "Absent environment defines PKGDEST");
     expect(
-            !environment.has_forwarded_nonempty_assignment(),
-            "Absent environment has a forwardable assignment");
+        !environment.has_forwarded_nonempty_assignment(),
+        "Absent environment has a forwardable assignment");
     expect_equal(
-            "absent preference serialization",
-            serialize_source_build_environment(
-                    environment, SourceEnvironmentEmptyValuePolicy::Omit),
-            "");
+        "absent preference serialization",
+        serialize_source_build_environment(
+            environment, SourceEnvironmentEmptyValuePolicy::Omit),
+        "");
     expect_equal(
-            "absent CLI serialization",
-            serialize_source_build_environment(
-                    environment, SourceEnvironmentEmptyValuePolicy::Forward),
-            "");
+        "absent CLI serialization",
+        serialize_source_build_environment(
+            environment, SourceEnvironmentEmptyValuePolicy::Forward),
+        "");
     expect_words(
-            "absent preference assignment words",
-            materialize_source_build_environment_assignment_words(
-                    environment, SourceEnvironmentEmptyValuePolicy::Omit),
-            {});
+        "absent preference assignment words",
+        materialize_source_build_environment_assignment_words(
+            environment, SourceEnvironmentEmptyValuePolicy::Omit),
+        {});
     expect_words(
-            "absent CLI assignment words",
-            materialize_source_build_environment_assignment_words(
-                    environment, SourceEnvironmentEmptyValuePolicy::Forward),
-            {});
+        "absent CLI assignment words",
+        materialize_source_build_environment_assignment_words(
+            environment, SourceEnvironmentEmptyValuePolicy::Forward),
+        {});
     expect(
-            !fs::exists(source_preference_root()),
-            "Absent source preference read created the canonical store");
+        !fs::exists(source_preference_root()),
+        "Absent source preference read created the canonical store");
 }
 
 void test_native_mutation_creation_boundary_and_identity() {
@@ -561,8 +561,8 @@ void test_native_mutation_creation_boundary_and_identity() {
     fs::remove_all(root.parent_path(), remove_error);
     if(remove_error) {
         throw std::runtime_error(
-                "Failed to reset source preference creation fixture: " +
-                remove_error.message());
+            "Failed to reset source preference creation fixture: " +
+            remove_error.message());
     }
 
     const std::string package_name = "native-mutation-target";
@@ -577,14 +577,14 @@ void test_native_mutation_creation_boundary_and_identity() {
     append_source_preference_assignment(package_name, "FIRST=alpha");
     append_source_preference_assignment(package_name, "SECOND=beta");
     expect_equal(
-            "native append preserves byte identity",
-            read_preference_contents(package_name),
-            "FIRST=alpha\nSECOND=beta\n");
+        "native append preserves byte identity",
+        read_preference_contents(package_name),
+        "FIRST=alpha\nSECOND=beta\n");
 
     const SourcePreferenceLoaded before_replace =
-            expect_strict_alternative<SourcePreferenceLoaded>(
-                    read_source_preference_strict(package_name),
-                    "native mutation identity read");
+        expect_strict_alternative<SourcePreferenceLoaded>(
+            read_source_preference_strict(package_name),
+            "native mutation identity read");
     expect(before_replace.identity.has_value(), "Strict read omitted entry identity");
 
     const fs::path replacement = root.parent_path() / "replacement.fixture";
@@ -593,18 +593,18 @@ void test_native_mutation_creation_boundary_and_identity() {
         output << "REPLACED=yes\n";
     }
     fs::permissions(
-            replacement,
-            fs::perms::owner_read | fs::perms::owner_write,
-            fs::perm_options::replace);
+        replacement,
+        fs::perms::owner_read | fs::perms::owner_write,
+        fs::perm_options::replace);
     const int descriptor = ::open(replacement.c_str(), O_RDONLY | O_CLOEXEC);
     if(descriptor < 0) {
         throw std::runtime_error(
-                "Failed to open source preference replacement fixture: " +
-                std::string(std::strerror(errno)));
+            "Failed to open source preference replacement fixture: " +
+            std::string(std::strerror(errno)));
     }
     try {
         replace_source_preference_entry_from_descriptor(
-                package_name, descriptor, before_replace.identity);
+            package_name, descriptor, before_replace.identity);
     } catch(...) {
         static_cast<void>(::close(descriptor));
         throw;
@@ -613,74 +613,74 @@ void test_native_mutation_creation_boundary_and_identity() {
         throw std::runtime_error("Failed to close replacement fixture");
     }
     expect_equal(
-            "native atomic replacement contents",
-            read_preference_contents(package_name), "REPLACED=yes\n");
+        "native atomic replacement contents",
+        read_preference_contents(package_name), "REPLACED=yes\n");
     require_mode(entry_path, 0600, "atomically replaced source preference entry");
 
     const SourcePreferenceLoaded before_concurrent_change =
-            expect_strict_alternative<SourcePreferenceLoaded>(
-                    read_source_preference_strict(package_name),
-                    "native mutation concurrent identity read");
+        expect_strict_alternative<SourcePreferenceLoaded>(
+            read_source_preference_strict(package_name),
+            "native mutation concurrent identity read");
     expect(
-            before_concurrent_change.identity.has_value(),
-            "Concurrent mutation fixture omitted entry identity");
+        before_concurrent_change.identity.has_value(),
+        "Concurrent mutation fixture omitted entry identity");
     {
         std::ofstream concurrent(entry_path, std::ios::binary | std::ios::trunc);
         concurrent << "CONCURRENT=in-place-change\n";
     }
     const int stale_descriptor =
-            ::open(replacement.c_str(), O_RDONLY | O_CLOEXEC);
+        ::open(replacement.c_str(), O_RDONLY | O_CLOEXEC);
     if(stale_descriptor < 0) {
         throw std::runtime_error(
-                "Failed to reopen source preference replacement fixture: " +
-                std::string(std::strerror(errno)));
+            "Failed to reopen source preference replacement fixture: " +
+            std::string(std::strerror(errno)));
     }
     try {
         replace_source_preference_entry_from_descriptor(
-                package_name, stale_descriptor,
-                before_concurrent_change.identity);
+            package_name, stale_descriptor,
+            before_concurrent_change.identity);
         static_cast<void>(::close(stale_descriptor));
         throw std::runtime_error(
-                "Atomic replacement accepted stale same-inode entry state");
+            "Atomic replacement accepted stale same-inode entry state");
     } catch(const SourcePreferenceError& error) {
         if(::close(stale_descriptor) != 0) {
             throw std::runtime_error("Failed to close stale replacement fixture");
         }
         expect(
-                error.failure().kind ==
-                        SourcePreferenceFailureKind::ConcurrentReplacement,
-                "Stale same-inode replacement lost its typed error");
+            error.failure().kind ==
+                SourcePreferenceFailureKind::ConcurrentReplacement,
+            "Stale same-inode replacement lost its typed error");
     }
     expect_equal(
-            "stale replacement preserved concurrent contents",
-            read_preference_contents(package_name),
-            "CONCURRENT=in-place-change\n");
+        "stale replacement preserved concurrent contents",
+        read_preference_contents(package_name),
+        "CONCURRENT=in-place-change\n");
     expect(remove_source_preference_entry(package_name), "Native delete reported absent");
     expect(!remove_source_preference_entry(package_name), "Missing native delete reported present");
     expect(
-            fs::is_directory(root),
-            "Deleting the final entry removed the canonical store");
+        fs::is_directory(root),
+        "Deleting the final entry removed the canonical store");
     fs::remove(replacement);
 }
 
 void test_preference_parsing_and_serialization() {
     write_preference(
-            "structured-target",
-            "FIRST = \"alpha value\" # stripped comment\n"
-            "QUOTED = 'quoted # value' # stripped after quoted hash\n"
-            "EMPTY=\n"
-            "BRACED=${FIRST}/brace\n"
-            "UNDEFINED=$MISSING\n"
-            "DUP=first\n"
-            "DUP=second\n"
-            "SIMPLE=$DUP/simple\n"
-            "9INVALID=value\n"
-            "ignored without equals\n");
+        "structured-target",
+        "FIRST = \"alpha value\" # stripped comment\n"
+        "QUOTED = 'quoted # value' # stripped after quoted hash\n"
+        "EMPTY=\n"
+        "BRACED=${FIRST}/brace\n"
+        "UNDEFINED=$MISSING\n"
+        "DUP=first\n"
+        "DUP=second\n"
+        "SIMPLE=$DUP/simple\n"
+        "9INVALID=value\n"
+        "ignored without equals\n");
 
     SourceBuildEnvironment environment = load_preference("structured-target");
     expect(
-            environment.ordered_assignments.size() == 8,
-            "Unexpected structured assignment count");
+        environment.ordered_assignments.size() == 8,
+        "Unexpected structured assignment count");
     expect_assignment(environment, 0, "FIRST", "alpha value");
     expect_assignment(environment, 1, "QUOTED", "quoted # value");
     expect_assignment(environment, 2, "EMPTY", "");
@@ -692,180 +692,180 @@ void test_preference_parsing_and_serialization() {
     expect(environment.defines("EMPTY"), "Empty assignment definition was lost");
     expect(environment.defines("UNDEFINED"), "Expanded-empty definition was lost");
     expect(
-            environment.has_forwarded_nonempty_assignment(),
-            "Nonempty preference assignment was not detected");
+        environment.has_forwarded_nonempty_assignment(),
+        "Nonempty preference assignment was not detected");
     expect(
-            g_warnings.size() == 1,
-            "Unexpected source preference warning count");
+        g_warnings.size() == 1,
+        "Unexpected source preference warning count");
     expect_equal(
-            "invalid preference warning",
-            g_warnings.front(),
-            "Ignoring invalid environment assignment: 9INVALID=value");
+        "invalid preference warning",
+        g_warnings.front(),
+        "Ignoring invalid environment assignment: 9INVALID=value");
 
     expect_equal(
-            "preference compatibility serialization",
-            serialize_source_build_environment(
-                    environment, SourceEnvironmentEmptyValuePolicy::Omit),
-            "FIRST='alpha value' QUOTED='quoted # value' BRACED='alpha value/brace' "
-            "DUP='first' DUP='second' SIMPLE='second/simple' ");
+        "preference compatibility serialization",
+        serialize_source_build_environment(
+            environment, SourceEnvironmentEmptyValuePolicy::Omit),
+        "FIRST='alpha value' QUOTED='quoted # value' BRACED='alpha value/brace' "
+        "DUP='first' DUP='second' SIMPLE='second/simple' ");
     expect_equal(
-            "CLI compatibility serialization",
-            serialize_source_build_environment(
-                    environment, SourceEnvironmentEmptyValuePolicy::Forward),
-            "FIRST='alpha value' QUOTED='quoted # value' EMPTY='' "
-            "BRACED='alpha value/brace' UNDEFINED='' DUP='first' DUP='second' "
-            "SIMPLE='second/simple' ");
+        "CLI compatibility serialization",
+        serialize_source_build_environment(
+            environment, SourceEnvironmentEmptyValuePolicy::Forward),
+        "FIRST='alpha value' QUOTED='quoted # value' EMPTY='' "
+        "BRACED='alpha value/brace' UNDEFINED='' DUP='first' DUP='second' "
+        "SIMPLE='second/simple' ");
     expect_words(
-            "preference compatibility assignment words",
-            materialize_source_build_environment_assignment_words(
-                    environment, SourceEnvironmentEmptyValuePolicy::Omit),
-            {"FIRST=alpha value", "QUOTED=quoted # value",
-             "BRACED=alpha value/brace", "DUP=first", "DUP=second",
-             "SIMPLE=second/simple"});
+        "preference compatibility assignment words",
+        materialize_source_build_environment_assignment_words(
+            environment, SourceEnvironmentEmptyValuePolicy::Omit),
+        {"FIRST=alpha value", "QUOTED=quoted # value",
+         "BRACED=alpha value/brace", "DUP=first", "DUP=second",
+         "SIMPLE=second/simple"});
     expect_words(
-            "CLI compatibility assignment words",
-            materialize_source_build_environment_assignment_words(
-                    environment, SourceEnvironmentEmptyValuePolicy::Forward),
-            {"FIRST=alpha value", "QUOTED=quoted # value", "EMPTY=",
-             "BRACED=alpha value/brace", "UNDEFINED=", "DUP=first",
-             "DUP=second", "SIMPLE=second/simple"});
+        "CLI compatibility assignment words",
+        materialize_source_build_environment_assignment_words(
+            environment, SourceEnvironmentEmptyValuePolicy::Forward),
+        {"FIRST=alpha value", "QUOTED=quoted # value", "EMPTY=",
+         "BRACED=alpha value/brace", "UNDEFINED=", "DUP=first",
+         "DUP=second", "SIMPLE=second/simple"});
 }
 
 void test_raw_assignment_word_materialization() {
     const SourceBuildEnvironment environment{{
-            {"PLAIN", "alpha"},
-            {"DUP", "first"},
-            {"EMPTY", ""},
-            {"DUP", "second"},
-            {"EQUALS", "left=middle=right"},
-            {"SPACES", "two words"},
-            {"SINGLE", "single'quote"},
-            {"DOUBLE", "double\"quote"},
-            {"DOLLAR", "literal $value"},
-            {"BACKSLASH", "slash\\value"},
-            {"NEWLINE", "line1\nline2"},
-            {"UNICODE", "日本語"},
+        {"PLAIN", "alpha"},
+        {"DUP", "first"},
+        {"EMPTY", ""},
+        {"DUP", "second"},
+        {"EQUALS", "left=middle=right"},
+        {"SPACES", "two words"},
+        {"SINGLE", "single'quote"},
+        {"DOUBLE", "double\"quote"},
+        {"DOLLAR", "literal $value"},
+        {"BACKSLASH", "slash\\value"},
+        {"NEWLINE", "line1\nline2"},
+        {"UNICODE", "日本語"},
     }};
 
     expect_words(
-            "Forward raw assignment words",
-            materialize_source_build_environment_assignment_words(
-                    environment, SourceEnvironmentEmptyValuePolicy::Forward),
-            {"PLAIN=alpha", "DUP=first", "EMPTY=", "DUP=second",
-             "EQUALS=left=middle=right", "SPACES=two words",
-             "SINGLE=single'quote", "DOUBLE=double\"quote",
-             "DOLLAR=literal $value", "BACKSLASH=slash\\value",
-             "NEWLINE=line1\nline2", "UNICODE=日本語"});
+        "Forward raw assignment words",
+        materialize_source_build_environment_assignment_words(
+            environment, SourceEnvironmentEmptyValuePolicy::Forward),
+        {"PLAIN=alpha", "DUP=first", "EMPTY=", "DUP=second",
+         "EQUALS=left=middle=right", "SPACES=two words",
+         "SINGLE=single'quote", "DOUBLE=double\"quote",
+         "DOLLAR=literal $value", "BACKSLASH=slash\\value",
+         "NEWLINE=line1\nline2", "UNICODE=日本語"});
     expect_equal(
-            "Forward raw assignment prefix",
-            serialize_source_build_environment(
-                    environment, SourceEnvironmentEmptyValuePolicy::Forward),
-            "PLAIN='alpha' DUP='first' EMPTY='' DUP='second' "
-            "EQUALS='left=middle=right' SPACES='two words' "
-            "SINGLE='single'\\''quote' DOUBLE='double\"quote' "
-            "DOLLAR='literal $value' BACKSLASH='slash\\value' "
-            "NEWLINE='line1\nline2' UNICODE='日本語' ");
+        "Forward raw assignment prefix",
+        serialize_source_build_environment(
+            environment, SourceEnvironmentEmptyValuePolicy::Forward),
+        "PLAIN='alpha' DUP='first' EMPTY='' DUP='second' "
+        "EQUALS='left=middle=right' SPACES='two words' "
+        "SINGLE='single'\\''quote' DOUBLE='double\"quote' "
+        "DOLLAR='literal $value' BACKSLASH='slash\\value' "
+        "NEWLINE='line1\nline2' UNICODE='日本語' ");
 
     expect_words(
-            "Omit raw assignment words",
-            materialize_source_build_environment_assignment_words(
-                    environment, SourceEnvironmentEmptyValuePolicy::Omit),
-            {"PLAIN=alpha", "DUP=first", "DUP=second",
-             "EQUALS=left=middle=right", "SPACES=two words",
-             "SINGLE=single'quote", "DOUBLE=double\"quote",
-             "DOLLAR=literal $value", "BACKSLASH=slash\\value",
-             "NEWLINE=line1\nline2", "UNICODE=日本語"});
+        "Omit raw assignment words",
+        materialize_source_build_environment_assignment_words(
+            environment, SourceEnvironmentEmptyValuePolicy::Omit),
+        {"PLAIN=alpha", "DUP=first", "DUP=second",
+         "EQUALS=left=middle=right", "SPACES=two words",
+         "SINGLE=single'quote", "DOUBLE=double\"quote",
+         "DOLLAR=literal $value", "BACKSLASH=slash\\value",
+         "NEWLINE=line1\nline2", "UNICODE=日本語"});
     expect_equal(
-            "Omit raw assignment prefix",
-            serialize_source_build_environment(
-                    environment, SourceEnvironmentEmptyValuePolicy::Omit),
-            "PLAIN='alpha' DUP='first' DUP='second' "
-            "EQUALS='left=middle=right' SPACES='two words' "
-            "SINGLE='single'\\''quote' DOUBLE='double\"quote' "
-            "DOLLAR='literal $value' BACKSLASH='slash\\value' "
-            "NEWLINE='line1\nline2' UNICODE='日本語' ");
+        "Omit raw assignment prefix",
+        serialize_source_build_environment(
+            environment, SourceEnvironmentEmptyValuePolicy::Omit),
+        "PLAIN='alpha' DUP='first' DUP='second' "
+        "EQUALS='left=middle=right' SPACES='two words' "
+        "SINGLE='single'\\''quote' DOUBLE='double\"quote' "
+        "DOLLAR='literal $value' BACKSLASH='slash\\value' "
+        "NEWLINE='line1\nline2' UNICODE='日本語' ");
 }
 
 void test_empty_duplicate_pkgdest_definitions() {
     write_preference(
-            "requested-target",
-            "PKGDEST=\n"
-            "PKGDEST=\"\"\n"
-            "PKGDEST=$UNDEFINED_PKGDEST\n");
+        "requested-target",
+        "PKGDEST=\n"
+        "PKGDEST=\"\"\n"
+        "PKGDEST=$UNDEFINED_PKGDEST\n");
 
     SourceBuildEnvironment environment = load_preference("requested-target");
     expect(
-            environment.ordered_assignments.size() == 3,
-            "Unexpected PKGDEST assignment count");
+        environment.ordered_assignments.size() == 3,
+        "Unexpected PKGDEST assignment count");
     expect_assignment(environment, 0, "PKGDEST", "");
     expect_assignment(environment, 1, "PKGDEST", "");
     expect_assignment(environment, 2, "PKGDEST", "");
     expect(environment.defines("PKGDEST"), "Empty PKGDEST definition was lost");
     expect(
-            !environment.has_forwarded_nonempty_assignment(),
-            "Empty-only PKGDEST changed fallback eligibility");
+        !environment.has_forwarded_nonempty_assignment(),
+        "Empty-only PKGDEST changed fallback eligibility");
     expect_equal(
-            "preference empty PKGDEST serialization",
-            serialize_source_build_environment(
-                    environment, SourceEnvironmentEmptyValuePolicy::Omit),
-            "");
+        "preference empty PKGDEST serialization",
+        serialize_source_build_environment(
+            environment, SourceEnvironmentEmptyValuePolicy::Omit),
+        "");
     expect_equal(
-            "CLI empty PKGDEST serialization",
-            serialize_source_build_environment(
-                    environment, SourceEnvironmentEmptyValuePolicy::Forward),
-            "PKGDEST='' PKGDEST='' PKGDEST='' ");
+        "CLI empty PKGDEST serialization",
+        serialize_source_build_environment(
+            environment, SourceEnvironmentEmptyValuePolicy::Forward),
+        "PKGDEST='' PKGDEST='' PKGDEST='' ");
 }
 
 void test_mixed_duplicate_pkgdest_uses_last_value_for_expansion() {
     write_preference(
-            "mixed-pkgdest-target",
-            "PKGDEST=first-path\n"
-            "PKGDEST=\n"
-            "AFTER=$PKGDEST\n");
+        "mixed-pkgdest-target",
+        "PKGDEST=first-path\n"
+        "PKGDEST=\n"
+        "AFTER=$PKGDEST\n");
 
     SourceBuildEnvironment environment = load_preference("mixed-pkgdest-target");
     expect(
-            environment.ordered_assignments.size() == 3,
-            "Unexpected mixed PKGDEST assignment count");
+        environment.ordered_assignments.size() == 3,
+        "Unexpected mixed PKGDEST assignment count");
     expect_assignment(environment, 0, "PKGDEST", "first-path");
     expect_assignment(environment, 1, "PKGDEST", "");
     expect_assignment(environment, 2, "AFTER", "");
     expect(environment.defines("PKGDEST"), "Mixed PKGDEST definition was lost");
     expect(
-            environment.has_forwarded_nonempty_assignment(),
-            "Mixed PKGDEST lost its forwardable nonempty assignment");
+        environment.has_forwarded_nonempty_assignment(),
+        "Mixed PKGDEST lost its forwardable nonempty assignment");
     expect_equal(
-            "preference mixed PKGDEST serialization",
-            serialize_source_build_environment(
-                    environment, SourceEnvironmentEmptyValuePolicy::Omit),
-            "PKGDEST='first-path' ");
+        "preference mixed PKGDEST serialization",
+        serialize_source_build_environment(
+            environment, SourceEnvironmentEmptyValuePolicy::Omit),
+        "PKGDEST='first-path' ");
     expect_equal(
-            "CLI mixed PKGDEST serialization",
-            serialize_source_build_environment(
-                    environment, SourceEnvironmentEmptyValuePolicy::Forward),
-            "PKGDEST='first-path' PKGDEST='' AFTER='' ");
+        "CLI mixed PKGDEST serialization",
+        serialize_source_build_environment(
+            environment, SourceEnvironmentEmptyValuePolicy::Forward),
+        "PKGDEST='first-path' PKGDEST='' AFTER='' ");
 }
 
 void test_invalid_only_preference() {
     write_preference(
-            "invalid-only-target",
-            "9INVALID=value\n"
-            "ignored without equals\n");
+        "invalid-only-target",
+        "9INVALID=value\n"
+        "ignored without equals\n");
 
     SourceBuildEnvironment environment = load_preference("invalid-only-target");
     expect(
-            environment.ordered_assignments.empty(),
-            "Invalid preference assignment entered structured environment");
+        environment.ordered_assignments.empty(),
+        "Invalid preference assignment entered structured environment");
     expect(
-            !environment.has_forwarded_nonempty_assignment(),
-            "Invalid-only preference changed fallback eligibility");
+        !environment.has_forwarded_nonempty_assignment(),
+        "Invalid-only preference changed fallback eligibility");
     expect(
-            g_warnings.size() == 1,
-            "Unexpected invalid-only warning count");
+        g_warnings.size() == 1,
+        "Unexpected invalid-only warning count");
     expect_equal(
-            "invalid-only warning",
-            g_warnings.front(),
-            "Ignoring invalid environment assignment: 9INVALID=value");
+        "invalid-only warning",
+        g_warnings.front(),
+        "Ignoring invalid environment assignment: 9INVALID=value");
 }
 
 void test_callback_timing_and_absent_behavior() {
@@ -876,95 +876,95 @@ void test_callback_timing_and_absent_behavior() {
     g_callback_events.clear();
 
     SourceBuildEnvironment absent_environment = get_package_env(
-            absent_package, record_load_event, record_warning_event);
+        absent_package, record_load_event, record_warning_event);
     expect(
-            absent_environment.ordered_assignments.empty(),
-            "Absent callback environment is not empty");
+        absent_environment.ordered_assignments.empty(),
+        "Absent callback environment is not empty");
     expect(g_loaded_paths.empty(), "Absent preference called on_load");
     expect(g_warnings.empty(), "Absent preference emitted a warning");
     expect(g_callback_events.empty(), "Absent preference emitted a callback event");
 
     const std::string package_name = "callback-target";
     write_preference(
-            package_name,
-            "GOOD=before\n"
-            "9INVALID=value\n"
-            "AFTER=still-parsed\n");
+        package_name,
+        "GOOD=before\n"
+        "9INVALID=value\n"
+        "AFTER=still-parsed\n");
     g_loaded_paths.clear();
     g_warnings.clear();
     g_callback_events.clear();
 
     SourceBuildEnvironment environment = get_package_env(
-            package_name, record_load_event, record_warning_event);
+        package_name, record_load_event, record_warning_event);
     expect(
-            environment.ordered_assignments.size() == 2,
-            "Invalid assignment stopped callback parsing");
+        environment.ordered_assignments.size() == 2,
+        "Invalid assignment stopped callback parsing");
     expect_assignment(environment, 0, "GOOD", "before");
     expect_assignment(environment, 1, "AFTER", "still-parsed");
     expect(g_loaded_paths.size() == 1, "Preference on_load count changed");
     expect(
-            g_loaded_paths.front() == source_preference_entry_path(package_name),
-            "Preference on_load path changed");
+        g_loaded_paths.front() == source_preference_entry_path(package_name),
+        "Preference on_load path changed");
     expect(g_warnings.size() == 1, "Warning callback count changed");
     expect(
-            g_callback_events == std::vector<std::string>{"load", "warning"},
-            "on_load no longer precedes parser warnings");
+        g_callback_events == std::vector<std::string>{"load", "warning"},
+        "on_load no longer precedes parser warnings");
 }
 
 void test_strict_absent_and_empty_file_are_distinct() {
     const std::string absent_package = "strict-absent-target";
     remove_preference_entry(absent_package);
     StrictSourcePreferenceResult absent =
-            read_source_preference_strict(absent_package);
+        read_source_preference_strict(absent_package);
     static_cast<void>(expect_strict_alternative<SourcePreferenceAbsent>(
-            absent, "strict absent preference"));
+        absent, "strict absent preference"));
 
     const std::string empty_package = "strict-empty-target";
     write_preference(empty_package, "");
     StrictSourcePreferenceResult empty =
-            read_source_preference_strict(empty_package);
+        read_source_preference_strict(empty_package);
     const SourcePreferenceLoaded loaded =
-            expect_strict_alternative<SourcePreferenceLoaded>(
-                    empty, "strict empty preference");
+        expect_strict_alternative<SourcePreferenceLoaded>(
+            empty, "strict empty preference");
     expect(
-            loaded.entry_path == source_preference_entry_path(empty_package),
-            "Strict empty preference returned an unexpected path");
+        loaded.entry_path == source_preference_entry_path(empty_package),
+        "Strict empty preference returned an unexpected path");
     expect(
-            loaded.environment.ordered_assignments.empty(),
-            "Strict empty preference returned assignments");
+        loaded.environment.ordered_assignments.empty(),
+        "Strict empty preference returned assignments");
     expect(loaded.warnings.empty(), "Strict empty preference returned warnings");
     expect(loaded.identity.has_value(), "Strict empty preference omitted identity");
     expect_equal("strict empty raw contents", loaded.raw_contents, "");
     expect_equal(
-            "strict empty preference contents",
-            read_preference_contents(empty_package), "");
+        "strict empty preference contents",
+        read_preference_contents(empty_package), "");
 }
 
 void test_strict_parser_compatibility_and_file_preservation() {
     const std::string package_name = "strict-structured-target";
     const std::string contents =
-            "9FIRST_INVALID=value\n"
-            "FIRST = \"alpha value\" # stripped comment\n"
-            "QUOTED = 'quoted # value' # stripped after quoted hash\n"
-            "EMPTY=\n"
-            "BRACED=${FIRST}/brace\n"
-            "UNDEFINED=$MISSING\n"
-            "DUP=first\n"
-            "DUP=second\n"
-            "SIMPLE=$DUP/simple\n"
-            "=second-invalid\n"
-            "ignored without equals\n";
+        "9FIRST_INVALID=value\n"
+        "FIRST = \"alpha value\" # stripped comment\n"
+        "QUOTED = 'quoted # value' # stripped after quoted hash\n"
+        "EMPTY=\n"
+        "BRACED=${FIRST}/brace\n"
+        "UNDEFINED=$MISSING\n"
+        "DUP=first\n"
+        "DUP=second\n"
+        "SIMPLE=$DUP/simple\n"
+        "=second-invalid\n"
+        "ignored without equals\n";
     write_preference(package_name, contents);
 
     StrictSourcePreferenceResult result =
-            read_source_preference_strict(package_name);
+        read_source_preference_strict(package_name);
     const SourcePreferenceLoaded loaded =
-            expect_strict_alternative<SourcePreferenceLoaded>(
-                    result, "strict structured preference");
+        expect_strict_alternative<SourcePreferenceLoaded>(
+            result, "strict structured preference");
     const SourceBuildEnvironment& environment = loaded.environment;
     expect(
-            environment.ordered_assignments.size() == 8,
-            "Unexpected strict structured assignment count");
+        environment.ordered_assignments.size() == 8,
+        "Unexpected strict structured assignment count");
     expect_assignment(environment, 0, "FIRST", "alpha value");
     expect_assignment(environment, 1, "QUOTED", "quoted # value");
     expect_assignment(environment, 2, "EMPTY", "");
@@ -974,39 +974,39 @@ void test_strict_parser_compatibility_and_file_preservation() {
     expect_assignment(environment, 6, "DUP", "second");
     expect_assignment(environment, 7, "SIMPLE", "second/simple");
     expect(
-            environment.defines("EMPTY"),
-            "Strict parser lost an explicit empty assignment");
+        environment.defines("EMPTY"),
+        "Strict parser lost an explicit empty assignment");
     expect(
-            loaded.warnings == std::vector<std::string>{
-                    "Ignoring invalid environment assignment: 9FIRST_INVALID=value",
-                    "Ignoring invalid environment assignment: =second-invalid"},
-            "Strict parser warning order changed");
+        loaded.warnings == std::vector<std::string>{
+                               "Ignoring invalid environment assignment: 9FIRST_INVALID=value",
+                               "Ignoring invalid environment assignment: =second-invalid"},
+        "Strict parser warning order changed");
     expect_equal("strict raw contents", loaded.raw_contents, contents);
     expect(loaded.identity.has_value(), "Strict parser result omitted identity");
     expect_equal(
-            "strict source preference remained unchanged",
-            read_preference_contents(package_name), contents);
+        "strict source preference remained unchanged",
+        read_preference_contents(package_name), contents);
 }
 
 void test_strict_malformed_only_file_is_loaded_with_warnings() {
     const std::string package_name = "strict-malformed-only-target";
     write_preference(
-            package_name,
-            "9INVALID=value\n"
-            "ignored without equals\n");
+        package_name,
+        "9INVALID=value\n"
+        "ignored without equals\n");
 
     StrictSourcePreferenceResult result =
-            read_source_preference_strict(package_name);
+        read_source_preference_strict(package_name);
     const SourcePreferenceLoaded loaded =
-            expect_strict_alternative<SourcePreferenceLoaded>(
-                    result, "strict malformed-only preference");
+        expect_strict_alternative<SourcePreferenceLoaded>(
+            result, "strict malformed-only preference");
     expect(
-            loaded.environment.ordered_assignments.empty(),
-            "Strict malformed-only preference returned an assignment");
+        loaded.environment.ordered_assignments.empty(),
+        "Strict malformed-only preference returned an assignment");
     expect(
-            loaded.warnings == std::vector<std::string>{
-                    "Ignoring invalid environment assignment: 9INVALID=value"},
-            "Strict malformed-only warning changed");
+        loaded.warnings == std::vector<std::string>{
+                               "Ignoring invalid environment assignment: 9INVALID=value"},
+        "Strict malformed-only warning changed");
 }
 
 void test_strict_status_failure_is_not_absent() {
@@ -1014,27 +1014,27 @@ void test_strict_status_failure_is_not_absent() {
     write_preference(package_name, "VALUE=available\n");
     reset_source_preference_test_hooks();
     fail_next_source_preference_operation_for_test(
-            package_name, SourcePreferenceTestFailurePoint::Status);
+        package_name, SourcePreferenceTestFailurePoint::Status);
 
     StrictSourcePreferenceResult result =
-            read_source_preference_strict(package_name);
+        read_source_preference_strict(package_name);
     const SourcePreferenceFailure failure = expect_strict_failure(
-            result, SourcePreferenceFailureKind::StatusUnavailable,
-            "strict status failure");
+        result, SourcePreferenceFailureKind::StatusUnavailable,
+        "strict status failure");
     expect(
-            failure.entry_path == source_preference_entry_path(package_name),
-            "Strict status failure returned an unexpected path");
+        failure.entry_path == source_preference_entry_path(package_name),
+        "Strict status failure returned an unexpected path");
     expect(
-            failure.system_error == std::make_error_code(std::errc::permission_denied),
-            "Strict status failure lost its system error");
+        failure.system_error == std::make_error_code(std::errc::permission_denied),
+        "Strict status failure lost its system error");
     expect(
-            !failure.observed_file_type.has_value(),
-            "Strict status failure invented an observed file type");
+        !failure.observed_file_type.has_value(),
+        "Strict status failure invented an observed file type");
 
     StrictSourcePreferenceResult retry =
-            read_source_preference_strict(package_name);
+        read_source_preference_strict(package_name);
     static_cast<void>(expect_strict_alternative<SourcePreferenceLoaded>(
-            retry, "strict status failure one-shot retry"));
+        retry, "strict status failure one-shot retry"));
 }
 
 void test_strict_symlink_is_rejected_by_all_readers() {
@@ -1044,30 +1044,30 @@ void test_strict_symlink_is_rejected_by_all_readers() {
     write_preference(target_package, target_contents);
     remove_preference_entry(link_package);
     fs::create_symlink(
-            fs::path(target_package),
-            source_preference_entry_path(link_package));
+        fs::path(target_package),
+        source_preference_entry_path(link_package));
 
     StrictSourcePreferenceResult result =
-            read_source_preference_strict(link_package);
+        read_source_preference_strict(link_package);
     const SourcePreferenceFailure failure = expect_strict_failure(
-            result, SourcePreferenceFailureKind::UnsupportedFileType,
-            "strict symlink preference");
+        result, SourcePreferenceFailureKind::UnsupportedFileType,
+        "strict symlink preference");
     expect(
-            failure.observed_file_type == fs::file_type::symlink,
-            "Strict symlink preference lost its observed file type");
+        failure.observed_file_type == fs::file_type::symlink,
+        "Strict symlink preference lost its observed file type");
 
     try {
         static_cast<void>(load_preference(link_package));
         throw std::runtime_error("Convenience reader followed a source preference symlink");
     } catch(const SourcePreferenceError& error) {
         expect(
-                error.failure().kind ==
-                        SourcePreferenceFailureKind::UnsupportedFileType,
-                "Convenience symlink failure lost its typed error");
+            error.failure().kind ==
+                SourcePreferenceFailureKind::UnsupportedFileType,
+            "Convenience symlink failure lost its typed error");
     }
     expect_equal(
-            "strict symlink target remained unread and unchanged",
-            read_preference_contents(target_package), target_contents);
+        "strict symlink target remained unread and unchanged",
+        read_preference_contents(target_package), target_contents);
 }
 
 void test_strict_dangling_symlink_is_not_absent() {
@@ -1076,17 +1076,17 @@ void test_strict_dangling_symlink_is_not_absent() {
     remove_preference_entry(missing_package);
     remove_preference_entry(link_package);
     fs::create_symlink(
-            fs::path(missing_package),
-            source_preference_entry_path(link_package));
+        fs::path(missing_package),
+        source_preference_entry_path(link_package));
 
     StrictSourcePreferenceResult result =
-            read_source_preference_strict(link_package);
+        read_source_preference_strict(link_package);
     const SourcePreferenceFailure failure = expect_strict_failure(
-            result, SourcePreferenceFailureKind::UnsupportedFileType,
-            "strict dangling symlink preference");
+        result, SourcePreferenceFailureKind::UnsupportedFileType,
+        "strict dangling symlink preference");
     expect(
-            failure.observed_file_type == fs::file_type::symlink,
-            "Strict dangling symlink lost its observed file type");
+        failure.observed_file_type == fs::file_type::symlink,
+        "Strict dangling symlink lost its observed file type");
 }
 
 void test_strict_directory_entry_is_rejected() {
@@ -1097,33 +1097,33 @@ void test_strict_directory_entry_is_rejected() {
 
     StrictSourcePreferenceResult result = read_source_preference_strict(package_name);
     const SourcePreferenceFailure failure = expect_strict_failure(
-            result, SourcePreferenceFailureKind::UnsupportedFileType,
-            "strict directory preference");
+        result, SourcePreferenceFailureKind::UnsupportedFileType,
+        "strict directory preference");
     expect(
-            failure.observed_file_type == fs::file_type::directory,
-            "Strict directory preference lost its observed file type");
+        failure.observed_file_type == fs::file_type::directory,
+        "Strict directory preference lost its observed file type");
 }
 
 void test_unsafe_mode_is_a_typed_hard_error() {
     const std::string package_name = "unsafe-mode-target";
     write_preference(package_name, "VALUE=unsafe\n");
     fs::permissions(
-            source_preference_entry_path(package_name),
-            fs::perms::owner_read | fs::perms::owner_write |
-                    fs::perms::group_read | fs::perms::others_read,
-            fs::perm_options::replace);
+        source_preference_entry_path(package_name),
+        fs::perms::owner_read | fs::perms::owner_write |
+            fs::perms::group_read | fs::perms::others_read,
+        fs::perm_options::replace);
 
     const SourcePreferenceFailure failure = expect_strict_failure(
-            read_source_preference_strict(package_name),
-            SourcePreferenceFailureKind::UnsafePermissions,
-            "unsafe source preference mode");
+        read_source_preference_strict(package_name),
+        SourcePreferenceFailureKind::UnsafePermissions,
+        "unsafe source preference mode");
     expect(
-            !failure.system_error.has_value(),
-            "Unsafe mode failure invented a system error");
+        !failure.system_error.has_value(),
+        "Unsafe mode failure invented a system error");
     fs::permissions(
-            source_preference_entry_path(package_name),
-            fs::perms::owner_read | fs::perms::owner_write,
-            fs::perm_options::replace);
+        source_preference_entry_path(package_name),
+        fs::perms::owner_read | fs::perms::owner_write,
+        fs::perm_options::replace);
 }
 
 void test_directory_and_listing_snapshots_are_all_or_nothing() {
@@ -1131,72 +1131,72 @@ void test_directory_and_listing_snapshots_are_all_or_nothing() {
     fs::remove_all(source_preference_root(), remove_error);
     if(remove_error) {
         throw std::runtime_error(
-                "Failed to reset listing snapshot fixture: " +
-                remove_error.message());
+            "Failed to reset listing snapshot fixture: " +
+            remove_error.message());
     }
     write_preference("snapshot-alpha", "ONE=1\n# ignored\nTWO=2\n");
     write_preference("snapshot-zeta", "ZED=yes\n");
 
     const SourcePreferenceDirectorySnapshot directory_snapshot =
-            snapshot_source_preference_directory();
+        snapshot_source_preference_directory();
     expect(directory_snapshot.root_exists, "Directory snapshot reported the store absent");
     expect(!directory_snapshot.entries.empty(), "Directory snapshot omitted valid entries");
     for(const SourcePreferenceEntrySnapshot& entry : directory_snapshot.entries) {
         expect(entry.is_regular_file, "Validated directory snapshot lost regular identity");
         expect(
-                entry.entry_path == source_preference_entry_path(entry.package_name),
-                "Directory snapshot returned a noncanonical path");
+            entry.entry_path == source_preference_entry_path(entry.package_name),
+            "Directory snapshot returned a noncanonical path");
     }
 
     const SourcePreferenceListSnapshot listing =
-            snapshot_source_preferences_for_listing();
+        snapshot_source_preferences_for_listing();
     const auto alpha = std::find_if(
-            listing.entries.begin(), listing.entries.end(),
-            [](const SourcePreferenceListEntrySnapshot& entry) {
-                return entry.package_name == "snapshot-alpha";
-            });
+        listing.entries.begin(), listing.entries.end(),
+        [](const SourcePreferenceListEntrySnapshot& entry) {
+            return entry.package_name == "snapshot-alpha";
+        });
     expect(alpha != listing.entries.end(), "Listing snapshot omitted snapshot-alpha");
     expect(
-            alpha->display_lines == std::vector<std::string>{"ONE=1", "TWO=2"},
-            "Listing snapshot changed display-line filtering");
+        alpha->display_lines == std::vector<std::string>{"ONE=1", "TWO=2"},
+        "Listing snapshot changed display-line filtering");
 
     const fs::path invalid_entry = source_preference_root() /
-            "-.moguet-source-preference-interrupted-atomic-write";
+                                   "-.moguet-source-preference-interrupted-atomic-write";
     {
         std::ofstream output(invalid_entry, std::ios::binary);
         output << "VALUE=invalid-name\n";
     }
     fs::permissions(
-            invalid_entry,
-            fs::perms::owner_read | fs::perms::owner_write,
-            fs::perm_options::replace);
+        invalid_entry,
+        fs::perms::owner_read | fs::perms::owner_write,
+        fs::perm_options::replace);
     try {
         static_cast<void>(snapshot_source_preferences_for_listing());
         throw std::runtime_error("Listing snapshot accepted an invalid entry name");
     } catch(const SourcePreferenceError& error) {
         expect(
-                error.failure().kind == SourcePreferenceFailureKind::InvalidEntryName,
-                "Invalid listing entry name lost its typed error");
+            error.failure().kind == SourcePreferenceFailureKind::InvalidEntryName,
+            "Invalid listing entry name lost its typed error");
     }
     fs::remove(invalid_entry);
 
     fs::permissions(
-            source_preference_entry_path("snapshot-zeta"),
-            fs::perms::owner_read | fs::perms::owner_write |
-                    fs::perms::group_read,
-            fs::perm_options::replace);
+        source_preference_entry_path("snapshot-zeta"),
+        fs::perms::owner_read | fs::perms::owner_write |
+            fs::perms::group_read,
+        fs::perm_options::replace);
     try {
         static_cast<void>(snapshot_source_preferences_for_listing());
         throw std::runtime_error("Listing snapshot accepted an unsafe later entry");
     } catch(const SourcePreferenceError& error) {
         expect(
-                error.failure().kind == SourcePreferenceFailureKind::UnsafePermissions,
-                "Unsafe listing entry lost its typed error");
+            error.failure().kind == SourcePreferenceFailureKind::UnsafePermissions,
+            "Unsafe listing entry lost its typed error");
     }
     fs::permissions(
-            source_preference_entry_path("snapshot-zeta"),
-            fs::perms::owner_read | fs::perms::owner_write,
-            fs::perm_options::replace);
+        source_preference_entry_path("snapshot-zeta"),
+        fs::perms::owner_read | fs::perms::owner_write,
+        fs::perm_options::replace);
 }
 
 void test_cooperative_reader_writer_directory_locks() {
@@ -1210,9 +1210,9 @@ void test_cooperative_reader_writer_directory_locks() {
     g_concurrent_writer_ready_descriptor = writer_ready.write_descriptor();
     g_concurrent_writer_release_descriptor = writer_release.read_descriptor();
     run_source_preference_race_once_for_test(
-            read_package,
-            SourcePreferenceTestRacePoint::AtPublicationBoundary,
-            hold_writer_lock_for_concurrency_test);
+        read_package,
+        SourcePreferenceTestRacePoint::AtPublicationBoundary,
+        hold_writer_lock_for_concurrency_test);
 
     const pid_t first_writer = ::fork();
     if(first_writer < 0) {
@@ -1223,7 +1223,7 @@ void test_cooperative_reader_writer_directory_locks() {
         writer_release.close_write_descriptor();
         try {
             append_source_preference_assignment(
-                    read_package, "SERIALIZED=writer");
+                read_package, "SERIALIZED=writer");
             ::_exit(0);
         } catch(...) {
             ::_exit(1);
@@ -1233,97 +1233,99 @@ void test_cooperative_reader_writer_directory_locks() {
     writer_release.close_read_descriptor();
     reset_source_preference_test_hooks();
     expect(
-            read_pipe_byte(writer_ready.read_descriptor()) == 'R',
-            "First concurrency writer did not reach the publication boundary");
+        read_pipe_byte(writer_ready.read_descriptor()) == 'R',
+        "First concurrency writer did not reach the publication boundary");
     expect(
-            internal_artifacts_for_package(
-                    source_preference_entry_path(read_package)).size() == 1,
-            "Blocked writer did not expose the expected live internal artifact");
+        internal_artifacts_for_package(
+            source_preference_entry_path(read_package))
+                .size() == 1,
+        "Blocked writer did not expose the expected live internal artifact");
     expect_source_preference_directory_lock_blocked(
-            LOCK_SH,
-            "Cooperative reader lock probe");
+        LOCK_SH,
+        "Cooperative reader lock probe");
     expect_source_preference_directory_lock_blocked(
-            LOCK_EX,
-            "Cooperative writer lock probe");
+        LOCK_EX,
+        "Cooperative writer lock probe");
 
     TestPipe strict_ready;
     TestPipe strict_done;
     const pid_t strict_reader = start_concurrent_probe(
-            ConcurrentProbeKind::StrictRead, read_package,
-            strict_ready, strict_done);
+        ConcurrentProbeKind::StrictRead, read_package,
+        strict_ready, strict_done);
     expect(
-            read_pipe_byte(strict_ready.read_descriptor()) == 'R',
-            "Strict reader did not start");
+        read_pipe_byte(strict_ready.read_descriptor()) == 'R',
+        "Strict reader did not start");
 
     TestPipe directory_ready;
     TestPipe directory_done;
     const pid_t directory_reader = start_concurrent_probe(
-            ConcurrentProbeKind::DirectorySnapshot, read_package,
-            directory_ready, directory_done);
+        ConcurrentProbeKind::DirectorySnapshot, read_package,
+        directory_ready, directory_done);
     expect(
-            read_pipe_byte(directory_ready.read_descriptor()) == 'R',
-            "Directory snapshot reader did not start");
+        read_pipe_byte(directory_ready.read_descriptor()) == 'R',
+        "Directory snapshot reader did not start");
 
     TestPipe listing_ready;
     TestPipe listing_done;
     const pid_t listing_reader = start_concurrent_probe(
-            ConcurrentProbeKind::ListingSnapshot, read_package,
-            listing_ready, listing_done);
+        ConcurrentProbeKind::ListingSnapshot, read_package,
+        listing_ready, listing_done);
     expect(
-            read_pipe_byte(listing_ready.read_descriptor()) == 'R',
-            "Listing snapshot reader did not start");
+        read_pipe_byte(listing_ready.read_descriptor()) == 'R',
+        "Listing snapshot reader did not start");
 
     TestPipe second_writer_ready;
     TestPipe second_writer_done;
     const pid_t second_writer = start_concurrent_probe(
-            ConcurrentProbeKind::RemoveEntry, remove_package,
-            second_writer_ready, second_writer_done);
+        ConcurrentProbeKind::RemoveEntry, remove_package,
+        second_writer_ready, second_writer_done);
     expect(
-            read_pipe_byte(second_writer_ready.read_descriptor()) == 'R',
-            "Second concurrency writer did not start");
+        read_pipe_byte(second_writer_ready.read_descriptor()) == 'R',
+        "Second concurrency writer did not start");
 
     const bool completed_while_exclusive_lock_was_held = any_probe_completed(
-            {
-                    strict_done.read_descriptor(),
-                    directory_done.read_descriptor(),
-                    listing_done.read_descriptor(),
-                    second_writer_done.read_descriptor(),
-            },
-            250);
+        {
+            strict_done.read_descriptor(),
+            directory_done.read_descriptor(),
+            listing_done.read_descriptor(),
+            second_writer_done.read_descriptor(),
+        },
+        250);
 
     write_pipe_byte(writer_release.write_descriptor(), 'G');
     writer_release.close_write_descriptor();
 
     expect(
-            read_pipe_byte(strict_done.read_descriptor()) == 'S',
-            "Strict reader failed after writer serialization");
+        read_pipe_byte(strict_done.read_descriptor()) == 'S',
+        "Strict reader failed after writer serialization");
     expect(
-            read_pipe_byte(directory_done.read_descriptor()) == 'S',
-            "Directory snapshot failed after writer serialization");
+        read_pipe_byte(directory_done.read_descriptor()) == 'S',
+        "Directory snapshot failed after writer serialization");
     expect(
-            read_pipe_byte(listing_done.read_descriptor()) == 'S',
-            "Listing snapshot observed a live internal artifact");
+        read_pipe_byte(listing_done.read_descriptor()) == 'S',
+        "Listing snapshot observed a live internal artifact");
     expect(
-            read_pipe_byte(second_writer_done.read_descriptor()) == 'S',
-            "Second writer failed after exclusive-lock serialization");
+        read_pipe_byte(second_writer_done.read_descriptor()) == 'S',
+        "Second writer failed after exclusive-lock serialization");
 
     expect_child_success(first_writer, "first source preference writer");
     expect_child_success(strict_reader, "strict source preference reader");
     expect_child_success(
-            directory_reader, "source preference directory snapshot");
+        directory_reader, "source preference directory snapshot");
     expect_child_success(listing_reader, "source preference listing snapshot");
     expect_child_success(second_writer, "second source preference writer");
 
     expect(
-            !completed_while_exclusive_lock_was_held,
-            "A cooperative reader or writer bypassed the directory LOCK_EX");
+        !completed_while_exclusive_lock_was_held,
+        "A cooperative reader or writer bypassed the directory LOCK_EX");
     expect(
-            !fs::exists(source_preference_entry_path(remove_package)),
-            "Serialized removal did not remove its source preference entry");
+        !fs::exists(source_preference_entry_path(remove_package)),
+        "Serialized removal did not remove its source preference entry");
     expect(
-            internal_artifacts_for_package(
-                    source_preference_entry_path(read_package)).empty(),
-            "Successful cooperative serialization left an internal artifact");
+        internal_artifacts_for_package(
+            source_preference_entry_path(read_package))
+            .empty(),
+        "Successful cooperative serialization left an internal artifact");
     g_concurrent_writer_ready_descriptor = -1;
     g_concurrent_writer_release_descriptor = -1;
 }
@@ -1333,125 +1335,125 @@ void test_deterministic_descriptor_races_fail_closed() {
     write_preference(read_package, "ORIGINAL=read\n");
     g_race_contents = "CONCURRENT=read-in-place\n";
     run_source_preference_race_once_for_test(
-            read_package, SourcePreferenceTestRacePoint::AfterReadOpen,
-            mutate_preference_in_place_for_race);
+        read_package, SourcePreferenceTestRacePoint::AfterReadOpen,
+        mutate_preference_in_place_for_race);
     expect_strict_failure(
-            read_source_preference_strict(read_package),
-            SourcePreferenceFailureKind::ConcurrentReplacement,
-            "same-inode read mutation");
+        read_source_preference_strict(read_package),
+        SourcePreferenceFailureKind::ConcurrentReplacement,
+        "same-inode read mutation");
     expect_equal(
-            "same-inode read race contents",
-            read_preference_contents(read_package), g_race_contents);
+        "same-inode read race contents",
+        read_preference_contents(read_package), g_race_contents);
 
     const std::string create_package = "race-create-target";
     remove_preference_entry(create_package);
     g_race_contents = "COMPETING=create\n";
     run_source_preference_race_once_for_test(
-            create_package,
-            SourcePreferenceTestRacePoint::AtPublicationBoundary,
-            replace_preference_for_race);
+        create_package,
+        SourcePreferenceTestRacePoint::AtPublicationBoundary,
+        replace_preference_for_race);
     try {
         create_source_preference_entry(create_package);
         throw std::runtime_error(
-                "Absent atomic create overwrote a competing entry");
+            "Absent atomic create overwrote a competing entry");
     } catch(const SourcePreferenceError& error) {
         expect(
-                error.failure().kind ==
-                        SourcePreferenceFailureKind::ConcurrentReplacement,
-                "Absent create race lost its typed error");
+            error.failure().kind ==
+                SourcePreferenceFailureKind::ConcurrentReplacement,
+            "Absent create race lost its typed error");
     }
     expect_equal(
-            "absent create race preserved competitor",
-            read_preference_contents(create_package), g_race_contents);
+        "absent create race preserved competitor",
+        read_preference_contents(create_package), g_race_contents);
 
     const std::string post_create_package = "race-post-create-target";
     remove_preference_entry(post_create_package);
     g_race_contents = "COMPETING=post-create\n";
     run_source_preference_race_once_for_test(
-            post_create_package,
-            SourcePreferenceTestRacePoint::AfterPublication,
-            replace_preference_for_race);
+        post_create_package,
+        SourcePreferenceTestRacePoint::AfterPublication,
+        replace_preference_for_race);
     try {
         create_source_preference_entry(post_create_package);
         throw std::runtime_error(
-                "Post-publication create race returned success");
+            "Post-publication create race returned success");
     } catch(const SourcePreferenceError& error) {
         expect(
-                error.failure().kind ==
-                        SourcePreferenceFailureKind::ConcurrentReplacement,
-                "Post-publication create race lost its typed error");
+            error.failure().kind ==
+                SourcePreferenceFailureKind::ConcurrentReplacement,
+            "Post-publication create race lost its typed error");
     }
     expect_equal(
-            "post-publication create race preserved canonical competitor",
-            read_preference_contents(post_create_package), g_race_contents);
+        "post-publication create race preserved canonical competitor",
+        read_preference_contents(post_create_package), g_race_contents);
 
     const std::string replace_package = "race-replace-target";
     write_preference(replace_package, "ORIGINAL=replace\n");
     const SourcePreferenceLoaded replace_identity =
-            expect_strict_alternative<SourcePreferenceLoaded>(
-                    read_source_preference_strict(replace_package),
-                    "replacement race identity");
+        expect_strict_alternative<SourcePreferenceLoaded>(
+            read_source_preference_strict(replace_package),
+            "replacement race identity");
     expect(
-            replace_identity.identity.has_value(),
-            "Replacement race fixture omitted entry identity");
+        replace_identity.identity.has_value(),
+        "Replacement race fixture omitted entry identity");
     const fs::path replacement_source =
-            source_preference_root().parent_path() /
-            "race-replacement-source.fixture";
+        source_preference_root().parent_path() /
+        "race-replacement-source.fixture";
     {
         std::ofstream output(replacement_source, std::ios::binary);
         output << "DESIRED=replacement\n";
     }
     fs::permissions(
-            replacement_source,
-            fs::perms::owner_read | fs::perms::owner_write,
-            fs::perm_options::replace);
+        replacement_source,
+        fs::perms::owner_read | fs::perms::owner_write,
+        fs::perm_options::replace);
     const int replacement_descriptor =
-            ::open(replacement_source.c_str(), O_RDONLY | O_CLOEXEC);
+        ::open(replacement_source.c_str(), O_RDONLY | O_CLOEXEC);
     if(replacement_descriptor < 0) {
         throw std::runtime_error(
-                "Failed to open replacement race source: " +
-                std::string(std::strerror(errno)));
+            "Failed to open replacement race source: " +
+            std::string(std::strerror(errno)));
     }
     g_race_contents = "COMPETING=replace\n";
     run_source_preference_race_once_for_test(
-            replace_package,
-            SourcePreferenceTestRacePoint::AtPublicationBoundary,
-            replace_preference_for_race);
+        replace_package,
+        SourcePreferenceTestRacePoint::AtPublicationBoundary,
+        replace_preference_for_race);
     try {
         replace_source_preference_entry_from_descriptor(
-                replace_package, replacement_descriptor,
-                replace_identity.identity);
+            replace_package, replacement_descriptor,
+            replace_identity.identity);
         static_cast<void>(::close(replacement_descriptor));
         throw std::runtime_error(
-                "Atomic replacement overwrote a competing entry");
+            "Atomic replacement overwrote a competing entry");
     } catch(const SourcePreferenceError& error) {
         if(::close(replacement_descriptor) != 0) {
             throw std::runtime_error(
-                    "Failed to close replacement race source");
+                "Failed to close replacement race source");
         }
         expect(
-                error.failure().kind ==
-                        SourcePreferenceFailureKind::ConcurrentReplacement,
-                "Existing replacement race lost its typed error");
+            error.failure().kind ==
+                SourcePreferenceFailureKind::ConcurrentReplacement,
+            "Existing replacement race lost its typed error");
     }
     expect_equal(
-            "replacement mismatch kept the published entry in place",
-            read_preference_contents(replace_package),
-            "DESIRED=replacement\n");
+        "replacement mismatch kept the published entry in place",
+        read_preference_contents(replace_package),
+        "DESIRED=replacement\n");
     const std::vector<fs::path> replacement_artifacts =
-            internal_artifacts_for_package(
-                    source_preference_entry_path(replace_package));
+        internal_artifacts_for_package(
+            source_preference_entry_path(replace_package));
     expect(
-            replacement_artifacts.size() == 1,
-            "Replacement mismatch did not preserve exactly one displaced artifact");
+        replacement_artifacts.size() == 1,
+        "Replacement mismatch did not preserve exactly one displaced artifact");
     {
         std::ifstream artifact(replacement_artifacts.front(), std::ios::binary);
         const std::string artifact_contents(
-                (std::istreambuf_iterator<char>(artifact)),
-                std::istreambuf_iterator<char>());
+            (std::istreambuf_iterator<char>(artifact)),
+            std::istreambuf_iterator<char>());
         expect_equal(
-                "replacement mismatch preserved the untrusted artifact",
-                artifact_contents, g_race_contents);
+            "replacement mismatch preserved the untrusted artifact",
+            artifact_contents, g_race_contents);
     }
     fs::remove(replacement_artifacts.front());
     fs::remove(replacement_source);
@@ -1459,168 +1461,168 @@ void test_deterministic_descriptor_races_fail_closed() {
     const std::string source_race_package = "race-edit-source-target";
     write_preference(source_race_package, "ORIGINAL=source-race\n");
     const SourcePreferenceLoaded source_race_identity =
-            expect_strict_alternative<SourcePreferenceLoaded>(
-                    read_source_preference_strict(source_race_package),
-                    "source descriptor race identity");
+        expect_strict_alternative<SourcePreferenceLoaded>(
+            read_source_preference_strict(source_race_package),
+            "source descriptor race identity");
     g_race_source_path = source_preference_root().parent_path() /
-            "race-edit-source.fixture";
+                         "race-edit-source.fixture";
     g_race_contents = "DESIRED=before-race\n";
     write_race_contents(g_race_source_path);
     const int source_race_descriptor =
-            ::open(g_race_source_path.c_str(), O_RDONLY | O_CLOEXEC);
+        ::open(g_race_source_path.c_str(), O_RDONLY | O_CLOEXEC);
     if(source_race_descriptor < 0) {
         throw std::runtime_error(
-                "Failed to open source descriptor race fixture");
+            "Failed to open source descriptor race fixture");
     }
     g_race_contents = "CONCURRENT=source-after-copy\n";
     run_source_preference_race_once_for_test(
-            source_race_package,
-            SourcePreferenceTestRacePoint::AtPublicationBoundary,
-            mutate_source_descriptor_for_race);
+        source_race_package,
+        SourcePreferenceTestRacePoint::AtPublicationBoundary,
+        mutate_source_descriptor_for_race);
     try {
         replace_source_preference_entry_from_descriptor(
-                source_race_package, source_race_descriptor,
-                source_race_identity.identity);
+            source_race_package, source_race_descriptor,
+            source_race_identity.identity);
         static_cast<void>(::close(source_race_descriptor));
         throw std::runtime_error(
-                "Atomic replacement accepted a changing source descriptor");
+            "Atomic replacement accepted a changing source descriptor");
     } catch(const SourcePreferenceError& error) {
         if(::close(source_race_descriptor) != 0) {
             throw std::runtime_error(
-                    "Failed to close source descriptor race fixture");
+                "Failed to close source descriptor race fixture");
         }
         expect(
-                error.failure().kind ==
-                        SourcePreferenceFailureKind::ConcurrentReplacement,
-                "Changing source descriptor lost its typed error");
+            error.failure().kind ==
+                SourcePreferenceFailureKind::ConcurrentReplacement,
+            "Changing source descriptor lost its typed error");
     }
     expect_equal(
-            "source descriptor race preserved destination",
-            read_preference_contents(source_race_package),
-            "ORIGINAL=source-race\n");
+        "source descriptor race preserved destination",
+        read_preference_contents(source_race_package),
+        "ORIGINAL=source-race\n");
     fs::remove(g_race_source_path);
 
     const std::string temporary_race_package = "race-temporary-target";
     write_preference(temporary_race_package, "ORIGINAL=temporary-race\n");
     const SourcePreferenceLoaded temporary_race_identity =
-            expect_strict_alternative<SourcePreferenceLoaded>(
-                    read_source_preference_strict(temporary_race_package),
-                    "internal temporary race identity");
+        expect_strict_alternative<SourcePreferenceLoaded>(
+            read_source_preference_strict(temporary_race_package),
+            "internal temporary race identity");
     const fs::path temporary_race_source =
-            source_preference_root().parent_path() /
-            "race-temporary-source.fixture";
+        source_preference_root().parent_path() /
+        "race-temporary-source.fixture";
     g_race_contents = "DESIRED=temporary-race\n";
     write_race_contents(temporary_race_source);
     const int temporary_race_descriptor =
-            ::open(temporary_race_source.c_str(), O_RDONLY | O_CLOEXEC);
+        ::open(temporary_race_source.c_str(), O_RDONLY | O_CLOEXEC);
     if(temporary_race_descriptor < 0) {
         throw std::runtime_error(
-                "Failed to open internal temporary race source");
+            "Failed to open internal temporary race source");
     }
     g_race_contents = "COMPETING=temporary-leaf\n";
     g_race_internal_path.clear();
     run_source_preference_race_once_for_test(
-            temporary_race_package,
-            SourcePreferenceTestRacePoint::BeforePublication,
-            replace_internal_temporary_for_race);
+        temporary_race_package,
+        SourcePreferenceTestRacePoint::BeforePublication,
+        replace_internal_temporary_for_race);
     try {
         replace_source_preference_entry_from_descriptor(
-                temporary_race_package, temporary_race_descriptor,
-                temporary_race_identity.identity);
+            temporary_race_package, temporary_race_descriptor,
+            temporary_race_identity.identity);
         static_cast<void>(::close(temporary_race_descriptor));
         throw std::runtime_error(
-                "Atomic replacement published a substituted temporary leaf");
+            "Atomic replacement published a substituted temporary leaf");
     } catch(const SourcePreferenceError& error) {
         if(::close(temporary_race_descriptor) != 0) {
             throw std::runtime_error(
-                    "Failed to close internal temporary race source");
+                "Failed to close internal temporary race source");
         }
         expect(
-                error.failure().kind ==
-                        SourcePreferenceFailureKind::ConcurrentReplacement,
-                "Substituted temporary leaf lost its typed error");
+            error.failure().kind ==
+                SourcePreferenceFailureKind::ConcurrentReplacement,
+            "Substituted temporary leaf lost its typed error");
     }
     expect_equal(
-            "temporary mismatch preserved the original destination",
-            read_preference_contents(temporary_race_package),
-            "ORIGINAL=temporary-race\n");
+        "temporary mismatch preserved the original destination",
+        read_preference_contents(temporary_race_package),
+        "ORIGINAL=temporary-race\n");
     expect(
-            !g_race_internal_path.empty() &&
-                    fs::is_regular_file(g_race_internal_path),
-            "Temporary leaf race discarded the competing file");
+        !g_race_internal_path.empty() &&
+            fs::is_regular_file(g_race_internal_path),
+        "Temporary leaf race discarded the competing file");
     {
         std::ifstream competitor(g_race_internal_path, std::ios::binary);
         const std::string competitor_contents(
-                (std::istreambuf_iterator<char>(competitor)),
-                std::istreambuf_iterator<char>());
+            (std::istreambuf_iterator<char>(competitor)),
+            std::istreambuf_iterator<char>());
         expect_equal(
-                "temporary mismatch preserved the untrusted artifact",
-                competitor_contents, g_race_contents);
+            "temporary mismatch preserved the untrusted artifact",
+            competitor_contents, g_race_contents);
     }
     fs::remove(g_race_internal_path);
     fs::remove(temporary_race_source);
 
     const std::string in_place_temporary_race_package =
-            "race-temporary-in-place-target";
+        "race-temporary-in-place-target";
     write_preference(
-            in_place_temporary_race_package,
-            "ORIGINAL=temporary-in-place-race\n");
+        in_place_temporary_race_package,
+        "ORIGINAL=temporary-in-place-race\n");
     const SourcePreferenceLoaded in_place_temporary_race_identity =
-            expect_strict_alternative<SourcePreferenceLoaded>(
-                    read_source_preference_strict(
-                            in_place_temporary_race_package),
-                    "same-inode internal temporary race identity");
+        expect_strict_alternative<SourcePreferenceLoaded>(
+            read_source_preference_strict(
+                in_place_temporary_race_package),
+            "same-inode internal temporary race identity");
     const fs::path in_place_temporary_race_source =
-            source_preference_root().parent_path() /
-            "race-temporary-in-place-source.fixture";
+        source_preference_root().parent_path() /
+        "race-temporary-in-place-source.fixture";
     g_race_contents = "DESIRED=temporary-in-place-race\n";
     write_race_contents(in_place_temporary_race_source);
     const int in_place_temporary_race_descriptor = ::open(
-            in_place_temporary_race_source.c_str(), O_RDONLY | O_CLOEXEC);
+        in_place_temporary_race_source.c_str(), O_RDONLY | O_CLOEXEC);
     if(in_place_temporary_race_descriptor < 0) {
         throw std::runtime_error(
-                "Failed to open same-inode temporary race source");
+            "Failed to open same-inode temporary race source");
     }
     g_race_contents = "CONCURRENT=temporary-in-place\n";
     g_race_internal_path.clear();
     run_source_preference_race_once_for_test(
-            in_place_temporary_race_package,
-            SourcePreferenceTestRacePoint::BeforePublication,
-            mutate_internal_temporary_in_place_for_race);
+        in_place_temporary_race_package,
+        SourcePreferenceTestRacePoint::BeforePublication,
+        mutate_internal_temporary_in_place_for_race);
     try {
         replace_source_preference_entry_from_descriptor(
-                in_place_temporary_race_package,
-                in_place_temporary_race_descriptor,
-                in_place_temporary_race_identity.identity);
+            in_place_temporary_race_package,
+            in_place_temporary_race_descriptor,
+            in_place_temporary_race_identity.identity);
         static_cast<void>(::close(in_place_temporary_race_descriptor));
         throw std::runtime_error(
-                "Atomic replacement accepted a same-inode temporary mutation");
+            "Atomic replacement accepted a same-inode temporary mutation");
     } catch(const SourcePreferenceError& error) {
         if(::close(in_place_temporary_race_descriptor) != 0) {
             throw std::runtime_error(
-                    "Failed to close same-inode temporary race source");
+                "Failed to close same-inode temporary race source");
         }
         expect(
-                error.failure().kind ==
-                        SourcePreferenceFailureKind::ConcurrentReplacement,
-                "Same-inode temporary mutation lost its typed error");
+            error.failure().kind ==
+                SourcePreferenceFailureKind::ConcurrentReplacement,
+            "Same-inode temporary mutation lost its typed error");
     }
     expect_equal(
-            "same-inode temporary race preserved canonical entry",
-            read_preference_contents(in_place_temporary_race_package),
-            "ORIGINAL=temporary-in-place-race\n");
+        "same-inode temporary race preserved canonical entry",
+        read_preference_contents(in_place_temporary_race_package),
+        "ORIGINAL=temporary-in-place-race\n");
     expect(
-            !g_race_internal_path.empty() &&
-                    fs::is_regular_file(g_race_internal_path),
-            "Same-inode temporary race discarded the changed artifact");
+        !g_race_internal_path.empty() &&
+            fs::is_regular_file(g_race_internal_path),
+        "Same-inode temporary race discarded the changed artifact");
     {
         std::ifstream artifact(g_race_internal_path, std::ios::binary);
         const std::string artifact_contents(
-                (std::istreambuf_iterator<char>(artifact)),
-                std::istreambuf_iterator<char>());
+            (std::istreambuf_iterator<char>(artifact)),
+            std::istreambuf_iterator<char>());
         expect_equal(
-                "same-inode temporary race retained changed contents",
-                artifact_contents, g_race_contents);
+            "same-inode temporary race retained changed contents",
+            artifact_contents, g_race_contents);
     }
     fs::remove(g_race_internal_path);
     fs::remove(in_place_temporary_race_source);
@@ -1629,36 +1631,36 @@ void test_deterministic_descriptor_races_fail_closed() {
     write_preference(remove_package, "ORIGINAL=remove\n");
     g_race_contents = "COMPETING=remove\n";
     run_source_preference_race_once_for_test(
-            remove_package,
-            SourcePreferenceTestRacePoint::AtRemovalBoundary,
-            replace_preference_for_race);
+        remove_package,
+        SourcePreferenceTestRacePoint::AtRemovalBoundary,
+        replace_preference_for_race);
     try {
         static_cast<void>(remove_source_preference_entry(remove_package));
         throw std::runtime_error(
-                "Atomic removal deleted a competing entry");
+            "Atomic removal deleted a competing entry");
     } catch(const SourcePreferenceError& error) {
         expect(
-                error.failure().kind ==
-                        SourcePreferenceFailureKind::ConcurrentReplacement,
-                "Removal race lost its typed error");
+            error.failure().kind ==
+                SourcePreferenceFailureKind::ConcurrentReplacement,
+            "Removal race lost its typed error");
     }
     expect(
-            !fs::exists(source_preference_entry_path(remove_package)),
-            "Removal mismatch restored an untrusted tombstone");
+        !fs::exists(source_preference_entry_path(remove_package)),
+        "Removal mismatch restored an untrusted tombstone");
     const std::vector<fs::path> removal_artifacts =
-            internal_artifacts_for_package(
-                    source_preference_entry_path(remove_package));
+        internal_artifacts_for_package(
+            source_preference_entry_path(remove_package));
     expect(
-            removal_artifacts.size() == 1,
-            "Removal mismatch did not preserve exactly one tombstone artifact");
+        removal_artifacts.size() == 1,
+        "Removal mismatch did not preserve exactly one tombstone artifact");
     {
         std::ifstream artifact(removal_artifacts.front(), std::ios::binary);
         const std::string artifact_contents(
-                (std::istreambuf_iterator<char>(artifact)),
-                std::istreambuf_iterator<char>());
+            (std::istreambuf_iterator<char>(artifact)),
+            std::istreambuf_iterator<char>());
         expect_equal(
-                "removal mismatch preserved the untrusted tombstone",
-                artifact_contents, g_race_contents);
+            "removal mismatch preserved the untrusted tombstone",
+            artifact_contents, g_race_contents);
     }
     fs::remove(removal_artifacts.front());
 
@@ -1666,47 +1668,47 @@ void test_deterministic_descriptor_races_fail_closed() {
     write_preference(post_remove_package, "ORIGINAL=post-remove\n");
     g_race_contents = "COMPETING=post-remove\n";
     run_source_preference_race_once_for_test(
-            post_remove_package,
-            SourcePreferenceTestRacePoint::AfterRemoval,
-            replace_preference_for_race);
+        post_remove_package,
+        SourcePreferenceTestRacePoint::AfterRemoval,
+        replace_preference_for_race);
     try {
         static_cast<void>(remove_source_preference_entry(post_remove_package));
         throw std::runtime_error(
-                "Post-removal recreation race returned success");
+            "Post-removal recreation race returned success");
     } catch(const SourcePreferenceError& error) {
         expect(
-                error.failure().kind ==
-                        SourcePreferenceFailureKind::ConcurrentReplacement,
-                "Post-removal recreation race lost its typed error");
+            error.failure().kind ==
+                SourcePreferenceFailureKind::ConcurrentReplacement,
+            "Post-removal recreation race lost its typed error");
     }
     expect_equal(
-            "post-removal race preserved canonical competitor",
-            read_preference_contents(post_remove_package), g_race_contents);
+        "post-removal race preserved canonical competitor",
+        read_preference_contents(post_remove_package), g_race_contents);
     reset_source_preference_test_hooks();
 }
 
 void test_snapshot_authority_failure_is_typed() {
     ScopedEnvironmentVariable invalid_authority(
-            "XDG_CONFIG_HOME", "relative-source-preference-config");
+        "XDG_CONFIG_HOME", "relative-source-preference-config");
     try {
         static_cast<void>(snapshot_source_preference_directory());
         throw std::runtime_error(
-                "Directory snapshot accepted a relative XDG authority");
+            "Directory snapshot accepted a relative XDG authority");
     } catch(const SourcePreferenceError& error) {
         expect(
-                error.failure().kind ==
-                        SourcePreferenceFailureKind::AuthorityUnavailable,
-                "Directory snapshot authority failure lost its typed kind");
+            error.failure().kind ==
+                SourcePreferenceFailureKind::AuthorityUnavailable,
+            "Directory snapshot authority failure lost its typed kind");
     }
     try {
         static_cast<void>(snapshot_source_preferences_for_listing());
         throw std::runtime_error(
-                "Listing snapshot accepted a relative XDG authority");
+            "Listing snapshot accepted a relative XDG authority");
     } catch(const SourcePreferenceError& error) {
         expect(
-                error.failure().kind ==
-                        SourcePreferenceFailureKind::AuthorityUnavailable,
-                "Listing snapshot authority failure lost its typed kind");
+            error.failure().kind ==
+                SourcePreferenceFailureKind::AuthorityUnavailable,
+            "Listing snapshot authority failure lost its typed kind");
     }
 }
 
@@ -1717,18 +1719,18 @@ void test_strict_fifo_entry_is_rejected_without_opening_it() {
     if(::mkfifo(entry_path.c_str(), 0600) != 0) {
         const int fixture_errno = errno;
         throw std::runtime_error(
-                "Failed to create strict FIFO fixture: " +
-                std::string(std::strerror(fixture_errno)));
+            "Failed to create strict FIFO fixture: " +
+            std::string(std::strerror(fixture_errno)));
     }
 
     StrictSourcePreferenceResult result =
-            read_source_preference_strict(package_name);
+        read_source_preference_strict(package_name);
     const SourcePreferenceFailure failure = expect_strict_failure(
-            result, SourcePreferenceFailureKind::UnsupportedFileType,
-            "strict FIFO preference");
+        result, SourcePreferenceFailureKind::UnsupportedFileType,
+        "strict FIFO preference");
     expect(
-            failure.observed_file_type == fs::file_type::fifo,
-            "Strict FIFO preference lost its observed file type");
+        failure.observed_file_type == fs::file_type::fifo,
+        "Strict FIFO preference lost its observed file type");
 }
 
 void test_strict_open_failure_is_typed_and_one_shot() {
@@ -1737,61 +1739,61 @@ void test_strict_open_failure_is_typed_and_one_shot() {
     write_preference(package_name, contents);
     reset_source_preference_test_hooks();
     fail_next_source_preference_operation_for_test(
-            package_name, SourcePreferenceTestFailurePoint::Open);
+        package_name, SourcePreferenceTestFailurePoint::Open);
 
     StrictSourcePreferenceResult result =
-            read_source_preference_strict(package_name);
+        read_source_preference_strict(package_name);
     const SourcePreferenceFailure failure = expect_strict_failure(
-            result, SourcePreferenceFailureKind::OpenFailed,
-            "strict open failure");
+        result, SourcePreferenceFailureKind::OpenFailed,
+        "strict open failure");
     expect(
-            failure.system_error == std::make_error_code(std::errc::permission_denied),
-            "Strict open failure lost its system error");
+        failure.system_error == std::make_error_code(std::errc::permission_denied),
+        "Strict open failure lost its system error");
     expect_equal(
-            "strict open failure left the file unchanged",
-            read_preference_contents(package_name), contents);
+        "strict open failure left the file unchanged",
+        read_preference_contents(package_name), contents);
 
     StrictSourcePreferenceResult retry =
-            read_source_preference_strict(package_name);
+        read_source_preference_strict(package_name);
     const SourcePreferenceLoaded loaded =
-            expect_strict_alternative<SourcePreferenceLoaded>(
-                    retry, "strict open failure one-shot retry");
+        expect_strict_alternative<SourcePreferenceLoaded>(
+            retry, "strict open failure one-shot retry");
     expect_assignment(loaded.environment, 0, "VALUE", "available");
 }
 
 void test_strict_read_failure_does_not_publish_partial_environment() {
     const std::string package_name = "strict-read-failure-target";
     const std::string contents =
-            "FIRST=partial-byte-source\n"
-            "SECOND=must-not-publish\n";
+        "FIRST=partial-byte-source\n"
+        "SECOND=must-not-publish\n";
     write_preference(package_name, contents);
     reset_source_preference_test_hooks();
     fail_next_source_preference_operation_for_test(
-            package_name, SourcePreferenceTestFailurePoint::Read);
+        package_name, SourcePreferenceTestFailurePoint::Read);
 
     StrictSourcePreferenceResult result =
-            read_source_preference_strict(package_name);
+        read_source_preference_strict(package_name);
     const SourcePreferenceFailure failure = expect_strict_failure(
-            result, SourcePreferenceFailureKind::ReadFailed,
-            "strict partial read failure");
+        result, SourcePreferenceFailureKind::ReadFailed,
+        "strict partial read failure");
     expect(
-            failure.system_error == std::make_error_code(std::errc::io_error),
-            "Strict read failure lost its system error");
+        failure.system_error == std::make_error_code(std::errc::io_error),
+        "Strict read failure lost its system error");
     expect(
-            std::get_if<SourcePreferenceLoaded>(&result) == nullptr,
-            "Strict read failure published a partial environment");
+        std::get_if<SourcePreferenceLoaded>(&result) == nullptr,
+        "Strict read failure published a partial environment");
     expect_equal(
-            "strict read failure left the file unchanged",
-            read_preference_contents(package_name), contents);
+        "strict read failure left the file unchanged",
+        read_preference_contents(package_name), contents);
 
     StrictSourcePreferenceResult retry =
-            read_source_preference_strict(package_name);
+        read_source_preference_strict(package_name);
     const SourcePreferenceLoaded loaded =
-            expect_strict_alternative<SourcePreferenceLoaded>(
-                    retry, "strict read failure one-shot retry");
+        expect_strict_alternative<SourcePreferenceLoaded>(
+            retry, "strict read failure one-shot retry");
     expect(
-            loaded.environment.ordered_assignments.size() == 2,
-            "Strict read failure retry did not load the full file");
+        loaded.environment.ordered_assignments.size() == 2,
+        "Strict read failure retry did not load the full file");
     expect_assignment(loaded.environment, 0, "FIRST", "partial-byte-source");
     expect_assignment(loaded.environment, 1, "SECOND", "must-not-publish");
 }
@@ -1802,23 +1804,23 @@ int main(int argc, char* argv[]) {
     try {
         if(argc != 2) {
             throw std::runtime_error(
-                    "Usage: source-environment-test <fixture-root>");
+                "Usage: source-environment-test <fixture-root>");
         }
 
         const fs::path expected_root = fs::path(argv[1]).lexically_normal();
         expect(
-                source_preference_root().lexically_normal() == expected_root,
-                "Source preference XDG authority did not resolve to the fixture root");
+            source_preference_root().lexically_normal() == expected_root,
+            "Source preference XDG authority did not resolve to the fixture root");
         fs::create_directories(expected_root.parent_path().parent_path());
         fs::permissions(
-                expected_root.parent_path().parent_path(),
-                fs::perms::owner_all, fs::perm_options::replace);
+            expected_root.parent_path().parent_path(),
+            fs::perms::owner_all, fs::perm_options::replace);
         std::error_code remove_error;
         fs::remove_all(expected_root.parent_path(), remove_error);
         if(remove_error) {
             throw std::runtime_error(
-                    "Failed to reset source preference fixture: " +
-                    remove_error.message());
+                "Failed to reset source preference fixture: " +
+                remove_error.message());
         }
 
         test_absent_environment();
