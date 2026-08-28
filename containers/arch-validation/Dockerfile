@@ -13,6 +13,7 @@ RUN pacman-key --init \
     && pacman -Syu --needed --noconfirm \
         base-devel \
         bash \
+        clang \
         cmake \
         curl \
         fish \

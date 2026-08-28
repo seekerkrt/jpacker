@@ -49,12 +49,14 @@ a new storage direction: source-build preferences now use only the executing
 user's XDG config context, while the published v2.0.0 tag, Release, and release
 notes remain historical records.
 
-Moguet v2.4.1 is the latest release. This patch maintenance release adds a
-canonical `sample/config.toml`, installs it as an example in the standard Arch
-package documentation, and makes `moguet --help` show TOML string enum values
-with quotes. The strict parser, configuration schema, and built-in defaults are
-unchanged; malformed existing configuration continues to fail closed. See the
-[v2.4.1 release](https://github.com/seekerkrt/moguet/releases/tag/v2.4.1) for
+Moguet v2.5.0 is the latest release. This minor release adds conservative
+VCS/devel AUR tracking that surfaces `RequiresCheck` instead of a false
+`UpToDate` when a conventional devel package cannot yet be authoritatively
+tracked, and targeted `upgrade-all` diagnostics for repo/AUR cross-source
+exact-version dependency locks. It also establishes safety foundations for
+invocation-owned dependency cleanup without enabling public source-build
+`--rmdeps`. See the
+[v2.5.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.5.0) for
 the complete user-visible changes.
 
 The canonical repository identity is Moguet on GitHub, with a GitLab mirror.
