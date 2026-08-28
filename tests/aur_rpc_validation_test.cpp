@@ -16,7 +16,8 @@ void print_info(const std::optional<AurPackageInfo>& info) {
 }
 
 void print_names(const std::vector<std::string>& names) {
-    for(const auto& name : names) std::cout << name << '\n';
+    for(const auto& name : names)
+        std::cout << name << '\n';
 }
 
 void print_packages(const std::vector<AurPackageInfo>& packages) {
@@ -34,13 +35,13 @@ void print_info_map(const std::map<std::string, AurPackageInfo>& packages) {
 }
 
 void print_constraint_metadata(
-        const std::optional<AurPackageInfo>& info) {
+    const std::optional<AurPackageInfo>& info) {
     if(!info.has_value() || !info->constraint_metadata.has_value()) {
         throw std::runtime_error(
-                "AUR response did not retain typed constraint metadata.");
+            "AUR response did not retain typed constraint metadata.");
     }
     const AurPackageConstraintMetadata& metadata =
-            info->constraint_metadata.value();
+        info->constraint_metadata.value();
     std::cout << metadata.package_name << '|'
               << metadata.package_base << '|'
               << metadata.depends.size() << '|'
@@ -52,34 +53,34 @@ void print_constraint_metadata(
 
 #ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
 void test_write_callback_contract() {
-    char        payload[] = "abc";
+    char payload[] = "abc";
     std::string buffer = "prefix:";
 
     set_aur_rpc_write_append_failure_for_test(false);
     const std::size_t success_result =
-            invoke_aur_rpc_write_callback_for_test(
-                    payload, 1, 3, buffer);
+        invoke_aur_rpc_write_callback_for_test(
+            payload, 1, 3, buffer);
     if(success_result != 3 || buffer != "prefix:abc") {
         throw std::runtime_error(
-                "AUR write callback changed successful append behavior.");
+            "AUR write callback changed successful append behavior.");
     }
 
     buffer = "unchanged";
     set_aur_rpc_write_append_failure_for_test(true);
     const std::size_t failure_result =
-            invoke_aur_rpc_write_callback_for_test(
-                    payload, 1, 3, buffer);
+        invoke_aur_rpc_write_callback_for_test(
+            payload, 1, 3, buffer);
     const std::size_t zero_byte_failure_result =
-            invoke_aur_rpc_write_callback_for_test(
-                    payload, 0, 0, buffer);
+        invoke_aur_rpc_write_callback_for_test(
+            payload, 0, 0, buffer);
     set_aur_rpc_write_append_failure_for_test(false);
     if(failure_result == 3 || zero_byte_failure_result == 0) {
         throw std::runtime_error(
-                "AUR write callback did not return a libcurl write failure.");
+            "AUR write callback did not return a libcurl write failure.");
     }
     if(buffer != "unchanged") {
         throw std::runtime_error(
-                "AUR write callback treated an append exception as partial success.");
+            "AUR write callback treated an append exception as partial success.");
     }
     std::cout << "write-callback-contract-ok\n";
 }
@@ -93,7 +94,7 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
-    CurlGlobal       curl_global;
+    CurlGlobal curl_global;
     const std::string operation = argv[1];
     const std::string subject = argv[2];
     try {
@@ -120,15 +121,15 @@ int main(int argc, char* argv[]) {
             print_packages(AurClient::search_strict(subject));
         } else if(operation == "info-many-normal") {
             print_info_map(AurClient::info_many(
-                    {"valid-minimal", "arrays-null"}));
+                {"valid-minimal", "arrays-null"}));
         } else if(operation == "info-many-fail-first") {
             set_aur_rpc_encode_failure_package_for_test("valid-minimal");
             print_info_map(AurClient::info_many(
-                    {"valid-minimal", "arrays-null"}));
+                {"valid-minimal", "arrays-null"}));
         } else if(operation == "info-many-fail-middle") {
             set_aur_rpc_encode_failure_package_for_test("arrays-null");
             print_info_map(AurClient::info_many(
-                    {"valid-minimal", "arrays-null", "arrays-empty"}));
+                {"valid-minimal", "arrays-null", "arrays-empty"}));
 #endif
         } else {
             throw std::invalid_argument("unknown test operation: " + operation);

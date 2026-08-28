@@ -54,10 +54,10 @@ enum class StateLogErrorCode {
 
 struct StateLogFailure {
     xdg_paths::DirectoryKind directory_kind =
-            xdg_paths::DirectoryKind::State;
-    StateLogStage     stage = StateLogStage::BoundaryValidation;
+        xdg_paths::DirectoryKind::State;
+    StateLogStage stage = StateLogStage::BoundaryValidation;
     StateLogErrorCode code =
-            StateLogErrorCode::InvalidStateLogBoundary;
+        StateLogErrorCode::InvalidStateLogBoundary;
     std::optional<std::error_code> system_error;
 };
 
@@ -81,18 +81,18 @@ class StateLogLoggerBackend;
 // parent directoryのdescriptorを一体で保持し、path-based reopenを許さない。
 class PreparedLogFile final {
     xdg_paths::DirectoryKind directory_kind_ =
-            xdg_paths::DirectoryKind::State;
+        xdg_paths::DirectoryKind::State;
     std::filesystem::path logical_path_;
-    std::string           filename_;
-    int                   directory_descriptor_ = -1;
-    int                   file_descriptor_ = -1;
-    std::uintmax_t        directory_device_ = 0;
-    std::uintmax_t        directory_inode_ = 0;
-    std::uintmax_t        owner_ = 0;
-    std::uintmax_t        permissions_ = 0;
-    std::uintmax_t        device_ = 0;
-    std::uintmax_t        inode_ = 0;
-    bool                  created_ = false;
+    std::string filename_;
+    int directory_descriptor_ = -1;
+    int file_descriptor_ = -1;
+    std::uintmax_t directory_device_ = 0;
+    std::uintmax_t directory_inode_ = 0;
+    std::uintmax_t owner_ = 0;
+    std::uintmax_t permissions_ = 0;
+    std::uintmax_t device_ = 0;
+    std::uintmax_t inode_ = 0;
+    bool created_ = false;
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
     int test_record_write_error_ = 0;
     int test_file_close_error_ = 0;
@@ -100,12 +100,12 @@ class PreparedLogFile final {
 #endif
 
     PreparedLogFile(
-            std::filesystem::path logical_path, std::string filename,
-            int directory_descriptor, int file_descriptor,
-            std::uintmax_t directory_device,
-            std::uintmax_t directory_inode, std::uintmax_t owner,
-            std::uintmax_t permissions, std::uintmax_t device,
-            std::uintmax_t inode, bool created) noexcept;
+        std::filesystem::path logical_path, std::string filename,
+        int directory_descriptor, int file_descriptor,
+        std::uintmax_t directory_device,
+        std::uintmax_t directory_inode, std::uintmax_t owner,
+        std::uintmax_t permissions, std::uintmax_t device,
+        std::uintmax_t inode, bool created) noexcept;
 
     void close_descriptors() noexcept;
     void require_adoption_ready_for_logger() const;
@@ -158,8 +158,8 @@ public:
 // arbitrary filenameを受け取らず、StatePathsが固定したmoguet.logだけを
 // PreparedDirectoryのretained descriptorからopenする。
 PreparedLogFile open_default_state_log(
-        const xdg_paths::StatePaths& paths,
-        const xdg_directory_safety::PreparedDirectory& directory);
+    const xdg_paths::StatePaths& paths,
+    const xdg_directory_safety::PreparedDirectory& directory);
 
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
 enum class StateLogTestEvent {
@@ -188,11 +188,11 @@ enum class StateLogTestObservedType {
 
 struct StateLogInjectedFailure {
     StateLogTestFailurePoint failure_point;
-    int                      error_number;
+    int error_number;
 };
 
 using StateLogTestEventHook = std::function<void(
-        StateLogTestEvent, const std::filesystem::path&)>;
+    StateLogTestEvent, const std::filesystem::path&)>;
 
 // Focused test binaryだけがowner observation、syscall failure、race timing、
 // unprivilegedに作れないfile typeを差し替える。
@@ -204,14 +204,14 @@ struct StateLogTestOverrides {
 };
 
 PreparedLogFile open_default_state_log_for_test(
-        const xdg_paths::StatePaths& paths,
-        const xdg_directory_safety::PreparedDirectory& directory,
-        const StateLogTestOverrides& overrides);
+    const xdg_paths::StatePaths& paths,
+    const xdg_directory_safety::PreparedDirectory& directory,
+    const StateLogTestOverrides& overrides);
 
 int state_log_file_descriptor_for_test(
-        const PreparedLogFile& log_file) noexcept;
+    const PreparedLogFile& log_file) noexcept;
 int state_log_directory_descriptor_for_test(
-        const PreparedLogFile& log_file) noexcept;
+    const PreparedLogFile& log_file) noexcept;
 #endif
 
 } // namespace xdg_state_log

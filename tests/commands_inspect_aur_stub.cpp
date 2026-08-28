@@ -6,6 +6,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 // WHY: inspection handler のloop / barrierだけをcharacterizeするため、real AUR transportを
@@ -36,8 +37,8 @@ void append_command_log(const std::string& line) {
 }
 
 AurPackageInfo package_info(
-        const std::string& name, const std::vector<std::string>& depends = {},
-        const std::vector<std::string>& provides = {}) {
+    const std::string& name, const std::vector<std::string>& depends = {},
+    const std::vector<std::string>& provides = {}) {
     AurPackageInfo info;
     info.Name = name;
     info.PackageBase = name;
@@ -55,7 +56,8 @@ bool is_graph_scenario(const std::string& scenario) {
            scenario != "foreign-ordinary-failure" &&
            scenario != "foreign-schema-failure" &&
            scenario != "foreign-order" &&
-           scenario != "foreign-classification";
+           scenario != "foreign-classification" &&
+           scenario != "foreign-devel-requires-check";
 }
 
 bool is_numbered_foreign_package(const std::string& package_name) {
@@ -69,8 +71,8 @@ bool is_numbered_foreign_package(const std::string& package_name) {
 }
 
 bool is_expected_numbered_batch(
-        const std::vector<std::string>& package_names, size_t expected_size,
-        const std::string& expected_first, const std::string& expected_last) {
+    const std::vector<std::string>& package_names, size_t expected_size,
+    const std::string& expected_first, const std::string& expected_last) {
     return package_names.size() == expected_size && !package_names.empty() &&
            package_names.front() == expected_first && package_names.back() == expected_last;
 }
@@ -93,8 +95,8 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
     }
     if(package_name == "provider-constraint-root") {
         return package_info(
-                package_name,
-                {"moguet-inspect-350-virtual-provider>=1"});
+            package_name,
+            {"moguet-inspect-350-virtual-provider>=1"});
     }
     if(package_name == "moguet-inspect-203-virtual-provider") {
         return std::nullopt;
@@ -104,15 +106,15 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
     }
     if(package_name == "provider-z" || package_name == "provider-a") {
         return package_info(
-                package_name, {},
-                {"moguet-inspect-203-virtual-provider",
-                 "moguet-inspect-350-virtual-provider=2"});
+            package_name, {},
+            {"moguet-inspect-203-virtual-provider",
+             "moguet-inspect-350-virtual-provider=2"});
     }
 
     if(package_name == "fetch-preflight-root") {
         return package_info(
-                package_name,
-                {"fetch-preflight-dep-one", "fetch-preflight-dep-two"});
+            package_name,
+            {"fetch-preflight-dep-one", "fetch-preflight-dep-two"});
     }
     if(package_name == "fetch-guard-root") {
         return package_info(package_name, {"fetch-guard-root"});
@@ -151,7 +153,7 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
         std::vector<std::string> dependencies;
         for(std::size_t index = 0; index < 32; ++index) {
             dependencies.push_back(
-                    "normal-dependency-" + std::to_string(index));
+                "normal-dependency-" + std::to_string(index));
         }
         dependencies.push_back("attention-risk-child");
         return package_info(package_name, dependencies);
@@ -179,22 +181,22 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
     if(package_name == "partial-provider-a" ||
        package_name == "partial-provider-b") {
         return package_info(
-                package_name, {}, {"partial-provider-virtual=2"});
+            package_name, {}, {"partial-provider-virtual=2"});
     }
 
     if(package_name == "public-conflict-single-root") {
         AurPackageInfo info = package_info(
-                package_name, {"public-conflict-virtual>=2"});
+            package_name, {"public-conflict-virtual>=2"});
         info.MakeDepends = {"public-conflict-virtual<2"};
         return info;
     }
     if(package_name == "public-conflict-root-a") {
         return package_info(
-                package_name, {"public-conflict-virtual>=2"});
+            package_name, {"public-conflict-virtual>=2"});
     }
     if(package_name == "public-conflict-root-b") {
         return package_info(
-                package_name, {"public-conflict-virtual<2"});
+            package_name, {"public-conflict-virtual<2"});
     }
     if(package_name == "public-conflict-virtual") return std::nullopt;
 
@@ -203,7 +205,7 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
     }
     if(package_name == "installed-query-failure-root") {
         return package_info(
-                package_name, {"installed-query-failure>=1"});
+            package_name, {"installed-query-failure>=1"});
     }
     if(package_name == "foreign-installed" ||
        package_name == "installed-query-failure") {
@@ -212,18 +214,18 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
 
     if(package_name == "plan-formatter-root") {
         return package_info(
-                package_name,
-                {"format-0", "format-1023", "format-1024", "format-1152",
-                 "format-1536", "format-1048570", "format-1048571",
-                 "format-1048576", "format-991730", "format-5283285",
-                 "format-int64-max"});
+            package_name,
+            {"format-0", "format-1023", "format-1024", "format-1152",
+             "format-1536", "format-1048570", "format-1048571",
+             "format-1048576", "format-991730", "format-5283285",
+             "format-int64-max"});
     }
 
     if(package_name == "plan-result-root") {
         return package_info(
-                package_name,
-                {"result-zero", "result-missing", "result-query-failure",
-                 "result-malformed", "result-after-failure"});
+            package_name,
+            {"result-zero", "result-missing", "result-query-failure",
+             "result-malformed", "result-after-failure"});
     }
     if(package_name == "plan-result-later-root") {
         return package_info(package_name, {"result-later-target"});
@@ -231,22 +233,22 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
 
     if(package_name == "plan-identity-root") {
         AurPackageInfo info = package_info(
-                package_name,
-                {"same-package", "identity-same-virtual", "different-package",
-                 "identity-different-virtual", "same-semantic",
-                 "identity-stale-virtual",
-                 "identity-repository-aur-virtual", "identity-aur-virtual",
-                 "identity-ambiguous-virtual", "identity-unknown-virtual",
-                 "identity-aur-child"});
+            package_name,
+            {"same-package", "identity-same-virtual", "different-package",
+             "identity-different-virtual", "same-semantic",
+             "identity-stale-virtual",
+             "identity-repository-aur-virtual", "identity-aur-virtual",
+             "identity-ambiguous-virtual", "identity-unknown-virtual",
+             "identity-aur-child"});
         info.MakeDepends = {"same-semantic"};
         return info;
     }
 
     if(package_name == "plan-no-metadata-root") {
         return package_info(
-                package_name,
-                {"no-metadata-aur-child", "no-metadata-aur-virtual",
-                 "ambiguous-only-virtual", "no-metadata-unknown-virtual"});
+            package_name,
+            {"no-metadata-aur-child", "no-metadata-aur-virtual",
+             "ambiguous-only-virtual", "no-metadata-unknown-virtual"});
     }
 
     if(package_name == "plan-cache-first" ||
@@ -268,11 +270,11 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
 
     if(package_name == "identity-aur-provider") {
         return package_info(
-                package_name, {}, {"identity-aur-virtual"});
+            package_name, {}, {"identity-aur-virtual"});
     }
     if(package_name == "no-metadata-aur-provider") {
         return package_info(
-                package_name, {}, {"no-metadata-aur-virtual"});
+            package_name, {}, {"no-metadata-aur-virtual"});
     }
 
     if(package_name == "identity-same-virtual" ||
@@ -292,53 +294,66 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
 }
 
 std::map<std::string, AurPackageInfo> foreign_info_many(
-        const std::string& scenario, const std::vector<std::string>& package_names) {
+    const std::string& scenario, const std::vector<std::string>& package_names) {
     if(scenario == "foreign-fallback") {
         if(is_expected_numbered_batch(
-                   package_names, 100, "foreign-001", "foreign-100")) {
+               package_names, 100, "foreign-001", "foreign-100")) {
             return {};
         }
         if(is_expected_numbered_batch(
-                   package_names, 1, "foreign-101", "foreign-101")) {
+               package_names, 1, "foreign-101", "foreign-101")) {
             return {{"foreign-101", package_info("foreign-101")}};
         }
     } else if(scenario == "foreign-fallback-schema-failure") {
         if(is_expected_numbered_batch(
-                   package_names, 100, "foreign-001", "foreign-100")) {
+               package_names, 100, "foreign-001", "foreign-100")) {
             return {};
         }
     } else if(scenario == "foreign-ordinary-failure") {
         if(is_expected_numbered_batch(
-                   package_names, 100, "foreign-001", "foreign-100")) {
+               package_names, 100, "foreign-001", "foreign-100")) {
             throw std::runtime_error("ordinary batch failure");
         }
         if(is_expected_numbered_batch(
-                   package_names, 1, "foreign-101", "foreign-101")) {
+               package_names, 1, "foreign-101", "foreign-101")) {
             return {{"foreign-101", package_info("foreign-101")}};
         }
     } else if(scenario == "foreign-schema-failure") {
         if(is_expected_numbered_batch(
-                   package_names, 100, "foreign-001", "foreign-100")) {
+               package_names, 100, "foreign-001", "foreign-100")) {
             throw AurRpcResponseError("schema batch failure");
         }
     } else if(scenario == "foreign-order") {
         const std::vector<std::string> expected = {
-                "foreign-order-z", "foreign-order-missing", "foreign-order-a"};
+            "foreign-order-z", "foreign-order-missing", "foreign-order-a"};
         if(package_names == expected) {
             return {
-                    {"foreign-order-z", package_info("foreign-order-z")},
-                    {"foreign-order-a", package_info("foreign-order-a")}};
+                {"foreign-order-z", package_info("foreign-order-z")},
+                {"foreign-order-a", package_info("foreign-order-a")}};
         }
     } else if(scenario == "foreign-classification") {
         const std::vector<std::string> expected = {
-                "foreign-up-to-date", "foreign-non-aur"};
+            "foreign-up-to-date", "foreign-non-aur"};
         if(package_names == expected) {
             return {{"foreign-up-to-date", package_info("foreign-up-to-date")}};
+        }
+    } else if(scenario == "foreign-devel-requires-check") {
+        const std::vector<std::string> expected = {
+            "split-cli", "split-child-git", "non-aur-git"};
+        if(package_names == expected) {
+            AurPackageInfo package_base_candidate = package_info("split-cli");
+            package_base_candidate.PackageBase = "split-suite-git";
+            AurPackageInfo child_candidate = package_info("split-child-git");
+            child_candidate.PackageBase = "split-suite";
+            return {
+                {"split-cli", std::move(package_base_candidate)},
+                {"split-child-git", std::move(child_candidate)},
+            };
         }
     }
 
     throw std::runtime_error(
-            "Unexpected inspection info_many call for scenario " + scenario);
+        "Unexpected inspection info_many call for scenario " + scenario);
 }
 
 } // namespace
@@ -353,18 +368,18 @@ std::vector<AurPackageInfo> AurClient::search(const std::string& query) {
 }
 
 std::vector<AurPackageInfo> AurClient::search_strict(
-        const std::string& query) {
+    const std::string& query) {
     append_command_log("aur search-strict " + query);
     throw std::runtime_error(
-            "Unexpected inspection strict search call: " + query);
+        "Unexpected inspection strict search call: " + query);
 }
 
 std::vector<std::string> AurClient::search_names_by_provides(
-        const std::string& provided_name) {
+    const std::string& provided_name) {
     append_command_log("aur search-provides " + provided_name);
     if(!is_graph_scenario(inspection_scenario())) {
         throw std::runtime_error(
-                "Unexpected inspection search-provides call: " + provided_name);
+            "Unexpected inspection search-provides call: " + provided_name);
     }
     if(provided_name == "moguet-inspect-203-virtual-provider") {
         // POLICY: AUR RPC order is significant to the provider presentation contract.
@@ -394,11 +409,11 @@ std::vector<std::string> AurClient::search_names_by_provides(
         return {};
     }
     throw std::runtime_error(
-            "Unexpected inspection search-provides call: " + provided_name);
+        "Unexpected inspection search-provides call: " + provided_name);
 }
 
 std::vector<std::string> AurClient::search_names_by_provides_strict(
-        const std::string& provided_name) {
+    const std::string& provided_name) {
     return search_names_by_provides(provided_name);
 }
 
@@ -409,8 +424,8 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     if(is_graph_scenario(scenario)) return graph_info(package_name);
 
     throw std::runtime_error(
-            "Unexpected inspection info call for scenario " + scenario + ": " +
-            package_name);
+        "Unexpected inspection info call for scenario " + scenario + ": " +
+        package_name);
 }
 
 std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_name) {
@@ -419,10 +434,10 @@ std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_
 
     if(is_graph_scenario(scenario)) {
         if(scenario.find("provider-partial-failure") !=
-                   std::string::npos &&
+               std::string::npos &&
            package_name == "partial-provider-b") {
             throw std::runtime_error(
-                    "partial provider candidate metadata failure");
+                "partial provider candidate metadata failure");
         }
         return graph_info(package_name);
     }
@@ -438,12 +453,12 @@ std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_
     }
 
     throw std::runtime_error(
-            "Unexpected inspection info_strict call for scenario " + scenario +
-            ": " + package_name);
+        "Unexpected inspection info_strict call for scenario " + scenario +
+        ": " + package_name);
 }
 
 std::map<std::string, AurPackageInfo> AurClient::info_many(
-        const std::vector<std::string>& package_names) {
+    const std::vector<std::string>& package_names) {
     std::string line = "aur info-many " + std::to_string(package_names.size());
     if(!package_names.empty()) {
         line += " " + package_names.front() + " " + package_names.back();
@@ -453,7 +468,7 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(
     const std::string scenario = inspection_scenario();
     if(is_graph_scenario(scenario)) {
         throw std::runtime_error(
-                "Unexpected inspection info_many call for scenario " + scenario);
+            "Unexpected inspection info_many call for scenario " + scenario);
     }
     return foreign_info_many(scenario, package_names);
 }

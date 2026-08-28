@@ -13,14 +13,14 @@
 // 1 PackageBaseのseparated build/installへ渡すvalidated inputだけを束ねる。
 // Artifact path/identity/directiveはlifecycle内部で生成し、入力として公開しない。
 struct SeparatedSourceBuildUnitRequest {
-    ProductionArtifactSourceTree       source_tree;
-    ValidatedPrivateCacheRoot          artifact_root;
-    std::string                        requested_name;
-    std::string                        package_base;
-    DesiredInstallReason               desired_reason;
-    SourceBuildEnvironment             source_environment;
+    ProductionArtifactSourceTree source_tree;
+    ValidatedPrivateCacheRoot artifact_root;
+    std::string requested_name;
+    std::string package_base;
+    DesiredInstallReason desired_reason;
+    SourceBuildEnvironment source_environment;
     SourceEnvironmentEmptyValuePolicy empty_value_policy =
-            SourceEnvironmentEmptyValuePolicy::Omit;
+        SourceEnvironmentEmptyValuePolicy::Omit;
     PacmanDatabasePaths database_paths;
 };
 
@@ -36,7 +36,7 @@ struct SeparatedSourceBuildUnitOptions {
 
 struct SeparatedSourceBuildExecutionResult {
     ArtifactInstallExecutionOutcome install_outcome =
-            ArtifactInstallExecutionOutcome::Installed;
+        ArtifactInstallExecutionOutcome::Installed;
     ProductionSourceBuildStagedOutcome production_outcome;
 };
 
@@ -55,19 +55,19 @@ class SeparatedSourceBuildPhaseError final : public std::runtime_error {
 
 public:
     SeparatedSourceBuildPhaseError(
-            SeparatedSourceBuildFailurePhase phase,
-            ProductionSourceBuildStagedOutcome production_outcome,
-            const std::string& diagnostic,
-            std::optional<PackageMetadataFailure>
-                    package_metadata_failure = std::nullopt,
-            std::exception_ptr failure_exception = nullptr);
+        SeparatedSourceBuildFailurePhase phase,
+        ProductionSourceBuildStagedOutcome production_outcome,
+        const std::string& diagnostic,
+        std::optional<PackageMetadataFailure>
+            package_metadata_failure = std::nullopt,
+        std::exception_ptr failure_exception = nullptr);
 
     SeparatedSourceBuildFailurePhase phase() const noexcept {
         return phase_;
     }
 
     const ProductionSourceBuildStagedOutcome& production_outcome()
-            const noexcept {
+        const noexcept {
         return production_outcome_;
     }
 
@@ -79,7 +79,7 @@ public:
     void rethrow_failure() const {
         if(failure_exception_ == nullptr) {
             throw std::logic_error(
-                    "Separated source-build failure has no nested exception.");
+                "Separated source-build failure has no nested exception.");
         }
         std::rethrow_exception(failure_exception_);
     }
@@ -93,16 +93,16 @@ class SeparatedSourceBuildCleanupError : public std::runtime_error {
 
 public:
     SeparatedSourceBuildCleanupError(
-            ArtifactInstallExecutionOutcome install_outcome,
-            ProductionSourceBuildStagedOutcome production_outcome,
-            const std::string& diagnostic);
+        ArtifactInstallExecutionOutcome install_outcome,
+        ProductionSourceBuildStagedOutcome production_outcome,
+        const std::string& diagnostic);
 
     ArtifactInstallExecutionOutcome install_outcome() const noexcept {
         return install_outcome_;
     }
 
     const ProductionSourceBuildStagedOutcome& production_outcome()
-            const noexcept {
+        const noexcept {
         return production_outcome_;
     }
 };
@@ -110,15 +110,15 @@ public:
 // POLICY(#242): production callerはこのshared lifecycleだけを呼び、artifact pathや
 // lower-level install primitiveを組み替えない。戻り値はcleanup完了後のinstall outcome。
 SeparatedSourceBuildExecutionResult execute_separated_source_build_unit(
-        SeparatedSourceBuildUnitRequest request,
-        const SeparatedSourceBuildUnitOptions& options);
+    SeparatedSourceBuildUnitRequest request,
+    const SeparatedSourceBuildUnitOptions& options);
 
 #ifdef MOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS
 using SeparatedSourceBuildWorkspaceObserverForTest =
-        void (*)(const std::filesystem::path& workspace_path);
+    void (*)(const std::filesystem::path& workspace_path);
 
 // mkdtemp由来pathでstrict process expectationを組み立てるためのtest-only observer。
 // workspaceやartifact ownershipを差し替える能力は公開しない。
 void set_separated_source_build_workspace_observer_for_test(
-        SeparatedSourceBuildWorkspaceObserverForTest observer);
+    SeparatedSourceBuildWorkspaceObserverForTest observer);
 #endif

@@ -13,10 +13,10 @@ struct ReviewedSourceProductionOutcomePresentation {
 
 ReviewedSourceProductionOutcomePresentation
 format_reviewed_source_production_outcome(
-        const std::string& package_base,
-        const ProductionSourceBuildProvenance& provenance);
+    const std::string& package_base,
+    const ProductionSourceBuildProvenance& provenance);
 
 ReviewedSourceProductionOutcomePresentation
 format_production_source_build_staged_outcome(
-        const std::string& package_base,
-        const ProductionSourceBuildStagedOutcome& outcome);
+    const std::string& package_base,
+    const ProductionSourceBuildStagedOutcome& outcome);

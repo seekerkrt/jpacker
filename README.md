@@ -49,12 +49,14 @@ a new storage direction: source-build preferences now use only the executing
 user's XDG config context, while the published v2.0.0 tag, Release, and release
 notes remain historical records.
 
-Moguet v2.4.1 is the latest release. This patch maintenance release adds a
-canonical `sample/config.toml`, installs it as an example in the standard Arch
-package documentation, and makes `moguet --help` show TOML string enum values
-with quotes. The strict parser, configuration schema, and built-in defaults are
-unchanged; malformed existing configuration continues to fail closed. See the
-[v2.4.1 release](https://github.com/seekerkrt/moguet/releases/tag/v2.4.1) for
+Moguet v2.5.0 is the latest release. This minor release adds conservative
+VCS/devel AUR tracking that surfaces `RequiresCheck` instead of a false
+`UpToDate` when a conventional devel package cannot yet be authoritatively
+tracked, and targeted `upgrade-all` diagnostics for repo/AUR cross-source
+exact-version dependency locks. It also establishes safety foundations for
+invocation-owned dependency cleanup without enabling public source-build
+`--rmdeps`. See the
+[v2.5.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.5.0) for
 the complete user-visible changes.
 
 The canonical repository identity is Moguet on GitHub, with a GitLab mirror.
@@ -257,6 +259,14 @@ install graph and its exact `install_manifest.txt`; the destination overrides
 shown above are mapped into that graph rather than implemented by a separate
 Make install recipe.
 
+The current development package also installs the private implementation
+helper `/usr/libexec/moguet/moguet-alpm-receipt-helper`. It is a package-owned
+root transaction helper, not a public command: it is outside `PATH`, has no
+man page, does not accept an executable or destination path, and must never be
+replaced by a helper from a source or build tree. The current public
+source-build `--rmdeps` route remains unsupported and fail-closed; installing
+this helper does not enable dependency cleanup.
+
 The v2.0.0 package and its only executable are named `moguet`; it does not
 install `/usr/bin/jpacker`. Its payload is disjoint from the jpacker v1.16.0
 package, so the metadata intentionally declares no `provides`, `conflicts`, or
@@ -298,8 +308,8 @@ makepkg -si
 system with `pacman -U` in the same step. This differs from `make` and
 `./moguet --help` above, which only build and inspect the development tree
 in place and install nothing. The `PKGBUILD` is the canonical production
-CMake build/install consumer and configures `BUILD_TESTING=OFF`; the 94
-developer C++ test executables and 117 CTest registrations remain in host,
+CMake build/install consumer and configures `BUILD_TESTING=OFF`; the 96
+developer C++ test executables and 119 CTest registrations remain in host,
 CI, and release validation. This `PKGBUILD` is a repository-provided
 packaging path, not an AUR submission; Moguet still has no published AUR
 page.
@@ -436,6 +446,23 @@ and `-Syu`, as with pacman and other AUR helpers. Use the corresponding
 a Moguet-specific multi-phase workflow, such as applying saved source-build
 preferences or rebuilding installed AUR packages from source. These commands
 are not aliases for an ordinary `-Syu`.
+
+Moguet v2.5.0 treats installed exact-AUR packages with conventional `-git`,
+`-svn`, `-hg`, `-bzr`, `-cvs`, or `-darcs` suffix evidence as devel
+candidates. When the normal AUR version is not newer and only that suffix
+evidence is available, `moguet -Qua` reports `RequiresCheck` with the package,
+PackageBase/child evidence, and reason instead of silently treating the
+package as up to date. A normal newer AUR version remains an update candidate
+and keeps the existing precedence.
+
+`RequiresCheck` is not an automatic rebuild candidate. `upgrade-aur`, its
+dry-run, and the fresh AUR phase of `upgrade-all` block before AUR mutation;
+non-TTY use and `--noconfirm` do not add a prompt or approve a rebuild. v2.5.0
+does not query or compare the upstream VCS revision and does not publish devel
+build provenance. The read-only Git observer and installed-artifact-bound
+authoritative comparison remain follow-up work in
+[issue #475](https://github.com/seekerkrt/moguet/issues/475) and
+[issue #476](https://github.com/seekerkrt/moguet/issues/476).
 
 `--aur` limits supported `-S`, `-Ss`, and `-Si` forms to AUR. `--repo`
 limits them to official binary repositories. Combining the selectors is an

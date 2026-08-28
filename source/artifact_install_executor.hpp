@@ -28,47 +28,47 @@ enum class ArtifactInstallExecutionOutcome {
 // InstalledPackageQueryResultからinstall policyへ渡すowned value。
 // libalpm sessionやborrowed metadataを保持しない。
 struct InstalledArtifactPolicyState {
-    InstalledVersionState                 version_state;
+    InstalledVersionState version_state;
     std::optional<ExistingInstallReason> existing_reason;
 };
 
 // Package absenceだけをNotInstalledへ写し、metadata failureや未知reasonはfail closedにする。
 InstalledArtifactPolicyState map_installed_artifact_policy_state(
-        const ArtifactPackageIdentity& identity,
-        const InstalledPackageQueryResult& query_result);
+    const ArtifactPackageIdentity& identity,
+    const InstalledPackageQueryResult& query_result);
 
 class PreparedArtifactInstall final {
-    std::string                          requested_name_;
-    DesiredInstallReason                 desired_reason_;
-    bool                                 needed_ = false;
-    ArtifactPackageIdentity              identity_;
-    ValidatedArtifactInstallTarget       target_;
-    InstalledVersionState                installed_version_state_;
+    std::string requested_name_;
+    DesiredInstallReason desired_reason_;
+    bool needed_ = false;
+    ArtifactPackageIdentity identity_;
+    ValidatedArtifactInstallTarget target_;
+    InstalledVersionState installed_version_state_;
     std::optional<ExistingInstallReason> existing_reason_;
-    InstallReasonDirective               directive_;
-    ValidatedPackageArtifactPath         artifact_;
+    InstallReasonDirective directive_;
+    ValidatedPackageArtifactPath artifact_;
 
     PreparedArtifactInstall(
-            std::string&& requested_name,
-            DesiredInstallReason desired_reason,
-            bool needed,
-            ArtifactPackageIdentity&& identity,
-            ValidatedArtifactInstallTarget&& target,
-            InstalledVersionState installed_version_state,
-            std::optional<ExistingInstallReason> existing_reason,
-            InstallReasonDirective directive,
-            ValidatedPackageArtifactPath&& artifact) noexcept;
+        std::string&& requested_name,
+        DesiredInstallReason desired_reason,
+        bool needed,
+        ArtifactPackageIdentity&& identity,
+        ValidatedArtifactInstallTarget&& target,
+        InstalledVersionState installed_version_state,
+        std::optional<ExistingInstallReason> existing_reason,
+        InstallReasonDirective directive,
+        ValidatedPackageArtifactPath&& artifact) noexcept;
 
     friend PreparedArtifactInstall prepare_artifact_install(
-            ValidatedPackageArtifactPath& artifact,
-            const std::string& requested_name,
-            const std::string& package_base,
-            DesiredInstallReason desired_reason,
-            const ArtifactInstallPreparationOptions& options,
-            const PacmanDatabasePaths& database_paths);
+        ValidatedPackageArtifactPath& artifact,
+        const std::string& requested_name,
+        const std::string& package_base,
+        DesiredInstallReason desired_reason,
+        const ArtifactInstallPreparationOptions& options,
+        const PacmanDatabasePaths& database_paths);
     friend ArtifactInstallExecutionOutcome execute_prepared_artifact_install(
-            PreparedArtifactInstall& install,
-            const ArtifactInstallExecutionOptions& options);
+        PreparedArtifactInstall& install,
+        const ArtifactInstallExecutionOptions& options);
 
 public:
     PreparedArtifactInstall(const PreparedArtifactInstall&) = delete;
@@ -123,14 +123,14 @@ public:
 
 // artifactは全preparation failure中borrowされ、成功時のaggregate構築でだけmoveされる。
 PreparedArtifactInstall prepare_artifact_install(
-        ValidatedPackageArtifactPath& artifact,
-        const std::string& requested_name,
-        const std::string& package_base,
-        DesiredInstallReason desired_reason,
-        const ArtifactInstallPreparationOptions& options,
-        const PacmanDatabasePaths& database_paths);
+    ValidatedPackageArtifactPath& artifact,
+    const std::string& requested_name,
+    const std::string& package_base,
+    DesiredInstallReason desired_reason,
+    const ArtifactInstallPreparationOptions& options,
+    const PacmanDatabasePaths& database_paths);
 
 // POLICY(#242): raw pathや個別directiveを受けず、相関済みaggregateだけをtransactionへ渡す。
 ArtifactInstallExecutionOutcome execute_prepared_artifact_install(
-        PreparedArtifactInstall& install,
-        const ArtifactInstallExecutionOptions& options);
+    PreparedArtifactInstall& install,
+    const ArtifactInstallExecutionOptions& options);

@@ -21,14 +21,14 @@ class DependencyVersionConstraint final {
 public:
     DependencyVersionConstraint() = delete;
     DependencyVersionConstraint(
-            DependencyVersionRelation relation, std::string version);
+        DependencyVersionRelation relation, std::string version);
     DependencyVersionConstraint(const DependencyVersionConstraint&) = default;
     DependencyVersionConstraint(DependencyVersionConstraint&&) noexcept =
-            default;
+        default;
     DependencyVersionConstraint& operator=(
-            const DependencyVersionConstraint&) = default;
+        const DependencyVersionConstraint&) = default;
     DependencyVersionConstraint& operator=(
-            DependencyVersionConstraint&&) noexcept = default;
+        DependencyVersionConstraint&&) noexcept = default;
     ~DependencyVersionConstraint() = default;
 
     [[nodiscard]] DependencyVersionRelation relation() const noexcept;
@@ -38,23 +38,23 @@ public:
 
 private:
     DependencyVersionRelation relation_;
-    std::string               version_;
+    std::string version_;
 };
 
 class ConsumerDependencyRequirement final {
 public:
     ConsumerDependencyRequirement() = delete;
     ConsumerDependencyRequirement(
-            std::string raw_specification, std::string package_name,
-            std::optional<DependencyVersionConstraint> constraint);
+        std::string raw_specification, std::string package_name,
+        std::optional<DependencyVersionConstraint> constraint);
     ConsumerDependencyRequirement(const ConsumerDependencyRequirement&) =
-            default;
+        default;
     ConsumerDependencyRequirement(ConsumerDependencyRequirement&&) noexcept =
-            default;
+        default;
     ConsumerDependencyRequirement& operator=(
-            const ConsumerDependencyRequirement&) = default;
+        const ConsumerDependencyRequirement&) = default;
     ConsumerDependencyRequirement& operator=(
-            ConsumerDependencyRequirement&&) noexcept = default;
+        ConsumerDependencyRequirement&&) noexcept = default;
     ~ConsumerDependencyRequirement() = default;
 
     [[nodiscard]] const std::string& raw_specification() const noexcept;
@@ -65,8 +65,8 @@ public:
     bool operator==(const ConsumerDependencyRequirement&) const = default;
 
 private:
-    std::string                                raw_specification_;
-    std::string                                package_name_;
+    std::string raw_specification_;
+    std::string package_name_;
     std::optional<DependencyVersionConstraint> constraint_;
 };
 
@@ -74,8 +74,8 @@ class ProviderCapability final {
 public:
     ProviderCapability() = delete;
     ProviderCapability(
-            std::string raw_specification, std::string package_name,
-            std::optional<std::string> version);
+        std::string raw_specification, std::string package_name,
+        std::optional<std::string> version);
     ProviderCapability(const ProviderCapability&) = default;
     ProviderCapability(ProviderCapability&&) noexcept = default;
     ProviderCapability& operator=(const ProviderCapability&) = default;
@@ -89,23 +89,23 @@ public:
     bool operator==(const ProviderCapability&) const = default;
 
 private:
-    std::string                    raw_specification_;
-    std::string                    package_name_;
-    std::optional<std::string>     version_;
+    std::string raw_specification_;
+    std::string package_name_;
+    std::optional<std::string> version_;
 };
 
 class SonameDependencyRequirement final {
 public:
     SonameDependencyRequirement() = delete;
     SonameDependencyRequirement(
-            std::string raw_specification, std::string soname);
+        std::string raw_specification, std::string soname);
     SonameDependencyRequirement(const SonameDependencyRequirement&) = default;
     SonameDependencyRequirement(SonameDependencyRequirement&&) noexcept =
-            default;
+        default;
     SonameDependencyRequirement& operator=(
-            const SonameDependencyRequirement&) = default;
+        const SonameDependencyRequirement&) = default;
     SonameDependencyRequirement& operator=(
-            SonameDependencyRequirement&&) noexcept = default;
+        SonameDependencyRequirement&&) noexcept = default;
     ~SonameDependencyRequirement() = default;
 
     [[nodiscard]] const std::string& raw_specification() const noexcept;
@@ -119,7 +119,7 @@ private:
 };
 
 using DependencyRequirement =
-        std::variant<ConsumerDependencyRequirement, SonameDependencyRequirement>;
+    std::variant<ConsumerDependencyRequirement, SonameDependencyRequirement>;
 
 enum class DependencyConstraintParseFailureKind {
     EmptySpecification,
@@ -133,7 +133,7 @@ enum class DependencyConstraintParseFailureKind {
 
 struct DependencyConstraintParseFailure {
     DependencyConstraintParseFailureKind kind;
-    std::string                          raw_specification;
+    std::string raw_specification;
 
     bool operator==(const DependencyConstraintParseFailure&) const = default;
 };
@@ -142,78 +142,77 @@ class DependencyRequirementParseResult final {
 public:
     DependencyRequirementParseResult() = delete;
     DependencyRequirementParseResult(const DependencyRequirementParseResult&) =
-            default;
+        default;
     DependencyRequirementParseResult(
-            DependencyRequirementParseResult&&) noexcept = default;
+        DependencyRequirementParseResult&&) noexcept = default;
     DependencyRequirementParseResult& operator=(
-            const DependencyRequirementParseResult&) = delete;
+        const DependencyRequirementParseResult&) = delete;
     DependencyRequirementParseResult& operator=(
-            DependencyRequirementParseResult&&) noexcept = delete;
+        DependencyRequirementParseResult&&) noexcept = delete;
     ~DependencyRequirementParseResult() = default;
 
     [[nodiscard]] const DependencyRequirement* requirement() const noexcept;
     [[nodiscard]] const DependencyConstraintParseFailure* failure()
-            const noexcept;
+        const noexcept;
 
 private:
     explicit DependencyRequirementParseResult(
-            DependencyRequirement requirement) noexcept;
+        DependencyRequirement requirement) noexcept;
     explicit DependencyRequirementParseResult(
-            DependencyConstraintParseFailure failure) noexcept;
+        DependencyConstraintParseFailure failure) noexcept;
 
     std::variant<DependencyRequirement, DependencyConstraintParseFailure>
-            outcome_;
+        outcome_;
 
     friend DependencyRequirementParseResult parse_dependency_requirement(
-            std::string_view specification);
+        std::string_view specification);
 };
 
 class ProviderCapabilityParseResult final {
 public:
     ProviderCapabilityParseResult() = delete;
     ProviderCapabilityParseResult(const ProviderCapabilityParseResult&) =
-            default;
+        default;
     ProviderCapabilityParseResult(ProviderCapabilityParseResult&&) noexcept =
-            default;
+        default;
     ProviderCapabilityParseResult& operator=(
-            const ProviderCapabilityParseResult&) = delete;
+        const ProviderCapabilityParseResult&) = delete;
     ProviderCapabilityParseResult& operator=(
-            ProviderCapabilityParseResult&&) noexcept = delete;
+        ProviderCapabilityParseResult&&) noexcept = delete;
     ~ProviderCapabilityParseResult() = default;
 
     [[nodiscard]] const ProviderCapability* capability() const noexcept;
     [[nodiscard]] const DependencyConstraintParseFailure* failure()
-            const noexcept;
+        const noexcept;
 
 private:
-    explicit ProviderCapabilityParseResult(ProviderCapability capability)
-            noexcept;
+    explicit ProviderCapabilityParseResult(ProviderCapability capability) noexcept;
     explicit ProviderCapabilityParseResult(
-            DependencyConstraintParseFailure failure) noexcept;
+        DependencyConstraintParseFailure failure) noexcept;
 
     std::variant<ProviderCapability, DependencyConstraintParseFailure>
-            outcome_;
+        outcome_;
 
     friend ProviderCapabilityParseResult parse_provider_capability(
-            std::string_view specification);
+        std::string_view specification);
     friend ProviderCapabilityParseResult
     make_provider_capability_from_metadata(
-            std::string package_name,
-            std::optional<std::string> version);
+        std::string package_name,
+        std::optional<std::string> version);
 };
 
 // The parser is a metadata trust-boundary operation. Consumers retain this
 // typed value rather than reparsing raw specification text downstream.
 DependencyRequirementParseResult parse_dependency_requirement(
-        std::string_view specification);
+    std::string_view specification);
 ProviderCapabilityParseResult parse_provider_capability(
-        std::string_view specification);
+    std::string_view specification);
 
 // Typed provider metadata has already separated identity and version. This
 // factory validates that provider-domain value without reparsing a synthetic
 // dependency specification.
 ProviderCapabilityParseResult make_provider_capability_from_metadata(
-        std::string package_name, std::optional<std::string> version);
+    std::string package_name, std::optional<std::string> version);
 
 enum class ObservedVersionSource {
     InstalledExactPackage,
@@ -255,39 +254,38 @@ public:
     ~ObservedVersion() = default;
 
     [[nodiscard]] static ObservedVersion available(
-            ObservedVersionSource source, std::string version);
+        ObservedVersionSource source, std::string version);
     [[nodiscard]] static ObservedVersion from_provider_capability(
-            ObservedVersionSource source,
-            const ProviderCapability& capability);
+        ObservedVersionSource source,
+        const ProviderCapability& capability);
     [[nodiscard]] static ObservedVersion unknown(
-            ObservedVersionSource source,
-            ObservedVersionUnknownReason unknown_reason);
+        ObservedVersionSource source,
+        ObservedVersionUnknownReason unknown_reason);
     [[nodiscard]] static ObservedVersion invalid(
-            ObservedVersionSource source,
-            ConstraintInvalidReason invalid_reason);
+        ObservedVersionSource source,
+        ConstraintInvalidReason invalid_reason);
 
     [[nodiscard]] ObservedVersionSource source() const noexcept;
     [[nodiscard]] const std::string* version() const noexcept;
     [[nodiscard]] const ObservedVersionUnknownReason* unknown_reason()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const ConstraintInvalidReason* invalid_reason()
-            const noexcept;
+        const noexcept;
 
     bool operator==(const ObservedVersion&) const = default;
 
 private:
     ObservedVersion(
-            ObservedVersionSource source,
-            std::variant<std::string, ObservedVersionUnknownReason,
-                         ConstraintInvalidReason>
-                    outcome)
-            noexcept;
+        ObservedVersionSource source,
+        std::variant<std::string, ObservedVersionUnknownReason,
+                     ConstraintInvalidReason>
+            outcome) noexcept;
 
     ObservedVersionSource
-            source_;
+        source_;
     std::variant<std::string, ObservedVersionUnknownReason,
                  ConstraintInvalidReason>
-            outcome_;
+        outcome_;
 };
 
 enum class ArchVersionOrdering {
@@ -299,8 +297,8 @@ enum class ArchVersionOrdering {
 // This is the only version-comparison adapter in Moguet. It deliberately
 // delegates the complete Arch epoch/pkgver/pkgrel ordering to libalpm.
 ArchVersionOrdering compare_arch_package_versions(
-        const std::string& observed_version,
-        const std::string& required_version) noexcept;
+    const std::string& observed_version,
+    const std::string& required_version) noexcept;
 
 enum class ConstraintSatisfaction {
     Unconstrained,
@@ -323,47 +321,47 @@ public:
     ConstraintEvaluation(ConstraintEvaluation&&) noexcept = default;
     ConstraintEvaluation& operator=(const ConstraintEvaluation&) = default;
     ConstraintEvaluation& operator=(ConstraintEvaluation&&) noexcept =
-            default;
+        default;
     ~ConstraintEvaluation() = default;
 
     [[nodiscard]] static ConstraintEvaluation unconstrained() noexcept;
     [[nodiscard]] static ConstraintEvaluation satisfied() noexcept;
     [[nodiscard]] static ConstraintEvaluation unsatisfied() noexcept;
     [[nodiscard]] static ConstraintEvaluation unknown(
-            ObservedVersionUnknownReason reason) noexcept;
+        ObservedVersionUnknownReason reason) noexcept;
     [[nodiscard]] static ConstraintEvaluation invalid(
-            ConstraintInvalidReason reason) noexcept;
+        ConstraintInvalidReason reason) noexcept;
 
     [[nodiscard]] ConstraintSatisfaction satisfaction() const noexcept;
     [[nodiscard]] const ObservedVersionUnknownReason* unknown_reason()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const ConstraintInvalidReason* invalid_reason()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const ConstraintConflictReason* conflict_reason()
-            const noexcept;
+        const noexcept;
 
     bool operator==(const ConstraintEvaluation&) const = default;
 
 private:
     ConstraintEvaluation(
-            ConstraintSatisfaction satisfaction,
-            std::optional<ObservedVersionUnknownReason> unknown_reason,
-            std::optional<ConstraintInvalidReason> invalid_reason,
-            std::optional<ConstraintConflictReason> conflict_reason) noexcept;
+        ConstraintSatisfaction satisfaction,
+        std::optional<ObservedVersionUnknownReason> unknown_reason,
+        std::optional<ConstraintInvalidReason> invalid_reason,
+        std::optional<ConstraintConflictReason> conflict_reason) noexcept;
 
-    ConstraintSatisfaction                       satisfaction_;
+    ConstraintSatisfaction satisfaction_;
     std::optional<ObservedVersionUnknownReason> unknown_reason_;
-    std::optional<ConstraintInvalidReason>      invalid_reason_;
-    std::optional<ConstraintConflictReason>     conflict_reason_;
+    std::optional<ConstraintInvalidReason> invalid_reason_;
+    std::optional<ConstraintConflictReason> conflict_reason_;
 
     friend std::optional<ConstraintEvaluation>
     project_conflicting_constraint_invocation(
-            const std::vector<ConsumerDependencyRequirement>& requirements);
+        const std::vector<ConsumerDependencyRequirement>& requirements);
 };
 
 ConstraintEvaluation evaluate_consumer_dependency_requirement(
-        const ConsumerDependencyRequirement& requirement,
-        const ObservedVersion& observed_version);
+    const ConsumerDependencyRequirement& requirement,
+    const ObservedVersion& observed_version);
 
 // Conflicting is intentionally created only when this invocation-level
 // projection proves that requirements for one package cannot coexist. An
@@ -371,4 +369,4 @@ ConstraintEvaluation evaluate_consumer_dependency_requirement(
 // identity conflicts remain a distinct source-aware reason and cannot be
 // manufactured by this pure requirement projection.
 std::optional<ConstraintEvaluation> project_conflicting_constraint_invocation(
-        const std::vector<ConsumerDependencyRequirement>& requirements);
+    const std::vector<ConsumerDependencyRequirement>& requirements);

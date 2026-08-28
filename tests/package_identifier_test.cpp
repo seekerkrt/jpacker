@@ -33,27 +33,29 @@ void expect_invalid_package_name(const std::string& name) {
 int main() {
     try {
         const std::vector<std::string> valid_names = {
-                "package",
-                "foo.bar",
-                "lib32.foo",
-                "name.with.multiple.dots",
-                "foo..bar",
-                ".hidden",
-                "...",
-                "pkg@name_2+extra-value",
+            "package",
+            "foo.bar",
+            "lib32.foo",
+            "name.with.multiple.dots",
+            "foo..bar",
+            ".hidden",
+            "...",
+            "pkg@name_2+extra-value",
         };
-        for(const auto& name : valid_names) expect_valid_package_name(name);
+        for(const auto& name : valid_names)
+            expect_valid_package_name(name);
 
         const std::vector<std::string> invalid_names = {
-                "",
-                ".",
-                "..",
-                "-leading-hyphen",
-                "invalid/name",
-                "bad name",
-                "name=version",
+            "",
+            ".",
+            "..",
+            "-leading-hyphen",
+            "invalid/name",
+            "bad name",
+            "name=version",
         };
-        for(const auto& name : invalid_names) expect_invalid_package_name(name);
+        for(const auto& name : invalid_names)
+            expect_invalid_package_name(name);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

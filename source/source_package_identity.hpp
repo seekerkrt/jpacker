@@ -28,36 +28,35 @@ public:
     SourceLocationIdentity(SourceLocationIdentity&&) noexcept = default;
     SourceLocationIdentity& operator=(const SourceLocationIdentity&) = default;
     SourceLocationIdentity& operator=(SourceLocationIdentity&&) noexcept =
-            default;
+        default;
     ~SourceLocationIdentity() = default;
 
     [[nodiscard]] static SourceLocationIdentity known_git_remote(
-            std::string location);
+        std::string location);
     [[nodiscard]] static SourceLocationIdentity known_local_path(
-            std::string location);
+        std::string location);
     [[nodiscard]] static SourceLocationIdentity unknown(
-            SourceLocationKind kind);
+        SourceLocationKind kind);
     [[nodiscard]] static SourceLocationIdentity unavailable(
-            SourceLocationKind kind, IdentityUnavailableReason reason);
+        SourceLocationKind kind, IdentityUnavailableReason reason);
 
     [[nodiscard]] SourceLocationKind kind() const noexcept;
     [[nodiscard]] SourceLocationState state() const noexcept;
     [[nodiscard]] const std::string* value() const noexcept;
     [[nodiscard]] const IdentityUnavailableReason* unavailable_reason()
-            const noexcept;
+        const noexcept;
 
     bool operator==(const SourceLocationIdentity&) const = default;
 
 private:
     SourceLocationIdentity(
-            SourceLocationKind kind, SourceLocationState state,
-            std::optional<std::string> value,
-            std::optional<IdentityUnavailableReason> unavailable_reason)
-        noexcept;
+        SourceLocationKind kind, SourceLocationState state,
+        std::optional<std::string> value,
+        std::optional<IdentityUnavailableReason> unavailable_reason) noexcept;
 
-    SourceLocationKind                       kind_;
-    SourceLocationState                      state_;
-    std::optional<std::string>                value_;
+    SourceLocationKind kind_;
+    SourceLocationState state_;
+    std::optional<std::string> value_;
     std::optional<IdentityUnavailableReason> unavailable_reason_;
 };
 
@@ -74,15 +73,15 @@ public:
     PackageSourceIdentity(PackageSourceIdentity&&) noexcept = default;
     PackageSourceIdentity& operator=(const PackageSourceIdentity&) = default;
     PackageSourceIdentity& operator=(PackageSourceIdentity&&) noexcept =
-            default;
+        default;
     ~PackageSourceIdentity() = default;
 
     [[nodiscard]] static PackageSourceIdentity repository(
-            std::string repository_name, SourceLocationIdentity location);
+        std::string repository_name, SourceLocationIdentity location);
     [[nodiscard]] static PackageSourceIdentity aur(
-            SourceLocationIdentity location);
+        SourceLocationIdentity location);
     [[nodiscard]] static PackageSourceIdentity local(
-            SourceLocationIdentity location);
+        SourceLocationIdentity location);
 
     [[nodiscard]] PackageSourceKind kind() const noexcept;
     [[nodiscard]] const std::string* repository_name() const noexcept;
@@ -92,13 +91,13 @@ public:
 
 private:
     PackageSourceIdentity(
-            PackageSourceKind kind,
-            std::optional<std::string> repository_name,
-            SourceLocationIdentity location) noexcept;
+        PackageSourceKind kind,
+        std::optional<std::string> repository_name,
+        SourceLocationIdentity location) noexcept;
 
-    PackageSourceKind                 kind_;
-    std::optional<std::string>        repository_name_;
-    SourceLocationIdentity            location_;
+    PackageSourceKind kind_;
+    std::optional<std::string> repository_name_;
+    SourceLocationIdentity location_;
 };
 
 class PackageBaseIdentity final {
@@ -111,7 +110,7 @@ public:
     ~PackageBaseIdentity() = default;
 
     [[nodiscard]] static PackageBaseIdentity make(
-            PackageSourceIdentity source, std::string package_base);
+        PackageSourceIdentity source, std::string package_base);
 
     [[nodiscard]] const PackageSourceIdentity& source() const noexcept;
     [[nodiscard]] const std::string& package_base() const noexcept;
@@ -120,11 +119,11 @@ public:
 
 private:
     PackageBaseIdentity(
-            PackageSourceIdentity source,
-            std::string package_base) noexcept;
+        PackageSourceIdentity source,
+        std::string package_base) noexcept;
 
     PackageSourceIdentity source_;
-    std::string           package_base_;
+    std::string package_base_;
 };
 
 class PackageChildIdentity final {
@@ -137,7 +136,7 @@ public:
     ~PackageChildIdentity() = default;
 
     [[nodiscard]] static PackageChildIdentity make(
-            PackageBaseIdentity package_base, std::string package_name);
+        PackageBaseIdentity package_base, std::string package_name);
 
     [[nodiscard]] const PackageBaseIdentity& package_base() const noexcept;
     [[nodiscard]] const std::string& package_name() const noexcept;
@@ -146,11 +145,11 @@ public:
 
 private:
     PackageChildIdentity(
-            PackageBaseIdentity package_base,
-            std::string package_name) noexcept;
+        PackageBaseIdentity package_base,
+        std::string package_name) noexcept;
 
     PackageBaseIdentity package_base_;
-    std::string         package_name_;
+    std::string package_name_;
 };
 
 enum class GitObjectFormat {
@@ -173,36 +172,35 @@ public:
     SourceRevisionIdentity(SourceRevisionIdentity&&) noexcept = default;
     SourceRevisionIdentity& operator=(const SourceRevisionIdentity&) = default;
     SourceRevisionIdentity& operator=(SourceRevisionIdentity&&) noexcept =
-            default;
+        default;
     ~SourceRevisionIdentity() = default;
 
     [[nodiscard]] static SourceRevisionIdentity git_commit(
-            std::string object_id);
+        std::string object_id);
     [[nodiscard]] static SourceRevisionIdentity unknown() noexcept;
     [[nodiscard]] static SourceRevisionIdentity absent() noexcept;
     [[nodiscard]] static SourceRevisionIdentity unavailable(
-            IdentityUnavailableReason reason);
+        IdentityUnavailableReason reason);
     [[nodiscard]] static SourceRevisionIdentity inapplicable() noexcept;
 
     [[nodiscard]] SourceRevisionState state() const noexcept;
     [[nodiscard]] const GitObjectFormat* git_object_format() const noexcept;
     [[nodiscard]] const std::string* git_commit() const noexcept;
     [[nodiscard]] const IdentityUnavailableReason* unavailable_reason()
-            const noexcept;
+        const noexcept;
 
     bool operator==(const SourceRevisionIdentity&) const = default;
 
 private:
     SourceRevisionIdentity(
-            SourceRevisionState state,
-            std::optional<GitObjectFormat> git_object_format,
-            std::optional<std::string> git_commit,
-            std::optional<IdentityUnavailableReason> unavailable_reason)
-        noexcept;
+        SourceRevisionState state,
+        std::optional<GitObjectFormat> git_object_format,
+        std::optional<std::string> git_commit,
+        std::optional<IdentityUnavailableReason> unavailable_reason) noexcept;
 
-    SourceRevisionState                      state_;
-    std::optional<GitObjectFormat>            git_object_format_;
-    std::optional<std::string>                git_commit_;
+    SourceRevisionState state_;
+    std::optional<GitObjectFormat> git_object_format_;
+    std::optional<std::string> git_commit_;
     std::optional<IdentityUnavailableReason> unavailable_reason_;
 };
 
@@ -224,49 +222,48 @@ public:
     PackageVersionIdentity(PackageVersionIdentity&&) noexcept = default;
     PackageVersionIdentity& operator=(const PackageVersionIdentity&) = default;
     PackageVersionIdentity& operator=(PackageVersionIdentity&&) noexcept =
-            default;
+        default;
     ~PackageVersionIdentity() = default;
 
     [[nodiscard]] static PackageVersionIdentity composite(
-            std::string full_version);
+        std::string full_version);
     [[nodiscard]] static PackageVersionIdentity pkgver_pkgrel(
-            std::optional<std::string> epoch,
-            std::string pkgver,
-            std::string pkgrel);
+        std::optional<std::string> epoch,
+        std::string pkgver,
+        std::string pkgrel);
     [[nodiscard]] static PackageVersionIdentity unknown() noexcept;
     [[nodiscard]] static PackageVersionIdentity unavailable(
-            IdentityUnavailableReason reason);
+        IdentityUnavailableReason reason);
 
     [[nodiscard]] PackageVersionState state() const noexcept;
     [[nodiscard]] const PackageVersionRepresentation* representation()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const std::string* full_version() const noexcept;
     [[nodiscard]] const std::string* epoch() const noexcept;
     [[nodiscard]] const std::string* pkgver() const noexcept;
     [[nodiscard]] const std::string* pkgrel() const noexcept;
     [[nodiscard]] const IdentityUnavailableReason* unavailable_reason()
-            const noexcept;
+        const noexcept;
 
     bool operator==(const PackageVersionIdentity&) const = default;
 
 private:
     PackageVersionIdentity(
-            PackageVersionState state,
-            std::optional<PackageVersionRepresentation> representation,
-            std::optional<std::string> full_version,
-            std::optional<std::string> epoch,
-            std::optional<std::string> pkgver,
-            std::optional<std::string> pkgrel,
-            std::optional<IdentityUnavailableReason> unavailable_reason)
-        noexcept;
+        PackageVersionState state,
+        std::optional<PackageVersionRepresentation> representation,
+        std::optional<std::string> full_version,
+        std::optional<std::string> epoch,
+        std::optional<std::string> pkgver,
+        std::optional<std::string> pkgrel,
+        std::optional<IdentityUnavailableReason> unavailable_reason) noexcept;
 
-    PackageVersionState                             state_;
-    std::optional<PackageVersionRepresentation>     representation_;
-    std::optional<std::string>                      full_version_;
-    std::optional<std::string>                      epoch_;
-    std::optional<std::string>                      pkgver_;
-    std::optional<std::string>                      pkgrel_;
-    std::optional<IdentityUnavailableReason>        unavailable_reason_;
+    PackageVersionState state_;
+    std::optional<PackageVersionRepresentation> representation_;
+    std::optional<std::string> full_version_;
+    std::optional<std::string> epoch_;
+    std::optional<std::string> pkgver_;
+    std::optional<std::string> pkgrel_;
+    std::optional<IdentityUnavailableReason> unavailable_reason_;
 };
 
 enum class PackageArchitectureState {
@@ -280,36 +277,35 @@ public:
     PackageArchitectureIdentity() = delete;
     PackageArchitectureIdentity(const PackageArchitectureIdentity&) = default;
     PackageArchitectureIdentity(PackageArchitectureIdentity&&) noexcept =
-            default;
+        default;
     PackageArchitectureIdentity& operator=(
-            const PackageArchitectureIdentity&) = default;
+        const PackageArchitectureIdentity&) = default;
     PackageArchitectureIdentity& operator=(
-            PackageArchitectureIdentity&&) noexcept = default;
+        PackageArchitectureIdentity&&) noexcept = default;
     ~PackageArchitectureIdentity() = default;
 
     [[nodiscard]] static PackageArchitectureIdentity known(
-            std::vector<std::string> architectures);
+        std::vector<std::string> architectures);
     [[nodiscard]] static PackageArchitectureIdentity unknown() noexcept;
     [[nodiscard]] static PackageArchitectureIdentity unavailable(
-            IdentityUnavailableReason reason);
+        IdentityUnavailableReason reason);
 
     [[nodiscard]] PackageArchitectureState state() const noexcept;
     [[nodiscard]] const std::vector<std::string>& architectures()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const IdentityUnavailableReason* unavailable_reason()
-            const noexcept;
+        const noexcept;
 
     bool operator==(const PackageArchitectureIdentity&) const = default;
 
 private:
     PackageArchitectureIdentity(
-            PackageArchitectureState state,
-            std::vector<std::string> architectures,
-            std::optional<IdentityUnavailableReason> unavailable_reason)
-        noexcept;
+        PackageArchitectureState state,
+        std::vector<std::string> architectures,
+        std::optional<IdentityUnavailableReason> unavailable_reason) noexcept;
 
-    PackageArchitectureState                 state_;
-    std::vector<std::string>                  architectures_;
+    PackageArchitectureState state_;
+    std::vector<std::string> architectures_;
     std::optional<IdentityUnavailableReason> unavailable_reason_;
 };
 
@@ -319,36 +315,36 @@ public:
     SourceAwarePackageIdentity(const SourceAwarePackageIdentity&) = default;
     SourceAwarePackageIdentity(SourceAwarePackageIdentity&&) noexcept = default;
     SourceAwarePackageIdentity& operator=(
-            const SourceAwarePackageIdentity&) = default;
+        const SourceAwarePackageIdentity&) = default;
     SourceAwarePackageIdentity& operator=(
-            SourceAwarePackageIdentity&&) noexcept = default;
+        SourceAwarePackageIdentity&&) noexcept = default;
     ~SourceAwarePackageIdentity() = default;
 
     [[nodiscard]] static SourceAwarePackageIdentity make(
-            PackageChildIdentity package,
-            SourceRevisionIdentity source_revision,
-            PackageVersionIdentity package_version,
-            PackageArchitectureIdentity architecture);
+        PackageChildIdentity package,
+        SourceRevisionIdentity source_revision,
+        PackageVersionIdentity package_version,
+        PackageArchitectureIdentity architecture);
 
     [[nodiscard]] const PackageChildIdentity& package() const noexcept;
     [[nodiscard]] const SourceRevisionIdentity& source_revision()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const PackageVersionIdentity& package_version()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const PackageArchitectureIdentity& architecture()
-            const noexcept;
+        const noexcept;
 
     bool operator==(const SourceAwarePackageIdentity&) const = default;
 
 private:
     SourceAwarePackageIdentity(
-            PackageChildIdentity package,
-            SourceRevisionIdentity source_revision,
-            PackageVersionIdentity package_version,
-            PackageArchitectureIdentity architecture) noexcept;
+        PackageChildIdentity package,
+        SourceRevisionIdentity source_revision,
+        PackageVersionIdentity package_version,
+        PackageArchitectureIdentity architecture) noexcept;
 
-    PackageChildIdentity        package_;
-    SourceRevisionIdentity      source_revision_;
-    PackageVersionIdentity      package_version_;
+    PackageChildIdentity package_;
+    SourceRevisionIdentity source_revision_;
+    PackageVersionIdentity package_version_;
     PackageArchitectureIdentity architecture_;
 };

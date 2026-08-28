@@ -26,9 +26,9 @@ namespace fs = std::filesystem;
 
 constexpr mode_t PRIVATE_LOG_MODE = S_IRUSR | S_IWUSR;
 constexpr mode_t DIRECTORY_REQUIRED_OWNER_PERMISSIONS =
-        S_IRUSR | S_IWUSR | S_IXUSR;
+    S_IRUSR | S_IWUSR | S_IXUSR;
 constexpr mode_t DIRECTORY_FORBIDDEN_WRITE_PERMISSIONS =
-        S_IWGRP | S_IWOTH;
+    S_IWGRP | S_IWOTH;
 
 class OwnedFileDescriptor final {
     int descriptor_ = -1;
@@ -67,15 +67,15 @@ public:
 
 struct DuplicatedDirectory {
     OwnedFileDescriptor descriptor;
-    std::uintmax_t      device = 0;
-    std::uintmax_t      inode = 0;
-    std::uintmax_t      owner = 0;
+    std::uintmax_t device = 0;
+    std::uintmax_t inode = 0;
+    std::uintmax_t owner = 0;
 };
 
 struct OpenedLogFile {
     OwnedFileDescriptor descriptor;
-    struct stat         status {};
-    bool                created = false;
+    struct stat status{};
+    bool created = false;
 };
 
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
@@ -94,163 +94,163 @@ std::string_view state_log_stage_name(StateLogStage stage) {
     // NO_TRANSLATE: These values are stable internal stage tokens and are
     // passed as runtime data to complete diagnostic msgids.
     switch(stage) {
-    case StateLogStage::BoundaryValidation:
-        return "boundary-validation";
-    case StateLogStage::DirectoryRevalidation:
-        return "directory-revalidation";
-    case StateLogStage::DirectoryDescriptorDuplication:
-        return "directory-descriptor-duplication";
-    case StateLogStage::FileInspection:
-        return "file-inspection";
-    case StateLogStage::FileCreation:
-        return "file-creation";
-    case StateLogStage::FileOpen:
-        return "file-open";
-    case StateLogStage::DescriptorValidation:
-        return "descriptor-validation";
-    case StateLogStage::NameRevalidation:
-        return "name-revalidation";
-    case StateLogStage::DescriptorAdoption:
-        return "descriptor-adoption";
-    case StateLogStage::RecordWrite:
-        return "record-write";
-    case StateLogStage::DescriptorClose:
-        return "descriptor-close";
+        case StateLogStage::BoundaryValidation:
+            return "boundary-validation";
+        case StateLogStage::DirectoryRevalidation:
+            return "directory-revalidation";
+        case StateLogStage::DirectoryDescriptorDuplication:
+            return "directory-descriptor-duplication";
+        case StateLogStage::FileInspection:
+            return "file-inspection";
+        case StateLogStage::FileCreation:
+            return "file-creation";
+        case StateLogStage::FileOpen:
+            return "file-open";
+        case StateLogStage::DescriptorValidation:
+            return "descriptor-validation";
+        case StateLogStage::NameRevalidation:
+            return "name-revalidation";
+        case StateLogStage::DescriptorAdoption:
+            return "descriptor-adoption";
+        case StateLogStage::RecordWrite:
+            return "record-write";
+        case StateLogStage::DescriptorClose:
+            return "descriptor-close";
     }
     throw std::logic_error(localization::translate_message(
-            "Unknown state log stage."));
+        "Unknown state log stage."));
 }
 
 std::string state_log_diagnostic(const StateLogFailure& failure) {
     const bool is_directory_stage =
-            failure.stage == StateLogStage::DirectoryRevalidation ||
-            failure.stage == StateLogStage::DirectoryDescriptorDuplication;
+        failure.stage == StateLogStage::DirectoryRevalidation ||
+        failure.stage == StateLogStage::DirectoryDescriptorDuplication;
     std::string diagnostic;
     switch(failure.code) {
-    case StateLogErrorCode::InvalidStateLogBoundary:
-        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
-        diagnostic = localization::format_translated_message(
+        case StateLogErrorCode::InvalidStateLogBoundary:
+            // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+            diagnostic = localization::format_translated_message(
                 "Cannot safely use the {} default state log during stage {}: the state log boundary is invalid.",
                 application_identity::PROJECT_NAME,
                 state_log_stage_name(failure.stage));
-        break;
-    case StateLogErrorCode::Symlink:
-        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
-        diagnostic = localization::format_translated_message(
+            break;
+        case StateLogErrorCode::Symlink:
+            // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+            diagnostic = localization::format_translated_message(
                 "Cannot safely use the {} default state log during stage {}: the default state log must not be a symlink.",
                 application_identity::PROJECT_NAME,
                 state_log_stage_name(failure.stage));
-        break;
-    case StateLogErrorCode::NotRegularFile:
-        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
-        diagnostic = localization::format_translated_message(
+            break;
+        case StateLogErrorCode::NotRegularFile:
+            // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+            diagnostic = localization::format_translated_message(
                 "Cannot safely use the {} default state log during stage {}: the default state log is not a regular file.",
                 application_identity::PROJECT_NAME,
                 state_log_stage_name(failure.stage));
-        break;
-    case StateLogErrorCode::OwnershipMismatch:
-        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
-        diagnostic = is_directory_stage
-                ? localization::format_translated_message(
-                          "Cannot safely use the {} default state log during stage {}: state-directory ownership no longer matches its authority.",
-                          application_identity::PROJECT_NAME,
-                          state_log_stage_name(failure.stage))
-                : localization::format_translated_message(
-                          "Cannot safely use the {} default state log during stage {}: file ownership does not match the state-directory authority.",
-                          application_identity::PROJECT_NAME,
-                          state_log_stage_name(failure.stage));
-        break;
-    case StateLogErrorCode::UnsafePermissions:
-        // TRANSLATORS: The placeholders are the project identity, a stable state-log stage token, and, for the file case, the literal mode 0600.
-        diagnostic = is_directory_stage
-                ? localization::format_translated_message(
-                          "Cannot safely use the {} default state log during stage {}: state-directory permissions are unsafe.",
-                          application_identity::PROJECT_NAME,
-                          state_log_stage_name(failure.stage))
-                : localization::format_translated_message(
-                          "Cannot safely use the {} default state log during stage {}: file permissions are not private mode {}.",
-                          application_identity::PROJECT_NAME,
-                          state_log_stage_name(failure.stage), "0600");
-        break;
-    case StateLogErrorCode::MultipleHardLinks:
-        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
-        diagnostic = localization::format_translated_message(
+            break;
+        case StateLogErrorCode::OwnershipMismatch:
+            // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+            diagnostic = is_directory_stage
+                             ? localization::format_translated_message(
+                                   "Cannot safely use the {} default state log during stage {}: state-directory ownership no longer matches its authority.",
+                                   application_identity::PROJECT_NAME,
+                                   state_log_stage_name(failure.stage))
+                             : localization::format_translated_message(
+                                   "Cannot safely use the {} default state log during stage {}: file ownership does not match the state-directory authority.",
+                                   application_identity::PROJECT_NAME,
+                                   state_log_stage_name(failure.stage));
+            break;
+        case StateLogErrorCode::UnsafePermissions:
+            // TRANSLATORS: The placeholders are the project identity, a stable state-log stage token, and, for the file case, the literal mode 0600.
+            diagnostic = is_directory_stage
+                             ? localization::format_translated_message(
+                                   "Cannot safely use the {} default state log during stage {}: state-directory permissions are unsafe.",
+                                   application_identity::PROJECT_NAME,
+                                   state_log_stage_name(failure.stage))
+                             : localization::format_translated_message(
+                                   "Cannot safely use the {} default state log during stage {}: file permissions are not private mode {}.",
+                                   application_identity::PROJECT_NAME,
+                                   state_log_stage_name(failure.stage), "0600");
+            break;
+        case StateLogErrorCode::MultipleHardLinks:
+            // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+            diagnostic = localization::format_translated_message(
                 "Cannot safely use the {} default state log during stage {}: the default state log has multiple hard links.",
                 application_identity::PROJECT_NAME,
                 state_log_stage_name(failure.stage));
-        break;
-    case StateLogErrorCode::PermissionDenied:
-        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
-        diagnostic = localization::format_translated_message(
+            break;
+        case StateLogErrorCode::PermissionDenied:
+            // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+            diagnostic = localization::format_translated_message(
                 "Cannot safely use the {} default state log during stage {}: filesystem permission was denied.",
                 application_identity::PROJECT_NAME,
                 state_log_stage_name(failure.stage));
-        break;
-    case StateLogErrorCode::OpenFailed:
-        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
-        diagnostic = localization::format_translated_message(
+            break;
+        case StateLogErrorCode::OpenFailed:
+            // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+            diagnostic = localization::format_translated_message(
                 "Cannot safely use the {} default state log during stage {}: the default state log could not be opened safely.",
                 application_identity::PROJECT_NAME,
                 state_log_stage_name(failure.stage));
-        break;
-    case StateLogErrorCode::MetadataFailure:
-        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
-        diagnostic = localization::format_translated_message(
+            break;
+        case StateLogErrorCode::MetadataFailure:
+            // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+            diagnostic = localization::format_translated_message(
                 "Cannot safely use the {} default state log during stage {}: filesystem metadata could not be obtained safely.",
                 application_identity::PROJECT_NAME,
                 state_log_stage_name(failure.stage));
-        break;
-    case StateLogErrorCode::ConcurrentReplacement:
-        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
-        diagnostic = localization::format_translated_message(
+            break;
+        case StateLogErrorCode::ConcurrentReplacement:
+            // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+            diagnostic = localization::format_translated_message(
                 "Cannot safely use the {} default state log during stage {}: the default state log changed during validation.",
                 application_identity::PROJECT_NAME,
                 state_log_stage_name(failure.stage));
-        break;
-    case StateLogErrorCode::DescriptorAdoptionFailure:
-        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
-        diagnostic = localization::format_translated_message(
+            break;
+        case StateLogErrorCode::DescriptorAdoptionFailure:
+            // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+            diagnostic = localization::format_translated_message(
                 "Cannot safely use the {} default state log during stage {}: the validated descriptor cannot be adopted by the logger.",
                 application_identity::PROJECT_NAME,
                 state_log_stage_name(failure.stage));
-        break;
-    case StateLogErrorCode::WriteFailure:
-        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
-        diagnostic = localization::format_translated_message(
+            break;
+        case StateLogErrorCode::WriteFailure:
+            // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+            diagnostic = localization::format_translated_message(
                 "Cannot safely use the {} default state log during stage {}: the validated descriptor could not accept a log record.",
                 application_identity::PROJECT_NAME,
                 state_log_stage_name(failure.stage));
-        break;
-    case StateLogErrorCode::CloseFailure:
-        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
-        diagnostic = localization::format_translated_message(
+            break;
+        case StateLogErrorCode::CloseFailure:
+            // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+            diagnostic = localization::format_translated_message(
                 "Cannot safely use the {} default state log during stage {}: the validated descriptor could not be closed cleanly.",
                 application_identity::PROJECT_NAME,
                 state_log_stage_name(failure.stage));
-        break;
+            break;
     }
     if(diagnostic.empty()) {
         throw std::logic_error(localization::translate_message(
-                "Unknown state log error code."));
+            "Unknown state log error code."));
     }
     if(failure.system_error.has_value()) {
         // TRANSLATORS: The placeholder is an operating-system error message.
         diagnostic += " " + localization::format_translated_message(
-                "System error: {}.", failure.system_error->message());
+                                "System error: {}.", failure.system_error->message());
     }
     return diagnostic;
 }
 
 [[noreturn]] void throw_state_log_error(
-        StateLogStage stage, StateLogErrorCode code,
-        std::optional<int> error_number = std::nullopt) {
+    StateLogStage stage, StateLogErrorCode code,
+    std::optional<int> error_number = std::nullopt) {
     std::optional<std::error_code> system_error;
     if(error_number.has_value()) {
         system_error =
-                std::error_code(error_number.value(), std::generic_category());
+            std::error_code(error_number.value(), std::generic_category());
     }
     throw StateLogError(StateLogFailure{
-            xdg_paths::DirectoryKind::State, stage, code, system_error});
+        xdg_paths::DirectoryKind::State, stage, code, system_error});
 }
 
 bool is_permission_error(int error_number) {
@@ -281,15 +281,15 @@ std::uintmax_t status_permissions(const struct stat& status) {
 }
 
 bool same_filesystem_identity(
-        const struct stat& expected, const struct stat& actual) {
+    const struct stat& expected, const struct stat& actual) {
     return expected.st_dev == actual.st_dev &&
            expected.st_ino == actual.st_ino &&
            (expected.st_mode & S_IFMT) == (actual.st_mode & S_IFMT);
 }
 
 void validate_state_log_boundary(
-        const xdg_paths::StatePaths& paths,
-        const xdg_directory_safety::PreparedDirectory& directory) {
+    const xdg_paths::StatePaths& paths,
+    const xdg_directory_safety::PreparedDirectory& directory) {
     const std::string filename = default_log_filename();
     if(directory.directory_kind() != xdg_paths::DirectoryKind::State ||
        directory.path() != paths.directory ||
@@ -297,45 +297,45 @@ void validate_state_log_boundary(
        paths.default_log_file.filename() != filename ||
        paths.default_log_file != paths.directory / filename) {
         throw_state_log_error(
-                StateLogStage::BoundaryValidation,
-                StateLogErrorCode::InvalidStateLogBoundary);
+            StateLogStage::BoundaryValidation,
+            StateLogErrorCode::InvalidStateLogBoundary);
     }
 }
 
 void translate_directory_revalidation_error(
-        const xdg_directory_safety::PreparationError& error) {
+    const xdg_directory_safety::PreparationError& error) {
     const xdg_directory_safety::PreparationFailure& failure = error.failure();
     StateLogErrorCode code = StateLogErrorCode::MetadataFailure;
     switch(failure.code) {
-    case xdg_directory_safety::PreparationErrorCode::OwnershipMismatch:
-        code = StateLogErrorCode::OwnershipMismatch;
-        break;
-    case xdg_directory_safety::PreparationErrorCode::UnsafePermissions:
-        code = StateLogErrorCode::UnsafePermissions;
-        break;
-    case xdg_directory_safety::PreparationErrorCode::PermissionDenied:
-        code = StateLogErrorCode::PermissionDenied;
-        break;
-    case xdg_directory_safety::PreparationErrorCode::Symlink:
-    case xdg_directory_safety::PreparationErrorCode::NotDirectory:
-    case xdg_directory_safety::PreparationErrorCode::ConcurrentReplacement:
-    case xdg_directory_safety::PreparationErrorCode::MissingAnchor:
-        code = StateLogErrorCode::ConcurrentReplacement;
-        break;
-    case xdg_directory_safety::PreparationErrorCode::CreationFailed:
-    case xdg_directory_safety::PreparationErrorCode::MetadataFailure:
-    case xdg_directory_safety::PreparationErrorCode::InvalidCreationBoundary:
-        code = StateLogErrorCode::MetadataFailure;
-        break;
+        case xdg_directory_safety::PreparationErrorCode::OwnershipMismatch:
+            code = StateLogErrorCode::OwnershipMismatch;
+            break;
+        case xdg_directory_safety::PreparationErrorCode::UnsafePermissions:
+            code = StateLogErrorCode::UnsafePermissions;
+            break;
+        case xdg_directory_safety::PreparationErrorCode::PermissionDenied:
+            code = StateLogErrorCode::PermissionDenied;
+            break;
+        case xdg_directory_safety::PreparationErrorCode::Symlink:
+        case xdg_directory_safety::PreparationErrorCode::NotDirectory:
+        case xdg_directory_safety::PreparationErrorCode::ConcurrentReplacement:
+        case xdg_directory_safety::PreparationErrorCode::MissingAnchor:
+            code = StateLogErrorCode::ConcurrentReplacement;
+            break;
+        case xdg_directory_safety::PreparationErrorCode::CreationFailed:
+        case xdg_directory_safety::PreparationErrorCode::MetadataFailure:
+        case xdg_directory_safety::PreparationErrorCode::InvalidCreationBoundary:
+            code = StateLogErrorCode::MetadataFailure;
+            break;
     }
     throw StateLogError(StateLogFailure{
-            xdg_paths::DirectoryKind::State,
-            StateLogStage::DirectoryRevalidation, code,
-            failure.system_error});
+        xdg_paths::DirectoryKind::State,
+        StateLogStage::DirectoryRevalidation, code,
+        failure.system_error});
 }
 
 void require_prepared_directory_unchanged(
-        const xdg_directory_safety::PreparedDirectory& directory) {
+    const xdg_directory_safety::PreparedDirectory& directory) {
     try {
         directory.require_unchanged_identity();
     } catch(const xdg_directory_safety::PreparationError& error) {
@@ -345,36 +345,36 @@ void require_prepared_directory_unchanged(
 
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
 bool inject_failure(
-        const TestOverrides* overrides,
-        StateLogTestFailurePoint failure_point) {
+    const TestOverrides* overrides,
+    StateLogTestFailurePoint failure_point) {
     if(overrides == nullptr || !overrides->injected_failure.has_value())
         return false;
     const StateLogInjectedFailure& failure =
-            overrides->injected_failure.value();
+        overrides->injected_failure.value();
     if(failure.failure_point != failure_point) return false;
     errno = failure.error_number;
     return true;
 }
 
 void emit_test_event(
-        const TestOverrides* overrides, StateLogTestEvent event,
-        const fs::path& path) {
+    const TestOverrides* overrides, StateLogTestEvent event,
+    const fs::path& path) {
     if(overrides != nullptr && overrides->event_hook)
         overrides->event_hook(event, path);
 }
 
 void apply_observed_type_override(
-        struct stat& status, const TestOverrides* overrides) {
+    struct stat& status, const TestOverrides* overrides) {
     if(overrides == nullptr || !overrides->observed_type.has_value()) return;
     switch(overrides->observed_type.value()) {
-    case StateLogTestObservedType::CharacterDevice:
-        status.st_mode =
+        case StateLogTestObservedType::CharacterDevice:
+            status.st_mode =
                 (status.st_mode & ~static_cast<mode_t>(S_IFMT)) | S_IFCHR;
-        return;
-    case StateLogTestObservedType::Socket:
-        status.st_mode =
+            return;
+        case StateLogTestObservedType::Socket:
+            status.st_mode =
                 (status.st_mode & ~static_cast<mode_t>(S_IFMT)) | S_IFSOCK;
-        return;
+            return;
     }
 }
 #else
@@ -386,7 +386,7 @@ void apply_observed_type_override(struct stat&, const TestOverrides*) {
 #endif
 
 std::uintmax_t observed_owner(
-        const struct stat& status, const TestOverrides* overrides) {
+    const struct stat& status, const TestOverrides* overrides) {
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
     if(overrides != nullptr && overrides->observed_owner.has_value())
         return overrides->observed_owner.value();
@@ -397,8 +397,8 @@ std::uintmax_t observed_owner(
 }
 
 void validate_log_file_status(
-        const struct stat& status, std::uintmax_t expected_owner,
-        StateLogStage stage, const TestOverrides* overrides) {
+    const struct stat& status, std::uintmax_t expected_owner,
+    StateLogStage stage, const TestOverrides* overrides) {
     if(S_ISLNK(status.st_mode)) {
         throw_state_log_error(stage, StateLogErrorCode::Symlink);
     }
@@ -407,33 +407,33 @@ void validate_log_file_status(
     }
     if(observed_owner(status, overrides) != expected_owner) {
         throw_state_log_error(
-                stage, StateLogErrorCode::OwnershipMismatch);
+            stage, StateLogErrorCode::OwnershipMismatch);
     }
     if((status.st_mode & 07777) != PRIVATE_LOG_MODE) {
         throw_state_log_error(
-                stage, StateLogErrorCode::UnsafePermissions);
+            stage, StateLogErrorCode::UnsafePermissions);
     }
     if(status.st_nlink != 1) {
         throw_state_log_error(
-                stage, StateLogErrorCode::MultipleHardLinks);
+            stage, StateLogErrorCode::MultipleHardLinks);
     }
 }
 
 std::optional<struct stat> inspect_log_name(
-        int directory_descriptor, const std::string& filename,
-        const TestOverrides* overrides, bool allow_type_override) {
+    int directory_descriptor, const std::string& filename,
+    const TestOverrides* overrides, bool allow_type_override) {
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
     const bool injected_metadata_failure = inject_failure(
-            overrides, StateLogTestFailurePoint::InitialMetadata);
+        overrides, StateLogTestFailurePoint::InitialMetadata);
 #else
     static_cast<void>(allow_type_override);
     const bool injected_metadata_failure = false;
 #endif
-    struct stat status {};
+    struct stat status{};
     if(!injected_metadata_failure &&
        fstatat(
-               directory_descriptor, filename.c_str(), &status,
-               AT_SYMLINK_NOFOLLOW) == 0) {
+           directory_descriptor, filename.c_str(), &status,
+           AT_SYMLINK_NOFOLLOW) == 0) {
         if(allow_type_override)
             apply_observed_type_override(status, overrides);
         return status;
@@ -441,262 +441,262 @@ std::optional<struct stat> inspect_log_name(
     const int metadata_error = errno;
     if(metadata_error == ENOENT) return std::nullopt;
     throw_state_log_error(
-            StateLogStage::FileInspection,
-            is_permission_error(metadata_error)
-                    ? StateLogErrorCode::PermissionDenied
-                    : StateLogErrorCode::MetadataFailure,
-            metadata_error);
+        StateLogStage::FileInspection,
+        is_permission_error(metadata_error)
+            ? StateLogErrorCode::PermissionDenied
+            : StateLogErrorCode::MetadataFailure,
+        metadata_error);
 }
 
 struct stat descriptor_status(
-        int file_descriptor, const TestOverrides* overrides) {
+    int file_descriptor, const TestOverrides* overrides) {
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
     const bool injected_metadata_failure = inject_failure(
-            overrides, StateLogTestFailurePoint::DescriptorMetadata);
+        overrides, StateLogTestFailurePoint::DescriptorMetadata);
 #else
     static_cast<void>(overrides);
     const bool injected_metadata_failure = false;
 #endif
-    struct stat status {};
+    struct stat status{};
     if(injected_metadata_failure || fstat(file_descriptor, &status) != 0) {
         const int metadata_error = errno;
         throw_state_log_error(
-                StateLogStage::DescriptorValidation,
-                is_permission_error(metadata_error)
-                        ? StateLogErrorCode::PermissionDenied
-                        : StateLogErrorCode::MetadataFailure,
-                metadata_error);
+            StateLogStage::DescriptorValidation,
+            is_permission_error(metadata_error)
+                ? StateLogErrorCode::PermissionDenied
+                : StateLogErrorCode::MetadataFailure,
+            metadata_error);
     }
     return status;
 }
 
 struct stat revalidate_log_name(
-        int directory_descriptor, const std::string& filename,
-        const TestOverrides* overrides) {
+    int directory_descriptor, const std::string& filename,
+    const TestOverrides* overrides) {
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
     const bool injected_metadata_failure = inject_failure(
-            overrides, StateLogTestFailurePoint::NameRevalidation);
+        overrides, StateLogTestFailurePoint::NameRevalidation);
 #else
     static_cast<void>(overrides);
     const bool injected_metadata_failure = false;
 #endif
-    struct stat status {};
+    struct stat status{};
     if(injected_metadata_failure ||
        fstatat(
-               directory_descriptor, filename.c_str(), &status,
-               AT_SYMLINK_NOFOLLOW) != 0) {
+           directory_descriptor, filename.c_str(), &status,
+           AT_SYMLINK_NOFOLLOW) != 0) {
         const int metadata_error = errno;
         throw_state_log_error(
-                StateLogStage::NameRevalidation,
-                is_replacement_error(metadata_error)
-                        ? StateLogErrorCode::ConcurrentReplacement
-                        : (is_permission_error(metadata_error)
-                                   ? StateLogErrorCode::PermissionDenied
-                                   : StateLogErrorCode::MetadataFailure),
-                metadata_error);
+            StateLogStage::NameRevalidation,
+            is_replacement_error(metadata_error)
+                ? StateLogErrorCode::ConcurrentReplacement
+                : (is_permission_error(metadata_error)
+                       ? StateLogErrorCode::PermissionDenied
+                       : StateLogErrorCode::MetadataFailure),
+            metadata_error);
     }
     return status;
 }
 
 OpenedLogFile finish_opened_log_file(
-        OwnedFileDescriptor opened,
-        const struct stat* initial_status,
-        int directory_descriptor, const std::string& filename,
-        std::uintmax_t expected_owner, bool created,
-        const TestOverrides* overrides, const fs::path& logical_path) {
+    OwnedFileDescriptor opened,
+    const struct stat* initial_status,
+    int directory_descriptor, const std::string& filename,
+    std::uintmax_t expected_owner, bool created,
+    const TestOverrides* overrides, const fs::path& logical_path) {
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
     emit_test_event(
-            overrides, StateLogTestEvent::AfterFileOpen, logical_path);
+        overrides, StateLogTestEvent::AfterFileOpen, logical_path);
 #else
     emit_test_event(overrides, 0, logical_path);
 #endif
     const struct stat opened_status =
-            descriptor_status(opened.get(), overrides);
+        descriptor_status(opened.get(), overrides);
     if(initial_status != nullptr &&
        !same_filesystem_identity(*initial_status, opened_status)) {
         throw_state_log_error(
-                StateLogStage::DescriptorValidation,
-                StateLogErrorCode::ConcurrentReplacement);
+            StateLogStage::DescriptorValidation,
+            StateLogErrorCode::ConcurrentReplacement);
     }
     validate_log_file_status(
-            opened_status, expected_owner,
-            StateLogStage::DescriptorValidation, overrides);
+        opened_status, expected_owner,
+        StateLogStage::DescriptorValidation, overrides);
 
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
     emit_test_event(
-            overrides, StateLogTestEvent::BeforeNameRevalidation,
-            logical_path);
+        overrides, StateLogTestEvent::BeforeNameRevalidation,
+        logical_path);
 #else
     emit_test_event(overrides, 0, logical_path);
 #endif
     const struct stat named_status = revalidate_log_name(
-            directory_descriptor, filename, overrides);
+        directory_descriptor, filename, overrides);
     if(!same_filesystem_identity(opened_status, named_status)) {
         throw_state_log_error(
-                StateLogStage::NameRevalidation,
-                StateLogErrorCode::ConcurrentReplacement);
+            StateLogStage::NameRevalidation,
+            StateLogErrorCode::ConcurrentReplacement);
     }
     validate_log_file_status(
-            named_status, expected_owner,
-            StateLogStage::NameRevalidation, overrides);
+        named_status, expected_owner,
+        StateLogStage::NameRevalidation, overrides);
     return OpenedLogFile{
-            std::move(opened), opened_status, created};
+        std::move(opened), opened_status, created};
 }
 
 OpenedLogFile open_existing_log_file(
-        int directory_descriptor, const std::string& filename,
-        const struct stat& initial_status, std::uintmax_t expected_owner,
-        const TestOverrides* overrides, const fs::path& logical_path) {
+    int directory_descriptor, const std::string& filename,
+    const struct stat& initial_status, std::uintmax_t expected_owner,
+    const TestOverrides* overrides, const fs::path& logical_path) {
     validate_log_file_status(
-            initial_status, expected_owner,
-            StateLogStage::FileInspection, overrides);
+        initial_status, expected_owner,
+        StateLogStage::FileInspection, overrides);
 
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
     const bool injected_open_failure =
-            inject_failure(overrides, StateLogTestFailurePoint::FileOpen);
+        inject_failure(overrides, StateLogTestFailurePoint::FileOpen);
 #else
     const bool injected_open_failure = false;
 #endif
     const int descriptor = injected_open_failure
-                                   ? -1
-                                   : openat(
-                                             directory_descriptor,
-                                             filename.c_str(),
-                                             O_WRONLY | O_APPEND | O_CLOEXEC |
-                                                     O_NOFOLLOW | O_NONBLOCK);
+                               ? -1
+                               : openat(
+                                     directory_descriptor,
+                                     filename.c_str(),
+                                     O_WRONLY | O_APPEND | O_CLOEXEC |
+                                         O_NOFOLLOW | O_NONBLOCK);
     if(descriptor < 0) {
         const int open_error = errno;
         throw_state_log_error(
-                StateLogStage::FileOpen,
-                is_replacement_error(open_error)
-                        ? StateLogErrorCode::ConcurrentReplacement
-                        : (is_permission_error(open_error)
-                                   ? StateLogErrorCode::PermissionDenied
-                                   : StateLogErrorCode::OpenFailed),
-                open_error);
+            StateLogStage::FileOpen,
+            is_replacement_error(open_error)
+                ? StateLogErrorCode::ConcurrentReplacement
+                : (is_permission_error(open_error)
+                       ? StateLogErrorCode::PermissionDenied
+                       : StateLogErrorCode::OpenFailed),
+            open_error);
     }
     return finish_opened_log_file(
-            OwnedFileDescriptor(descriptor), &initial_status,
-            directory_descriptor, filename, expected_owner, false,
-            overrides, logical_path);
+        OwnedFileDescriptor(descriptor), &initial_status,
+        directory_descriptor, filename, expected_owner, false,
+        overrides, logical_path);
 }
 
 OpenedLogFile create_log_file(
-        int directory_descriptor, const std::string& filename,
-        std::uintmax_t expected_owner, const TestOverrides* overrides,
-        const fs::path& logical_path) {
+    int directory_descriptor, const std::string& filename,
+    std::uintmax_t expected_owner, const TestOverrides* overrides,
+    const fs::path& logical_path) {
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
     const bool injected_creation_failure = inject_failure(
-            overrides, StateLogTestFailurePoint::FileCreation);
+        overrides, StateLogTestFailurePoint::FileCreation);
 #else
     const bool injected_creation_failure = false;
 #endif
     const int descriptor = injected_creation_failure
-                                   ? -1
-                                   : openat(
-                                             directory_descriptor,
-                                             filename.c_str(),
-                                             O_WRONLY | O_APPEND | O_CLOEXEC |
-                                                     O_NOFOLLOW | O_NONBLOCK |
-                                                     O_CREAT | O_EXCL,
-                                             PRIVATE_LOG_MODE);
+                               ? -1
+                               : openat(
+                                     directory_descriptor,
+                                     filename.c_str(),
+                                     O_WRONLY | O_APPEND | O_CLOEXEC |
+                                         O_NOFOLLOW | O_NONBLOCK |
+                                         O_CREAT | O_EXCL,
+                                     PRIVATE_LOG_MODE);
     if(descriptor < 0) {
         const int creation_error = errno;
         if(creation_error == EEXIST) {
             std::optional<struct stat> appeared = inspect_log_name(
-                    directory_descriptor, filename, overrides, true);
+                directory_descriptor, filename, overrides, true);
             if(!appeared.has_value()) {
                 throw_state_log_error(
-                        StateLogStage::FileCreation,
-                        StateLogErrorCode::ConcurrentReplacement);
+                    StateLogStage::FileCreation,
+                    StateLogErrorCode::ConcurrentReplacement);
             }
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
             emit_test_event(
-                    overrides, StateLogTestEvent::AfterInitialMetadata,
-                    logical_path);
+                overrides, StateLogTestEvent::AfterInitialMetadata,
+                logical_path);
 #else
             emit_test_event(overrides, 0, logical_path);
 #endif
             return open_existing_log_file(
-                    directory_descriptor, filename, appeared.value(),
-                    expected_owner, overrides, logical_path);
+                directory_descriptor, filename, appeared.value(),
+                expected_owner, overrides, logical_path);
         }
         throw_state_log_error(
-                StateLogStage::FileCreation,
-                is_permission_error(creation_error)
-                        ? StateLogErrorCode::PermissionDenied
-                        : (is_replacement_error(creation_error)
-                                   ? StateLogErrorCode::ConcurrentReplacement
-                                   : StateLogErrorCode::OpenFailed),
-                creation_error);
+            StateLogStage::FileCreation,
+            is_permission_error(creation_error)
+                ? StateLogErrorCode::PermissionDenied
+                : (is_replacement_error(creation_error)
+                       ? StateLogErrorCode::ConcurrentReplacement
+                       : StateLogErrorCode::OpenFailed),
+            creation_error);
     }
     return finish_opened_log_file(
-            OwnedFileDescriptor(descriptor), nullptr,
-            directory_descriptor, filename, expected_owner, true,
-            overrides, logical_path);
+        OwnedFileDescriptor(descriptor), nullptr,
+        directory_descriptor, filename, expected_owner, true,
+        overrides, logical_path);
 }
 
 OpenedLogFile open_log_file(
-        int directory_descriptor, const std::string& filename,
-        std::uintmax_t expected_owner, const TestOverrides* overrides,
-        const fs::path& logical_path) {
+    int directory_descriptor, const std::string& filename,
+    std::uintmax_t expected_owner, const TestOverrides* overrides,
+    const fs::path& logical_path) {
     std::optional<struct stat> initial_status = inspect_log_name(
-            directory_descriptor, filename, overrides, true);
+        directory_descriptor, filename, overrides, true);
     if(!initial_status.has_value()) {
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
         emit_test_event(
-                overrides, StateLogTestEvent::AfterMissingObservation,
-                logical_path);
+            overrides, StateLogTestEvent::AfterMissingObservation,
+            logical_path);
 #else
         emit_test_event(overrides, 0, logical_path);
 #endif
         return create_log_file(
-                directory_descriptor, filename, expected_owner, overrides,
-                logical_path);
+            directory_descriptor, filename, expected_owner, overrides,
+            logical_path);
     }
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
     emit_test_event(
-            overrides, StateLogTestEvent::AfterInitialMetadata,
-            logical_path);
+        overrides, StateLogTestEvent::AfterInitialMetadata,
+        logical_path);
 #else
     emit_test_event(overrides, 0, logical_path);
 #endif
     return open_existing_log_file(
-            directory_descriptor, filename, initial_status.value(),
-            expected_owner, overrides, logical_path);
+        directory_descriptor, filename, initial_status.value(),
+        expected_owner, overrides, logical_path);
 }
 
 void validate_retained_directory(
-        int directory_descriptor, std::uintmax_t expected_device,
-        std::uintmax_t expected_inode, std::uintmax_t expected_owner) {
-    struct stat status {};
+    int directory_descriptor, std::uintmax_t expected_device,
+    std::uintmax_t expected_inode, std::uintmax_t expected_owner) {
+    struct stat status{};
     if(fstat(directory_descriptor, &status) != 0) {
         const int metadata_error = errno;
         throw_state_log_error(
-                StateLogStage::DirectoryRevalidation,
-                is_permission_error(metadata_error)
-                        ? StateLogErrorCode::PermissionDenied
-                        : StateLogErrorCode::MetadataFailure,
-                metadata_error);
+            StateLogStage::DirectoryRevalidation,
+            is_permission_error(metadata_error)
+                ? StateLogErrorCode::PermissionDenied
+                : StateLogErrorCode::MetadataFailure,
+            metadata_error);
     }
     if(!S_ISDIR(status.st_mode) || status_device(status) != expected_device ||
        status_inode(status) != expected_inode) {
         throw_state_log_error(
-                StateLogStage::DirectoryRevalidation,
-                StateLogErrorCode::ConcurrentReplacement);
+            StateLogStage::DirectoryRevalidation,
+            StateLogErrorCode::ConcurrentReplacement);
     }
     const mode_t permissions = status.st_mode & 07777;
     if(status_owner(status) != expected_owner) {
         throw_state_log_error(
-                StateLogStage::DirectoryRevalidation,
-                StateLogErrorCode::OwnershipMismatch);
+            StateLogStage::DirectoryRevalidation,
+            StateLogErrorCode::OwnershipMismatch);
     }
     if((permissions & DIRECTORY_REQUIRED_OWNER_PERMISSIONS) !=
-               DIRECTORY_REQUIRED_OWNER_PERMISSIONS ||
+           DIRECTORY_REQUIRED_OWNER_PERMISSIONS ||
        (permissions & DIRECTORY_FORBIDDEN_WRITE_PERMISSIONS) != 0) {
         throw_state_log_error(
-                StateLogStage::DirectoryRevalidation,
-                StateLogErrorCode::UnsafePermissions);
+            StateLogStage::DirectoryRevalidation,
+            StateLogErrorCode::UnsafePermissions);
     }
 }
 
@@ -704,120 +704,120 @@ void validate_retained_directory(
 
 struct StateLogDirectoryAccess {
     static DuplicatedDirectory duplicate(
-            const xdg_directory_safety::PreparedDirectory& directory,
-            const TestOverrides* overrides) {
+        const xdg_directory_safety::PreparedDirectory& directory,
+        const TestOverrides* overrides) {
         require_prepared_directory_unchanged(directory);
 
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
         const bool injected_duplication_failure = inject_failure(
-                overrides,
-                StateLogTestFailurePoint::DirectoryDescriptorDuplication);
+            overrides,
+            StateLogTestFailurePoint::DirectoryDescriptorDuplication);
 #else
         static_cast<void>(overrides);
         const bool injected_duplication_failure = false;
 #endif
         const int descriptor = injected_duplication_failure
-                                       ? -1
-                                       : fcntl(
-                                                 directory.directory_descriptor_,
-                                                 F_DUPFD_CLOEXEC, 0);
+                                   ? -1
+                                   : fcntl(
+                                         directory.directory_descriptor_,
+                                         F_DUPFD_CLOEXEC, 0);
         if(descriptor < 0) {
             const int duplication_error = errno;
             throw_state_log_error(
-                    StateLogStage::DirectoryDescriptorDuplication,
-                    is_permission_error(duplication_error)
-                            ? StateLogErrorCode::PermissionDenied
-                            : StateLogErrorCode::MetadataFailure,
-                    duplication_error);
+                StateLogStage::DirectoryDescriptorDuplication,
+                is_permission_error(duplication_error)
+                    ? StateLogErrorCode::PermissionDenied
+                    : StateLogErrorCode::MetadataFailure,
+                duplication_error);
         }
         OwnedFileDescriptor duplicated(descriptor);
-        struct stat status {};
+        struct stat status{};
         if(fstat(duplicated.get(), &status) != 0) {
             const int metadata_error = errno;
             throw_state_log_error(
-                    StateLogStage::DirectoryDescriptorDuplication,
-                    is_permission_error(metadata_error)
-                            ? StateLogErrorCode::PermissionDenied
-                            : StateLogErrorCode::MetadataFailure,
-                    metadata_error);
+                StateLogStage::DirectoryDescriptorDuplication,
+                is_permission_error(metadata_error)
+                    ? StateLogErrorCode::PermissionDenied
+                    : StateLogErrorCode::MetadataFailure,
+                metadata_error);
         }
         if(!S_ISDIR(status.st_mode) ||
            status_device(status) != directory.device_ ||
            status_inode(status) != directory.inode_) {
             throw_state_log_error(
-                    StateLogStage::DirectoryDescriptorDuplication,
-                    StateLogErrorCode::ConcurrentReplacement);
+                StateLogStage::DirectoryDescriptorDuplication,
+                StateLogErrorCode::ConcurrentReplacement);
         }
         if(status_owner(status) != directory.filesystem_owner_) {
             throw_state_log_error(
-                    StateLogStage::DirectoryDescriptorDuplication,
-                    StateLogErrorCode::OwnershipMismatch);
+                StateLogStage::DirectoryDescriptorDuplication,
+                StateLogErrorCode::OwnershipMismatch);
         }
         return DuplicatedDirectory{
-                std::move(duplicated), status_device(status),
-                status_inode(status), status_owner(status)};
+            std::move(duplicated), status_device(status),
+            status_inode(status), status_owner(status)};
     }
 };
 
 struct StateLogFileAccess {
     static PreparedLogFile open(
-            const xdg_paths::StatePaths& paths,
-            const xdg_directory_safety::PreparedDirectory& directory,
-            const TestOverrides* overrides) {
+        const xdg_paths::StatePaths& paths,
+        const xdg_directory_safety::PreparedDirectory& directory,
+        const TestOverrides* overrides) {
         validate_state_log_boundary(paths, directory);
         DuplicatedDirectory duplicated =
-                StateLogDirectoryAccess::duplicate(directory, overrides);
+            StateLogDirectoryAccess::duplicate(directory, overrides);
         const std::string filename = default_log_filename();
         OpenedLogFile opened = open_log_file(
-                duplicated.descriptor.get(), filename, duplicated.owner,
-                overrides, paths.default_log_file);
+            duplicated.descriptor.get(), filename, duplicated.owner,
+            overrides, paths.default_log_file);
 
         // Directoryのnamed chainとfileのparent-relative nameを、return直前に
         // もう一度固定する。file自体はabsolute pathから再openしない。
         require_prepared_directory_unchanged(directory);
         validate_retained_directory(
-                duplicated.descriptor.get(), duplicated.device,
-                duplicated.inode, duplicated.owner);
+            duplicated.descriptor.get(), duplicated.device,
+            duplicated.inode, duplicated.owner);
         const struct stat named_status = revalidate_log_name(
-                duplicated.descriptor.get(), filename, overrides);
+            duplicated.descriptor.get(), filename, overrides);
         if(!same_filesystem_identity(opened.status, named_status)) {
             throw_state_log_error(
-                    StateLogStage::NameRevalidation,
-                    StateLogErrorCode::ConcurrentReplacement);
+                StateLogStage::NameRevalidation,
+                StateLogErrorCode::ConcurrentReplacement);
         }
         validate_log_file_status(
-                named_status, duplicated.owner,
-                StateLogStage::NameRevalidation, overrides);
+            named_status, duplicated.owner,
+            StateLogStage::NameRevalidation, overrides);
 
         PreparedLogFile result(
-                paths.default_log_file, filename,
-                duplicated.descriptor.get(), opened.descriptor.get(),
-                duplicated.device, duplicated.inode,
-                status_owner(opened.status),
-                status_permissions(opened.status),
-                status_device(opened.status), status_inode(opened.status),
-                opened.created);
+            paths.default_log_file, filename,
+            duplicated.descriptor.get(), opened.descriptor.get(),
+            duplicated.device, duplicated.inode,
+            status_owner(opened.status),
+            status_permissions(opened.status),
+            status_device(opened.status), status_inode(opened.status),
+            opened.created);
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
         if(overrides != nullptr && overrides->injected_failure.has_value()) {
             const StateLogInjectedFailure& failure =
-                    overrides->injected_failure.value();
+                overrides->injected_failure.value();
             switch(failure.failure_point) {
-            case StateLogTestFailurePoint::RecordWrite:
-                result.test_record_write_error_ = failure.error_number;
-                break;
-            case StateLogTestFailurePoint::FileClose:
-                result.test_file_close_error_ = failure.error_number;
-                break;
-            case StateLogTestFailurePoint::DirectoryClose:
-                result.test_directory_close_error_ = failure.error_number;
-                break;
-            case StateLogTestFailurePoint::DirectoryDescriptorDuplication:
-            case StateLogTestFailurePoint::InitialMetadata:
-            case StateLogTestFailurePoint::FileCreation:
-            case StateLogTestFailurePoint::FileOpen:
-            case StateLogTestFailurePoint::DescriptorMetadata:
-            case StateLogTestFailurePoint::NameRevalidation:
-                break;
+                case StateLogTestFailurePoint::RecordWrite:
+                    result.test_record_write_error_ = failure.error_number;
+                    break;
+                case StateLogTestFailurePoint::FileClose:
+                    result.test_file_close_error_ = failure.error_number;
+                    break;
+                case StateLogTestFailurePoint::DirectoryClose:
+                    result.test_directory_close_error_ = failure.error_number;
+                    break;
+                case StateLogTestFailurePoint::DirectoryDescriptorDuplication:
+                case StateLogTestFailurePoint::InitialMetadata:
+                case StateLogTestFailurePoint::FileCreation:
+                case StateLogTestFailurePoint::FileOpen:
+                case StateLogTestFailurePoint::DescriptorMetadata:
+                case StateLogTestFailurePoint::NameRevalidation:
+                    break;
             }
         }
 #endif
@@ -833,11 +833,11 @@ StateLogError::StateLogError(StateLogFailure failure)
 }
 
 PreparedLogFile::PreparedLogFile(
-        fs::path logical_path, std::string filename,
-        int directory_descriptor, int file_descriptor,
-        std::uintmax_t directory_device, std::uintmax_t directory_inode,
-        std::uintmax_t owner, std::uintmax_t permissions,
-        std::uintmax_t device, std::uintmax_t inode, bool created) noexcept
+    fs::path logical_path, std::string filename,
+    int directory_descriptor, int file_descriptor,
+    std::uintmax_t directory_device, std::uintmax_t directory_inode,
+    std::uintmax_t owner, std::uintmax_t permissions,
+    std::uintmax_t device, std::uintmax_t inode, bool created) noexcept
     : logical_path_(std::move(logical_path)),
       filename_(std::move(filename)),
       directory_descriptor_(directory_descriptor),
@@ -852,7 +852,7 @@ PreparedLogFile::PreparedLogFile(PreparedLogFile&& other) noexcept
       logical_path_(std::move(other.logical_path_)),
       filename_(std::move(other.filename_)),
       directory_descriptor_(
-              std::exchange(other.directory_descriptor_, -1)),
+          std::exchange(other.directory_descriptor_, -1)),
       file_descriptor_(std::exchange(other.file_descriptor_, -1)),
       directory_device_(other.directory_device_),
       directory_inode_(other.directory_inode_), owner_(other.owner_),
@@ -860,11 +860,11 @@ PreparedLogFile::PreparedLogFile(PreparedLogFile&& other) noexcept
       inode_(other.inode_), created_(other.created_) {
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
     test_record_write_error_ =
-            std::exchange(other.test_record_write_error_, 0);
+        std::exchange(other.test_record_write_error_, 0);
     test_file_close_error_ =
-            std::exchange(other.test_file_close_error_, 0);
+        std::exchange(other.test_file_close_error_, 0);
     test_directory_close_error_ =
-            std::exchange(other.test_directory_close_error_, 0);
+        std::exchange(other.test_directory_close_error_, 0);
 #endif
 }
 
@@ -875,7 +875,7 @@ PreparedLogFile& PreparedLogFile::operator=(PreparedLogFile&& other) noexcept {
     logical_path_ = std::move(other.logical_path_);
     filename_ = std::move(other.filename_);
     directory_descriptor_ =
-            std::exchange(other.directory_descriptor_, -1);
+        std::exchange(other.directory_descriptor_, -1);
     file_descriptor_ = std::exchange(other.file_descriptor_, -1);
     directory_device_ = other.directory_device_;
     directory_inode_ = other.directory_inode_;
@@ -886,11 +886,11 @@ PreparedLogFile& PreparedLogFile::operator=(PreparedLogFile&& other) noexcept {
     created_ = other.created_;
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
     test_record_write_error_ =
-            std::exchange(other.test_record_write_error_, 0);
+        std::exchange(other.test_record_write_error_, 0);
     test_file_close_error_ =
-            std::exchange(other.test_file_close_error_, 0);
+        std::exchange(other.test_file_close_error_, 0);
     test_directory_close_error_ =
-            std::exchange(other.test_directory_close_error_, 0);
+        std::exchange(other.test_directory_close_error_, 0);
 #endif
     return *this;
 }
@@ -913,43 +913,43 @@ void PreparedLogFile::close_descriptors() noexcept {
 void PreparedLogFile::require_unchanged_identity() const {
     if(directory_descriptor_ < 0 || file_descriptor_ < 0) {
         throw_state_log_error(
-                StateLogStage::DescriptorValidation,
-                StateLogErrorCode::MetadataFailure);
+            StateLogStage::DescriptorValidation,
+            StateLogErrorCode::MetadataFailure);
     }
     validate_retained_directory(
-            directory_descriptor_, directory_device_, directory_inode_,
-            owner_);
+        directory_descriptor_, directory_device_, directory_inode_,
+        owner_);
 
-    struct stat retained_status {};
+    struct stat retained_status{};
     if(fstat(file_descriptor_, &retained_status) != 0) {
         const int metadata_error = errno;
         throw_state_log_error(
-                StateLogStage::DescriptorValidation,
-                is_permission_error(metadata_error)
-                        ? StateLogErrorCode::PermissionDenied
-                        : StateLogErrorCode::MetadataFailure,
-                metadata_error);
+            StateLogStage::DescriptorValidation,
+            is_permission_error(metadata_error)
+                ? StateLogErrorCode::PermissionDenied
+                : StateLogErrorCode::MetadataFailure,
+            metadata_error);
     }
     if(!S_ISREG(retained_status.st_mode) ||
        status_device(retained_status) != device_ ||
        status_inode(retained_status) != inode_) {
         throw_state_log_error(
-                StateLogStage::DescriptorValidation,
-                StateLogErrorCode::ConcurrentReplacement);
+            StateLogStage::DescriptorValidation,
+            StateLogErrorCode::ConcurrentReplacement);
     }
     validate_log_file_status(
-            retained_status, owner_, StateLogStage::DescriptorValidation,
-            nullptr);
+        retained_status, owner_, StateLogStage::DescriptorValidation,
+        nullptr);
 
     const struct stat named_status = revalidate_log_name(
-            directory_descriptor_, filename_, nullptr);
+        directory_descriptor_, filename_, nullptr);
     if(!same_filesystem_identity(retained_status, named_status)) {
         throw_state_log_error(
-                StateLogStage::NameRevalidation,
-                StateLogErrorCode::ConcurrentReplacement);
+            StateLogStage::NameRevalidation,
+            StateLogErrorCode::ConcurrentReplacement);
     }
     validate_log_file_status(
-            named_status, owner_, StateLogStage::NameRevalidation, nullptr);
+        named_status, owner_, StateLogStage::NameRevalidation, nullptr);
 }
 
 void PreparedLogFile::require_adoption_ready_for_logger() const {
@@ -960,20 +960,20 @@ void PreparedLogFile::require_adoption_ready_for_logger() const {
        (file_descriptor_flags & FD_CLOEXEC) == 0) {
         const int descriptor_error = errno == 0 ? EINVAL : errno;
         throw_state_log_error(
-                StateLogStage::DescriptorAdoption,
-                StateLogErrorCode::DescriptorAdoptionFailure,
-                descriptor_error);
+            StateLogStage::DescriptorAdoption,
+            StateLogErrorCode::DescriptorAdoptionFailure,
+            descriptor_error);
     }
     errno = 0;
     const int directory_descriptor_flags =
-            fcntl(directory_descriptor_, F_GETFD);
+        fcntl(directory_descriptor_, F_GETFD);
     if(directory_descriptor_flags < 0 ||
        (directory_descriptor_flags & FD_CLOEXEC) == 0) {
         const int descriptor_error = errno == 0 ? EINVAL : errno;
         throw_state_log_error(
-                StateLogStage::DescriptorAdoption,
-                StateLogErrorCode::DescriptorAdoptionFailure,
-                descriptor_error);
+            StateLogStage::DescriptorAdoption,
+            StateLogErrorCode::DescriptorAdoptionFailure,
+            descriptor_error);
     }
     errno = 0;
     const int status_flags = fcntl(file_descriptor_, F_GETFL);
@@ -982,39 +982,39 @@ void PreparedLogFile::require_adoption_ready_for_logger() const {
        (status_flags & O_NONBLOCK) == 0) {
         const int descriptor_error = errno == 0 ? EINVAL : errno;
         throw_state_log_error(
-                StateLogStage::DescriptorAdoption,
-                StateLogErrorCode::DescriptorAdoptionFailure,
-                descriptor_error);
+            StateLogStage::DescriptorAdoption,
+            StateLogErrorCode::DescriptorAdoptionFailure,
+            descriptor_error);
     }
 }
 
 void PreparedLogFile::append_record_for_logger(
-        std::string_view record) const {
+    std::string_view record) const {
     require_unchanged_identity();
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
     if(test_record_write_error_ != 0) {
         throw_state_log_error(
-                StateLogStage::RecordWrite,
-                StateLogErrorCode::WriteFailure,
-                test_record_write_error_);
+            StateLogStage::RecordWrite,
+            StateLogErrorCode::WriteFailure,
+            test_record_write_error_);
     }
 #endif
     std::size_t offset = 0;
     while(offset < record.size()) {
         const ssize_t written = write(
-                file_descriptor_, record.data() + offset,
-                record.size() - offset);
+            file_descriptor_, record.data() + offset,
+            record.size() - offset);
         if(written < 0) {
             if(errno == EINTR) continue;
             const int write_error = errno;
             throw_state_log_error(
-                    StateLogStage::RecordWrite,
-                    StateLogErrorCode::WriteFailure, write_error);
+                StateLogStage::RecordWrite,
+                StateLogErrorCode::WriteFailure, write_error);
         }
         if(written == 0) {
             throw_state_log_error(
-                    StateLogStage::RecordWrite,
-                    StateLogErrorCode::WriteFailure, EIO);
+                StateLogStage::RecordWrite,
+                StateLogErrorCode::WriteFailure, EIO);
         }
         offset += static_cast<std::size_t>(written);
     }
@@ -1023,8 +1023,8 @@ void PreparedLogFile::append_record_for_logger(
 void PreparedLogFile::close_checked_for_logger() {
     std::optional<int> first_close_error;
     const auto close_checked = [&first_close_error](
-                                       int& descriptor,
-                                       int injected_error) {
+                                   int& descriptor,
+                                   int injected_error) {
         if(descriptor < 0) return;
         const int owned_descriptor = std::exchange(descriptor, -1);
         const int close_result = close(owned_descriptor);
@@ -1046,9 +1046,9 @@ void PreparedLogFile::close_checked_for_logger() {
 #endif
     if(first_close_error.has_value()) {
         throw_state_log_error(
-                StateLogStage::DescriptorClose,
-                StateLogErrorCode::CloseFailure,
-                first_close_error.value());
+            StateLogStage::DescriptorClose,
+            StateLogErrorCode::CloseFailure,
+            first_close_error.value());
     }
 }
 
@@ -1078,16 +1078,16 @@ public:
 };
 
 PreparedLogFile open_default_state_log(
-        const xdg_paths::StatePaths& paths,
-        const xdg_directory_safety::PreparedDirectory& directory) {
+    const xdg_paths::StatePaths& paths,
+    const xdg_directory_safety::PreparedDirectory& directory) {
     return StateLogFileAccess::open(paths, directory, nullptr);
 }
 
 #ifdef MOGUET_TEST_XDG_STATE_LOG_HOOKS
 PreparedLogFile open_default_state_log_for_test(
-        const xdg_paths::StatePaths& paths,
-        const xdg_directory_safety::PreparedDirectory& directory,
-        const StateLogTestOverrides& overrides) {
+    const xdg_paths::StatePaths& paths,
+    const xdg_directory_safety::PreparedDirectory& directory,
+    const StateLogTestOverrides& overrides) {
     return StateLogFileAccess::open(paths, directory, &overrides);
 }
 
@@ -1097,18 +1097,18 @@ struct StateLogTestAccess {
     }
 
     static int directory_descriptor(
-            const PreparedLogFile& log_file) noexcept {
+        const PreparedLogFile& log_file) noexcept {
         return log_file.directory_descriptor_;
     }
 };
 
 int state_log_file_descriptor_for_test(
-        const PreparedLogFile& log_file) noexcept {
+    const PreparedLogFile& log_file) noexcept {
     return StateLogTestAccess::file_descriptor(log_file);
 }
 
 int state_log_directory_descriptor_for_test(
-        const PreparedLogFile& log_file) noexcept {
+    const PreparedLogFile& log_file) noexcept {
     return StateLogTestAccess::directory_descriptor(log_file);
 }
 #endif
@@ -1116,10 +1116,10 @@ int state_log_directory_descriptor_for_test(
 } // namespace xdg_state_log
 
 void Logger::init(
-        xdg_state_log::PreparedLogFile&& log_file,
-        const std::string& initial_info_message) {
+    xdg_state_log::PreparedLogFile&& log_file,
+    const std::string& initial_info_message) {
     log_file.require_adoption_ready_for_logger();
     auto backend = std::make_unique<xdg_state_log::StateLogLoggerBackend>(
-            std::move(log_file));
+        std::move(log_file));
     adopt_state_log_backend(std::move(backend), initial_info_message);
 }

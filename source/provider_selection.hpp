@@ -27,13 +27,13 @@ private:
 // candidate metadataの表示はselection policyから分離し、phase-localな補助表示を
 // callbackの外側で接続できるようにする。
 using ProviderCandidatePresenter = std::function<void(
-        std::ostream& output, std::size_t index,
-        const ProvidedDependency& candidate)>;
+    std::ostream& output, std::size_t index,
+    const ProvidedDependency& candidate)>;
 
 // selection phaseごとにcandidate presenterを生成する。factory自体はselection
 // sessionへstateful metadata lookupを所有させないための外側の接続点である。
 using ProviderCandidatePresenterFactory =
-        std::function<ProviderCandidatePresenter()>;
+    std::function<ProviderCandidatePresenter()>;
 
 // installed-state等を持たない既存のcandidate metadata表示を生成する。
 ProviderCandidatePresenter make_default_provider_candidate_presenter();
@@ -41,27 +41,27 @@ ProviderCandidatePresenter make_default_provider_candidate_presenter();
 // fixed metadata labelを保ったcandidate line本体だけを表示する。suffixは
 // presentation seamが後ろへ追加し、candidate identityへ戻さない。
 void present_provider_candidate_metadata(
-        std::ostream& output, std::size_t index,
-        const ProvidedDependency& candidate);
+    std::ostream& output, std::size_t index,
+    const ProvidedDependency& candidate);
 
 // provider選択をinvocation単位で共有し、CLI入出力とplan callbackを接続する。
 class ProviderSelectionSession final {
 public:
     ProviderSelectionSession(
-            std::istream& input, std::ostream& output,
-            bool is_interactive);
+        std::istream& input, std::ostream& output,
+        bool is_interactive);
 
     ProviderSelectionSession(const ProviderSelectionSession&) = delete;
     ProviderSelectionSession& operator=(const ProviderSelectionSession&) = delete;
 
     std::optional<ProvidedDependency> select_provider(
-            const std::string& dependency,
-            const std::vector<ProvidedDependency>& candidates);
+        const std::string& dependency,
+        const std::vector<ProvidedDependency>& candidates);
 
     std::optional<ProvidedDependency> select_provider(
-            const std::string& dependency,
-            const std::vector<ProvidedDependency>& candidates,
-            const ProviderCandidatePresenter& present_candidate);
+        const std::string& dependency,
+        const std::vector<ProvidedDependency>& candidates,
+        const ProviderCandidatePresenter& present_candidate);
 
     bool is_interactive() const noexcept;
     // Raw dependency specifications use the same canonical package-name
@@ -78,4 +78,4 @@ private:
 
 // production sessionはstdinがTTYかつ--noconfirm未指定の場合だけ入力を読む。
 std::shared_ptr<ProviderSelectionSession> make_provider_selection_session(
-        bool no_confirm);
+    bool no_confirm);

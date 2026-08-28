@@ -104,11 +104,31 @@ Declinedはquestion固有のnegative answer、Cancelledはcurrent Moguet operati
 <a id="compat-aur-update"></a>
 ## AUR update operation summary
 
-`upgrade-aur`はinstalled foreign inventoryを起点に、AUR RPCでexact packageとして解決でき、installed versionより新しいpackageだけを対象にする。official repository package、AURに存在しないforeign package、source preferenceだけで選ばれるpackageはこのoperationの対象にしない。query、recursive plan、provider selection、conflicts / replaces metadata、preparationを全targetについて確認してからexecutionへ進み、blocking targetが1件でもあればgit checkout、makepkg、`pacman -U`、sudoを開始しない。
+`upgrade-aur`はinstalled foreign inventoryを起点にする。AUR RPCでexact packageとして解決でき、installed versionより新しいnormal AUR packageは従来どおりupdate candidateである。normal versionが新しくないexact AUR packageでも、PackageBaseまたはinstalled childに`-git`、`-svn`、`-hg`、`-bzr`、`-cvs`、`-darcs`のsuffix根拠があれば、v2.5.0ではsilentな`UpToDate`へ丸めず`RequiresCheck(SuffixCandidateOnly)`として保持する。suffixはcandidate evidenceだけであり、supported VCS、source metadata、tracking readiness、update有無を証明しない。AUR exact packageが存在しないsuffix付きforeign packageは`NonAurForeign`のままで、metadata / version comparison failureも既存failure semanticsを維持する。
+
+normal AUR `UpdateAvailable`はdevel assessmentより優先し、suffix候補やauthoritative baseline不足を理由に取り消さない。`moguet -Qua`は`RequiresCheck`をpackage、PackageBase / child根拠、reason付きで表示し、installed versionからAUR Versionへのupdate arrowへ偽装しない。check-required自体はquery transport failureではないため、それだけならqueryの終了codeは0である。
+
+`RequiresCheck`はautomatic update / rebuild candidateへ昇格しない。`upgrade-aur`はcurrent all-target contractに従い、1件でもあればoperation全体をAUR mutation前にblockする。dry-runは同じ状態を`Blocked`とnon-zeroへ投影し、`upgrade-all`はsystem、registered source、fresh foreign inventoryまでの完了済みphaseを保持したままfresh AUR phaseをblockする。non-TTYと`--noconfirm`はmanual rebuild promptやimplicit approvalを追加しない。query、recursive plan、provider selection、conflicts / replaces metadata、preparationを全targetについて確認してからexecutionへ進み、blocking targetが1件でもあればcache作成、git checkout、makepkg、`pacman -U`、sudoを開始しない。
+
+v2.5.0のconservative connectionはupstream VCS revisionをquery / 比較せず、`.SRCINFO` / PKGBUILDをproduction detection authorityとして評価せず、devel build provenanceやbaselineを保存しない。trusted Git remoteのread-only observerはIssue #475、installed artifactへ束縛したprovenanceとauthoritative `UpdateAvailable` / `UpToDate`比較はIssue #476のfollow-up contractであり、v2.5.0がfull VCS update trackingを実装済みであるとは扱わない。
+
+official repository package、AURに存在しないforeign package、source preferenceだけで選ばれるpackageはautomatic AUR update対象にしない。
 
 `upgrade-all`はsystem upgrade、registered source package、remaining installed AUR packageを`system → registered source → fresh foreign inventory → filtered AUR`のphase順で扱う。single atomic transactionやautomatic rollbackではなく、先行phaseの成功、現在のfailure、後続phaseの`NotAttempted`を区別する。`upgrade-aur`と`upgrade-all`の`--rmdeps`、package target、`--needed`、`--aur`、`--repo`はunsupportedであり、queryやcache mutationより前に停止する。
 
 対象がない場合は成功とするが、query failure、preparation failure、cleanup failure、未実行targetを空の成功結果へ丸めない。partial completionはnon-zeroである。source preferenceで選ばれたPackageBaseとautomatic AUR targetが重複する場合はduplicate exclusion / external satisfactionとして扱い、同じsourceを二重buildしない。
+
+### `upgrade-all` system failure後のversion-lock診断
+
+`moguet upgrade-all`のrepository system upgradeが失敗してsystem phaseで停止した後に限り、Moguetはlocal / sync databaseとexact AUR metadataをread-onlyで追加観測する。installed foreign packageのdirect exact runtime dependencyがinstalled repository package versionでは満たされ、観測したより新しいrepository candidate versionでは満たされない相関を1件以上表示できる場合だけ、repository / AURをまたぐpossible version-lock candidateをsupplemental diagnosticとして表示する。すべてのsystem failureへ表示するものではなく、publicに表示できるcoherentなcandidate correlationがなければ既存failure outputのままである。この非表示自体はcandidate absenceの証明ではない。
+
+表示できる根拠は、observed repository candidateと同名のinstalled package / version、observed repository candidate / version、installed foreign package / version、そのinstalled direct exact dependency requirement、observed AUR replacement candidate、およびreplacementのdirect runtime requirementである。`foreign`は、installed packageのexact nameが現在設定されているrepository metadataに存在しないという観測に基づくもので、historical AUR provenanceを証明しない。
+
+observed repository candidateはread-only repository metadataであり、pacmanが実際に選択したtransaction targetではない。possible candidateはconfirmed pacman blockerでもsystem failureの特定済み原因でもない。`CompatibleReplacement`も、observed AUR replacement candidateのdirect runtime requirementがobserved repository candidate versionで満たされるというmetadata correlationだけを表す。pacmanがそのversionを選択したこと、installed foreign packageがfailure原因だったこと、またはsafeなcoordinated updateが許可・証明されたことを意味しない。
+
+replacement assessmentはcompatible、incompatible、matching candidate not found、compatibility unknown、AUR query failure、ambiguous evidenceを区別する。query failureをreplacement missingへ変換せず、candidate observationの`Partial` / `Failed`もabsenceへ丸めない。`Partial` observationからcandidateを表示する場合はsupplemental observationがincompleteであることを明示し、coherentなcandidateがなければsupplemental outputを追加しない。
+
+このdiagnosticは元のpacman / sudo output、既存Moguet failure result、failure exit behaviorを置換しないため、candidateが表示されてもcommandはfailureのままである。Moguetが行うのはpossible candidateとversion / dependency constraintを示してmanual reviewを求めるところまでであり、repository / AURのautomatic coordinated update、automatic remove / reinstall、rollback、retry、partial upgrade、dependency bypassは行わない。
 
 <a id="compat-aur-export"></a>
 ## AUR PKGBUILD export summary
@@ -254,7 +274,7 @@ selected childだけがinstall input、install reason、installed / skipped-as-n
 <a id="compat-rmdeps"></a>
 ## `--rmdeps` compatibility
 
-`--rmdeps`はpacman optionではなく、makepkg由来のMoguet global optionである。separated source-buildでは、今回のinvocationが導入したdependency集合をMoguetがauthoritativeに所有できないため、意味のあるcleanup要求をsilent ignoreせず、mutation前にfail closedする。pre/post installed package差分だけではpre-existing / Explicit / `base-devel`、reason変化、並行transaction、invocation外の変更を安全に区別できない。
+`--rmdeps`はpacman optionではなく、makepkg由来のMoguet global optionである。separated source-buildでは、今回のinvocationが導入したdependency集合をMoguetがauthoritativeに所有できないため、意味のあるcleanup要求をsilent ignoreせず、mutation前にfail closedする。current build-only commandは概ね`makepkg -sc`であり、`-s`によるdependency installが発生し得る。pre/post installed package差分だけではmakepkg内部または並行するtransaction、invocation外のinstall / reason変更を安全に区別できず、新しく観測された`NewlyObserved` packageを`InvocationOwned`へ昇格できない。
 
 source-build routeでは`makepkg -r`、`pacman -Rns`、`pacman -Qdt`、独自orphan cleanup、automatic rollbackへ変換しない。`--noconfirm`でも拒否を突破しない。
 
@@ -263,6 +283,7 @@ pacman-only routeでは、Moguetがmakepkg dependency installation lifecycleを�
 | Route | `--rmdeps` contract |
 | --- | --- |
 | 明示的なAUR / source-build install、`build` | source resolutionより前、またはroute probe後でcheckout mutation、workspace、makepkg、metadata query、pacman / sudoより前に拒否 |
+| local `build --local` | local root inspectionより前にoperation-local parserで拒否 |
 | singular / PackageBase separated lifecycle | workspace / process / metadata / transactionより前に拒否。既存preflight orderを維持 |
 | `upgrade-aur` | update query、default log / cache初期化より前に拒否。target 0件でもno-op成功へ変換しない |
 | `upgrade-all` | log / cache、source preparation、system upgrade、foreign inventory、AUR queryより前に拒否 |

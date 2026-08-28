@@ -44,11 +44,11 @@ enum class LocalSourceRootErrorCode {
 };
 
 struct LocalSourceRootFailure {
-    LocalSourceRootStage     stage = LocalSourceRootStage::RootInspection;
+    LocalSourceRootStage stage = LocalSourceRootStage::RootInspection;
     LocalSourceRootErrorCode code =
-            LocalSourceRootErrorCode::MetadataFailure;
-    std::filesystem::path              path;
-    std::optional<std::error_code>     system_error;
+        LocalSourceRootErrorCode::MetadataFailure;
+    std::filesystem::path path;
+    std::optional<std::error_code> system_error;
 
     bool operator==(const LocalSourceRootFailure&) const = default;
 };
@@ -73,25 +73,25 @@ enum class LocalSourceNodeType {
 
 struct LocalSourceDirectoryIdentity {
     LocalSourceNodeType type = LocalSourceNodeType::Directory;
-    std::uintmax_t      device = 0;
-    std::uintmax_t      inode = 0;
-    std::uintmax_t      owner = 0;
-    std::uintmax_t      mode = 0;
+    std::uintmax_t device = 0;
+    std::uintmax_t inode = 0;
+    std::uintmax_t owner = 0;
+    std::uintmax_t mode = 0;
 
     bool operator==(const LocalSourceDirectoryIdentity&) const = default;
 };
 
 struct LocalSourceFileIdentity {
     LocalSourceNodeType type = LocalSourceNodeType::RegularFile;
-    std::uintmax_t      device = 0;
-    std::uintmax_t      inode = 0;
-    std::uintmax_t      owner = 0;
-    std::uintmax_t      mode = 0;
-    std::intmax_t       size = 0;
-    std::intmax_t       modification_time_seconds = 0;
-    std::intmax_t       modification_time_nanoseconds = 0;
-    std::intmax_t       status_change_time_seconds = 0;
-    std::intmax_t       status_change_time_nanoseconds = 0;
+    std::uintmax_t device = 0;
+    std::uintmax_t inode = 0;
+    std::uintmax_t owner = 0;
+    std::uintmax_t mode = 0;
+    std::intmax_t size = 0;
+    std::intmax_t modification_time_seconds = 0;
+    std::intmax_t modification_time_nanoseconds = 0;
+    std::intmax_t status_change_time_seconds = 0;
+    std::intmax_t status_change_time_nanoseconds = 0;
 
     bool operator==(const LocalSourceFileIdentity&) const = default;
 };
@@ -99,7 +99,7 @@ struct LocalSourceFileIdentity {
 struct LocalSourceFileSnapshot {
     std::filesystem::path path;
     LocalSourceFileIdentity identity;
-    std::string             contents;
+    std::string contents;
 
     bool operator==(const LocalSourceFileSnapshot&) const = default;
 };
@@ -126,22 +126,22 @@ class LocalSourceWorkspace;
 class ValidatedCacheRoot;
 struct LocalSourceMetadataEvaluationAccess;
 LocalSourceRoot open_local_source_root(
-        const std::filesystem::path& input_path,
-        bool has_one_off_environment_assignment);
+    const std::filesystem::path& input_path,
+    bool has_one_off_environment_assignment);
 LocalSourceWorkspace materialize_local_source_workspace(
-        const LocalSourceRoot& source_root,
-        const ValidatedCacheRoot& cache_root);
+    const LocalSourceRoot& source_root,
+    const ValidatedCacheRoot& cache_root);
 void require_local_source_cache_separation(
-        const LocalSourceRoot& source_root,
-        const ValidatedCacheRoot& cache_root);
+    const LocalSourceRoot& source_root,
+    const ValidatedCacheRoot& cache_root);
 void require_directory_identity_outside_local_source_tree(
-        const LocalSourceRoot& source_root,
-        std::uintmax_t directory_device,
-        std::uintmax_t directory_inode);
+    const LocalSourceRoot& source_root,
+    std::uintmax_t directory_device,
+    std::uintmax_t directory_inode);
 #ifdef MOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS
 void require_cache_identity_outside_source_tree_for_test(
-        const LocalSourceRoot& source_root,
-        std::uintmax_t cache_device, std::uintmax_t cache_inode);
+    const LocalSourceRoot& source_root,
+    std::uintmax_t cache_device, std::uintmax_t cache_inode);
 #endif
 
 class LocalSourceMetadataSnapshot final {
@@ -153,17 +153,17 @@ class LocalSourceMetadataSnapshot final {
     std::vector<LocalSourceMetadataStaleReason> stale_reasons_;
 
     LocalSourceMetadataSnapshot(
-            LocalSourceMetadataState state,
-            std::optional<LocalSourceMetadataProvenance> provenance,
-            std::optional<LocalSourceFileSnapshot> file,
-            std::optional<LocalPackageMetadataParseResult> parse_result,
-            std::optional<LocalSourceRootFailure> unsafe_failure,
-            std::vector<LocalSourceMetadataStaleReason> stale_reasons) noexcept;
+        LocalSourceMetadataState state,
+        std::optional<LocalSourceMetadataProvenance> provenance,
+        std::optional<LocalSourceFileSnapshot> file,
+        std::optional<LocalPackageMetadataParseResult> parse_result,
+        std::optional<LocalSourceRootFailure> unsafe_failure,
+        std::vector<LocalSourceMetadataStaleReason> stale_reasons) noexcept;
 
     friend class LocalSourceRoot;
     friend LocalSourceRoot open_local_source_root(
-            const std::filesystem::path& input_path,
-            bool has_one_off_environment_assignment);
+        const std::filesystem::path& input_path,
+        bool has_one_off_environment_assignment);
 #ifdef MOGUET_ENABLE_LOCAL_SOURCE_ROOT_TEST_HOOKS
     friend struct LocalSourceRootTestAccess;
 #endif
@@ -171,11 +171,11 @@ class LocalSourceMetadataSnapshot final {
 public:
     LocalSourceMetadataSnapshot(const LocalSourceMetadataSnapshot&) = default;
     LocalSourceMetadataSnapshot(
-            LocalSourceMetadataSnapshot&&) noexcept = default;
+        LocalSourceMetadataSnapshot&&) noexcept = default;
     LocalSourceMetadataSnapshot& operator=(
-            const LocalSourceMetadataSnapshot&) = delete;
+        const LocalSourceMetadataSnapshot&) = delete;
     LocalSourceMetadataSnapshot& operator=(
-            LocalSourceMetadataSnapshot&&) noexcept = delete;
+        LocalSourceMetadataSnapshot&&) noexcept = delete;
     ~LocalSourceMetadataSnapshot() = default;
 
     LocalSourceMetadataState state() const noexcept {
@@ -199,7 +199,7 @@ public:
     }
 
     const std::vector<LocalSourceMetadataStaleReason>& stale_reasons()
-            const noexcept {
+        const noexcept {
         return stale_reasons_;
     }
 };
@@ -208,44 +208,44 @@ class LocalSourceRoot final {
     std::filesystem::path input_path_;
     std::filesystem::path lookup_path_;
     std::filesystem::path canonical_path_;
-    int                   invocation_anchor_descriptor_ = -1;
-    int                   directory_descriptor_ = -1;
-    int                   pkgbuild_descriptor_ = -1;
-    int                   srcinfo_descriptor_ = -1;
-    std::uintmax_t        expected_owner_ = 0;
+    int invocation_anchor_descriptor_ = -1;
+    int directory_descriptor_ = -1;
+    int pkgbuild_descriptor_ = -1;
+    int srcinfo_descriptor_ = -1;
+    std::uintmax_t expected_owner_ = 0;
     LocalSourceDirectoryIdentity directory_identity_;
-    LocalSourceFileSnapshot      pkgbuild_;
-    LocalSourceMetadataSnapshot  metadata_;
+    LocalSourceFileSnapshot pkgbuild_;
+    LocalSourceMetadataSnapshot metadata_;
 
     LocalSourceRoot(
-            std::filesystem::path input_path,
-            std::filesystem::path lookup_path,
-            std::filesystem::path canonical_path,
-            int invocation_anchor_descriptor, int directory_descriptor,
-            int pkgbuild_descriptor, int srcinfo_descriptor,
-            std::uintmax_t expected_owner,
-            LocalSourceDirectoryIdentity directory_identity,
-            LocalSourceFileSnapshot pkgbuild,
-            LocalSourceMetadataSnapshot metadata) noexcept;
+        std::filesystem::path input_path,
+        std::filesystem::path lookup_path,
+        std::filesystem::path canonical_path,
+        int invocation_anchor_descriptor, int directory_descriptor,
+        int pkgbuild_descriptor, int srcinfo_descriptor,
+        std::uintmax_t expected_owner,
+        LocalSourceDirectoryIdentity directory_identity,
+        LocalSourceFileSnapshot pkgbuild,
+        LocalSourceMetadataSnapshot metadata) noexcept;
 
     friend LocalSourceRoot open_local_source_root(
-            const std::filesystem::path& input_path,
-            bool has_one_off_environment_assignment);
+        const std::filesystem::path& input_path,
+        bool has_one_off_environment_assignment);
     friend LocalSourceWorkspace materialize_local_source_workspace(
-            const LocalSourceRoot& source_root,
-            const ValidatedCacheRoot& cache_root);
+        const LocalSourceRoot& source_root,
+        const ValidatedCacheRoot& cache_root);
     friend void require_local_source_cache_separation(
-            const LocalSourceRoot& source_root,
-            const ValidatedCacheRoot& cache_root);
+        const LocalSourceRoot& source_root,
+        const ValidatedCacheRoot& cache_root);
     friend void require_directory_identity_outside_local_source_tree(
-            const LocalSourceRoot& source_root,
-            std::uintmax_t directory_device,
-            std::uintmax_t directory_inode);
+        const LocalSourceRoot& source_root,
+        std::uintmax_t directory_device,
+        std::uintmax_t directory_inode);
     friend struct LocalSourceMetadataEvaluationAccess;
 #ifdef MOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS
     friend void require_cache_identity_outside_source_tree_for_test(
-            const LocalSourceRoot& source_root,
-            std::uintmax_t cache_device, std::uintmax_t cache_inode);
+        const LocalSourceRoot& source_root,
+        std::uintmax_t cache_device, std::uintmax_t cache_inode);
 #endif
 #ifdef MOGUET_ENABLE_LOCAL_SOURCE_ROOT_TEST_HOOKS
     friend struct LocalSourceRootTestAccess;
@@ -285,8 +285,8 @@ public:
 // retained for the complete LocalSourceRoot lifetime. Relative paths therefore
 // remain anchored even if a later owner changes the process working directory.
 LocalSourceRoot open_local_source_root(
-        const std::filesystem::path& input_path,
-        bool has_one_off_environment_assignment = false);
+    const std::filesystem::path& input_path,
+    bool has_one_off_environment_assignment = false);
 
 #ifdef MOGUET_ENABLE_LOCAL_SOURCE_ROOT_TEST_HOOKS
 enum class LocalSourceRootTestFailurePoint {
@@ -303,7 +303,7 @@ enum class LocalSourceRootTestFailurePoint {
 
 struct LocalSourceRootInjectedFailure {
     LocalSourceRootTestFailurePoint point;
-    int                             error_number;
+    int error_number;
 };
 
 // Focused tests may override observed ownership or one syscall boundary. No
@@ -317,7 +317,7 @@ struct LocalSourceRootTestOverrides {
 };
 
 LocalSourceRoot open_local_source_root_for_test(
-        const std::filesystem::path& input_path,
-        bool has_one_off_environment_assignment,
-        const LocalSourceRootTestOverrides& overrides);
+    const std::filesystem::path& input_path,
+    bool has_one_off_environment_assignment,
+    const LocalSourceRootTestOverrides& overrides);
 #endif

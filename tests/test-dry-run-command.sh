@@ -162,10 +162,54 @@ setup_case() {
     unset MOGUET_TEST_PACMAN_Q_OUTPUT_FILE
     unset MOGUET_TEST_PACKAGE_METADATA_STATE_FILE
     unset MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG
+    unset MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE
     unset MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE
     unset MOGUET_TEST_MAKEPKG_PRINTSRCINFO_EXIT_CODE
     unset MOGUET_TEST_MAKEPKG_SRCINFO_OUTPUT_FILE
+    unset MOGUET_TEST_VERCMP_OUTPUT
     unset PKGDEST
+}
+
+set_foreign_inventory() {
+    inventory_state=$case_dir/foreign-inventory.state
+    printf '%s\n' "$1" > "$inventory_state"
+    MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$inventory_state
+    export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE
+}
+
+set_empty_foreign_inventory() {
+    inventory_state=$case_dir/foreign-inventory.state
+    : > "$inventory_state"
+    MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$inventory_state
+    export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE
+}
+
+assert_text_occurrence_count() {
+    expected_count=$1
+    text=$2
+    checked_file=$3
+    actual_count=$(validation_grep_count -Fc -- "$text" "$checked_file")
+    if [ "$actual_count" -ne "$expected_count" ]; then
+        echo "expected $expected_count occurrences of '$text', got $actual_count" >&2
+        sed -n '1,240p' "$checked_file" >&2
+        exit 1
+    fi
+}
+
+assert_text_before() {
+    first_text=$1
+    second_text=$2
+    checked_file=$3
+    first_line=$(grep -n -F -m1 -- "$first_text" "$checked_file" |
+        sed -n '1s/:.*//p')
+    second_line=$(grep -n -F -m1 -- "$second_text" "$checked_file" |
+        sed -n '1s/:.*//p')
+    if [ -z "$first_line" ] || [ -z "$second_line" ] ||
+       [ "$first_line" -ge "$second_line" ]; then
+        echo "expected '$first_text' before '$second_text'" >&2
+        sed -n '1,240p' "$checked_file" >&2
+        exit 1
+    fi
 }
 
 start_mutation_sentinel() {
@@ -258,6 +302,7 @@ assert_read_only_commands() {
             'pacman-conf --repo-list'|\
             'pacman -Si clean-root'|\
             'pacman -Qm'|\
+            'vercmp 1.0-1 1.0-1'|\
             'alpm initialize'|\
             'alpm sync-register core'|\
             'alpm sync-valid core'|\
@@ -597,6 +642,186 @@ assert_read_only_commands
 run_supported \
     upgrade Ready 0 "     - system upgrade" \
     upgrade --dry-run
+
+# No-op actual AUR update retains the pre-log zero-mutation boundary.
+setup_case upgrade-aur-noop
+set_empty_foreign_inventory
+: > "$command_log"
+start_mutation_sentinel
+if (cd "$case_work_dir" &&
+        "$repository_test_binary" --noconfirm upgrade-aur) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+if [ "$status" -ne 0 ] ||
+   ! grep -F -- "AUR update: no updates" "$output_file" >/dev/null
+then
+    echo "actual no-op AUR update changed its result" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+assert_protected_storage_unchanged
+assert_read_only_commands
+
+# A non-empty no-op still owns query diagnostics, but replay remains console
+# only and does not initialize persistent logging.
+setup_case upgrade-aur-current-noop
+set_foreign_inventory 'clean-root 1.0-1 explicit'
+MOGUET_TEST_VERCMP_OUTPUT=0
+export MOGUET_TEST_VERCMP_OUTPUT
+: > "$command_log"
+start_mutation_sentinel
+if (cd "$case_work_dir" &&
+        "$repository_test_binary" --noconfirm upgrade-aur) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+if [ "$status" -ne 0 ] ||
+   ! grep -F -- "AUR update: no updates" "$output_file" >/dev/null
+then
+    echo "actual current-package AUR no-op changed its result" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+assert_text_occurrence_count 1 \
+    'Checking AUR updates for 1 foreign packages...' "$output_file"
+assert_text_occurrence_count 1 \
+    'Fetching AUR info for packages 1-1 of 1...' "$output_file"
+assert_protected_storage_unchanged
+assert_read_only_commands
+
+# A normal authoritative update crosses the execution capability boundary,
+# but its external mutation is stopped by the Git test double. Captured
+# pre-log diagnostics must follow Started in both console and persistent log.
+setup_case upgrade-aur-normal-executable-log
+set_foreign_inventory 'clean-root 0.9-1 explicit'
+MOGUET_TEST_VERCMP_OUTPUT=1
+export MOGUET_TEST_VERCMP_OUTPUT
+: > "$command_log"
+if (cd "$case_work_dir" &&
+        "$repository_test_binary" --noedit --nodiff --noconfirm upgrade-aur) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+if [ "$status" -ne 1 ]; then
+    echo "normal executable AUR fixture returned $status instead of 1" >&2
+    sed -n '1,240p' "$output_file" >&2
+    cat "$command_log" >&2
+    exit 1
+fi
+started_text='Started Moguet v'
+checking_text='Checking AUR updates for 1 foreign packages...'
+fetching_text='Fetching AUR info for packages 1-1 of 1...'
+assert_text_before "$started_text" "$checking_text" "$output_file"
+assert_text_before "$checking_text" "$fetching_text" "$output_file"
+assert_text_occurrence_count 1 "$started_text" "$output_file"
+assert_text_occurrence_count 1 "$checking_text" "$output_file"
+assert_text_occurrence_count 1 "$fetching_text" "$output_file"
+
+state_log_file=$XDG_STATE_HOME/moguet/moguet.log
+if [ ! -f "$state_log_file" ]; then
+    echo "normal executable AUR update did not create its state log" >&2
+    exit 1
+fi
+assert_text_before '[INFO] Started Moguet v' \
+    "[INFO] $checking_text" "$state_log_file"
+assert_text_before "[INFO] $checking_text" \
+    "[INFO] $fetching_text" "$state_log_file"
+assert_text_before "[INFO] $fetching_text" '[EXEC] git clone ' \
+    "$state_log_file"
+assert_text_occurrence_count 1 '[INFO] Started Moguet v' "$state_log_file"
+assert_text_occurrence_count 1 "[INFO] $checking_text" "$state_log_file"
+assert_text_occurrence_count 1 "[INFO] $fetching_text" "$state_log_file"
+assert_text_occurrence_count 1 '[EXEC] git clone ' "$state_log_file"
+if ! grep -F -- \
+        'git clone https://aur.archlinux.org/clean-root.git clean-root' \
+        "$command_log" >/dev/null ||
+   grep -E '^(makepkg|sudo)( |$)' "$command_log" >/dev/null
+then
+    echo "normal executable fixture did not stop at its Git test double" >&2
+    cat "$command_log" >&2
+    exit 1
+fi
+
+# The same production query/preflight path must block actual and dry-run AUR
+# execution without a transient filesystem mutation. non-TTY/--noconfirm does
+# not turn RequiresCheck into a rebuild approval.
+setup_case upgrade-aur-devel-requires-check
+set_foreign_inventory 'foo-git 1.0-1 explicit'
+MOGUET_TEST_VERCMP_OUTPUT=0
+export MOGUET_TEST_VERCMP_OUTPUT
+: > "$command_log"
+start_mutation_sentinel
+if (cd "$case_work_dir" &&
+        "$repository_test_binary" --noconfirm upgrade-aur) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+if [ "$status" -ne 1 ]; then
+    echo "actual RequiresCheck returned $status instead of 1" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+if ! grep -F -- "AUR update: blocked before execution" \
+    "$output_file" >/dev/null ||
+   ! grep -F -- \
+       "foo-git: devel update requires check: suffix candidate only" \
+       "$output_file" >/dev/null ||
+   ! grep -F -- \
+       "authoritative build provenance is unavailable" \
+       "$output_file" >/dev/null
+then
+    echo "actual RequiresCheck lost its public reason" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+assert_text_occurrence_count 1 \
+    'Checking AUR updates for 1 foreign packages...' "$output_file"
+assert_text_occurrence_count 1 \
+    'Fetching AUR info for packages 1-1 of 1...' "$output_file"
+assert_protected_storage_unchanged
+assert_read_only_commands
+
+setup_case dry-run-upgrade-aur-devel-requires-check
+set_foreign_inventory 'foo-git 1.0-1 explicit'
+MOGUET_TEST_VERCMP_OUTPUT=0
+export MOGUET_TEST_VERCMP_OUTPUT
+: > "$command_log"
+start_mutation_sentinel
+if (cd "$case_work_dir" &&
+        "$repository_test_binary" --noconfirm upgrade-aur --dry-run) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+assert_expected_observation \
+    Blocked 1 "AurUpdateExecutionReason::DevelRequiresCheck" \
+    "$status" "dry-run devel RequiresCheck"
+if ! grep -F -- \
+    "authoritative build provenance is unavailable" \
+    "$output_file" >/dev/null
+then
+    echo "dry-run RequiresCheck lost its blocker reason" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+assert_protected_storage_unchanged
+assert_read_only_commands
+
 run_supported \
     upgrade-aur NoOp 0 "External owner: AUR RPC" \
     upgrade-aur --dry-run

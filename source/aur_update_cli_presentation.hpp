@@ -14,9 +14,9 @@ struct AurUpdateCliPresentation {
 };
 
 AurUpdateCliPresentation format_aur_update_cli_presentation(
-        const AurUpdateOperationResult& result);
+    const AurUpdateOperationResult& result);
 
 // target-level summaryでraw diagnosticへfallbackせず、decisive typed detailだけを
 // safeなfailure categoryへ射影する。
 std::string aur_update_cli_target_failure_summary(
-        const AurUpdateOperationTargetResult& target);
+    const AurUpdateOperationTargetResult& target);

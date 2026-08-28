@@ -37,13 +37,13 @@ class ExplicitConfirmationAcceptance final {
 public:
     ExplicitConfirmationAcceptance() = delete;
     ExplicitConfirmationAcceptance(
-            const ExplicitConfirmationAcceptance&) = delete;
+        const ExplicitConfirmationAcceptance&) = delete;
     ExplicitConfirmationAcceptance(
-            ExplicitConfirmationAcceptance&& other) noexcept;
+        ExplicitConfirmationAcceptance&& other) noexcept;
     ExplicitConfirmationAcceptance& operator=(
-            const ExplicitConfirmationAcceptance&) = delete;
+        const ExplicitConfirmationAcceptance&) = delete;
     ExplicitConfirmationAcceptance& operator=(
-            ExplicitConfirmationAcceptance&& other) noexcept;
+        ExplicitConfirmationAcceptance&& other) noexcept;
     ~ExplicitConfirmationAcceptance() = default;
 
     [[nodiscard]] bool valid() const noexcept;
@@ -93,57 +93,57 @@ struct InvalidConfirmationInput {
 };
 
 using ConfirmationResult = std::variant<
-        ConfirmationAccepted,
-        ConfirmationDeclined,
-        ConfirmationCancelled,
-        ConfirmationUnavailable,
-        ConfirmationInputFailure>;
+    ConfirmationAccepted,
+    ConfirmationDeclined,
+    ConfirmationCancelled,
+    ConfirmationUnavailable,
+    ConfirmationInputFailure>;
 
 using ConfirmationInputParseResult = std::variant<
-        ConfirmationAccepted,
-        ConfirmationDeclined,
-        ConfirmationCancelled,
-        InvalidConfirmationInput>;
+    ConfirmationAccepted,
+    ConfirmationDeclined,
+    ConfirmationCancelled,
+    InvalidConfirmationInput>;
 
 using ExplicitConfirmationInputParseResult = std::variant<
-        ExplicitConfirmationAcceptance,
-        ConfirmationDeclined,
-        ConfirmationCancelled,
-        InvalidConfirmationInput>;
+    ExplicitConfirmationAcceptance,
+    ConfirmationDeclined,
+    ConfirmationCancelled,
+    InvalidConfirmationInput>;
 
 using ExplicitConfirmationResult = std::variant<
-        ExplicitConfirmationAcceptance,
-        ConfirmationDeclined,
-        ConfirmationCancelled,
-        ConfirmationUnavailable,
-        ConfirmationInputFailure>;
+    ExplicitConfirmationAcceptance,
+    ConfirmationDeclined,
+    ConfirmationCancelled,
+    ConfirmationUnavailable,
+    ConfirmationInputFailure>;
 
 ConfirmationInputParseResult parse_confirmation_input(
-        std::string_view input, ConfirmationDefault default_answer);
+    std::string_view input, ConfirmationDefault default_answer);
 
 // Fixed no-default parser. Only actual y/yes bytes can produce the sealed
 // positive capability; empty/default/automatic decisions have no conversion.
 ExplicitConfirmationInputParseResult parse_explicit_confirmation_input(
-        std::string_view input);
+    std::string_view input);
 
 ConfirmationResult request_confirmation(
-        const std::string& question, ConfirmationDefault default_answer,
-        bool no_confirm);
+    const std::string& question, ConfirmationDefault default_answer,
+    bool no_confirm);
 
 // Injected session for focused tests and non-production adapters. The caller
 // supplies the already-observed TTY state so parser/default semantics do not
 // depend on process-global stdin.
 ConfirmationResult request_confirmation(
-        const std::string& question, ConfirmationDefault default_answer,
-        bool no_confirm, bool is_interactive_input, std::istream& input,
-        std::ostream& output);
+    const std::string& question, ConfirmationDefault default_answer,
+    bool no_confirm, bool is_interactive_input, std::istream& input,
+    std::ostream& output);
 
 ExplicitConfirmationResult request_explicit_confirmation(
-        const std::string& question, bool no_confirm);
+    const std::string& question, bool no_confirm);
 
 ExplicitConfirmationResult request_explicit_confirmation(
-        const std::string& question, bool no_confirm,
-        bool is_interactive_input, std::istream& input, std::ostream& output);
+    const std::string& question, bool no_confirm,
+    bool is_interactive_input, std::istream& input, std::ostream& output);
 
 std::string confirmation_stop_diagnostic(const ConfirmationResult& result);
 
@@ -155,7 +155,7 @@ class ConfirmationOperationStopped final : public std::exception {
 
 public:
     explicit ConfirmationOperationStopped(
-            ConfirmationResult result) noexcept
+        ConfirmationResult result) noexcept
         : result_(std::move(result)) {
     }
 

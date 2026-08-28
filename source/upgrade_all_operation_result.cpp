@@ -7,11 +7,11 @@
 namespace {
 
 PackageStateChange aur_package_state_change(
-        const UpgradeAllAurPhaseResult& aur) noexcept {
+    const UpgradeAllAurPhaseResult& aur) noexcept {
     if(!aur.operation_result.has_value()) return PackageStateChange::Unknown;
 
     const FilteredAurUpdateExecutionResult& filtered =
-            *aur.operation_result;
+        *aur.operation_result;
     if(filtered.package_state_change() == PackageStateChange::Changed) {
         return PackageStateChange::Changed;
     }
@@ -27,14 +27,14 @@ PackageStateChange aur_package_state_change(
 }
 
 bool system_source_phase_not_attempted(
-        const SystemSourceUpgradeResult& system_source) noexcept {
+    const SystemSourceUpgradeResult& system_source) noexcept {
     return system_source.system.status ==
-                   SystemUpgradePhaseStatus::NotAttempted ||
+               SystemUpgradePhaseStatus::NotAttempted ||
            system_source.has_not_attempted_sources();
 }
 
 ObservationReason system_source_observation_reason(
-        const SystemSourceUpgradeResult& system_source) noexcept {
+    const SystemSourceUpgradeResult& system_source) noexcept {
     if(system_source.system.before_snapshot_failure.has_value()) {
         return ObservationReason::BeforeSnapshotUnavailable;
     }
@@ -55,7 +55,7 @@ ObservationReason system_source_observation_reason(
 }
 
 bool aur_phase_not_attempted(
-        const UpgradeAllAurPhaseResult& aur) noexcept {
+    const UpgradeAllAurPhaseResult& aur) noexcept {
     return aur.status == UpgradeAllAurPhaseStatus::NotAttempted ||
            aur.not_attempted_reason.has_value() ||
            (aur.operation_result.has_value() &&
@@ -63,7 +63,7 @@ bool aur_phase_not_attempted(
 }
 
 bool aur_phase_has_inconsistency(
-        const UpgradeAllAurPhaseResult& aur) noexcept {
+    const UpgradeAllAurPhaseResult& aur) noexcept {
     if(aur.status == UpgradeAllAurPhaseStatus::InconsistentResult) {
         return true;
     }
@@ -72,15 +72,15 @@ bool aur_phase_has_inconsistency(
     }
 
     const FilteredAurUpdateExecutionResult& filtered =
-            aur.operation_result.value();
+        aur.operation_result.value();
     return !filtered.issues.empty() ||
            !filtered.reduced_operation_result.reduction_issues.empty() ||
            filtered.reduced_operation_result.status ==
-                   AurUpdateOperationStatus::InconsistentResult;
+               AurUpdateOperationStatus::InconsistentResult;
 }
 
 ObservationReason aur_observation_reason(
-        const UpgradeAllAurPhaseResult& aur) noexcept {
+    const UpgradeAllAurPhaseResult& aur) noexcept {
     if(aur_phase_has_inconsistency(aur)) {
         return ObservationReason::InconsistentEvidence;
     }
@@ -99,8 +99,8 @@ ObservationReason aur_observation_reason(
 }
 
 PackageStateChange fail_closed_unattempted_phase(
-        PackageStateChange package_state_change,
-        bool phase_not_attempted) noexcept {
+    PackageStateChange package_state_change,
+    bool phase_not_attempted) noexcept {
     // A phase can retain its default NoChange value before execution. That
     // default is not authoritative unchanged evidence for presentation.
     if(phase_not_attempted &&
@@ -111,8 +111,8 @@ PackageStateChange fail_closed_unattempted_phase(
 }
 
 std::optional<NoOpBasis> upgrade_all_no_op_basis(
-        const UpgradeAllOperationResult& result,
-        PackageStateChange package_state_change) noexcept {
+    const UpgradeAllOperationResult& result,
+    PackageStateChange package_state_change) noexcept {
     if(result.status != UpgradeAllOperationStatus::NoUpdates ||
        !result.is_success() ||
        package_state_change != PackageStateChange::NoChange) {
@@ -120,52 +120,52 @@ std::optional<NoOpBasis> upgrade_all_no_op_basis(
     }
 
     const bool has_registered_source_work =
-            !result.system_source.registered_source_results.empty();
+        !result.system_source.registered_source_results.empty();
     bool has_aur_target_work = false;
     if(result.aur.operation_result.has_value()) {
         const FilteredAurUpdateExecutionResult& filtered =
-                result.aur.operation_result.value();
+            result.aur.operation_result.value();
         has_aur_target_work =
-                !filtered.query_result.plan.entries.empty() ||
-                !filtered.target_adapter.entries.empty() ||
-                !filtered.reduced_operation_result.targets.empty();
+            !filtered.query_result.plan.entries.empty() ||
+            !filtered.target_adapter.entries.empty() ||
+            !filtered.reduced_operation_result.targets.empty();
     }
 
     return has_registered_source_work || has_aur_target_work
-            ? NoOpBasis::VerifiedUnchanged
-            : NoOpBasis::NoRelevantWork;
+               ? NoOpBasis::VerifiedUnchanged
+               : NoOpBasis::NoRelevantWork;
 }
 
 } // namespace
 
 UpgradeAllPhasePackageStateObservations
 project_upgrade_all_phase_package_state_observations(
-        const UpgradeAllOperationResult& result) noexcept {
+    const UpgradeAllOperationResult& result) noexcept {
     const bool is_system_source_not_attempted =
-            system_source_phase_not_attempted(result.system_source);
+        system_source_phase_not_attempted(result.system_source);
     const bool is_aur_not_attempted = aur_phase_not_attempted(result.aur);
 
     return UpgradeAllPhasePackageStateObservations{
-            project_package_state_observation(
-                    fail_closed_unattempted_phase(
-                            result.system_source.package_state_change(),
-                            is_system_source_not_attempted),
-                    system_source_observation_reason(
-                            result.system_source)),
-            project_package_state_observation(
-                    fail_closed_unattempted_phase(
-                            aur_package_state_change(result.aur),
-                            is_aur_not_attempted),
-                    aur_observation_reason(result.aur))};
+        project_package_state_observation(
+            fail_closed_unattempted_phase(
+                result.system_source.package_state_change(),
+                is_system_source_not_attempted),
+            system_source_observation_reason(
+                result.system_source)),
+        project_package_state_observation(
+            fail_closed_unattempted_phase(
+                aur_package_state_change(result.aur),
+                is_aur_not_attempted),
+            aur_observation_reason(result.aur))};
 }
 
 OperationStateProjection project_upgrade_all_operation_state(
-        const UpgradeAllOperationResult& result) noexcept {
+    const UpgradeAllOperationResult& result) noexcept {
     const PackageStateChange package_state_change =
-            result.package_state_change();
+        result.package_state_change();
 
     ObservationReason unverified_reason =
-            ObservationReason::ObservationNotPrepared;
+        ObservationReason::ObservationNotPrepared;
     if(result.system_source.system.before_snapshot_failure.has_value()) {
         unverified_reason = ObservationReason::BeforeSnapshotUnavailable;
     } else if(result.system_source.system.after_snapshot_failure.has_value()) {
@@ -179,14 +179,14 @@ OperationStateProjection project_upgrade_all_operation_state(
     }
 
     return project_operation_state(OperationStateProjectionInput{
-            result.is_success(),
-            upgrade_all_no_op_basis(result, package_state_change),
-            result.status == UpgradeAllOperationStatus::BlockedBeforeMutation,
-            result.has_partial_completion(),
-            result.status != UpgradeAllOperationStatus::BlockedBeforeMutation,
-            result.has_inconsistency(),
-            package_state_change,
-            unverified_reason});
+        result.is_success(),
+        upgrade_all_no_op_basis(result, package_state_change),
+        result.status == UpgradeAllOperationStatus::BlockedBeforeMutation,
+        result.has_partial_completion(),
+        result.status != UpgradeAllOperationStatus::BlockedBeforeMutation,
+        result.has_inconsistency(),
+        package_state_change,
+        unverified_reason});
 }
 
 bool UpgradeAllOperationResult::is_success() const noexcept {
@@ -199,18 +199,18 @@ bool UpgradeAllOperationResult::is_success() const noexcept {
     // inconsistent resultもCLIで成功へ丸めないよう、nested typed resultと
     // phase/issue情報をすべてfail-closedで合成する。
     const bool aur_phase_completed =
-            aur.status == UpgradeAllAurPhaseStatus::NoUpdates ||
-            aur.status == UpgradeAllAurPhaseStatus::Completed;
+        aur.status == UpgradeAllAurPhaseStatus::NoUpdates ||
+        aur.status == UpgradeAllAurPhaseStatus::Completed;
     const bool has_stopping_diagnostic = std::any_of(
-            diagnostics.begin(), diagnostics.end(),
-            [](const UpgradeAllOperationDiagnostic& diagnostic) {
-                return diagnostic.stops_execution;
-            });
+        diagnostics.begin(), diagnostics.end(),
+        [](const UpgradeAllOperationDiagnostic& diagnostic) {
+            return diagnostic.stops_execution;
+        });
     if(stopped_phase != UpgradeAllOperationPhase::None ||
        !system_source.is_success() ||
        system_source.system.status != SystemUpgradePhaseStatus::Completed ||
        foreign_inventory.status !=
-               UpgradeAllForeignInventoryPhaseStatus::Completed ||
+           UpgradeAllForeignInventoryPhaseStatus::Completed ||
        foreign_inventory.not_attempted_reason.has_value() ||
        foreign_inventory.failure.has_value() ||
        foreign_inventory.diagnostic.has_value() ||
@@ -226,9 +226,9 @@ bool UpgradeAllOperationResult::is_success() const noexcept {
 }
 
 PackageStateChange UpgradeAllOperationResult::package_state_change()
-        const noexcept {
+    const noexcept {
     const PackageStateChange system_source_change =
-            system_source.package_state_change();
+        system_source.package_state_change();
     const PackageStateChange aur_change = aur_package_state_change(aur);
     if(system_source_change == PackageStateChange::Changed ||
        aur_change == PackageStateChange::Changed) {
@@ -244,15 +244,15 @@ PackageStateChange UpgradeAllOperationResult::package_state_change()
 bool UpgradeAllOperationResult::has_partial_completion() const noexcept {
     if(is_success()) return false;
     return system_source.system.status ==
-            SystemUpgradePhaseStatus::Completed;
+           SystemUpgradePhaseStatus::Completed;
 }
 
 bool UpgradeAllOperationResult::has_not_attempted_phase() const noexcept {
     if(system_source.system.status ==
-               SystemUpgradePhaseStatus::NotAttempted ||
+           SystemUpgradePhaseStatus::NotAttempted ||
        system_source.has_not_attempted_sources() ||
        foreign_inventory.status ==
-               UpgradeAllForeignInventoryPhaseStatus::NotAttempted ||
+           UpgradeAllForeignInventoryPhaseStatus::NotAttempted ||
        aur.status == UpgradeAllAurPhaseStatus::NotAttempted) {
         return true;
     }
@@ -272,18 +272,18 @@ bool UpgradeAllOperationResult::has_query_failure() const noexcept {
         return true;
     }
     if(std::any_of(
-               issues.begin(), issues.end(),
-               [](const UpgradeAllOperationIssue& issue) {
-                   return issue.kind ==
-                                  UpgradeAllOperationIssueKind::
-                                          AurQueryFailed ||
-                          issue.kind ==
-                                  UpgradeAllOperationIssueKind::
-                                          ForeignInventoryConfigurationFailed ||
-                          issue.kind ==
-                                  UpgradeAllOperationIssueKind::
-                                          ForeignInventoryReadFailed;
-               })) {
+           issues.begin(), issues.end(),
+           [](const UpgradeAllOperationIssue& issue) {
+               return issue.kind ==
+                          UpgradeAllOperationIssueKind::
+                              AurQueryFailed ||
+                      issue.kind ==
+                          UpgradeAllOperationIssueKind::
+                              ForeignInventoryConfigurationFailed ||
+                      issue.kind ==
+                          UpgradeAllOperationIssueKind::
+                              ForeignInventoryReadFailed;
+           })) {
         return true;
     }
     return aur.operation_result.has_value() &&
@@ -312,47 +312,46 @@ bool UpgradeAllOperationResult::has_inconsistency() const noexcept {
     }
     if(aur.operation_result.has_value() &&
        (!aur.operation_result->issues.empty() ||
-        !aur.operation_result->reduced_operation_result.
-                reduction_issues.empty() ||
+        !aur.operation_result->reduced_operation_result.reduction_issues.empty() ||
         aur.operation_result->reduced_operation_result.status ==
-                AurUpdateOperationStatus::InconsistentResult)) {
+            AurUpdateOperationStatus::InconsistentResult)) {
         return true;
     }
     return std::any_of(
-            issues.begin(), issues.end(),
-            [](const UpgradeAllOperationIssue& issue) {
-                switch(issue.kind) {
-                    case UpgradeAllOperationIssueKind::OptionSnapshotMismatch:
-                    case UpgradeAllOperationIssueKind::SourceSnapshotMismatch:
-                    case UpgradeAllOperationIssueKind::
-                            ExplicitSourceCorrelationInconsistent:
-                    case UpgradeAllOperationIssueKind::
-                            PreparedCapabilityConsumed:
-                    case UpgradeAllOperationIssueKind::
-                            SystemSourceExecutionFailedUnexpectedly:
-                    case UpgradeAllOperationIssueKind::
-                            FilteredAurExecutionFailed:
-                    case UpgradeAllOperationIssueKind::
-                            DuplicateExclusionCorrelationInconsistent:
-                    case UpgradeAllOperationIssueKind::
-                            ExternalSatisfactionCorrelationInconsistent:
-                    case UpgradeAllOperationIssueKind::UnknownFailure:
-                        return true;
-                    case UpgradeAllOperationIssueKind::
-                            ExplicitSourceAdapterInvalid:
-                    case UpgradeAllOperationIssueKind::
-                            SystemSourcePhaseIncomplete:
-                    case UpgradeAllOperationIssueKind::
-                            ForeignInventoryConfigurationFailed:
-                    case UpgradeAllOperationIssueKind::
-                            ForeignInventoryReadFailed:
-                    case UpgradeAllOperationIssueKind::
-                            CacheAuthorityInvalid:
-                    case UpgradeAllOperationIssueKind::AurQueryFailed:
-                    case UpgradeAllOperationIssueKind::
-                            FilteredAurPreparationFailed:
-                        return false;
-                }
-                return true;
-            });
+        issues.begin(), issues.end(),
+        [](const UpgradeAllOperationIssue& issue) {
+            switch(issue.kind) {
+                case UpgradeAllOperationIssueKind::OptionSnapshotMismatch:
+                case UpgradeAllOperationIssueKind::SourceSnapshotMismatch:
+                case UpgradeAllOperationIssueKind::
+                    ExplicitSourceCorrelationInconsistent:
+                case UpgradeAllOperationIssueKind::
+                    PreparedCapabilityConsumed:
+                case UpgradeAllOperationIssueKind::
+                    SystemSourceExecutionFailedUnexpectedly:
+                case UpgradeAllOperationIssueKind::
+                    FilteredAurExecutionFailed:
+                case UpgradeAllOperationIssueKind::
+                    DuplicateExclusionCorrelationInconsistent:
+                case UpgradeAllOperationIssueKind::
+                    ExternalSatisfactionCorrelationInconsistent:
+                case UpgradeAllOperationIssueKind::UnknownFailure:
+                    return true;
+                case UpgradeAllOperationIssueKind::
+                    ExplicitSourceAdapterInvalid:
+                case UpgradeAllOperationIssueKind::
+                    SystemSourcePhaseIncomplete:
+                case UpgradeAllOperationIssueKind::
+                    ForeignInventoryConfigurationFailed:
+                case UpgradeAllOperationIssueKind::
+                    ForeignInventoryReadFailed:
+                case UpgradeAllOperationIssueKind::
+                    CacheAuthorityInvalid:
+                case UpgradeAllOperationIssueKind::AurQueryFailed:
+                case UpgradeAllOperationIssueKind::
+                    FilteredAurPreparationFailed:
+                    return false;
+            }
+            return true;
+        });
 }

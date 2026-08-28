@@ -14,26 +14,26 @@ enum class ExpectedProcessKind {
 };
 
 struct ExpectedProcessCall {
-    ExpectedProcessKind   kind;
-    std::string           command;
+    ExpectedProcessKind kind;
+    std::string command;
     CapturedCommandResult capture_result;
-    int                   run_exit_code = 0;
+    int run_exit_code = 0;
 };
 
 struct ProcessStubState {
     // POLICY: capture/runを同じFIFOへ積み、process API種別を跨ぐ順序も契約に含める。
     std::deque<ExpectedProcessCall> expected_calls;
-    std::size_t                     capture_calls = 0;
-    std::size_t                     run_calls = 0;
-    std::string                     last_captured_command;
-    std::string                     last_run_command;
-    const char*                     expectation_failure = nullptr;
+    std::size_t capture_calls = 0;
+    std::size_t run_calls = 0;
+    std::string last_captured_command;
+    std::string last_run_command;
+    const char* expectation_failure = nullptr;
     void (*capture_hook)() = nullptr;
     void (*run_hook)() = nullptr;
 };
 
 ProcessStubState* g_state = nullptr;
-bool              g_cleanup_registered = false;
+bool g_cleanup_registered = false;
 
 void destroy_process_stub_state() {
     delete g_state;
@@ -52,7 +52,7 @@ ProcessStubState& process_stub_state() {
 }
 
 [[noreturn]] void fail_process_expectation(
-        ProcessStubState& state, const char* diagnostic) {
+    ProcessStubState& state, const char* diagnostic) {
     // POLICY: fixed diagnosticだけを保持し、package-controlled commandをerrorへ埋め込まない。
     state.expectation_failure = diagnostic;
     throw std::logic_error(diagnostic);
@@ -67,20 +67,20 @@ void reset_process_stub() {
 }
 
 void expect_capture_command(
-        std::string command, CapturedCommandResult result) {
+    std::string command, CapturedCommandResult result) {
     process_stub_state().expected_calls.push_back(ExpectedProcessCall{
-            ExpectedProcessKind::Capture,
-            std::move(command),
-            std::move(result),
-            0});
+        ExpectedProcessKind::Capture,
+        std::move(command),
+        std::move(result),
+        0});
 }
 
 void expect_run_command(std::string command, int exit_code) {
     process_stub_state().expected_calls.push_back(ExpectedProcessCall{
-            ExpectedProcessKind::Run,
-            std::move(command),
-            CapturedCommandResult{},
-            exit_code});
+        ExpectedProcessKind::Run,
+        std::move(command),
+        CapturedCommandResult{},
+        exit_code});
 }
 
 void require_process_expectations_consumed() {
@@ -91,11 +91,11 @@ void require_process_expectations_consumed() {
     if(!state.expected_calls.empty() &&
        state.expected_calls.front().kind == ExpectedProcessKind::Capture) {
         throw std::logic_error(
-                "Artifact install process stub has unconsumed capture command expectations.");
+            "Artifact install process stub has unconsumed capture command expectations.");
     }
     if(!state.expected_calls.empty()) {
         throw std::logic_error(
-                "Artifact install process stub has unconsumed run command expectations.");
+            "Artifact install process stub has unconsumed run command expectations.");
     }
 }
 
@@ -133,14 +133,14 @@ CapturedCommandResult capture_command_output_raw(const char* command) {
     if(state.expected_calls.empty() ||
        state.expected_calls.front().kind != ExpectedProcessKind::Capture) {
         fail_process_expectation(
-                state,
-                "Unexpected artifact install capture command with no pending expectation.");
+            state,
+            "Unexpected artifact install capture command with no pending expectation.");
     }
     if(state.last_captured_command !=
        state.expected_calls.front().command) {
         fail_process_expectation(
-                state,
-                "Artifact install capture command did not match the next expectation.");
+            state,
+            "Artifact install capture command did not match the next expectation.");
     }
 
     ExpectedProcessCall expectation = std::move(state.expected_calls.front());
@@ -157,13 +157,13 @@ int run_command(const std::string& command) {
     if(state.expected_calls.empty() ||
        state.expected_calls.front().kind != ExpectedProcessKind::Run) {
         fail_process_expectation(
-                state,
-                "Unexpected artifact install run command with no pending expectation.");
+            state,
+            "Unexpected artifact install run command with no pending expectation.");
     }
     if(state.last_run_command != state.expected_calls.front().command) {
         fail_process_expectation(
-                state,
-                "Artifact install run command did not match the next expectation.");
+            state,
+            "Artifact install run command did not match the next expectation.");
     }
 
     ExpectedProcessCall expectation = std::move(state.expected_calls.front());
@@ -173,38 +173,38 @@ int run_command(const std::string& command) {
 }
 
 int run_command_with_parent_independent_lifetime_guard(
-        const std::string& command,
-        int,
-        const std::string& display_command) {
+    const std::string& command,
+    int,
+    const std::string& display_command) {
     if(display_command.empty()) return run_command(command);
 
     CapturedCommandResult result =
-            capture_command_output_raw(display_command.c_str());
+        capture_command_output_raw(display_command.c_str());
     const std::size_t redirect = command.rfind(" > ");
     if(redirect == std::string::npos) {
         throw std::logic_error(
-                "Guarded capture command has no output redirection.");
+            "Guarded capture command has no output redirection.");
     }
     std::string output_path = command.substr(redirect + 3);
     if(output_path.size() < 2 || output_path.front() != '\'' ||
        output_path.back() != '\'') {
         throw std::logic_error(
-                "Guarded capture command has an unsupported output path.");
+            "Guarded capture command has an unsupported output path.");
     }
     output_path = output_path.substr(1, output_path.size() - 2);
     std::ofstream output(
-            output_path, std::ios::binary | std::ios::trunc);
+        output_path, std::ios::binary | std::ios::trunc);
     if(!output) {
         throw std::logic_error(
-                "Guarded capture stub could not open its output path.");
+            "Guarded capture stub could not open its output path.");
     }
     output.write(
-            result.output.data(),
-            static_cast<std::streamsize>(result.output.size()));
+        result.output.data(),
+        static_cast<std::streamsize>(result.output.size()));
     output.close();
     if(!output) {
         throw std::logic_error(
-                "Guarded capture stub could not write its output.");
+            "Guarded capture stub could not write its output.");
     }
     return result.exit_code;
 }

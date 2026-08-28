@@ -40,24 +40,24 @@ public:
     ~ReviewedSourceState() = default;
 
     [[nodiscard]] static ReviewedSourceState make(
-            PackageBaseIdentity package_base,
-            SourceRevisionIdentity reviewed_revision);
+        PackageBaseIdentity package_base,
+        SourceRevisionIdentity reviewed_revision);
 
     [[nodiscard]] std::int64_t schema_version() const noexcept;
     [[nodiscard]] const PackageBaseIdentity& package_base() const noexcept;
     [[nodiscard]] const SourceRevisionIdentity& reviewed_revision()
-            const noexcept;
+        const noexcept;
 
     bool operator==(const ReviewedSourceState&) const = default;
 
 private:
     ReviewedSourceState(
-            std::int64_t schema_version,
-            PackageBaseIdentity package_base,
-            SourceRevisionIdentity reviewed_revision) noexcept;
+        std::int64_t schema_version,
+        PackageBaseIdentity package_base,
+        SourceRevisionIdentity reviewed_revision) noexcept;
 
-    std::int64_t           schema_version_;
-    PackageBaseIdentity    package_base_;
+    std::int64_t schema_version_;
+    PackageBaseIdentity package_base_;
     SourceRevisionIdentity reviewed_revision_;
 };
 
@@ -88,7 +88,7 @@ enum class ReviewedSourceStateInvalidReason {
 
 struct ReviewedSourceStateInvalid {
     ReviewedSourceStateInvalidReason reason;
-    std::optional<std::string>       field;
+    std::optional<std::string> field;
 
     bool operator==(const ReviewedSourceStateInvalid&) const = default;
 };
@@ -109,7 +109,7 @@ struct ReviewedSourceStateUnsupportedFuture {
     std::int64_t schema_version;
 
     bool operator==(const ReviewedSourceStateUnsupportedFuture&) const =
-            default;
+        default;
 };
 
 enum class ReviewedSourceStateMismatchReason {
@@ -119,8 +119,8 @@ enum class ReviewedSourceStateMismatchReason {
 };
 
 struct ReviewedSourceStateSourceMismatch {
-    ReviewedSourceState                            observed;
-    PackageBaseIdentity                            expected;
+    ReviewedSourceState observed;
+    PackageBaseIdentity expected;
     std::vector<ReviewedSourceStateMismatchReason> reasons;
 
     bool operator==(const ReviewedSourceStateSourceMismatch&) const = default;
@@ -128,43 +128,43 @@ struct ReviewedSourceStateSourceMismatch {
 
 // Observed file contents only. Absence of a file is not represented here.
 using ReviewedSourceStateDocument = std::variant<
-        ReviewedSourceStateLoaded,
-        ReviewedSourceStateInvalid,
-        ReviewedSourceStateCorrupted,
-        ReviewedSourceStateUnsupportedFuture>;
+    ReviewedSourceStateLoaded,
+    ReviewedSourceStateInvalid,
+    ReviewedSourceStateCorrupted,
+    ReviewedSourceStateUnsupportedFuture>;
 
 using ReviewedSourceStateMatch = std::variant<
-        ReviewedSourceStateLoaded,
-        ReviewedSourceStateSourceMismatch>;
+    ReviewedSourceStateLoaded,
+    ReviewedSourceStateSourceMismatch>;
 
 using ReviewedSourceStateInterpretation = std::variant<
-        ReviewedSourceStateLoaded,
-        ReviewedSourceStateInvalid,
-        ReviewedSourceStateCorrupted,
-        ReviewedSourceStateSourceMismatch,
-        ReviewedSourceStateUnsupportedFuture>;
+    ReviewedSourceStateLoaded,
+    ReviewedSourceStateInvalid,
+    ReviewedSourceStateCorrupted,
+    ReviewedSourceStateSourceMismatch,
+    ReviewedSourceStateUnsupportedFuture>;
 
 // Store-facing vocabulary. Missing is produced only by a later no-create
 // lookup, never by decode or interpret of observed contents.
 using ReviewedSourceStateObservation = std::variant<
-        ReviewedSourceStateMissing,
-        ReviewedSourceStateLoaded,
-        ReviewedSourceStateInvalid,
-        ReviewedSourceStateCorrupted,
-        ReviewedSourceStateSourceMismatch,
-        ReviewedSourceStateUnsupportedFuture>;
+    ReviewedSourceStateMissing,
+    ReviewedSourceStateLoaded,
+    ReviewedSourceStateInvalid,
+    ReviewedSourceStateCorrupted,
+    ReviewedSourceStateSourceMismatch,
+    ReviewedSourceStateUnsupportedFuture>;
 
 [[nodiscard]] std::string encode_reviewed_source_state(
-        const ReviewedSourceState& state);
+    const ReviewedSourceState& state);
 
 [[nodiscard]] ReviewedSourceStateDocument decode_reviewed_source_state(
-        std::string_view document);
+    std::string_view document);
 
 [[nodiscard]] ReviewedSourceStateMatch match_reviewed_source_state(
-        const ReviewedSourceState& state,
-        const PackageBaseIdentity& expected_package_base);
+    const ReviewedSourceState& state,
+    const PackageBaseIdentity& expected_package_base);
 
 [[nodiscard]] ReviewedSourceStateInterpretation
 interpret_reviewed_source_state(
-        std::string_view document,
-        const PackageBaseIdentity& expected_package_base);
+    std::string_view document,
+    const PackageBaseIdentity& expected_package_base);

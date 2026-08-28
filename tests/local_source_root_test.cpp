@@ -28,7 +28,7 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr std::string_view PKGBUILD_CONTENT =
-        "pkgname=local-root-test\npkgver=1\npkgrel=1\narch=('any')\n";
+    "pkgname=local-root-test\npkgver=1\npkgrel=1\narch=('any')\n";
 
 void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
@@ -40,16 +40,16 @@ class TemporaryTree final {
 public:
     TemporaryTree() {
         const std::string template_text =
-                (fs::temp_directory_path() /
-                 "moguet-local-source-root-test-XXXXXX")
-                        .string();
+            (fs::temp_directory_path() /
+             "moguet-local-source-root-test-XXXXXX")
+                .string();
         std::vector<char> path_template(
-                template_text.begin(), template_text.end());
+            template_text.begin(), template_text.end());
         path_template.push_back('\0');
         char* created_path = ::mkdtemp(path_template.data());
         if(created_path == nullptr) {
             throw std::runtime_error(
-                    "failed to create local source root test tree");
+                "failed to create local source root test tree");
         }
         path_ = created_path;
     }
@@ -101,7 +101,7 @@ void write_file(const fs::path& path, std::string_view contents) {
 }
 
 fs::path make_root(
-        const TemporaryTree& tree, std::string_view name = "root") {
+    const TemporaryTree& tree, std::string_view name = "root") {
     const fs::path root = tree.path() / std::string(name);
     fs::create_directory(root);
     if(::chmod(root.c_str(), 0755) != 0) {
@@ -114,51 +114,51 @@ fs::path make_root(
 std::string valid_srcinfo(std::string_view identity = "local-root-test") {
     const std::string name(identity);
     return "pkgbase = " + name + "\n" +
-            "pkgver = 1\n" +
-            "pkgrel = 1\n" +
-            "arch = any\n" +
-            "pkgname = " + name + "\n";
+           "pkgver = 1\n" +
+           "pkgrel = 1\n" +
+           "arch = any\n" +
+           "pkgname = " + name + "\n";
 }
 
 void set_mtime(
-        const fs::path& path, std::int64_t seconds,
-        std::int64_t nanoseconds) {
-    struct stat status {};
+    const fs::path& path, std::int64_t seconds,
+    std::int64_t nanoseconds) {
+    struct stat status{};
     if(::stat(path.c_str(), &status) != 0) {
         throw std::runtime_error("failed to stat test mtime path");
     }
     const struct timespec times[2] = {
-            status.st_atim,
-            {static_cast<time_t>(seconds),
-             static_cast<long>(nanoseconds)}};
+        status.st_atim,
+        {static_cast<time_t>(seconds),
+         static_cast<long>(nanoseconds)}};
     if(::utimensat(AT_FDCWD, path.c_str(), times, 0) != 0) {
         throw std::runtime_error("failed to set test mtime");
     }
 }
 
-template<typename Operation>
+template <typename Operation>
 LocalSourceRootFailure require_failure(
-        Operation operation, LocalSourceRootErrorCode expected_code,
-        const std::string& context) {
+    Operation operation, LocalSourceRootErrorCode expected_code,
+    const std::string& context) {
     try {
         operation();
     } catch(const LocalSourceRootError& error) {
         expect(
-                error.failure().code == expected_code,
-                context + ": failure code differs (expected " +
-                        std::to_string(static_cast<int>(expected_code)) +
-                        ", observed " +
-                        std::to_string(
-                                static_cast<int>(error.failure().code)) +
-                        ")");
+            error.failure().code == expected_code,
+            context + ": failure code differs (expected " +
+                std::to_string(static_cast<int>(expected_code)) +
+                ", observed " +
+                std::to_string(
+                    static_cast<int>(error.failure().code)) +
+                ")");
         return error.failure();
     }
     throw std::runtime_error(context + ": operation unexpectedly succeeded");
 }
 
 bool has_stale_reason(
-        const LocalSourceMetadataSnapshot& metadata,
-        LocalSourceMetadataStaleReason reason) {
+    const LocalSourceMetadataSnapshot& metadata,
+    LocalSourceMetadataStaleReason reason) {
     for(const LocalSourceMetadataStaleReason observed :
         metadata.stale_reasons()) {
         if(observed == reason) return true;
@@ -173,36 +173,36 @@ void test_safe_paths_and_invocation_anchor() {
 
     LocalSourceRoot absolute = open_local_source_root(root_path);
     expect(
-            absolute.canonical_path() == fs::canonical(root_path),
-            "absolute root canonical path differs");
+        absolute.canonical_path() == fs::canonical(root_path),
+        "absolute root canonical path differs");
     expect(
-            absolute.pkgbuild().contents == PKGBUILD_CONTENT,
-            "PKGBUILD exact content snapshot differs");
+        absolute.pkgbuild().contents == PKGBUILD_CONTENT,
+        "PKGBUILD exact content snapshot differs");
     expect(
-            absolute.metadata().state() == LocalSourceMetadataState::Missing,
-            "missing .SRCINFO was not classified Missing");
+        absolute.metadata().state() == LocalSourceMetadataState::Missing,
+        "missing .SRCINFO was not classified Missing");
     expect(
-            !absolute.metadata().provenance().has_value(),
-            "Missing metadata claims existing .SRCINFO provenance");
+        !absolute.metadata().provenance().has_value(),
+        "Missing metadata claims existing .SRCINFO provenance");
     expect(
-            absolute.directory_identity().owner ==
-                    static_cast<std::uintmax_t>(::geteuid()),
-            "directory owner identity differs");
+        absolute.directory_identity().owner ==
+            static_cast<std::uintmax_t>(::geteuid()),
+        "directory owner identity differs");
     expect(
-            absolute.directory_identity().mode == 0755,
-            "directory permission mode identity differs");
+        absolute.directory_identity().mode == 0755,
+        "directory permission mode identity differs");
     expect(
-            absolute.pkgbuild().identity.mode == 0644,
-            "PKGBUILD permission mode identity differs");
+        absolute.pkgbuild().identity.mode == 0644,
+        "PKGBUILD permission mode identity differs");
     absolute.require_unchanged_identity();
 
     const fs::path trailing_separator(root_path.string() + "/");
     LocalSourceRoot with_trailing_separator =
-            open_local_source_root(trailing_separator);
+        open_local_source_root(trailing_separator);
     expect(
-            with_trailing_separator.canonical_path() ==
-                    absolute.canonical_path(),
-            "safe root with trailing separator was not accepted");
+        with_trailing_separator.canonical_path() ==
+            absolute.canonical_path(),
+        "safe root with trailing separator was not accepted");
     with_trailing_separator.require_unchanged_identity();
 
     ScopedCurrentDirectory at_tree(tree.path());
@@ -210,14 +210,14 @@ void test_safe_paths_and_invocation_anchor() {
     fs::current_path(fs::temp_directory_path());
     relative.require_unchanged_identity();
     expect(
-            relative.canonical_path() == absolute.canonical_path(),
-            "relative path did not resolve from invocation anchor");
+        relative.canonical_path() == absolute.canonical_path(),
+        "relative path did not resolve from invocation anchor");
 
     fs::current_path(root_path);
     LocalSourceRoot dot = open_local_source_root(".");
     expect(
-            dot.canonical_path() == fs::canonical(root_path),
-            "dot root canonical path differs");
+        dot.canonical_path() == fs::canonical(root_path),
+        "dot root canonical path differs");
     expect(!fs::exists(root_path / ".git"), "root inspection created .git");
 }
 
@@ -233,8 +233,8 @@ void test_intermediate_symlink_is_not_blanket_rejected() {
     ScopedCurrentDirectory at_tree(tree.path());
     LocalSourceRoot opened = open_local_source_root("parent-link/root");
     expect(
-            opened.canonical_path() == fs::canonical(root),
-            "allowed intermediate symlink did not reach the root");
+        opened.canonical_path() == fs::canonical(root),
+        "allowed intermediate symlink did not reach the root");
     opened.require_unchanged_identity();
 }
 
@@ -248,8 +248,8 @@ void test_execute_only_root_does_not_require_directory_read_permission() {
     {
         LocalSourceRoot opened = open_local_source_root(root);
         expect(
-                opened.metadata().state() == LocalSourceMetadataState::Missing,
-                "execute-only safe root metadata state differs");
+            opened.metadata().state() == LocalSourceMetadataState::Missing,
+            "execute-only safe root metadata state differs");
         opened.require_unchanged_identity();
     }
 
@@ -270,25 +270,25 @@ void test_usable_and_invalid_metadata() {
         LocalSourceRoot opened = open_local_source_root(root);
         const LocalSourceMetadataSnapshot& metadata = opened.metadata();
         expect(
-                metadata.state() ==
-                        LocalSourceMetadataState::UsableUnverified,
-                "valid existing metadata was not UsableUnverified");
+            metadata.state() ==
+                LocalSourceMetadataState::UsableUnverified,
+            "valid existing metadata was not UsableUnverified");
         expect(
-                metadata.provenance() ==
-                        std::optional<LocalSourceMetadataProvenance>{
-                                LocalSourceMetadataProvenance::
-                                        ExistingSrcinfo},
-                "existing metadata provenance differs");
+            metadata.provenance() ==
+                std::optional<LocalSourceMetadataProvenance>{
+                    LocalSourceMetadataProvenance::
+                        ExistingSrcinfo},
+            "existing metadata provenance differs");
         expect(metadata.file() != nullptr, "usable metadata has no file snapshot");
         expect(metadata.file()->contents == source, "SRCINFO content differs");
         expect(
-                metadata.parse_result() != nullptr &&
-                        metadata.parse_result()->is_success(),
-                "usable metadata does not retain successful parse result");
+            metadata.parse_result() != nullptr &&
+                metadata.parse_result()->is_success(),
+            "usable metadata does not retain successful parse result");
         expect(
-                metadata.parse_result()->metadata()->package_base ==
-                        "local-root-test",
-                "typed PackageBase differs");
+            metadata.parse_result()->metadata()->package_base ==
+                "local-root-test",
+            "typed PackageBase differs");
         opened.require_unchanged_identity();
     }
 
@@ -296,25 +296,25 @@ void test_usable_and_invalid_metadata() {
         TemporaryTree tree;
         const fs::path root = make_root(tree);
         write_file(
-                root / ".SRCINFO",
-                "pkgbase = invalid\npkgver = 1\narch = any\n"
-                "pkgname = invalid\n");
+            root / ".SRCINFO",
+            "pkgbase = invalid\npkgver = 1\narch = any\n"
+            "pkgname = invalid\n");
 
         LocalSourceRoot opened = open_local_source_root(root);
         const LocalSourceMetadataSnapshot& metadata = opened.metadata();
         expect(
-                metadata.state() == LocalSourceMetadataState::Invalid,
-                "invalid safe metadata was not Invalid");
+            metadata.state() == LocalSourceMetadataState::Invalid,
+            "invalid safe metadata was not Invalid");
         expect(
-                metadata.parse_result() != nullptr &&
-                        !metadata.parse_result()->is_success(),
-                "invalid metadata parse failure is absent");
+            metadata.parse_result() != nullptr &&
+                !metadata.parse_result()->is_success(),
+            "invalid metadata parse failure is absent");
         expect(
-                metadata.parse_result()->failure() != nullptr &&
-                        metadata.parse_result()->failure()->code ==
-                                LocalPackageMetadataParseErrorCode::
-                                        MissingPkgrel,
-                "invalid metadata parse reason differs");
+            metadata.parse_result()->failure() != nullptr &&
+                metadata.parse_result()->failure()->code ==
+                    LocalPackageMetadataParseErrorCode::
+                        MissingPkgrel,
+            "invalid metadata parse reason differs");
         opened.require_unchanged_identity();
     }
 }
@@ -329,14 +329,14 @@ void test_known_stale_signals() {
 
         LocalSourceRoot opened = open_local_source_root(root);
         expect(
-                opened.metadata().state() ==
-                        LocalSourceMetadataState::KnownStale,
-                "nanosecond-newer PKGBUILD was not KnownStale");
+            opened.metadata().state() ==
+                LocalSourceMetadataState::KnownStale,
+            "nanosecond-newer PKGBUILD was not KnownStale");
         expect(
-                has_stale_reason(
-                        opened.metadata(),
-                        LocalSourceMetadataStaleReason::PkgbuildNewer),
-                "PKGBUILD-newer stale reason is absent");
+            has_stale_reason(
+                opened.metadata(),
+                LocalSourceMetadataStaleReason::PkgbuildNewer),
+            "PKGBUILD-newer stale reason is absent");
     }
 
     {
@@ -349,15 +349,15 @@ void test_known_stale_signals() {
         // true represents any parsed one-off assignment, including V=.
         LocalSourceRoot opened = open_local_source_root(root, true);
         expect(
-                opened.metadata().state() ==
-                        LocalSourceMetadataState::KnownStale,
-                "one-off empty assignment was not KnownStale");
+            opened.metadata().state() ==
+                LocalSourceMetadataState::KnownStale,
+            "one-off empty assignment was not KnownStale");
         expect(
-                has_stale_reason(
-                        opened.metadata(),
-                        LocalSourceMetadataStaleReason::
-                                OneOffEnvironmentAssignment),
-                "one-off assignment stale reason is absent");
+            has_stale_reason(
+                opened.metadata(),
+                LocalSourceMetadataStaleReason::
+                    OneOffEnvironmentAssignment),
+            "one-off assignment stale reason is absent");
     }
 }
 
@@ -365,12 +365,12 @@ void test_root_and_pkgbuild_safety() {
     {
         TemporaryTree tree;
         require_failure(
-                [&] {
-                    static_cast<void>(open_local_source_root(
-                            tree.path() / "missing-root"));
-                },
-                LocalSourceRootErrorCode::Missing,
-                "missing root");
+            [&] {
+                static_cast<void>(open_local_source_root(
+                    tree.path() / "missing-root"));
+            },
+            LocalSourceRootErrorCode::Missing,
+            "missing root");
     }
 
     {
@@ -379,17 +379,17 @@ void test_root_and_pkgbuild_safety() {
         const fs::path link = tree.path() / "root-link";
         fs::create_directory_symlink(root, link);
         require_failure(
-                [&] { static_cast<void>(open_local_source_root(link)); },
-                LocalSourceRootErrorCode::Symlink,
-                "final root symlink");
+            [&] { static_cast<void>(open_local_source_root(link)); },
+            LocalSourceRootErrorCode::Symlink,
+            "final root symlink");
         const fs::path trailing_separator(link.string() + "/");
         require_failure(
-                [&] {
-                    static_cast<void>(
-                            open_local_source_root(trailing_separator));
-                },
-                LocalSourceRootErrorCode::Symlink,
-                "trailing separator final root symlink");
+            [&] {
+                static_cast<void>(
+                    open_local_source_root(trailing_separator));
+            },
+            LocalSourceRootErrorCode::Symlink,
+            "trailing separator final root symlink");
     }
 
     {
@@ -397,14 +397,14 @@ void test_root_and_pkgbuild_safety() {
         const fs::path root = make_root(tree);
         LocalSourceRootTestOverrides overrides;
         overrides.root_observed_owner =
-                static_cast<std::uintmax_t>(::geteuid()) + 1;
+            static_cast<std::uintmax_t>(::geteuid()) + 1;
         require_failure(
-                [&] {
-                    static_cast<void>(open_local_source_root_for_test(
-                            root, false, overrides));
-                },
-                LocalSourceRootErrorCode::OwnershipMismatch,
-                "wrong-owner root hook");
+            [&] {
+                static_cast<void>(open_local_source_root_for_test(
+                    root, false, overrides));
+            },
+            LocalSourceRootErrorCode::OwnershipMismatch,
+            "wrong-owner root hook");
     }
 
     {
@@ -414,9 +414,9 @@ void test_root_and_pkgbuild_safety() {
             throw std::runtime_error("failed to set sticky unsafe root mode");
         }
         require_failure(
-                [&] { static_cast<void>(open_local_source_root(root)); },
-                LocalSourceRootErrorCode::UnsafePermissions,
-                "sticky group/other-writable root");
+            [&] { static_cast<void>(open_local_source_root(root)); },
+            LocalSourceRootErrorCode::UnsafePermissions,
+            "sticky group/other-writable root");
     }
 
     {
@@ -424,9 +424,9 @@ void test_root_and_pkgbuild_safety() {
         const fs::path direct_file = tree.path() / "PKGBUILD";
         write_file(direct_file, PKGBUILD_CONTENT);
         require_failure(
-                [&] { static_cast<void>(open_local_source_root(direct_file)); },
-                LocalSourceRootErrorCode::NotDirectory,
-                "direct PKGBUILD operand");
+            [&] { static_cast<void>(open_local_source_root(direct_file)); },
+            LocalSourceRootErrorCode::NotDirectory,
+            "direct PKGBUILD operand");
     }
 
     {
@@ -434,9 +434,9 @@ void test_root_and_pkgbuild_safety() {
         const fs::path root = tree.path() / "missing-pkgbuild";
         fs::create_directory(root);
         require_failure(
-                [&] { static_cast<void>(open_local_source_root(root)); },
-                LocalSourceRootErrorCode::Missing,
-                "missing PKGBUILD");
+            [&] { static_cast<void>(open_local_source_root(root)); },
+            LocalSourceRootErrorCode::Missing,
+            "missing PKGBUILD");
     }
 
     {
@@ -446,9 +446,9 @@ void test_root_and_pkgbuild_safety() {
         write_file(tree.path() / "outside", PKGBUILD_CONTENT);
         fs::create_symlink(tree.path() / "outside", root / "PKGBUILD");
         require_failure(
-                [&] { static_cast<void>(open_local_source_root(root)); },
-                LocalSourceRootErrorCode::Symlink,
-                "symlink PKGBUILD");
+            [&] { static_cast<void>(open_local_source_root(root)); },
+            LocalSourceRootErrorCode::Symlink,
+            "symlink PKGBUILD");
     }
 
     {
@@ -457,9 +457,9 @@ void test_root_and_pkgbuild_safety() {
         fs::create_directory(root);
         fs::create_directory(root / "PKGBUILD");
         require_failure(
-                [&] { static_cast<void>(open_local_source_root(root)); },
-                LocalSourceRootErrorCode::NotRegularFile,
-                "directory PKGBUILD");
+            [&] { static_cast<void>(open_local_source_root(root)); },
+            LocalSourceRootErrorCode::NotRegularFile,
+            "directory PKGBUILD");
     }
 
     {
@@ -469,9 +469,9 @@ void test_root_and_pkgbuild_safety() {
             throw std::runtime_error("failed to set unsafe PKGBUILD mode");
         }
         require_failure(
-                [&] { static_cast<void>(open_local_source_root(root)); },
-                LocalSourceRootErrorCode::UnsafePermissions,
-                "group-writable PKGBUILD");
+            [&] { static_cast<void>(open_local_source_root(root)); },
+            LocalSourceRootErrorCode::UnsafePermissions,
+            "group-writable PKGBUILD");
     }
 
     {
@@ -479,14 +479,14 @@ void test_root_and_pkgbuild_safety() {
         const fs::path root = make_root(tree);
         LocalSourceRootTestOverrides overrides;
         overrides.pkgbuild_observed_owner =
-                static_cast<std::uintmax_t>(::geteuid()) + 1;
+            static_cast<std::uintmax_t>(::geteuid()) + 1;
         require_failure(
-                [&] {
-                    static_cast<void>(open_local_source_root_for_test(
-                            root, false, overrides));
-                },
-                LocalSourceRootErrorCode::OwnershipMismatch,
-                "wrong-owner PKGBUILD hook");
+            [&] {
+                static_cast<void>(open_local_source_root_for_test(
+                    root, false, overrides));
+            },
+            LocalSourceRootErrorCode::OwnershipMismatch,
+            "wrong-owner PKGBUILD hook");
     }
 
     {
@@ -494,19 +494,19 @@ void test_root_and_pkgbuild_safety() {
         const fs::path root = make_root(tree);
         LocalSourceRootTestOverrides overrides;
         overrides.injected_failure = LocalSourceRootInjectedFailure{
-                LocalSourceRootTestFailurePoint::RootInspection, EIO};
+            LocalSourceRootTestFailurePoint::RootInspection, EIO};
         const LocalSourceRootFailure failure = require_failure(
-                [&] {
-                    static_cast<void>(open_local_source_root_for_test(
-                            root, false, overrides));
-                },
-                LocalSourceRootErrorCode::MetadataFailure,
-                "root inspection EIO");
+            [&] {
+                static_cast<void>(open_local_source_root_for_test(
+                    root, false, overrides));
+            },
+            LocalSourceRootErrorCode::MetadataFailure,
+            "root inspection EIO");
         expect(
-                failure.system_error ==
-                        std::optional<std::error_code>{
-                                std::error_code(EIO, std::generic_category())},
-                "root inspection EIO system error differs");
+            failure.system_error ==
+                std::optional<std::error_code>{
+                    std::error_code(EIO, std::generic_category())},
+            "root inspection EIO system error differs");
     }
 }
 
@@ -516,21 +516,21 @@ void test_unsafe_metadata_is_inspectable_but_not_usable() {
         const fs::path root = make_root(tree);
         write_file(tree.path() / "outside-srcinfo", valid_srcinfo());
         fs::create_symlink(
-                tree.path() / "outside-srcinfo", root / ".SRCINFO");
+            tree.path() / "outside-srcinfo", root / ".SRCINFO");
 
         LocalSourceRoot opened = open_local_source_root(root);
         expect(
-                opened.metadata().state() == LocalSourceMetadataState::Unsafe,
-                "symlink SRCINFO was not Unsafe");
+            opened.metadata().state() == LocalSourceMetadataState::Unsafe,
+            "symlink SRCINFO was not Unsafe");
         expect(
-                opened.metadata().unsafe_failure() != nullptr &&
-                        opened.metadata().unsafe_failure()->code ==
-                                LocalSourceRootErrorCode::Symlink,
-                "unsafe SRCINFO reason differs");
+            opened.metadata().unsafe_failure() != nullptr &&
+                opened.metadata().unsafe_failure()->code ==
+                    LocalSourceRootErrorCode::Symlink,
+            "unsafe SRCINFO reason differs");
         require_failure(
-                [&] { opened.require_unchanged_identity(); },
-                LocalSourceRootErrorCode::UnsafeMetadata,
-                "Unsafe metadata operation revalidation");
+            [&] { opened.require_unchanged_identity(); },
+            LocalSourceRootErrorCode::UnsafeMetadata,
+            "Unsafe metadata operation revalidation");
     }
 
     {
@@ -540,13 +540,13 @@ void test_unsafe_metadata_is_inspectable_but_not_usable() {
 
         LocalSourceRoot opened = open_local_source_root(root);
         expect(
-                opened.metadata().state() == LocalSourceMetadataState::Unsafe,
-                "directory SRCINFO was not Unsafe");
+            opened.metadata().state() == LocalSourceMetadataState::Unsafe,
+            "directory SRCINFO was not Unsafe");
         expect(
-                opened.metadata().unsafe_failure() != nullptr &&
-                        opened.metadata().unsafe_failure()->code ==
-                                LocalSourceRootErrorCode::NotRegularFile,
-                "directory SRCINFO reason differs");
+            opened.metadata().unsafe_failure() != nullptr &&
+                opened.metadata().unsafe_failure()->code ==
+                    LocalSourceRootErrorCode::NotRegularFile,
+            "directory SRCINFO reason differs");
     }
 
     {
@@ -555,18 +555,18 @@ void test_unsafe_metadata_is_inspectable_but_not_usable() {
         write_file(root / ".SRCINFO", valid_srcinfo());
         LocalSourceRootTestOverrides overrides;
         overrides.srcinfo_observed_owner =
-                static_cast<std::uintmax_t>(::geteuid()) + 1;
+            static_cast<std::uintmax_t>(::geteuid()) + 1;
 
         LocalSourceRoot opened =
-                open_local_source_root_for_test(root, false, overrides);
+            open_local_source_root_for_test(root, false, overrides);
         expect(
-                opened.metadata().state() == LocalSourceMetadataState::Unsafe,
-                "wrong-owner SRCINFO was not Unsafe");
+            opened.metadata().state() == LocalSourceMetadataState::Unsafe,
+            "wrong-owner SRCINFO was not Unsafe");
         expect(
-                opened.metadata().unsafe_failure() != nullptr &&
-                        opened.metadata().unsafe_failure()->code ==
-                                LocalSourceRootErrorCode::OwnershipMismatch,
-                "wrong-owner SRCINFO reason differs");
+            opened.metadata().unsafe_failure() != nullptr &&
+                opened.metadata().unsafe_failure()->code ==
+                    LocalSourceRootErrorCode::OwnershipMismatch,
+            "wrong-owner SRCINFO reason differs");
     }
 
     {
@@ -575,22 +575,22 @@ void test_unsafe_metadata_is_inspectable_but_not_usable() {
         write_file(root / ".SRCINFO", valid_srcinfo());
         LocalSourceRootTestOverrides overrides;
         overrides.injected_failure = LocalSourceRootInjectedFailure{
-                LocalSourceRootTestFailurePoint::SrcinfoRead, EIO};
+            LocalSourceRootTestFailurePoint::SrcinfoRead, EIO};
         LocalSourceRoot opened =
-                open_local_source_root_for_test(root, false, overrides);
+            open_local_source_root_for_test(root, false, overrides);
         expect(
-                opened.metadata().state() == LocalSourceMetadataState::Unsafe,
-                "SRCINFO EIO was not Unsafe");
+            opened.metadata().state() == LocalSourceMetadataState::Unsafe,
+            "SRCINFO EIO was not Unsafe");
         expect(
-                opened.metadata().unsafe_failure() != nullptr &&
-                        opened.metadata().unsafe_failure()->code ==
-                                LocalSourceRootErrorCode::ReadFailure,
-                "SRCINFO EIO reason differs");
+            opened.metadata().unsafe_failure() != nullptr &&
+                opened.metadata().unsafe_failure()->code ==
+                    LocalSourceRootErrorCode::ReadFailure,
+            "SRCINFO EIO reason differs");
         expect(
-                opened.metadata().unsafe_failure()->system_error ==
-                        std::optional<std::error_code>{
-                                std::error_code(EIO, std::generic_category())},
-                "SRCINFO EIO system error differs");
+            opened.metadata().unsafe_failure()->system_error ==
+                std::optional<std::error_code>{
+                    std::error_code(EIO, std::generic_category())},
+            "SRCINFO EIO system error differs");
     }
 
     {
@@ -602,13 +602,13 @@ void test_unsafe_metadata_is_inspectable_but_not_usable() {
         }
         LocalSourceRoot opened = open_local_source_root(root);
         expect(
-                opened.metadata().state() == LocalSourceMetadataState::Unsafe,
-                "group-writable SRCINFO was not Unsafe");
+            opened.metadata().state() == LocalSourceMetadataState::Unsafe,
+            "group-writable SRCINFO was not Unsafe");
         expect(
-                opened.metadata().unsafe_failure() != nullptr &&
-                        opened.metadata().unsafe_failure()->code ==
-                                LocalSourceRootErrorCode::UnsafePermissions,
-                "group-writable SRCINFO reason differs");
+            opened.metadata().unsafe_failure() != nullptr &&
+                opened.metadata().unsafe_failure()->code ==
+                    LocalSourceRootErrorCode::UnsafePermissions,
+            "group-writable SRCINFO reason differs");
     }
 }
 
@@ -620,9 +620,9 @@ void test_root_and_pkgbuild_revalidation() {
         fs::rename(root, tree.path() / "original-root");
         static_cast<void>(make_root(tree));
         require_failure(
-                [&] { opened.require_unchanged_identity(); },
-                LocalSourceRootErrorCode::ConcurrentReplacement,
-                "root pathname replacement");
+            [&] { opened.require_unchanged_identity(); },
+            LocalSourceRootErrorCode::ConcurrentReplacement,
+            "root pathname replacement");
     }
 
     {
@@ -633,9 +633,9 @@ void test_root_and_pkgbuild_revalidation() {
             throw std::runtime_error("failed to mutate root mode");
         }
         require_failure(
-                [&] { opened.require_unchanged_identity(); },
-                LocalSourceRootErrorCode::UnsafePermissions,
-                "root unsafe mode change");
+            [&] { opened.require_unchanged_identity(); },
+            LocalSourceRootErrorCode::UnsafePermissions,
+            "root unsafe mode change");
     }
 
     {
@@ -645,9 +645,9 @@ void test_root_and_pkgbuild_revalidation() {
         fs::rename(root / "PKGBUILD", root / "PKGBUILD.old");
         write_file(root / "PKGBUILD", PKGBUILD_CONTENT);
         require_failure(
-                [&] { opened.require_unchanged_identity(); },
-                LocalSourceRootErrorCode::ConcurrentReplacement,
-                "PKGBUILD pathname replacement");
+            [&] { opened.require_unchanged_identity(); },
+            LocalSourceRootErrorCode::ConcurrentReplacement,
+            "PKGBUILD pathname replacement");
     }
 
     {
@@ -656,9 +656,9 @@ void test_root_and_pkgbuild_revalidation() {
         LocalSourceRoot opened = open_local_source_root(root);
         write_file(root / "PKGBUILD", "pkgname=changed-in-place\n");
         require_failure(
-                [&] { opened.require_unchanged_identity(); },
-                LocalSourceRootErrorCode::ContentChanged,
-                "PKGBUILD in-place content change");
+            [&] { opened.require_unchanged_identity(); },
+            LocalSourceRootErrorCode::ContentChanged,
+            "PKGBUILD in-place content change");
     }
 
     {
@@ -669,9 +669,9 @@ void test_root_and_pkgbuild_revalidation() {
             throw std::runtime_error("failed to mutate PKGBUILD mode");
         }
         require_failure(
-                [&] { opened.require_unchanged_identity(); },
-                LocalSourceRootErrorCode::UnsafePermissions,
-                "PKGBUILD unsafe mode change");
+            [&] { opened.require_unchanged_identity(); },
+            LocalSourceRootErrorCode::UnsafePermissions,
+            "PKGBUILD unsafe mode change");
     }
 }
 
@@ -684,9 +684,9 @@ void test_metadata_revalidation() {
         fs::rename(root / ".SRCINFO", root / ".SRCINFO.old");
         write_file(root / ".SRCINFO", valid_srcinfo());
         require_failure(
-                [&] { opened.require_unchanged_identity(); },
-                LocalSourceRootErrorCode::ConcurrentReplacement,
-                "SRCINFO pathname replacement");
+            [&] { opened.require_unchanged_identity(); },
+            LocalSourceRootErrorCode::ConcurrentReplacement,
+            "SRCINFO pathname replacement");
     }
 
     {
@@ -696,9 +696,9 @@ void test_metadata_revalidation() {
         LocalSourceRoot opened = open_local_source_root(root);
         write_file(root / ".SRCINFO", valid_srcinfo("changed"));
         require_failure(
-                [&] { opened.require_unchanged_identity(); },
-                LocalSourceRootErrorCode::ContentChanged,
-                "SRCINFO in-place content change");
+            [&] { opened.require_unchanged_identity(); },
+            LocalSourceRootErrorCode::ContentChanged,
+            "SRCINFO in-place content change");
     }
 
     {
@@ -710,9 +710,9 @@ void test_metadata_revalidation() {
             throw std::runtime_error("failed to mutate SRCINFO mode");
         }
         require_failure(
-                [&] { opened.require_unchanged_identity(); },
-                LocalSourceRootErrorCode::UnsafePermissions,
-                "SRCINFO unsafe mode change");
+            [&] { opened.require_unchanged_identity(); },
+            LocalSourceRootErrorCode::UnsafePermissions,
+            "SRCINFO unsafe mode change");
     }
 
     {
@@ -721,9 +721,9 @@ void test_metadata_revalidation() {
         LocalSourceRoot opened = open_local_source_root(root);
         write_file(root / ".SRCINFO", valid_srcinfo());
         require_failure(
-                [&] { opened.require_unchanged_identity(); },
-                LocalSourceRootErrorCode::ConcurrentReplacement,
-                "previously missing SRCINFO appeared");
+            [&] { opened.require_unchanged_identity(); },
+            LocalSourceRootErrorCode::ConcurrentReplacement,
+            "previously missing SRCINFO appeared");
     }
 }
 

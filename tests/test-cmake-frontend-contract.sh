@@ -590,7 +590,7 @@ reconfigure_with_equivalent_compiler() {
     if [ "$build_testing" = ON ]; then
         assert_contains \
             "$configure_log" \
-            'Moguet C++ tests: targets=94/94, support=29/29, firewalls=49/49, descriptors=49/49, CTest registrations=117'
+            'Moguet C++ tests: targets=96/96, support=29/29, firewalls=49/49, descriptors=49/49, CTest registrations=119'
     else
         assert_not_contains "$configure_log" 'Moguet C++ tests:'
     fi
@@ -788,12 +788,12 @@ done
 
 completion_authority=$completion_fixture/source/cli_public_projection.cpp
 awk '
-    $0 == "        OperationId::Build," {
-        print "        OperationId::Upgrade,"
+    $0 == "    OperationId::Build," {
+        print "    OperationId::Upgrade,"
         next
     }
-    $0 == "        OperationId::Upgrade," {
-        print "        OperationId::Build,"
+    $0 == "    OperationId::Upgrade," {
+        print "    OperationId::Build,"
         next
     }
     { print }

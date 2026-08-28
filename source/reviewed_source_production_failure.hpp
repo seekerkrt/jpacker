@@ -51,39 +51,39 @@ enum class ReviewedSourceProductionFailureReason {
 };
 
 using ReviewedSourceProductionFailureDetail = std::variant<
-        std::monostate,
-        ReviewedSourceFatalStateFailure,
-        ReviewedSourceOperationStop,
-        TrustedGitReviewFailure,
-        ReviewedSourceReviewFailure,
-        ReviewedSourcePinnedCheckoutFailure,
-        ReviewedSourcePublicationConflict,
-        ReviewedSourcePublicationUncertain,
-        ReviewedSourcePublicationUnsafeHistory,
-        ReviewedSourcePublicationFailure,
-        ReviewedSourcePostPublicationCheckoutFailure,
-        TrustedGitPinnedCheckoutFailure>;
+    std::monostate,
+    ReviewedSourceFatalStateFailure,
+    ReviewedSourceOperationStop,
+    TrustedGitReviewFailure,
+    ReviewedSourceReviewFailure,
+    ReviewedSourcePinnedCheckoutFailure,
+    ReviewedSourcePublicationConflict,
+    ReviewedSourcePublicationUncertain,
+    ReviewedSourcePublicationUnsafeHistory,
+    ReviewedSourcePublicationFailure,
+    ReviewedSourcePostPublicationCheckoutFailure,
+    TrustedGitPinnedCheckoutFailure>;
 
 struct ReviewedSourceProductionFailure {
     ReviewedSourceProductionFailureStage stage =
-            ReviewedSourceProductionFailureStage::LifecyclePlanning;
+        ReviewedSourceProductionFailureStage::LifecyclePlanning;
     ReviewedSourceProductionFailureReason reason =
-            ReviewedSourceProductionFailureReason::LifecycleFailure;
+        ReviewedSourceProductionFailureReason::LifecycleFailure;
     ReviewedSourceProductionFailureDetail detail;
 };
 
 // User-visible projection for one typed failure. Every returned string is a
 // complete localized diagnostic; no raw English stage label is interpolated.
 std::string reviewed_source_production_failure_diagnostic(
-        const ReviewedSourceProductionFailure& failure);
+    const ReviewedSourceProductionFailure& failure);
 
 class ReviewedSourceProductionError final : public std::runtime_error {
 public:
     explicit ReviewedSourceProductionError(
-            ReviewedSourceProductionFailure failure);
+        ReviewedSourceProductionFailure failure);
 
     [[nodiscard]] const ReviewedSourceProductionFailure& failure()
-            const noexcept {
+        const noexcept {
         return failure_;
     }
 
@@ -93,10 +93,10 @@ public:
     }
 
     void attach_production_outcome(
-            ProductionSourceBuildStagedOutcome production_outcome) {
+        ProductionSourceBuildStagedOutcome production_outcome) {
         if(production_outcome_.has_value()) {
             throw std::logic_error(
-                    "Reviewed production failure already has a staged outcome.");
+                "Reviewed production failure already has a staged outcome.");
         }
         production_outcome_.emplace(std::move(production_outcome));
     }
@@ -104,5 +104,5 @@ public:
 private:
     ReviewedSourceProductionFailure failure_;
     std::optional<ProductionSourceBuildStagedOutcome>
-            production_outcome_;
+        production_outcome_;
 };

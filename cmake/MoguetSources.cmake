@@ -30,6 +30,10 @@ set(MOGUET_PRODUCTION_SOURCES
     source/commands_source_maintenance.cpp
     source/commands_sync.cpp
     source/commands_upgrade_all.cpp
+    source/cross_source_version_lock.cpp
+    source/cross_source_version_lock_observation.cpp
+    source/devel_package_classification.cpp
+    source/devel_update_model.cpp
     source/dependency_constraint.cpp
     source/dependency_constraint_presentation.cpp
     source/dependency_plan.cpp
@@ -40,6 +44,8 @@ set(MOGUET_PRODUCTION_SOURCES
     source/filtered_aur_update_operation.cpp
     source/installed_package_relation_inventory.cpp
     source/interactive_confirmation.cpp
+    source/invocation_owned_cleanup_adapter.cpp
+    source/invocation_owned_cleanup_model.cpp
     source/local_dependency_plan_projection.cpp
     source/local_package_metadata.cpp
     source/local_source_build.cpp
@@ -93,6 +99,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/separated_source_build.cpp
     source/shell_words.cpp
     source/source_build.cpp
+    source/source_entry_parser.cpp
     source/source_environment.cpp
     source/source_install.cpp
     source/source_install_preparation.cpp
@@ -100,9 +107,12 @@ set(MOGUET_PRODUCTION_SOURCES
     source/source_package_identity.cpp
     source/source_package_identity_projection.cpp
     source/source_preference.cpp
+    source/srcinfo_source_metadata.cpp
     source/system_source_upgrade.cpp
     source/trusted_cache.cpp
     source/trusted_git.cpp
+    source/trusted_alpm_receipt_protocol.cpp
+    source/trusted_alpm_receipt_transport.cpp
     source/unified_plan_observation.cpp
     source/unified_plan_projection.cpp
     source/unified_plan_renderer.cpp
@@ -111,10 +121,50 @@ set(MOGUET_PRODUCTION_SOURCES
     source/upgrade_all_plan.cpp
     source/upgrade_all_presentation_projection.cpp
     source/user_config.cpp
+    source/vcs_source_identity.cpp
     source/xdg_directory_safety.cpp
     source/xdg_paths.cpp
     source/xdg_state_log.cpp
 )
+
+# The package-installed root helper is a separate small executable and does
+# not link the Moguet production object graph. Keep its exact source closure
+# explicit alongside the main production manifest.
+set(MOGUET_ALPM_RECEIPT_HELPER_SOURCES
+    source/trusted_alpm_receipt_helper_main.cpp
+    source/trusted_alpm_receipt_helper_state.cpp
+    source/trusted_alpm_receipt_protocol.cpp
+)
+
+set(_moguet_unique_alpm_receipt_helper_sources
+    ${MOGUET_ALPM_RECEIPT_HELPER_SOURCES}
+)
+list(REMOVE_DUPLICATES _moguet_unique_alpm_receipt_helper_sources)
+list(LENGTH MOGUET_ALPM_RECEIPT_HELPER_SOURCES _moguet_helper_source_count)
+list(
+    LENGTH
+    _moguet_unique_alpm_receipt_helper_sources
+    _moguet_unique_helper_source_count
+)
+if(NOT _moguet_helper_source_count EQUAL _moguet_unique_helper_source_count)
+    message(
+        FATAL_ERROR
+        "MOGUET_ALPM_RECEIPT_HELPER_SOURCES contains duplicate entries"
+    )
+endif()
+foreach(_moguet_helper_source IN LISTS MOGUET_ALPM_RECEIPT_HELPER_SOURCES)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_moguet_helper_source}")
+        message(
+            FATAL_ERROR
+            "ALPM receipt helper source does not exist: "
+            "${_moguet_helper_source}"
+        )
+    endif()
+endforeach()
+unset(_moguet_helper_source)
+unset(_moguet_helper_source_count)
+unset(_moguet_unique_alpm_receipt_helper_sources)
+unset(_moguet_unique_helper_source_count)
 
 set(_moguet_unique_production_sources ${MOGUET_PRODUCTION_SOURCES})
 list(REMOVE_DUPLICATES _moguet_unique_production_sources)

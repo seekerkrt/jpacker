@@ -38,22 +38,22 @@ bool is_valid_env_key(const std::string& key) {
 
 bool SourceBuildEnvironment::defines(const std::string& key) const {
     return std::any_of(
-            ordered_assignments.begin(), ordered_assignments.end(),
-            [&key](const SourceEnvironmentAssignment& assignment) {
-                return assignment.key == key;
-            });
+        ordered_assignments.begin(), ordered_assignments.end(),
+        [&key](const SourceEnvironmentAssignment& assignment) {
+            return assignment.key == key;
+        });
 }
 
 bool SourceBuildEnvironment::has_forwarded_nonempty_assignment() const {
     return std::any_of(
-            ordered_assignments.begin(), ordered_assignments.end(),
-            [](const SourceEnvironmentAssignment& assignment) {
-                return !assignment.value.empty();
-            });
+        ordered_assignments.begin(), ordered_assignments.end(),
+        [](const SourceEnvironmentAssignment& assignment) {
+            return !assignment.value.empty();
+        });
 }
 
 bool split_env_assignment(
-        const std::string& assignment, std::string& key, std::string& value) {
+    const std::string& assignment, std::string& key, std::string& value) {
     size_t equals_position = assignment.find('=');
     if(equals_position == std::string::npos) return false;
     key = trim(assignment.substr(0, equals_position));
@@ -63,8 +63,8 @@ bool split_env_assignment(
 }
 
 std::vector<std::string> materialize_source_build_environment_assignment_words(
-        const SourceBuildEnvironment& environment,
-        SourceEnvironmentEmptyValuePolicy empty_value_policy) {
+    const SourceBuildEnvironment& environment,
+    SourceEnvironmentEmptyValuePolicy empty_value_policy) {
     std::vector<std::string> assignment_words;
     assignment_words.reserve(environment.ordered_assignments.size());
     for(const SourceEnvironmentAssignment& assignment :
@@ -79,16 +79,16 @@ std::vector<std::string> materialize_source_build_environment_assignment_words(
 }
 
 std::string serialize_source_build_environment(
-        const SourceBuildEnvironment& environment,
-        SourceEnvironmentEmptyValuePolicy empty_value_policy) {
+    const SourceBuildEnvironment& environment,
+    SourceEnvironmentEmptyValuePolicy empty_value_policy) {
     std::string serialized;
     for(const std::string& assignment_word :
         materialize_source_build_environment_assignment_words(
-                environment, empty_value_policy)) {
+            environment, empty_value_policy)) {
         const std::size_t separator = assignment_word.find('=');
         serialized += assignment_word.substr(0, separator) + "=" +
                       shell_words::quote(
-                              assignment_word.substr(separator + 1)) +
+                          assignment_word.substr(separator + 1)) +
                       " ";
     }
     return serialized;

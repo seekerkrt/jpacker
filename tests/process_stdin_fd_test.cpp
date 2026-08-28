@@ -25,14 +25,14 @@ namespace {
 using MonotonicClock = std::chrono::steady_clock;
 
 constexpr auto SIGNAL_TEST_TIMEOUT = std::chrono::seconds(5);
-constexpr int  SIGNAL_TEST_RETRY_INTERVAL_MS = 10;
-constexpr int  EXPECTED_CHILD_STATUS = 37;
+constexpr int SIGNAL_TEST_RETRY_INTERVAL_MS = 10;
+constexpr int EXPECTED_CHILD_STATUS = 37;
 
 struct WorkerResult {
-    int   helper_status = -1;
+    int helper_status = -1;
     pid_t post_helper_wait_result = -2;
-    int   post_helper_wait_errno = 0;
-    int   setup_errno = 0;
+    int post_helper_wait_errno = 0;
+    int setup_errno = 0;
 };
 
 void wait_before_retry() {
@@ -44,7 +44,8 @@ void wait_before_retry() {
 
 class ProcessGroupGuard {
 public:
-    explicit ProcessGroupGuard(pid_t worker_pid) : worker_pid_(worker_pid) {}
+    explicit ProcessGroupGuard(pid_t worker_pid) : worker_pid_(worker_pid) {
+    }
 
     ~ProcessGroupGuard() {
         if(!is_active_) return;
@@ -55,7 +56,7 @@ public:
 
         auto deadline = MonotonicClock::now() + SIGNAL_TEST_TIMEOUT;
         while(!is_reaped_ && MonotonicClock::now() < deadline) {
-            int   status = 0;
+            int status = 0;
             pid_t wait_result = waitpid(worker_pid_, &status, WNOHANG);
             if(wait_result == worker_pid_ || (wait_result == -1 && errno == ECHILD)) {
                 is_reaped_ = true;
@@ -72,7 +73,7 @@ public:
     int wait_for_worker() {
         auto deadline = MonotonicClock::now() + SIGNAL_TEST_TIMEOUT;
         while(MonotonicClock::now() < deadline) {
-            int   status = 0;
+            int status = 0;
             pid_t wait_result = waitpid(worker_pid_, &status, WNOHANG);
             if(wait_result == worker_pid_) {
                 is_reaped_ = true;
@@ -93,8 +94,8 @@ public:
 
 private:
     pid_t worker_pid_ = -1;
-    bool  is_active_ = true;
-    bool  is_reaped_ = false;
+    bool is_active_ = true;
+    bool is_reaped_ = false;
 };
 
 class SignalStateGuard {
@@ -128,10 +129,10 @@ public:
     }
 
 private:
-    struct sigaction original_sigint_ {};
-    struct sigaction original_sigquit_ {};
-    sigset_t         original_mask_ {};
-    bool             is_active_ = true;
+    struct sigaction original_sigint_{};
+    struct sigaction original_sigquit_{};
+    sigset_t original_mask_{};
+    bool is_active_ = true;
 };
 
 class TemporaryDirectory {
@@ -187,7 +188,7 @@ public:
     }
 
 private:
-    int  saved_stdin_ = -1;
+    int saved_stdin_ = -1;
     bool stdin_was_open_ = true;
 };
 
@@ -196,9 +197,9 @@ void require(bool condition, const std::string& message) {
 }
 
 void require_signal_sets_equal(
-        const sigset_t& actual,
-        const sigset_t& expected,
-        const std::string& context) {
+    const sigset_t& actual,
+    const sigset_t& expected,
+    const std::string& context) {
     for(int signal_number = 1; signal_number < NSIG; ++signal_number) {
         int actual_membership = sigismember(&actual, signal_number);
         int expected_membership = sigismember(&expected, signal_number);
@@ -210,17 +211,19 @@ void require_signal_sets_equal(
 }
 
 void require_sigaction_equal(
-        const struct sigaction& actual,
-        const struct sigaction& expected,
-        const std::string& context) {
+    const struct sigaction& actual,
+    const struct sigaction& expected,
+    const std::string& context) {
     require(actual.sa_handler == expected.sa_handler, context + ": handler changed");
     require(actual.sa_flags == expected.sa_flags, context + ": flags changed");
     require_signal_sets_equal(actual.sa_mask, expected.sa_mask, context + " handler mask");
 }
 
-void restored_sigint_handler(int) {}
+void restored_sigint_handler(int) {
+}
 
-void restored_sigquit_handler(int) {}
+void restored_sigquit_handler(int) {
+}
 
 void worker_signal_handler(int signal_number) {
     _exit(signal_number == SIGINT ? 90 : 91);
@@ -278,7 +281,7 @@ std::string shell_quote(const std::string& value) {
 
 bool write_full(int fd, const void* buffer, size_t size) {
     const char* bytes = static_cast<const char*>(buffer);
-    size_t      written = 0;
+    size_t written = 0;
     while(written < size) {
         ssize_t write_result = write(fd, bytes + written, size - written);
         if(write_result == -1) {
@@ -291,7 +294,7 @@ bool write_full(int fd, const void* buffer, size_t size) {
 }
 
 bool read_full(int fd, void* buffer, size_t size) {
-    char*  bytes = static_cast<char*>(buffer);
+    char* bytes = static_cast<char*>(buffer);
     size_t bytes_read = 0;
     while(bytes_read < size) {
         ssize_t read_result = read(fd, bytes + bytes_read, size - bytes_read);
@@ -312,16 +315,16 @@ bool read_full(int fd, void* buffer, size_t size) {
 }
 
 [[noreturn]] void run_signal_worker(
-        const std::string& command,
-        int source_fd,
-        int result_fd) {
+    const std::string& command,
+    int source_fd,
+    int result_fd) {
     WorkerResult result;
 
     if(setpgid(0, 0) == -1) fail_signal_worker(result_fd, result, errno);
 
     // caught dispositionはforkで継承され、execでdefaultへ戻る。
     // 親のignoreまたはchildのrestoreが欠けた場合はworkerの早期終了かchildのtimeoutとして検出する。
-    struct sigaction worker_action {};
+    struct sigaction worker_action{};
     worker_action.sa_handler = worker_signal_handler;
     if(sigemptyset(&worker_action.sa_mask) == -1 ||
        sigaction(SIGINT, &worker_action, nullptr) == -1 ||
@@ -351,7 +354,7 @@ bool read_full(int fd, void* buffer, size_t size) {
 void wait_for_marker(const fs::path& marker_path) {
     auto deadline = MonotonicClock::now() + SIGNAL_TEST_TIMEOUT;
     while(MonotonicClock::now() < deadline) {
-        struct stat marker_status {};
+        struct stat marker_status{};
         if(stat(marker_path.c_str(), &marker_status) == 0) return;
         if(errno != ENOENT) {
             throw std::system_error(errno, std::generic_category(),
@@ -406,9 +409,9 @@ size_t occurrence_count(const std::string& haystack, const std::string& needle) 
 
 void test_current_offset_and_borrowed_ownership(const fs::path& test_dir) {
     const std::string source_bytes{"skip\0payload\n", 13};
-    fs::path          source_path = test_dir / "offset-source";
-    fs::path          output_path = test_dir / "offset-output";
-    int               source_fd = open_source(source_path, source_bytes);
+    fs::path source_path = test_dir / "offset-source";
+    fs::path output_path = test_dir / "offset-output";
+    int source_fd = open_source(source_path, source_bytes);
     require_seek(source_fd, 4, "seek source offset");
 
     std::string command = "/usr/bin/cat > " + shell_quote(output_path.string());
@@ -436,18 +439,18 @@ void test_parent_stdin_is_unchanged(const fs::path& test_dir) {
     if(parent_stdin != STDIN_FILENO) close(parent_stdin);
     require_close_on_exec(STDIN_FILENO, "set parent stdin close-on-exec");
 
-    struct stat before_status {};
+    struct stat before_status{};
     require(fstat(STDIN_FILENO, &before_status) == 0, "failed to inspect parent stdin before command");
     off_t before_offset = lseek(STDIN_FILENO, 0, SEEK_CUR);
-    int   before_flags = fcntl(STDIN_FILENO, F_GETFD);
+    int before_flags = fcntl(STDIN_FILENO, F_GETFD);
 
     int source_fd = open_source(test_dir / "parent-check-source", "child-input");
     fs::path output_path = test_dir / "parent-check-output";
     int status = run_command_with_stdin_fd(
-            "/usr/bin/cat > " + shell_quote(output_path.string()), source_fd);
+        "/usr/bin/cat > " + shell_quote(output_path.string()), source_fd);
     require(status == 0, "parent stdin preservation command failed");
 
-    struct stat after_status {};
+    struct stat after_status{};
     require(fstat(STDIN_FILENO, &after_status) == 0, "parent stdin was closed");
     require(after_status.st_dev == before_status.st_dev && after_status.st_ino == before_status.st_ino,
             "parent stdin descriptor target changed");
@@ -468,7 +471,7 @@ void test_source_fd_zero_with_close_on_exec(const fs::path& test_dir) {
 
     fs::path output_path = test_dir / "fd-zero-output";
     int status = run_command_with_stdin_fd(
-            "/usr/bin/cat > " + shell_quote(output_path.string()), STDIN_FILENO);
+        "/usr/bin/cat > " + shell_quote(output_path.string()), STDIN_FILENO);
 
     require(status == 0, "source fd 0 was closed during exec");
     require(read_file(output_path) == source_bytes, "source fd 0 payload was not copied byte-exactly");
@@ -492,11 +495,11 @@ enum class SignalTarget {
 };
 
 void test_signal_wait_contract(
-        const fs::path& test_dir,
-        const std::string& case_name,
-        int signal_number,
-        SignalTarget target,
-        int expected_helper_status) {
+    const fs::path& test_dir,
+    const std::string& case_name,
+    int signal_number,
+    SignalTarget target,
+    int expected_helper_status) {
     fs::path marker_path = test_dir / (case_name + "-marker");
     fs::path fifo_path = test_dir / (case_name + "-release");
     require(mkfifo(fifo_path.c_str(), 0600) == 0,
@@ -554,12 +557,12 @@ void test_signal_wait_contract(
     require(has_worker_result, "signal test worker did not report results for " + case_name);
     require(worker_result.setup_errno == 0,
             "signal test worker setup failed for " + case_name + ": " +
-                    std::strerror(worker_result.setup_errno));
+                std::strerror(worker_result.setup_errno));
     require(worker_result.helper_status == expected_helper_status,
             "unexpected helper status for " + case_name + ": " +
-                    std::to_string(worker_result.helper_status));
+                std::to_string(worker_result.helper_status));
     require(worker_result.post_helper_wait_result == -1 &&
-                    worker_result.post_helper_wait_errno == ECHILD,
+                worker_result.post_helper_wait_errno == ECHILD,
             "helper did not reap the worker's direct child for " + case_name);
 
     wait_for_process_group_exit(worker_pid);
@@ -569,22 +572,22 @@ void test_signal_wait_contract(
 void test_parent_signal_state_restoration(const fs::path& test_dir) {
     SignalStateGuard signal_guard;
 
-    struct sigaction sigint_action {};
+    struct sigaction sigint_action{};
     sigint_action.sa_handler = restored_sigint_handler;
     sigint_action.sa_flags = SA_RESTART;
     require(sigemptyset(&sigint_action.sa_mask) == 0 &&
-                    sigaddset(&sigint_action.sa_mask, SIGUSR1) == 0 &&
-                    sigaddset(&sigint_action.sa_mask, SIGTERM) == 0,
+                sigaddset(&sigint_action.sa_mask, SIGUSR1) == 0 &&
+                sigaddset(&sigint_action.sa_mask, SIGTERM) == 0,
             "failed to initialize SIGINT restoration fixture");
     require(sigaction(SIGINT, &sigint_action, nullptr) == 0,
             "failed to install SIGINT restoration fixture");
 
-    struct sigaction sigquit_action {};
+    struct sigaction sigquit_action{};
     sigquit_action.sa_handler = restored_sigquit_handler;
     sigquit_action.sa_flags = SA_NODEFER;
     require(sigemptyset(&sigquit_action.sa_mask) == 0 &&
-                    sigaddset(&sigquit_action.sa_mask, SIGUSR2) == 0 &&
-                    sigaddset(&sigquit_action.sa_mask, SIGCHLD) == 0,
+                sigaddset(&sigquit_action.sa_mask, SIGUSR2) == 0 &&
+                sigaddset(&sigquit_action.sa_mask, SIGCHLD) == 0,
             "failed to initialize SIGQUIT restoration fixture");
     require(sigaction(SIGQUIT, &sigquit_action, nullptr) == 0,
             "failed to install SIGQUIT restoration fixture");
@@ -597,18 +600,17 @@ void test_parent_signal_state_restoration(const fs::path& test_dir) {
                 "failed to read signal restoration fixture mask");
         require(sigaddset(&configured_mask, SIGUSR2) == 0,
                 "failed to add SIGUSR2 to signal restoration fixture mask");
-        int update_result = block_sigchld ? sigaddset(&configured_mask, SIGCHLD) :
-                                            sigdelset(&configured_mask, SIGCHLD);
+        int update_result = block_sigchld ? sigaddset(&configured_mask, SIGCHLD) : sigdelset(&configured_mask, SIGCHLD);
         require(update_result == 0, "failed to configure SIGCHLD restoration fixture");
         require(sigprocmask(SIG_SETMASK, &configured_mask, nullptr) == 0,
                 "failed to install signal restoration fixture mask");
 
-        struct sigaction expected_sigint {};
-        struct sigaction expected_sigquit {};
-        sigset_t         expected_mask;
+        struct sigaction expected_sigint{};
+        struct sigaction expected_sigquit{};
+        sigset_t expected_mask;
         require(sigaction(SIGINT, nullptr, &expected_sigint) == 0 &&
-                        sigaction(SIGQUIT, nullptr, &expected_sigquit) == 0 &&
-                        sigprocmask(SIG_SETMASK, nullptr, &expected_mask) == 0,
+                    sigaction(SIGQUIT, nullptr, &expected_sigquit) == 0 &&
+                    sigprocmask(SIG_SETMASK, nullptr, &expected_mask) == 0,
                 "failed to capture configured parent signal state");
 
         int expected_status = block_sigchld ? EXPECTED_CHILD_STATUS : 0;
@@ -616,12 +618,12 @@ void test_parent_signal_state_restoration(const fs::path& test_dir) {
         require(run_command_with_stdin_fd(command, source_fd) == expected_status,
                 "signal restoration command returned an unexpected status");
 
-        struct sigaction actual_sigint {};
-        struct sigaction actual_sigquit {};
-        sigset_t         actual_mask;
+        struct sigaction actual_sigint{};
+        struct sigaction actual_sigquit{};
+        sigset_t actual_mask;
         require(sigaction(SIGINT, nullptr, &actual_sigint) == 0 &&
-                        sigaction(SIGQUIT, nullptr, &actual_sigquit) == 0 &&
-                        sigprocmask(SIG_SETMASK, nullptr, &actual_mask) == 0,
+                    sigaction(SIGQUIT, nullptr, &actual_sigquit) == 0 &&
+                    sigprocmask(SIG_SETMASK, nullptr, &actual_mask) == 0,
                 "failed to capture restored parent signal state");
         require_sigaction_equal(actual_sigint, expected_sigint, "SIGINT restoration");
         require_sigaction_equal(actual_sigquit, expected_sigquit, "SIGQUIT restoration");

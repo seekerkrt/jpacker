@@ -19,11 +19,11 @@ std::size_t g_unique_refresh_failure_info_queries = 0;
 std::size_t g_unique_refresh_name_change_info_queries = 0;
 
 AurPackageInfo package_info(
-        const std::string& name, const std::vector<std::string>& depends = {},
-        const std::vector<std::string>& make_depends = {},
-        const std::vector<std::string>& check_depends = {},
-        const std::vector<std::string>& provides = {},
-        const std::string& package_base = {}) {
+    const std::string& name, const std::vector<std::string>& depends = {},
+    const std::vector<std::string>& make_depends = {},
+    const std::vector<std::string>& check_depends = {},
+    const std::vector<std::string>& provides = {},
+    const std::string& package_base = {}) {
     AurPackageInfo info;
     info.Name = name;
     info.PackageBase = package_base.empty() ? name : package_base;
@@ -39,23 +39,23 @@ AurPackageInfo package_info(
 
 bool is_leaf_package(const std::string& package_name) {
     const std::vector<std::string> leaves = {
-            "case2-runtime-dep",
-            "case2-build-dep",
-            "case2-check-dep",
-            "case3-shared",
-            "case4-lib",
-            "case5-common",
-            "case7-provider-pkg",
-            "case10-common",
-            "case13-common",
-            "case15-shared",
-            "case16-a-only",
-            "case16-b-only",
-            "case16-shared",
-            "case17-leaf",
-            "case19-early-dep",
-            "case19-late-dep",
-            "case21-provider-child",
+        "case2-runtime-dep",
+        "case2-build-dep",
+        "case2-check-dep",
+        "case3-shared",
+        "case4-lib",
+        "case5-common",
+        "case7-provider-pkg",
+        "case10-common",
+        "case13-common",
+        "case15-shared",
+        "case16-a-only",
+        "case16-b-only",
+        "case16-shared",
+        "case17-leaf",
+        "case19-early-dep",
+        "case19-late-dep",
+        "case21-provider-child",
     };
     for(const auto& leaf : leaves) {
         if(package_name == leaf) return true;
@@ -83,7 +83,7 @@ std::vector<AurPackageInfo> AurClient::search(const std::string& query) {
 }
 
 std::vector<std::string> AurClient::search_names_by_provides(
-        const std::string& provided_name) {
+    const std::string& provided_name) {
     if(provided_name == "case7-virtual-api") {
         return {"case7-provider-pkg", "case7-provider-pkg"};
     }
@@ -96,23 +96,23 @@ std::vector<std::string> AurClient::search_names_by_provides(
     }
     if(provided_name == "recursive-selected-provider-failure-virtual") {
         return {
-                "recursive-selected-provider-failure-a",
-                "recursive-selected-provider-failure-b"};
+            "recursive-selected-provider-failure-a",
+            "recursive-selected-provider-failure-b"};
     }
     if(provided_name == "selected-provider-identity-virtual") {
         return {
-                "selected-provider-identity-a",
-                "selected-provider-identity-b"};
+            "selected-provider-identity-a",
+            "selected-provider-identity-b"};
     }
     if(provided_name == "selected-provider-provides-virtual") {
         return {
-                "selected-provider-provides-a",
-                "selected-provider-provides-b"};
+            "selected-provider-provides-a",
+            "selected-provider-provides-b"};
     }
     if(provided_name == "selected-provider-metadata-virtual") {
         return {
-                "selected-provider-metadata-a",
-                "selected-provider-metadata-b"};
+            "selected-provider-metadata-a",
+            "selected-provider-metadata-b"};
     }
     if(provided_name == "selected-source-change-virtual") {
         return {"selected-source-change-provider"};
@@ -129,13 +129,13 @@ std::vector<std::string> AurClient::search_names_by_provides(
     if(provided_name ==
        "preflight-exact-failure-no-provider-fallback") {
         return {
-                "preflight-exact-fallback-provider-a",
-                "preflight-exact-fallback-provider-b"};
+            "preflight-exact-fallback-provider-a",
+            "preflight-exact-fallback-provider-b"};
     }
     if(provided_name == "preflight-provider-candidate-virtual") {
         return {
-                "preflight-provider-broken",
-                "preflight-provider-good",
+            "preflight-provider-broken",
+            "preflight-provider-good",
         };
     }
     if(provided_name == "preflight-provider-search-virtual") {
@@ -159,11 +159,11 @@ std::vector<std::string> AurClient::search_names_by_provides(
         return {};
     }
     throw AurRpcResponseError(
-            "Unexpected dependency-plan AUR provider search: " + provided_name);
+        "Unexpected dependency-plan AUR provider search: " + provided_name);
 }
 
 std::vector<std::string> AurClient::search_names_by_provides_strict(
-        const std::string& provided_name) {
+    const std::string& provided_name) {
     if(provided_name == "preflight-provider-search-virtual") {
         throw std::runtime_error("strict provider search failure");
     }
@@ -178,8 +178,8 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
 
     if(package_name == "case2-app") {
         AurPackageInfo info = package_info(
-                package_name, {"case2-runtime-dep>=2"}, {"case2-build-dep"},
-                {"case2-check-dep"});
+            package_name, {"case2-runtime-dep>=2"}, {"case2-build-dep"},
+            {"case2-check-dep"});
         info.OptDepends = {"case2-optional-dep"};
         return info;
     }
@@ -220,15 +220,15 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
 
     if(package_name == "case11-root") {
         AurPackageInfo info = package_info(
-                package_name,
-                {"case11-direct", "case11-virtual", "case11-ambiguous",
-                 "case11-missing", "case11-cycle-a"});
+            package_name,
+            {"case11-direct", "case11-virtual", "case11-ambiguous",
+             "case11-missing", "case11-cycle-a"});
         info.Conflicts = {"case11-old"};
         return info;
     }
     if(package_name == "case11-direct") {
         AurPackageInfo info = package_info(
-                package_name, {}, {}, {}, {}, "case11-direct-base");
+            package_name, {}, {}, {}, {}, "case11-direct-base");
         info.Replaces = {"case11-replaced"};
         return info;
     }
@@ -250,30 +250,30 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     }
     if(package_name == "case15-app") {
         return package_info(
-                package_name, {"case15-shared"}, {"case15-shared"},
-                {"case15-shared"});
+            package_name, {"case15-shared"}, {"case15-shared"},
+            {"case15-shared"});
     }
 
     if(package_name == "case16-child-a") {
         return package_info(
-                package_name, {"case16-a-only", "case16-shared"}, {}, {}, {},
-                "case16-suite");
+            package_name, {"case16-a-only", "case16-shared"}, {}, {}, {},
+            "case16-suite");
     }
     if(package_name == "case16-child-b") {
         return package_info(
-                package_name, {"case16-b-only", "case16-shared"}, {}, {}, {},
-                "case16-suite");
+            package_name, {"case16-b-only", "case16-shared"}, {}, {}, {},
+            "case16-suite");
     }
 
     if(package_name == "case17-parent") {
         return package_info(
-                package_name, {"case17-sibling"}, {}, {}, {},
-                "case17-suite");
+            package_name, {"case17-sibling"}, {}, {}, {},
+            "case17-suite");
     }
     if(package_name == "case17-sibling") {
         return package_info(
-                package_name, {"case17-leaf"}, {}, {}, {},
-                "case17-suite");
+            package_name, {"case17-leaf"}, {}, {}, {},
+            "case17-suite");
     }
 
     if(package_name == "case18-cycle-a") {
@@ -285,13 +285,13 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
 
     if(package_name == "case20-cycle-a") {
         return package_info(
-                package_name, {"case20-cycle-b"}, {}, {}, {},
-                "case20-suite");
+            package_name, {"case20-cycle-b"}, {}, {}, {},
+            "case20-suite");
     }
     if(package_name == "case20-cycle-b") {
         return package_info(
-                package_name, {"case20-cycle-a"}, {}, {}, {},
-                "case20-suite");
+            package_name, {"case20-cycle-a"}, {}, {}, {},
+            "case20-suite");
     }
 
     if(package_name == "case19-consumer") {
@@ -299,13 +299,13 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     }
     if(package_name == "case19-suite-a") {
         return package_info(
-                package_name, {"case19-early-dep"}, {}, {}, {},
-                "case19-suite");
+            package_name, {"case19-early-dep"}, {}, {}, {},
+            "case19-suite");
     }
     if(package_name == "case19-suite-b") {
         return package_info(
-                package_name, {"case19-late-dep"}, {}, {}, {},
-                "case19-suite");
+            package_name, {"case19-late-dep"}, {}, {}, {},
+            "case19-suite");
     }
 
     if(package_name == "case21-app") {
@@ -313,12 +313,12 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     }
     if(package_name == "case21-provider-a") {
         return package_info(
-                package_name, {}, {}, {}, {"case21-virtual=1"});
+            package_name, {}, {}, {}, {"case21-virtual=1"});
     }
     if(package_name == "case21-provider-b") {
         return package_info(
-                package_name, {"case21-provider-child"}, {}, {},
-                {"case21-virtual=2"}, "case21-provider-suite");
+            package_name, {"case21-provider-child"}, {}, {},
+            {"case21-virtual=2"}, "case21-provider-suite");
     }
     if(package_name == "case22-app") {
         return package_info(package_name, {"case22-virtual"});
@@ -328,91 +328,91 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     }
     if(package_name == "case22-provider") {
         AurPackageInfo info = package_info(
-                package_name, {}, {}, {}, {"case22-virtual"});
+            package_name, {}, {}, {}, {"case22-virtual"});
         if(g_case22_provider_info_queries++ > 0) info.Version = "2.0-1";
         return info;
     }
     if(package_name == "recursive-selected-provider-failure-a" ||
        package_name == "recursive-selected-provider-failure-b") {
         return package_info(
-                package_name, {}, {}, {},
-                {"recursive-selected-provider-failure-virtual"});
+            package_name, {}, {}, {},
+            {"recursive-selected-provider-failure-virtual"});
     }
     if(package_name == "selected-provider-identity-root") {
         return package_info(
-                package_name, {"selected-provider-identity-virtual"});
+            package_name, {"selected-provider-identity-virtual"});
     }
     if(package_name == "selected-provider-identity-a") {
         return package_info(
-                package_name, {}, {}, {},
-                {"selected-provider-identity-virtual"});
+            package_name, {}, {}, {},
+            {"selected-provider-identity-virtual"});
     }
     if(package_name == "selected-provider-identity-b") {
         return package_info(
-                package_name, {}, {}, {},
-                {"selected-provider-identity-virtual"},
-                "selected-provider-original-base");
+            package_name, {}, {}, {},
+            {"selected-provider-identity-virtual"},
+            "selected-provider-original-base");
     }
     if(package_name == "selected-provider-provides-root") {
         return package_info(
-                package_name, {"selected-provider-provides-virtual"});
+            package_name, {"selected-provider-provides-virtual"});
     }
     if(package_name == "selected-provider-provides-a" ||
        package_name == "selected-provider-provides-b") {
         return package_info(
-                package_name, {}, {}, {},
-                {"selected-provider-provides-virtual=1"});
+            package_name, {}, {}, {},
+            {"selected-provider-provides-virtual=1"});
     }
     if(package_name == "selected-provider-metadata-root") {
         return package_info(
-                package_name, {"selected-provider-metadata-virtual"});
+            package_name, {"selected-provider-metadata-virtual"});
     }
     if(package_name == "selected-provider-metadata-a" ||
        package_name == "selected-provider-metadata-b") {
         return package_info(
-                package_name, {}, {}, {},
-                {"selected-provider-metadata-virtual=1"});
+            package_name, {}, {}, {},
+            {"selected-provider-metadata-virtual=1"});
     }
     if(package_name == "selected-source-change-root") {
         return package_info(
-                package_name, {"selected-source-change-virtual"});
+            package_name, {"selected-source-change-virtual"});
     }
     if(package_name == "selected-source-change-provider") {
         return package_info(
-                package_name, {}, {}, {},
-                {"selected-source-change-virtual=1"});
+            package_name, {}, {}, {},
+            {"selected-source-change-virtual=1"});
     }
     if(package_name == "unique-refresh-removal-root") {
         return package_info(
-                package_name, {"unique-refresh-removal-virtual>=1"});
+            package_name, {"unique-refresh-removal-virtual>=1"});
     }
     if(package_name == "unique-refresh-removal-provider") {
         return package_info(
-                package_name, {}, {}, {},
-                {"unique-refresh-removal-virtual=2"});
+            package_name, {}, {}, {},
+            {"unique-refresh-removal-virtual=2"});
     }
     if(package_name == "unique-refresh-failure-root") {
         return package_info(
-                package_name, {"unique-refresh-failure-virtual>=1"});
+            package_name, {"unique-refresh-failure-virtual>=1"});
     }
     if(package_name == "unique-refresh-failure-provider") {
         return package_info(
-                package_name, {}, {}, {},
-                {"unique-refresh-failure-virtual=2"});
+            package_name, {}, {}, {},
+            {"unique-refresh-failure-virtual=2"});
     }
     if(package_name == "unique-refresh-name-change-root") {
         return package_info(
-                package_name, {"unique-refresh-name-change-virtual>=1"});
+            package_name, {"unique-refresh-name-change-virtual>=1"});
     }
     if(package_name == "unique-refresh-name-change-provider") {
         return package_info(
-                package_name, {}, {}, {},
-                {"unique-refresh-name-change-virtual=2"});
+            package_name, {}, {}, {},
+            {"unique-refresh-name-change-virtual=2"});
     }
     if(package_name == "conflict-single-root") {
         return package_info(
-                package_name, {"conflict-virtual>=2"},
-                {"conflict-virtual<2"});
+            package_name, {"conflict-virtual>=2"},
+            {"conflict-virtual<2"});
     }
     if(package_name == "conflict-root-a") {
         return package_info(package_name, {"conflict-virtual>=2"});
@@ -423,7 +423,7 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     if(package_name == "target-metadata-root-a" ||
        package_name == "target-metadata-root-b") {
         return package_info(
-                package_name, {"target-metadata-change-virtual"});
+            package_name, {"target-metadata-change-virtual"});
     }
     if(package_name == "installed-present-root") {
         return package_info(package_name, {"installed-present>=1"});
@@ -433,24 +433,24 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     }
     if(package_name == "installed-query-failure-root") {
         return package_info(
-                package_name, {"installed-query-failure>=1"});
+            package_name, {"installed-query-failure>=1"});
     }
     if(package_name == "preflight-repository-partial-provider-root") {
         return package_info(
-                package_name,
-                {"preflight-repository-partial-provider-virtual>=1"});
+            package_name,
+            {"preflight-repository-partial-provider-virtual>=1"});
     }
     if(package_name ==
        "preflight-exact-failure-no-provider-fallback-root") {
         return package_info(
-                package_name,
-                {"preflight-exact-failure-no-provider-fallback"});
+            package_name,
+            {"preflight-exact-failure-no-provider-fallback"});
     }
     if(package_name == "preflight-exact-fallback-provider-a" ||
        package_name == "preflight-exact-fallback-provider-b") {
         return package_info(
-                package_name, {}, {}, {},
-                {"preflight-exact-failure-no-provider-fallback"});
+            package_name, {}, {}, {},
+            {"preflight-exact-failure-no-provider-fallback"});
     }
 
     if(package_name == "preflight-root-metadata-failure") {
@@ -472,8 +472,8 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     }
     if(package_name == "preflight-provider-good") {
         return package_info(
-                package_name, {}, {}, {},
-                {"preflight-provider-candidate-virtual"});
+            package_name, {}, {}, {},
+            {"preflight-provider-candidate-virtual"});
     }
     if(package_name == "preflight-provider-broken") {
         throw std::runtime_error("legacy provider candidate failure");
@@ -499,18 +499,18 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     }
     if(package_name == "preflight-provider-candidate-response-root") {
         return package_info(
-                package_name,
-                {"preflight-provider-candidate-response-virtual"});
+            package_name,
+            {"preflight-provider-candidate-response-virtual"});
     }
     if(package_name == "preflight-repository-exact-failure-root") {
         return package_info(
-                package_name,
-                {"preflight-repository-exact-failure-child"});
+            package_name,
+            {"preflight-repository-exact-failure-child"});
     }
     if(package_name == "preflight-repository-provider-failure-root") {
         return package_info(
-                package_name,
-                {"preflight-repository-provider-failure-virtual"});
+            package_name,
+            {"preflight-repository-provider-failure-virtual"});
     }
     if(package_name == "preflight-response-must-stop-before-later-root") {
         throw std::runtime_error("response error did not stop later root resolution");
@@ -557,7 +557,7 @@ std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_
     if(package_name ==
        "preflight-exact-failure-no-provider-fallback") {
         throw std::runtime_error(
-                "strict exact metadata failure before provider fallback");
+            "strict exact metadata failure before provider fallback");
     }
     if(package_name == "preflight-provider-broken") {
         throw std::runtime_error("strict provider candidate failure");
@@ -574,7 +574,7 @@ std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_
     if(package_name == "recursive-selected-provider-failure-b" &&
        g_recursive_selected_provider_info_queries++ > 0) {
         throw std::runtime_error(
-                "strict selected provider traversal metadata failure");
+            "strict selected provider traversal metadata failure");
     }
     if(package_name == "selected-provider-identity-b") {
         std::optional<AurPackageInfo> result = info(package_name);
@@ -608,7 +608,7 @@ std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_
     if(package_name == "unique-refresh-failure-provider") {
         if(g_unique_refresh_failure_info_queries++ > 0) {
             throw std::runtime_error(
-                    "transient selected provider metadata failure");
+                "transient selected provider metadata failure");
         }
         return info(package_name);
     }
@@ -623,7 +623,7 @@ std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_
 }
 
 std::map<std::string, AurPackageInfo> AurClient::info_many(
-        const std::vector<std::string>& package_names) {
+    const std::vector<std::string>& package_names) {
     std::map<std::string, AurPackageInfo> package_by_name;
     for(const auto& package_name : package_names) {
         std::optional<AurPackageInfo> package = info(package_name);

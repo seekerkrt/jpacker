@@ -44,11 +44,12 @@ Moguet v2.0.1は、採用済みXDG storage契約のうちsource-preference部分
 preferenceは実行user自身のXDG config contextだけを使い、公開済みv2.0.0のtag、Release、
 release noteは歴史的記録のまま変更しません。
 
-Moguet v2.4.1は最新releaseです。このpatch / maintenance releaseでは、canonicalな
-`sample/config.toml`を追加し、standard Arch packageのdocumentationへexampleとしてinstallし、
-`moguet --help`のTOML string enumをquote付きで表示します。strict parser、configuration schema、
-built-in defaultは変更せず、malformedな既存configurationは引き続きfail closedです。利用者から
-見える変更の全体は[v2.4.1 release](https://github.com/seekerkrt/moguet/releases/tag/v2.4.1)を
+Moguet v2.5.0は最新releaseです。このminor releaseでは、authoritativeな追跡がまだ
+成立しないconventionalなVCS/devel AUR packageをfalse `UpToDate`へ丸めず
+`RequiresCheck`として公開し、repo/AURを跨ぐexact-version dependency lockに対する
+`upgrade-all`のtargeted diagnosticを追加します。また、invocation-owned dependency cleanupの
+安全基盤を整備しますが、public source-build `--rmdeps`はまだ有効化しません。利用者から
+見える変更の全体は[v2.5.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.5.0)を
 参照してください。
 
 canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ちます。Moguet
@@ -221,6 +222,13 @@ find "$stage_dir" -type f -print
 `install_manifest.txt`へのfrontendです。上記destination overrideは別のMake install recipeではなく、
 同じCMake graphへmappingされます。
 
+current development packageはprivate implementation helper
+`/usr/libexec/moguet/moguet-alpm-receipt-helper`もinstallします。これはpackage-ownedな
+root transaction helperであり、public commandではありません。`PATH`外でman pageを持たず、
+executableやdestination pathを引数に取らず、source / build treeのhelperで置き換えては
+なりません。current public source-buildの`--rmdeps`は引き続きunsupported / fail-closedであり、
+helperのinstallによってdependency cleanupが有効になるわけではありません。
+
 v2.0.0のpackage名と唯一のexecutableは`moguet`で、`/usr/bin/jpacker`をinstall
 しません。payloadはjpacker v1.16.0 packageと重複しないため、metadataには
 `jpacker`への`provides`、`conflicts`、`replaces`を意図的に設定しません。manual
@@ -257,8 +265,8 @@ makepkg -si
 `makepkg -si`は、そのtag付きreleaseをbuildし、同じ操作で`pacman -U`によってlive
 systemへinstallします。これは、development treeをその場でbuild・確認するだけで
 何もinstallしない、上記の`make`や`./moguet --help`とは異なります。`PKGBUILD`はcanonicalな
-production CMake build / install consumerとして`BUILD_TESTING=OFF`を指定し、94個のdeveloper
-C++ test executableと117件のCTest registrationはhost / CI / release validation側で扱います。
+production CMake build / install consumerとして`BUILD_TESTING=OFF`を指定し、96個のdeveloper
+C++ test executableと119件のCTest registrationはhost / CI / release validation側で扱います。
 この`PKGBUILD`は
 repository同梱のpackaging経路であり、AUR submissionではありません。Moguetはまだ
 AUR pageを公開していません。
@@ -387,6 +395,21 @@ operationを使用してください。保存済みsource-build preferenceの適
 packageのsource build、またはそれらを組み合わせたMoguet固有のmulti-phase upgradeを
 明示的に実行する場合は、対応する`upgrade`、`upgrade-aur`、`upgrade-all`を使用します。
 これらは通常の`-Syu`の別名ではありません。
+
+Moguet v2.5.0では、exact AUR packageとして解決できるinstalled packageについて、
+`-git`、`-svn`、`-hg`、`-bzr`、`-cvs`、`-darcs`というconventionalなsuffix
+根拠をdevel candidateとして扱います。normal AUR versionが新しくなく、suffix根拠しか
+ない場合、`moguet -Qua`はsilentに最新扱いせず、package、PackageBase / child根拠、
+reason付きの`RequiresCheck`を表示します。normal AUR versionが新しい場合は既存の
+update candidate authorityを優先します。
+
+`RequiresCheck`はautomatic rebuild candidateではありません。`upgrade-aur`、そのdry-run、
+`upgrade-all`のfresh AUR phaseはAUR mutationより前にblockし、non-TTYや`--noconfirm`でも
+promptを追加せずrebuildを承認しません。v2.5.0ではupstream VCS revisionのquery / 比較や
+devel build provenanceのpublicationを行いません。read-only Git observerとinstalled artifactへ
+束縛したauthoritative comparisonはfollow-upの
+[Issue #475](https://github.com/seekerkrt/moguet/issues/475)と
+[Issue #476](https://github.com/seekerkrt/moguet/issues/476)が所有します。
 
 `--aur`は対応する`-S`、`-Ss`、`-Si`をAURへ限定し、`--repo`はofficial binary
 repositoryへ限定します。両selectorの併用はexternal commandやAUR queryより前に

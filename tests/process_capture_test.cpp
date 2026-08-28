@@ -39,9 +39,9 @@ bool write_stdout(std::string_view output) {
     std::size_t offset = 0;
     while(offset < output.size()) {
         ssize_t written = write(
-                STDOUT_FILENO,
-                output.data() + offset,
-                output.size() - offset);
+            STDOUT_FILENO,
+            output.data() + offset,
+            output.size() - offset);
         if(written == -1 && errno == EINTR) continue;
         if(written <= 0) return false;
         offset += static_cast<std::size_t>(written);
@@ -67,7 +67,7 @@ std::optional<std::string> read_stdin() {
 std::size_t parse_output_size(std::string_view value) {
     std::size_t output_size = 0;
     auto [end, error] = std::from_chars(
-            value.data(), value.data() + value.size(), output_size);
+        value.data(), value.data() + value.size(), output_size);
     if(error != std::errc{} || end != value.data() + value.size()) {
         throw std::runtime_error("Invalid child output size");
     }
@@ -109,21 +109,21 @@ int run_child(int argc, char* argv[]) {
 }
 
 std::string child_command(
-        const fs::path& executable_path,
-        const std::vector<std::string>& arguments) {
+    const fs::path& executable_path,
+    const std::vector<std::string>& arguments) {
     std::vector<std::string> command_arguments{
-            executable_path.string(), std::string(CHILD_MARKER)};
+        executable_path.string(), std::string(CHILD_MARKER)};
     command_arguments.insert(
-            command_arguments.end(), arguments.begin(), arguments.end());
+        command_arguments.end(), arguments.begin(), arguments.end());
 
     // POLICY: shellをchild binary自身へ置換し、signal終了をshell由来のexit statusへ変換させない。
     return "exec " + shell_words::join(command_arguments);
 }
 
 void require_output_equal(
-        const std::string& test_case,
-        const std::string& actual,
-        const std::string& expected) {
+    const std::string& test_case,
+    const std::string& actual,
+    const std::string& expected) {
     if(actual == expected) return;
 
     std::size_t difference = 0;
@@ -133,47 +133,46 @@ void require_output_equal(
         ++difference;
     }
     throw std::runtime_error(
-            test_case + ": output mismatch at byte " + std::to_string(difference) +
-            " (expected size " + std::to_string(expected.size()) +
-            ", actual size " + std::to_string(actual.size()) + ")");
+        test_case + ": output mismatch at byte " + std::to_string(difference) +
+        " (expected size " + std::to_string(expected.size()) +
+        ", actual size " + std::to_string(actual.size()) + ")");
 }
 
 void require_result(
-        const std::string& test_case,
-        const CapturedCommandResult& actual,
-        const std::string& expected_output,
-        int expected_exit_code) {
+    const std::string& test_case,
+    const CapturedCommandResult& actual,
+    const std::string& expected_output,
+    int expected_exit_code) {
     require_output_equal(test_case, actual.output, expected_output);
     require(
-            actual.exit_code == expected_exit_code,
-            test_case + ": expected exit code " + std::to_string(expected_exit_code) +
-                    ", actual " + std::to_string(actual.exit_code));
+        actual.exit_code == expected_exit_code,
+        test_case + ": expected exit code " + std::to_string(expected_exit_code) +
+            ", actual " + std::to_string(actual.exit_code));
 }
 
 CapturedCommandResult capture_raw(
-        const fs::path& executable_path,
-        const std::vector<std::string>& arguments) {
+    const fs::path& executable_path,
+    const std::vector<std::string>& arguments) {
     std::string command = child_command(executable_path, arguments);
     return capture_command_output_raw(command.c_str());
 }
 
 CapturedCommandResult capture_trimmed(
-        const fs::path& executable_path,
-        const std::vector<std::string>& arguments) {
+    const fs::path& executable_path,
+    const std::vector<std::string>& arguments) {
     std::string command = child_command(executable_path, arguments);
     return capture_command_output(command.c_str());
 }
 
 CapturedCommandResult capture_explicit(
-        const fs::path& executable_path,
-        const std::vector<std::string>& arguments,
-        std::optional<std::size_t> stdout_capture_limit = std::nullopt) {
+    const fs::path& executable_path,
+    const std::vector<std::string>& arguments,
+    std::optional<std::size_t> stdout_capture_limit = std::nullopt) {
     std::vector<std::string> invocation_arguments{std::string(CHILD_MARKER)};
     invocation_arguments.insert(
-            invocation_arguments.end(), arguments.begin(), arguments.end());
+        invocation_arguments.end(), arguments.begin(), arguments.end());
     return capture_explicit_process_output_raw(ExplicitProcessInvocation{
-            executable_path.string(), std::move(invocation_arguments), {},
-            stdout_capture_limit});
+        executable_path.string(), std::move(invocation_arguments), {}, stdout_capture_limit});
 }
 
 void test_raw_chunk_boundaries(const fs::path& executable_path) {
@@ -181,144 +180,146 @@ void test_raw_chunk_boundaries(const fs::path& executable_path) {
 
     for(std::size_t size : {127U, 128U, 129U, 256U}) {
         require_result(
-                std::to_string(size) + " byte output",
-                capture_raw(executable_path, {"size", std::to_string(size)}),
-                repeated_output(size),
-                0);
+            std::to_string(size) + " byte output",
+            capture_raw(executable_path, {"size", std::to_string(size)}),
+            repeated_output(size),
+            0);
     }
 }
 
 void test_raw_byte_preservation(const fs::path& executable_path) {
     const std::string nul_output{
-            'b', 'e', 'f', 'o', 'r', 'e', '\0', 'a', 'f', 't', 'e', 'r'};
+        'b', 'e', 'f', 'o', 'r', 'e', '\0', 'a', 'f', 't', 'e', 'r'};
     require_result(
-            "embedded NUL tail",
-            capture_raw(executable_path, {"embedded-nul"}),
-            nul_output,
-            0);
+        "embedded NUL tail",
+        capture_raw(executable_path, {"embedded-nul"}),
+        nul_output,
+        0);
     require_result(
-            "final LF",
-            capture_raw(executable_path, {"final-lf"}),
-            "line\n",
-            0);
+        "final LF",
+        capture_raw(executable_path, {"final-lf"}),
+        "line\n",
+        0);
     require_result(
-            "no final LF",
-            capture_raw(executable_path, {"no-final-lf"}),
-            "line",
-            0);
+        "no final LF",
+        capture_raw(executable_path, {"no-final-lf"}),
+        "line",
+        0);
     require_result(
-            "carriage return",
-            capture_raw(executable_path, {"carriage-return"}),
-            "left\rright",
-            0);
+        "carriage return",
+        capture_raw(executable_path, {"carriage-return"}),
+        "left\rright",
+        0);
 }
 
 void test_trimmed_capture_compatibility(const fs::path& executable_path) {
     require_result(
-            "trimmed capture",
-            capture_trimmed(executable_path, {"trim-boundaries"}),
-            "body",
-            0);
+        "trimmed capture",
+        capture_trimmed(executable_path, {"trim-boundaries"}),
+        "body",
+        0);
 }
 
 void test_decoded_exit_status(const fs::path& executable_path) {
     require_result(
-            "normal exit",
-            capture_raw(executable_path, {"empty"}),
-            "",
-            0);
+        "normal exit",
+        capture_raw(executable_path, {"empty"}),
+        "",
+        0);
     require_result(
-            "exit 23",
-            capture_raw(executable_path, {"exit-23"}),
-            "",
-            23);
+        "exit 23",
+        capture_raw(executable_path, {"exit-23"}),
+        "",
+        23);
     require_result(
-            "SIGTERM exit",
-            capture_raw(executable_path, {"signal-term"}),
-            "",
-            128 + SIGTERM);
+        "SIGTERM exit",
+        capture_raw(executable_path, {"signal-term"}),
+        "",
+        128 + SIGTERM);
 }
 
 void test_bounded_explicit_capture(const fs::path& executable_path) {
     constexpr std::size_t LIMIT = 8192;
 
     CapturedCommandResult exact = capture_explicit(
-            executable_path, {"size", std::to_string(LIMIT)}, LIMIT);
+        executable_path, {"size", std::to_string(LIMIT)}, LIMIT);
     require_result(
-            "bounded exact limit", exact, repeated_output(LIMIT), 0);
+        "bounded exact limit", exact, repeated_output(LIMIT), 0);
     require(
-            !exact.stdout_capture_limit_exceeded,
-            "Exact-limit output was incorrectly reported as oversized");
+        !exact.stdout_capture_limit_exceeded,
+        "Exact-limit output was incorrectly reported as oversized");
 
     constexpr std::size_t OVERSIZED_OUTPUT_SIZE = LIMIT + 256 * 1024 + 1;
     CapturedCommandResult oversized = capture_explicit(
-            executable_path,
-            {"size", std::to_string(OVERSIZED_OUTPUT_SIZE)}, LIMIT);
+        executable_path,
+        {"size", std::to_string(OVERSIZED_OUTPUT_SIZE)}, LIMIT);
     require_result(
-            "bounded oversized output", oversized, repeated_output(LIMIT), 0);
+        "bounded oversized output", oversized, repeated_output(LIMIT), 0);
     require(
-            oversized.stdout_capture_limit_exceeded,
-            "Oversized output did not set the capture limit flag");
+        oversized.stdout_capture_limit_exceeded,
+        "Oversized output did not set the capture limit flag");
     require(
-            oversized.output.size() <= LIMIT,
-            "Bounded capture retained bytes beyond its storage limit");
+        oversized.output.size() <= LIMIT,
+        "Bounded capture retained bytes beyond its storage limit");
 
     CapturedCommandResult subsequent = capture_explicit(
-            executable_path, {"no-final-lf"}, LIMIT);
+        executable_path, {"no-final-lf"}, LIMIT);
     require_result("capture after overflow", subsequent, "line", 0);
     require(
-            !subsequent.stdout_capture_limit_exceeded,
-            "Capture after overflow inherited stale limit state");
+        !subsequent.stdout_capture_limit_exceeded,
+        "Capture after overflow inherited stale limit state");
 
     CapturedCommandResult signaled = capture_explicit(
-            executable_path, {"signal-term"}, LIMIT);
+        executable_path, {"signal-term"}, LIMIT);
     require_result(
-            "bounded signal termination", signaled, "", 128 + SIGTERM);
+        "bounded signal termination", signaled, "", 128 + SIGTERM);
     require(
-            !signaled.stdout_capture_limit_exceeded,
-            "Signal-terminated capture incorrectly reported overflow");
+        !signaled.stdout_capture_limit_exceeded,
+        "Signal-terminated capture incorrectly reported overflow");
 
     errno = 0;
     require(
-            waitpid(-1, nullptr, WNOHANG) == -1 && errno == ECHILD,
-            "Bounded capture left a waitable child process");
+        waitpid(-1, nullptr, WNOHANG) == -1 && errno == ECHILD,
+        "Bounded capture left a waitable child process");
 }
 
 void test_unbounded_explicit_capture_compatibility(
-        const fs::path& executable_path) {
+    const fs::path& executable_path) {
     constexpr std::size_t OUTPUT_SIZE = 12289;
     CapturedCommandResult result = capture_explicit(
-            executable_path, {"size", std::to_string(OUTPUT_SIZE)});
+        executable_path, {"size", std::to_string(OUTPUT_SIZE)});
     require_result(
-            "unbounded explicit output", result,
-            repeated_output(OUTPUT_SIZE), 0);
+        "unbounded explicit output", result,
+        repeated_output(OUTPUT_SIZE), 0);
     require(
-            !result.stdout_capture_limit_exceeded,
-            "Unbounded capture reported a storage limit overflow");
+        !result.stdout_capture_limit_exceeded,
+        "Unbounded capture reported a storage limit overflow");
 }
 
 void test_explicit_working_directory_descriptor(
-        const fs::path& executable_path) {
+    const fs::path& executable_path) {
     const int directory_descriptor =
-            open("/tmp", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        open("/tmp", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     require(
-            directory_descriptor >= 0,
-            "Failed to open explicit-process working directory");
+        directory_descriptor >= 0,
+        "Failed to open explicit-process working directory");
 
     CapturedCommandResult result = capture_explicit_process_output_raw(
-            ExplicitProcessInvocation{
-                    executable_path.string(),
-                    {std::string(CHILD_MARKER), "cwd"}, {}, std::nullopt,
-                    directory_descriptor});
+        ExplicitProcessInvocation{
+            executable_path.string(),
+            {std::string(CHILD_MARKER), "cwd"},
+            {},
+            std::nullopt,
+            directory_descriptor});
     const int close_status = close(directory_descriptor);
     require(close_status == 0, "Failed to close working directory descriptor");
     require_result(
-            "explicit working directory descriptor", result,
-            fs::canonical("/tmp").string(), 0);
+        "explicit working directory descriptor", result,
+        fs::canonical("/tmp").string(), 0);
 }
 
 void test_explicit_standard_input_descriptor(
-        const fs::path& executable_path) {
+    const fs::path& executable_path) {
     int descriptors[2] = {-1, -1};
     require(pipe2(descriptors, O_CLOEXEC) == 0,
             "Failed to create explicit-process stdin pipe");
@@ -326,8 +327,8 @@ void test_explicit_standard_input_descriptor(
     std::size_t input_offset = 0;
     while(input_offset < input.size()) {
         const ssize_t written = write(
-                descriptors[1], input.data() + input_offset,
-                input.size() - input_offset);
+            descriptors[1], input.data() + input_offset,
+            input.size() - input_offset);
         if(written == -1 && errno == EINTR) continue;
         require(written > 0,
                 "Failed to write explicit-process stdin fixture");
@@ -337,14 +338,17 @@ void test_explicit_standard_input_descriptor(
             "Failed to close explicit-process stdin writer");
 
     CapturedCommandResult result = capture_explicit_process_output_raw(
-            ExplicitProcessInvocation{
-                    executable_path.string(),
-                    {std::string(CHILD_MARKER), "stdin-echo"}, {},
-                    std::nullopt, std::nullopt, descriptors[0]});
+        ExplicitProcessInvocation{
+            executable_path.string(),
+            {std::string(CHILD_MARKER), "stdin-echo"},
+            {},
+            std::nullopt,
+            std::nullopt,
+            descriptors[0]});
     require(close(descriptors[0]) == 0,
             "Explicit process closed the caller-owned stdin descriptor");
     require_result(
-            "explicit standard input descriptor", result, input, 0);
+        "explicit standard input descriptor", result, input, 0);
 }
 
 void run_tests(const fs::path& executable_path) {

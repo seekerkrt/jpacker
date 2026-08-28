@@ -31,25 +31,27 @@ struct CandidateMapping {
 };
 
 struct AttributedBuildPlanIssue {
-    AurUpdateExecutionIssue          issue;
+    AurUpdateExecutionIssue issue;
     std::vector<RootTargetIdentity> roots;
 };
 
 bool same_issue(
-        const AurUpdateExecutionIssue& lhs,
-        const AurUpdateExecutionIssue& rhs) {
+    const AurUpdateExecutionIssue& lhs,
+    const AurUpdateExecutionIssue& rhs) {
     return lhs.reason == rhs.reason && lhs.package_name == rhs.package_name &&
            lhs.package_base == rhs.package_base &&
            lhs.dependency_specification == rhs.dependency_specification &&
            lhs.diagnostic == rhs.diagnostic &&
+           lhs.devel_requires_check_reason ==
+               rhs.devel_requires_check_reason &&
            lhs.build_plan_projection_issue ==
-                   rhs.build_plan_projection_issue &&
+               rhs.build_plan_projection_issue &&
            lhs.relation_reason == rhs.relation_reason;
 }
 
 void add_issue(
-        AurUpdateExecutionTarget& target,
-        AurUpdateExecutionIssue issue) {
+    AurUpdateExecutionTarget& target,
+    AurUpdateExecutionIssue issue) {
     auto same = [&issue](const AurUpdateExecutionIssue& existing) {
         return same_issue(existing, issue);
     };
@@ -61,36 +63,42 @@ void add_issue(
 }
 
 AurUpdateExecutionIssue make_localized_execution_issue(
-        AurUpdateExecutionReason reason, std::string diagnostic,
-        std::optional<std::string> package_name = std::nullopt,
-        std::optional<std::string> package_base = std::nullopt,
-        std::optional<std::string> dependency_specification = std::nullopt) {
+    AurUpdateExecutionReason reason, std::string diagnostic,
+    std::optional<std::string> package_name = std::nullopt,
+    std::optional<std::string> package_base = std::nullopt,
+    std::optional<std::string> dependency_specification = std::nullopt,
+    std::optional<DevelRequiresCheckReason>
+        devel_requires_check_reason = std::nullopt) {
     return AurUpdateExecutionIssue{
-            reason, std::move(package_name), std::move(package_base),
-            std::move(dependency_specification), std::move(diagnostic)};
+        reason, std::move(package_name), std::move(package_base),
+        std::move(dependency_specification), std::move(diagnostic),
+        std::nullopt, std::nullopt, devel_requires_check_reason};
 }
 
-template<std::size_t Size>
+template <std::size_t Size>
 AurUpdateExecutionIssue make_localized_execution_issue(
-        AurUpdateExecutionReason reason, const char (&diagnostic)[Size],
-        std::optional<std::string> package_name = std::nullopt,
-        std::optional<std::string> package_base = std::nullopt,
-        std::optional<std::string> dependency_specification = std::nullopt) {
+    AurUpdateExecutionReason reason, const char (&diagnostic)[Size],
+    std::optional<std::string> package_name = std::nullopt,
+    std::optional<std::string> package_base = std::nullopt,
+    std::optional<std::string> dependency_specification = std::nullopt,
+    std::optional<DevelRequiresCheckReason>
+        devel_requires_check_reason = std::nullopt) {
     return make_localized_execution_issue(
-            reason, localization::translate_message(diagnostic),
-            std::move(package_name), std::move(package_base),
-            std::move(dependency_specification));
+        reason, localization::translate_message(diagnostic),
+        std::move(package_name), std::move(package_base),
+        std::move(dependency_specification),
+        devel_requires_check_reason);
 }
 
 bool is_unsupported_reason(AurUpdateExecutionReason reason) noexcept {
     switch(reason) {
-    case AurUpdateExecutionReason::SplitPackageSelectionRequired:
-    case AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase:
-    case AurUpdateExecutionReason::AmbiguousProvider:
-    case AurUpdateExecutionReason::ConflictsOrReplacesUnresolved:
-        return true;
-    default:
-        return false;
+        case AurUpdateExecutionReason::SplitPackageSelectionRequired:
+        case AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase:
+        case AurUpdateExecutionReason::AmbiguousProvider:
+        case AurUpdateExecutionReason::ConflictsOrReplacesUnresolved:
+            return true;
+        default:
+            return false;
     }
 }
 
@@ -99,11 +107,39 @@ bool is_skip_reason(AurUpdateExecutionReason reason) noexcept {
            reason == AurUpdateExecutionReason::NonAurForeign;
 }
 
+std::string devel_requires_check_diagnostic(
+    DevelRequiresCheckReason reason) {
+    switch(reason) {
+        case DevelRequiresCheckReason::SuffixCandidateOnly:
+            return localization::translate_message(
+                "Devel package update status requires check: the suffix is candidate evidence only, and authoritative build provenance is unavailable.");
+        case DevelRequiresCheckReason::NoAuthoritativeBuildProvenance:
+        case DevelRequiresCheckReason::InstalledArtifactDrift:
+        case DevelRequiresCheckReason::AurRecipeAdvanced:
+        case DevelRequiresCheckReason::SourceMetadataMissing:
+        case DevelRequiresCheckReason::SourceMetadataMalformed:
+        case DevelRequiresCheckReason::SourceIdentityChanged:
+        case DevelRequiresCheckReason::TransportRequiresCheck:
+        case DevelRequiresCheckReason::SelectorRequiresCheck:
+        case DevelRequiresCheckReason::MultipleFloatingSources:
+        case DevelRequiresCheckReason::ArchitectureSpecificSourceUnresolved:
+        case DevelRequiresCheckReason::ProvenanceMissing:
+        case DevelRequiresCheckReason::ProvenanceInvalid:
+        case DevelRequiresCheckReason::ProvenanceCorrupted:
+        case DevelRequiresCheckReason::ProvenanceFutureSchema:
+        case DevelRequiresCheckReason::BuildSourceProofUnavailable:
+            return localization::translate_message(
+                "Devel package update status requires check.");
+    }
+    return localization::translate_message(
+        "Devel package update status requires check.");
+}
+
 bool contains_control_character(const std::string& value) noexcept {
     return std::any_of(
-            value.begin(), value.end(), [](unsigned char character) {
-                return std::iscntrl(character) != 0;
-            });
+        value.begin(), value.end(), [](unsigned char character) {
+            return std::iscntrl(character) != 0;
+        });
 }
 
 void reduce_target_status(AurUpdateExecutionTarget& target) noexcept {
@@ -133,142 +169,169 @@ void reduce_target_status(AurUpdateExecutionTarget& target) noexcept {
     }
 }
 
-bool has_consistent_remote_metadata(const AurUpdatePlanEntry& entry) {
+bool has_consistent_normal_remote_metadata(
+    const AurUpdatePlanEntry& entry) {
     switch(entry.classification) {
-    case AurUpdateClassification::UpdateAvailable:
-        return entry.aur_package.has_value() &&
-               entry.aur_package->version_relation ==
+        case AurUpdateClassification::UpdateAvailable:
+            return entry.aur_package.has_value() &&
+                   entry.aur_package->version_relation ==
                        AurVersionRelation::NewerThanInstalled;
-    case AurUpdateClassification::UpToDate:
-        return entry.aur_package.has_value() &&
-               (entry.aur_package->version_relation ==
+        case AurUpdateClassification::UpToDate:
+            return entry.aur_package.has_value() &&
+                   (entry.aur_package->version_relation ==
                         AurVersionRelation::OlderThanInstalled ||
-                entry.aur_package->version_relation ==
+                    entry.aur_package->version_relation ==
                         AurVersionRelation::SameAsInstalled);
-    case AurUpdateClassification::NonAurForeign:
-    case AurUpdateClassification::MetadataUnavailable:
-        return !entry.aur_package.has_value();
-    case AurUpdateClassification::VersionComparisonUnavailable:
-        return entry.aur_package.has_value() &&
-               entry.aur_package->version_relation ==
+        case AurUpdateClassification::NonAurForeign:
+        case AurUpdateClassification::MetadataUnavailable:
+            return !entry.aur_package.has_value();
+        case AurUpdateClassification::VersionComparisonUnavailable:
+            return entry.aur_package.has_value() &&
+                   entry.aur_package->version_relation ==
                        AurVersionRelation::Unavailable;
     }
     return false;
 }
 
 void add_initial_classification_issue(AurUpdateExecutionTarget& target) {
-    switch(target.update.classification) {
-    case AurUpdateClassification::UpdateAvailable:
-        break;
-    case AurUpdateClassification::UpToDate:
-        add_issue(
+    switch(project_aur_update_effective_state(target.update)) {
+        case AurUpdateEffectiveState::UpdateAvailable:
+            break;
+        case AurUpdateEffectiveState::UpToDate:
+            add_issue(
                 target,
                 make_localized_execution_issue(
-                        AurUpdateExecutionReason::UpToDate,
-                        "Installed package is already up to date.",
-                        target.update.installed_name));
-        break;
-    case AurUpdateClassification::NonAurForeign:
-        add_issue(
-                target,
-                make_localized_execution_issue(
-                        AurUpdateExecutionReason::NonAurForeign,
-                        localization::format_translated_message(
-                                // TRANSLATORS: {} is the literal service name "AUR".
-                                "Installed foreign package is not present in {}.",
-                                AUR_SERVICE_NAME),
-                        target.update.installed_name));
-        break;
-    case AurUpdateClassification::MetadataUnavailable:
-        add_issue(
-                target,
-                make_localized_execution_issue(
-                        AurUpdateExecutionReason::AurMetadataUnavailable,
-                        localization::format_translated_message(
-                                // TRANSLATORS: {} is the literal service name "AUR".
-                                "{} update metadata is unavailable.",
-                                AUR_SERVICE_NAME),
-                        target.update.installed_name));
-        break;
-    case AurUpdateClassification::VersionComparisonUnavailable:
-        add_issue(
-                target,
-                make_localized_execution_issue(
-                        AurUpdateExecutionReason::VersionComparisonUnavailable,
-                        "Installed and remote versions could not be compared.",
-                        target.update.installed_name));
-        break;
-    default:
-        add_issue(
-                target,
-                make_localized_execution_issue(
+                    AurUpdateExecutionReason::UpToDate,
+                    "Installed package is already up to date.",
+                    target.update.installed_name));
+            break;
+        case AurUpdateEffectiveState::RequiresCheck: {
+            const DevelRequiresCheckReason* reason =
+                target.update.devel_assessment.requires_check_reason();
+            if(reason == nullptr) {
+                add_issue(
+                    target,
+                    make_localized_execution_issue(
                         AurUpdateExecutionReason::UpdatePlanInconsistent,
-                        localization::format_translated_message(
-                                // TRANSLATORS: {} is the literal service name "AUR".
-                                "{} update classification is unknown.",
-                                AUR_SERVICE_NAME),
+                        "Devel update assessment has no check-required reason.",
                         target.update.installed_name));
-        return;
+                break;
+            }
+            add_issue(
+                target,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::DevelRequiresCheck,
+                    devel_requires_check_diagnostic(*reason),
+                    target.update.installed_name,
+                    target.update.aur_package.has_value()
+                        ? std::optional<std::string>{
+                              target.update.aur_package
+                                  ->package_base}
+                        : std::nullopt,
+                    std::nullopt, *reason));
+            break;
+        }
+        case AurUpdateEffectiveState::NonAurForeign:
+            add_issue(
+                target,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::NonAurForeign,
+                    localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal service name "AUR".
+                        "Installed foreign package is not present in {}.",
+                        AUR_SERVICE_NAME),
+                    target.update.installed_name));
+            break;
+        case AurUpdateEffectiveState::MetadataUnavailable:
+            add_issue(
+                target,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::AurMetadataUnavailable,
+                    localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal service name "AUR".
+                        "{} update metadata is unavailable.",
+                        AUR_SERVICE_NAME),
+                    target.update.installed_name));
+            break;
+        case AurUpdateEffectiveState::VersionComparisonUnavailable:
+            add_issue(
+                target,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::VersionComparisonUnavailable,
+                    "Installed and remote versions could not be compared.",
+                    target.update.installed_name));
+            break;
+        case AurUpdateEffectiveState::Inconsistent:
+            add_issue(
+                target,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::UpdatePlanInconsistent,
+                    localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal service name "AUR".
+                        "{} update classification is unknown.",
+                        AUR_SERVICE_NAME),
+                    target.update.installed_name));
+            return;
     }
 
-    if(!has_consistent_remote_metadata(target.update)) {
+    if(!has_consistent_normal_remote_metadata(target.update)) {
         add_issue(
-                target,
-                make_localized_execution_issue(
-                        AurUpdateExecutionReason::UpdatePlanInconsistent,
-                        localization::format_translated_message(
-                                // TRANSLATORS: {} is the literal service name "AUR".
-                                "{} update classification and remote metadata disagree.",
-                                AUR_SERVICE_NAME),
-                        target.update.installed_name));
+            target,
+            make_localized_execution_issue(
+                AurUpdateExecutionReason::UpdatePlanInconsistent,
+                localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal service name "AUR".
+                    "{} update classification and remote metadata disagree.",
+                    AUR_SERVICE_NAME),
+                target.update.installed_name));
     }
 
     if(target.update.aur_package.has_value() &&
        (!is_valid_package_name(target.update.aur_package->aur_name) ||
         !is_valid_package_name(target.update.aur_package->package_base))) {
         add_issue(
-                target,
-                make_localized_execution_issue(
-                        AurUpdateExecutionReason::UpdatePlanInconsistent,
-                        localization::format_translated_message(
-                                // TRANSLATORS: {} is the literal service name "AUR".
-                                "{} update metadata contains an invalid package identity.",
-                                AUR_SERVICE_NAME),
-                        target.update.aur_package->aur_name,
-                        target.update.aur_package->package_base));
+            target,
+            make_localized_execution_issue(
+                AurUpdateExecutionReason::UpdatePlanInconsistent,
+                localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal service name "AUR".
+                    "{} update metadata contains an invalid package identity.",
+                    AUR_SERVICE_NAME),
+                target.update.aur_package->aur_name,
+                target.update.aur_package->package_base));
     }
     if(target.update.aur_package.has_value() &&
        target.update.aur_package->aur_name != target.update.installed_name) {
         add_issue(
-                target,
-                make_localized_execution_issue(
-                        AurUpdateExecutionReason::UpdatePlanInconsistent,
-                        localization::format_translated_message(
-                                // TRANSLATORS: {} is the literal service name "AUR".
-                                "Installed and {} package names disagree.",
-                                AUR_SERVICE_NAME),
-                        target.update.aur_package->aur_name,
-                        target.update.aur_package->package_base));
+            target,
+            make_localized_execution_issue(
+                AurUpdateExecutionReason::UpdatePlanInconsistent,
+                localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal service name "AUR".
+                    "Installed and {} package names disagree.",
+                    AUR_SERVICE_NAME),
+                target.update.aur_package->aur_name,
+                target.update.aur_package->package_base));
     }
 }
 
 std::optional<DesiredInstallReason> desired_install_reason_for_aur_update_root(
-        InstalledPackageReason installed_reason) noexcept {
+    InstalledPackageReason installed_reason) noexcept {
     switch(installed_reason) {
-    case InstalledPackageReason::Explicit:
-        return DesiredInstallReason::Explicit;
-    case InstalledPackageReason::Dependency:
-        return DesiredInstallReason::Dependency;
-    case InstalledPackageReason::Unknown:
-        return std::nullopt;
+        case InstalledPackageReason::Explicit:
+            return DesiredInstallReason::Explicit;
+        case InstalledPackageReason::Dependency:
+            return DesiredInstallReason::Dependency;
+        case InstalledPackageReason::Unknown:
+            return std::nullopt;
     }
     return std::nullopt;
 }
 
 bool has_package_role(
-        const PlannedPackageTarget& target, PackageRole expected_role) {
+    const PlannedPackageTarget& target, PackageRole expected_role) {
     return std::find(
-                   target.roles.begin(), target.roles.end(), expected_role) !=
+               target.roles.begin(), target.roles.end(), expected_role) !=
            target.roles.end();
 }
 
@@ -283,21 +346,21 @@ bool is_known_package_role(PackageRole role) noexcept {
 }
 
 bool contains_all_roots(
-        const std::vector<RootTargetIdentity>& available_roots,
-        const std::vector<RootTargetIdentity>& required_roots) {
+    const std::vector<RootTargetIdentity>& available_roots,
+    const std::vector<RootTargetIdentity>& required_roots) {
     return std::all_of(
-            required_roots.begin(), required_roots.end(),
-            [&available_roots](const RootTargetIdentity& root) {
-                return std::find(
-                               available_roots.begin(),
-                               available_roots.end(), root) !=
-                       available_roots.end();
-            });
+        required_roots.begin(), required_roots.end(),
+        [&available_roots](const RootTargetIdentity& root) {
+            return std::find(
+                       available_roots.begin(),
+                       available_roots.end(), root) !=
+                   available_roots.end();
+        });
 }
 
 bool root_identity_less(
-        const RootTargetIdentity& lhs,
-        const RootTargetIdentity& rhs) {
+    const RootTargetIdentity& lhs,
+    const RootTargetIdentity& rhs) {
     if(lhs.invocation_index != rhs.invocation_index) {
         return lhs.invocation_index < rhs.invocation_index;
     }
@@ -305,23 +368,23 @@ bool root_identity_less(
 }
 
 void add_root_identity(
-        std::vector<RootTargetIdentity>& roots,
-        const RootTargetIdentity& root) {
+    std::vector<RootTargetIdentity>& roots,
+    const RootTargetIdentity& root) {
     if(std::find(roots.begin(), roots.end(), root) != roots.end()) return;
     roots.push_back(root);
     std::sort(roots.begin(), roots.end(), root_identity_less);
 }
 
 bool is_known_plan_root(
-        const BuildPlan& plan, const RootTargetIdentity& root) {
+    const BuildPlan& plan, const RootTargetIdentity& root) {
     return std::find(
-                   plan.root_targets.begin(), plan.root_targets.end(), root) !=
+               plan.root_targets.begin(), plan.root_targets.end(), root) !=
            plan.root_targets.end();
 }
 
 std::vector<RootTargetIdentity> roots_for_package(
-        const BuildPlan& plan, const std::optional<std::string>& package_name,
-        const std::optional<std::string>& package_base) {
+    const BuildPlan& plan, const std::optional<std::string>& package_name,
+    const std::optional<std::string>& package_base) {
     std::vector<RootTargetIdentity> roots;
     for(const auto& target : plan.package_targets) {
         if(package_name.has_value() &&
@@ -332,14 +395,15 @@ std::vector<RootTargetIdentity> roots_for_package(
            target.package_base != package_base.value()) {
             continue;
         }
-        for(const auto& root : target.roots) add_root_identity(roots, root);
+        for(const auto& root : target.roots)
+            add_root_identity(roots, root);
     }
     return roots;
 }
 
 const PlannedPackageTarget* find_unique_package_target(
-        const BuildPlan& plan, const std::string& package_name,
-        const std::optional<std::string>& package_base) {
+    const BuildPlan& plan, const std::string& package_name,
+    const std::optional<std::string>& package_base) {
     const PlannedPackageTarget* match = nullptr;
     for(const auto& target : plan.package_targets) {
         if(target.package_name != package_name) continue;
@@ -356,22 +420,22 @@ const PlannedPackageTarget* find_unique_package_target(
 struct AurDependencyGraphEdge {
     const PlannedPackageTarget* parent;
     const PlannedPackageTarget* target;
-    PackageRole                 role;
+    PackageRole role;
 };
 
 std::optional<std::string> edge_requirement_name(
-        const BuildPlanDependencyEdge& edge) {
+    const BuildPlanDependencyEdge& edge) {
     if(!edge.requirement.has_value()) {
         // Compatibility for graph-only BuildPlan producers and focused test
         // fixtures. Production resolver edges always take the typed branch.
         const ParsedDependency legacy =
-                parse_dependency_string(edge.dependency_spec);
+            parse_dependency_string(edge.dependency_spec);
         if(legacy.has_malformed_constraint()) return std::nullopt;
         return legacy.name;
     }
     if(const auto* consumer =
-               std::get_if<ConsumerDependencyRequirement>(
-                       &edge.requirement.value());
+           std::get_if<ConsumerDependencyRequirement>(
+               &edge.requirement.value());
        consumer != nullptr) {
         return consumer->package_name();
     }
@@ -379,14 +443,14 @@ std::optional<std::string> edge_requirement_name(
 }
 
 std::vector<AurDependencyGraphEdge> collect_aur_dependency_graph(
-        const BuildPlan& plan) {
+    const BuildPlan& plan) {
     std::vector<AurDependencyGraphEdge> graph;
     for(const auto& edge : plan.dependency_edges) {
         if(!is_dependency_role(edge.role)) continue;
 
         const PlannedPackageTarget* parent = find_unique_package_target(
-                plan, edge.parent_package_name,
-                std::optional<std::string>{edge.parent_package_base});
+            plan, edge.parent_package_name,
+            std::optional<std::string>{edge.parent_package_base});
         if(parent == nullptr) continue;
 
         const PlannedPackageTarget* target = nullptr;
@@ -396,19 +460,19 @@ std::vector<AurDependencyGraphEdge> collect_aur_dependency_graph(
            !edge.resolved_provider.has_value() &&
            edge_requirement_name(edge).has_value() &&
            edge.resolved_package_name.value() ==
-                   edge_requirement_name(edge).value()) {
+               edge_requirement_name(edge).value()) {
             target = find_unique_package_target(
-                    plan, edge.resolved_package_name.value(),
-                    edge.resolved_package_base);
+                plan, edge.resolved_package_name.value(),
+                edge.resolved_package_base);
         } else if(
-                edge.kind == DependencyKind::Provided &&
-                edge.resolved_provider.has_value() &&
-                std::holds_alternative<AurProviderOrigin>(
-                        edge.resolved_provider->origin) &&
-                !edge.resolved_package_name.has_value() &&
-                !edge.resolved_package_base.has_value()) {
+            edge.kind == DependencyKind::Provided &&
+            edge.resolved_provider.has_value() &&
+            std::holds_alternative<AurProviderOrigin>(
+                edge.resolved_provider->origin) &&
+            !edge.resolved_package_name.has_value() &&
+            !edge.resolved_package_base.has_value()) {
             target = find_unique_package_target(
-                    plan, edge.resolved_provider->package_name, std::nullopt);
+                plan, edge.resolved_provider->package_name, std::nullopt);
         }
         if(target == nullptr || !has_package_role(*target, edge.role) ||
            parent->roots.empty() ||
@@ -421,29 +485,29 @@ std::vector<AurDependencyGraphEdge> collect_aur_dependency_graph(
 }
 
 struct RootGraphReachability {
-    RootTargetIdentity                       root;
+    RootTargetIdentity root;
     std::vector<const PlannedPackageTarget*> targets;
 };
 
 bool contains_target(
-        const std::vector<const PlannedPackageTarget*>& targets,
-        const PlannedPackageTarget* target) {
+    const std::vector<const PlannedPackageTarget*>& targets,
+    const PlannedPackageTarget* target) {
     return std::find(targets.begin(), targets.end(), target) != targets.end();
 }
 
 std::vector<RootGraphReachability> collect_root_graph_reachability(
-        const BuildPlan& plan,
-        const std::vector<AurDependencyGraphEdge>& graph) {
+    const BuildPlan& plan,
+    const std::vector<AurDependencyGraphEdge>& graph) {
     std::vector<RootGraphReachability> reachability;
     for(const auto& root : plan.root_targets) {
         RootGraphReachability reachable{root, {}};
         const PlannedPackageTarget* root_target = find_unique_package_target(
-                plan, root.requested_name, std::nullopt);
+            plan, root.requested_name, std::nullopt);
         if(root_target == nullptr ||
            !has_package_role(*root_target, PackageRole::Root) ||
            std::find(
-                   root_target->roots.begin(), root_target->roots.end(), root) ==
-                   root_target->roots.end()) {
+               root_target->roots.begin(), root_target->roots.end(), root) ==
+               root_target->roots.end()) {
             reachability.push_back(std::move(reachable));
             continue;
         }
@@ -469,8 +533,8 @@ std::vector<RootGraphReachability> collect_root_graph_reachability(
 }
 
 const RootGraphReachability* find_root_reachability(
-        const std::vector<RootGraphReachability>& reachability,
-        const RootTargetIdentity& root) {
+    const std::vector<RootGraphReachability>& reachability,
+    const RootTargetIdentity& root) {
     auto match = [&root](const RootGraphReachability& current) {
         return current.root == root;
     };
@@ -479,12 +543,12 @@ const RootGraphReachability* find_root_reachability(
 }
 
 bool dependency_target_is_grounded_by_rooted_graph(
-        const PlannedPackageTarget& target,
-        const std::vector<AurDependencyGraphEdge>& graph,
-        const std::vector<RootGraphReachability>& reachability) {
+    const PlannedPackageTarget& target,
+    const std::vector<AurDependencyGraphEdge>& graph,
+    const std::vector<RootGraphReachability>& reachability) {
     for(const auto& root : target.roots) {
         const RootGraphReachability* reachable =
-                find_root_reachability(reachability, root);
+            find_root_reachability(reachability, root);
         if(reachable == nullptr ||
            !contains_target(reachable->targets, &target)) {
             return false;
@@ -494,35 +558,35 @@ bool dependency_target_is_grounded_by_rooted_graph(
     for(const auto role : target.roles) {
         if(!is_dependency_role(role)) continue;
         bool role_is_grounded = std::any_of(
-                graph.begin(), graph.end(),
-                [&target, role, &reachability](
-                        const AurDependencyGraphEdge& edge) {
-                    if(edge.target != &target || edge.role != role) return false;
-                    return std::any_of(
-                            reachability.begin(), reachability.end(),
-                            [&edge](const RootGraphReachability& reachable) {
-                                return contains_target(
-                                        reachable.targets, edge.parent);
-                            });
-                });
+            graph.begin(), graph.end(),
+            [&target, role, &reachability](
+                const AurDependencyGraphEdge& edge) {
+                if(edge.target != &target || edge.role != role) return false;
+                return std::any_of(
+                    reachability.begin(), reachability.end(),
+                    [&edge](const RootGraphReachability& reachable) {
+                        return contains_target(
+                            reachable.targets, edge.parent);
+                    });
+            });
         if(!role_is_grounded) return false;
     }
     return true;
 }
 
 struct ReachableDependencyCycle {
-    std::vector<std::string>        package_bases;
+    std::vector<std::string> package_bases;
     std::vector<RootTargetIdentity> roots;
 };
 
 using PackageBaseGraph = std::map<std::string, std::set<std::string>>;
 
 bool package_target_reaches(
-        const std::vector<AurDependencyGraphEdge>& graph,
-        const PlannedPackageTarget* start,
-        const PlannedPackageTarget* destination) {
+    const std::vector<AurDependencyGraphEdge>& graph,
+    const PlannedPackageTarget* start,
+    const PlannedPackageTarget* destination) {
     std::vector<const PlannedPackageTarget*> pending{start};
-    std::set<const PlannedPackageTarget*>    visited;
+    std::set<const PlannedPackageTarget*> visited;
     while(!pending.empty()) {
         const PlannedPackageTarget* current = pending.back();
         pending.pop_back();
@@ -539,10 +603,10 @@ bool package_target_reaches(
 }
 
 bool package_base_reaches(
-        const PackageBaseGraph& graph, const std::string& start,
-        const std::string& destination) {
+    const PackageBaseGraph& graph, const std::string& start,
+    const std::string& destination) {
     std::vector<std::string> pending{start};
-    std::set<std::string>    visited;
+    std::set<std::string> visited;
     while(!pending.empty()) {
         std::string current = std::move(pending.back());
         pending.pop_back();
@@ -559,16 +623,16 @@ bool package_base_reaches(
 }
 
 bool cycle_contains_package_base(
-        const ReachableDependencyCycle& cycle,
-        const std::string& package_base) {
+    const ReachableDependencyCycle& cycle,
+    const std::string& package_base) {
     return std::find(
-                   cycle.package_bases.begin(), cycle.package_bases.end(),
-                   package_base) != cycle.package_bases.end();
+               cycle.package_bases.begin(), cycle.package_bases.end(),
+               package_base) != cycle.package_bases.end();
 }
 
 std::vector<ReachableDependencyCycle> collect_reachable_dependency_cycles(
-        const std::vector<AurDependencyGraphEdge>& graph,
-        const std::vector<RootGraphReachability>& reachability) {
+    const std::vector<AurDependencyGraphEdge>& graph,
+    const std::vector<RootGraphReachability>& reachability) {
     PackageBaseGraph package_base_graph;
     for(const auto& edge : graph) {
         // POLICY(#268): same-Base package dependency is real package-level
@@ -578,19 +642,19 @@ std::vector<ReachableDependencyCycle> collect_reachable_dependency_cycles(
            edge.parent->package_name != edge.target->package_name) {
             if(package_target_reaches(graph, edge.target, edge.parent)) {
                 package_base_graph[edge.parent->package_base].insert(
-                        edge.parent->package_base);
+                    edge.parent->package_base);
             } else {
                 package_base_graph.try_emplace(edge.parent->package_base);
             }
             continue;
         }
         package_base_graph[edge.parent->package_base].insert(
-                edge.target->package_base);
+            edge.target->package_base);
         package_base_graph.try_emplace(edge.target->package_base);
     }
 
     std::vector<ReachableDependencyCycle> cycles;
-    std::set<std::string>                  assigned_package_bases;
+    std::set<std::string> assigned_package_bases;
     for(const auto& graph_entry : package_base_graph) {
         const std::string& package_base = graph_entry.first;
         if(assigned_package_bases.contains(package_base)) continue;
@@ -600,9 +664,9 @@ std::vector<ReachableDependencyCycle> collect_reachable_dependency_cycles(
             const std::string& candidate = candidate_entry.first;
             if(assigned_package_bases.contains(candidate)) continue;
             if(package_base_reaches(
-                       package_base_graph, package_base, candidate) &&
+                   package_base_graph, package_base, candidate) &&
                package_base_reaches(
-                       package_base_graph, candidate, package_base)) {
+                   package_base_graph, candidate, package_base)) {
                 cycle.package_bases.push_back(candidate);
             }
         }
@@ -611,16 +675,16 @@ std::vector<ReachableDependencyCycle> collect_reachable_dependency_cycles(
         }
 
         const bool has_self_edge = cycle.package_bases.size() == 1 &&
-                package_base_graph.at(package_base).contains(package_base);
+                                   package_base_graph.at(package_base).contains(package_base);
         if(cycle.package_bases.size() <= 1 && !has_self_edge) continue;
 
         for(const auto& reachable : reachability) {
             const bool reaches_cycle = std::any_of(
-                    reachable.targets.begin(), reachable.targets.end(),
-                    [&cycle](const PlannedPackageTarget* target) {
-                        return cycle_contains_package_base(
-                                cycle, target->package_base);
-                    });
+                reachable.targets.begin(), reachable.targets.end(),
+                [&cycle](const PlannedPackageTarget* target) {
+                    return cycle_contains_package_base(
+                        cycle, target->package_base);
+                });
             if(reaches_cycle) add_root_identity(cycle.roots, reachable.root);
         }
         if(!cycle.roots.empty()) cycles.push_back(std::move(cycle));
@@ -629,47 +693,48 @@ std::vector<ReachableDependencyCycle> collect_reachable_dependency_cycles(
 }
 
 const ReachableDependencyCycle* find_reachable_cycle(
-        const std::vector<ReachableDependencyCycle>& cycles,
-        const std::string& package_base) {
+    const std::vector<ReachableDependencyCycle>& cycles,
+    const std::string& package_base) {
     auto found = std::find_if(
-            cycles.begin(), cycles.end(),
-            [&package_base](const ReachableDependencyCycle& cycle) {
-                return cycle_contains_package_base(cycle, package_base);
-            });
+        cycles.begin(), cycles.end(),
+        [&package_base](const ReachableDependencyCycle& cycle) {
+            return cycle_contains_package_base(cycle, package_base);
+        });
     return found == cycles.end() ? nullptr : &(*found);
 }
 
 void add_attributed_issue(
-        std::vector<AttributedBuildPlanIssue>& issues,
-        AurUpdateExecutionIssue issue,
-        std::vector<RootTargetIdentity> roots) {
+    std::vector<AttributedBuildPlanIssue>& issues,
+    AurUpdateExecutionIssue issue,
+    std::vector<RootTargetIdentity> roots) {
     auto same = [&issue, &roots](const AttributedBuildPlanIssue& existing) {
         return same_issue(existing.issue, issue) && existing.roots == roots;
     };
     if(std::find_if(issues.begin(), issues.end(), same) != issues.end()) return;
     issues.push_back(
-            AttributedBuildPlanIssue{std::move(issue), std::move(roots)});
+        AttributedBuildPlanIssue{std::move(issue), std::move(roots)});
 }
 
 std::vector<RootTargetIdentity> normalize_root_identities(
-        const std::vector<RootTargetIdentity>& roots) {
+    const std::vector<RootTargetIdentity>& roots) {
     std::vector<RootTargetIdentity> normalized;
-    for(const auto& root : roots) add_root_identity(normalized, root);
+    for(const auto& root : roots)
+        add_root_identity(normalized, root);
     return normalized;
 }
 
 bool resolution_failure_roots_are_consistent(
-        const BuildPlan& plan, const BuildPlanResolutionFailure& failure,
-        const std::vector<RootTargetIdentity>& normalized_roots) {
+    const BuildPlan& plan, const BuildPlanResolutionFailure& failure,
+    const std::vector<RootTargetIdentity>& normalized_roots) {
     if(normalized_roots.empty() ||
        normalized_roots.size() != failure.roots.size()) {
         return false;
     }
     if(std::any_of(
-               normalized_roots.begin(), normalized_roots.end(),
-               [&plan](const RootTargetIdentity& root) {
-                   return !is_known_plan_root(plan, root);
-               })) {
+           normalized_roots.begin(), normalized_roots.end(),
+           [&plan](const RootTargetIdentity& root) {
+               return !is_known_plan_root(plan, root);
+           })) {
         return false;
     }
 
@@ -680,60 +745,60 @@ bool resolution_failure_roots_are_consistent(
 
     if(failure.parent_package_name.has_value()) {
         const std::vector<RootTargetIdentity> expected_roots =
-                roots_for_package(
-                        plan, failure.parent_package_name,
-                        failure.parent_package_base);
+            roots_for_package(
+                plan, failure.parent_package_name,
+                failure.parent_package_base);
         return !expected_roots.empty() && expected_roots == normalized_roots;
     }
 
     return std::all_of(
-            normalized_roots.begin(), normalized_roots.end(),
-            [&failure](const RootTargetIdentity& root) {
-                return root.requested_name == failure.subject;
-            });
+        normalized_roots.begin(), normalized_roots.end(),
+        [&failure](const RootTargetIdentity& root) {
+            return root.requested_name == failure.subject;
+        });
 }
 
 void inspect_resolution_failures(
-        const BuildPlan& plan,
-        std::vector<AttributedBuildPlanIssue>& issues,
-        std::set<std::string>& represented_unresolved_values) {
+    const BuildPlan& plan,
+    std::vector<AttributedBuildPlanIssue>& issues,
+    std::set<std::string>& represented_unresolved_values) {
     for(const auto& failure : plan.resolution_failures) {
         AurUpdateExecutionReason reason;
         switch(failure.kind) {
-        case BuildPlanResolutionFailureKind::
+            case BuildPlanResolutionFailureKind::
                 InstalledPackageMetadataUnavailable:
-            reason = AurUpdateExecutionReason::
+                reason = AurUpdateExecutionReason::
                     InstalledPackageMetadataUnavailable;
-            break;
-        case BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable:
-            reason = AurUpdateExecutionReason::RepositoryMetadataUnavailable;
-            break;
-        case BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable:
-            reason = AurUpdateExecutionReason::AurDependencyMetadataUnavailable;
-            break;
-        case BuildPlanResolutionFailureKind::ProviderSearchUnavailable:
-        case BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable:
-            reason = AurUpdateExecutionReason::ProviderMetadataUnavailable;
-            break;
-        default:
-            reason = AurUpdateExecutionReason::BuildPlanInconsistent;
-            break;
+                break;
+            case BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable:
+                reason = AurUpdateExecutionReason::RepositoryMetadataUnavailable;
+                break;
+            case BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable:
+                reason = AurUpdateExecutionReason::AurDependencyMetadataUnavailable;
+                break;
+            case BuildPlanResolutionFailureKind::ProviderSearchUnavailable:
+            case BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable:
+                reason = AurUpdateExecutionReason::ProviderMetadataUnavailable;
+                break;
+            default:
+                reason = AurUpdateExecutionReason::BuildPlanInconsistent;
+                break;
         }
 
         std::vector<RootTargetIdentity> roots =
-                normalize_root_identities(failure.roots);
+            normalize_root_identities(failure.roots);
         if(!resolution_failure_roots_are_consistent(
-                   plan, failure, roots)) {
+               plan, failure, roots)) {
             // POLICY(#267): 不正なownershipを別rootへ流さず、invocation全体を
             // fail-closedにするためattributionなしとして扱う。
             roots.clear();
         }
         add_attributed_issue(
-                issues,
-                make_localized_execution_issue(
-                        reason, failure.diagnostic, failure.subject,
-                        std::nullopt, failure.dependency_specification),
-                std::move(roots));
+            issues,
+            make_localized_execution_issue(
+                reason, failure.diagnostic, failure.subject,
+                std::nullopt, failure.dependency_specification),
+            std::move(roots));
         if(failure.kind ==
            BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable) {
             represented_unresolved_values.insert(failure.subject);
@@ -742,229 +807,229 @@ void inspect_resolution_failures(
 }
 
 void inspect_dependency_edges(
-        const BuildPlan& plan,
-        std::vector<AttributedBuildPlanIssue>& issues,
-        std::set<std::string>& represented_unresolved_values) {
+    const BuildPlan& plan,
+    std::vector<AttributedBuildPlanIssue>& issues,
+    std::set<std::string>& represented_unresolved_values) {
     for(const auto& edge : plan.dependency_edges) {
         const std::optional<std::string> requirement_name =
-                edge_requirement_name(edge);
+            edge_requirement_name(edge);
         const std::optional<ParsedDependency> legacy_requirement =
-                edge.requirement.has_value()
+            edge.requirement.has_value()
                 ? std::nullopt
                 : std::optional<ParsedDependency>{
-                          parse_dependency_string(edge.dependency_spec)};
+                      parse_dependency_string(edge.dependency_spec)};
         std::vector<RootTargetIdentity> roots = roots_for_package(
-                plan, edge.parent_package_name, edge.parent_package_base);
+            plan, edge.parent_package_name, edge.parent_package_base);
 
         auto has_consistent_resolved_target =
-                [&plan, &edge, &roots](
-                        const std::string& package_name,
-                        const std::optional<std::string>& package_base) {
-                    std::vector<const PlannedPackageTarget*> matches;
-                    for(const auto& target : plan.package_targets) {
-                        if(target.package_name != package_name) continue;
-                        if(package_base.has_value() &&
-                           target.package_base != package_base.value()) {
-                            continue;
-                        }
-                        matches.push_back(&target);
+            [&plan, &edge, &roots](
+                const std::string& package_name,
+                const std::optional<std::string>& package_base) {
+                std::vector<const PlannedPackageTarget*> matches;
+                for(const auto& target : plan.package_targets) {
+                    if(target.package_name != package_name) continue;
+                    if(package_base.has_value() &&
+                       target.package_base != package_base.value()) {
+                        continue;
                     }
-                    return matches.size() == 1 &&
-                           has_package_role(*matches.front(), edge.role) &&
-                           contains_all_roots(matches.front()->roots, roots);
-                };
+                    matches.push_back(&target);
+                }
+                return matches.size() == 1 &&
+                       has_package_role(*matches.front(), edge.role) &&
+                       contains_all_roots(matches.front()->roots, roots);
+            };
 
         bool edge_is_consistent =
-                !roots.empty() && is_dependency_role(edge.role);
+            !roots.empty() && is_dependency_role(edge.role);
         switch(edge.kind) {
-        case DependencyKind::Installed:
-        case DependencyKind::Repo:
-            edge_is_consistent = edge_is_consistent &&
-                    edge.resolved_package_name.has_value() &&
-                    requirement_name.has_value() &&
-                    is_valid_package_name(
-                            edge.resolved_package_name.value()) &&
-                    edge.resolved_package_name.value() ==
-                            requirement_name.value() &&
-                    !edge.resolved_package_base.has_value() &&
-                    !edge.resolved_provider.has_value();
-            break;
-        case DependencyKind::Aur:
-            edge_is_consistent = edge_is_consistent &&
-                    edge.resolved_package_name.has_value() &&
-                    edge.resolved_package_base.has_value() &&
-                    requirement_name.has_value() &&
-                    is_valid_package_name(
-                            edge.resolved_package_name.value()) &&
-                    is_valid_package_name(
-                            edge.resolved_package_base.value()) &&
-                    edge.resolved_package_name.value() ==
-                            requirement_name.value() &&
-                    !edge.resolved_provider.has_value();
-            if(edge.resolved_package_name.has_value() &&
-               edge.resolved_package_base.has_value() &&
-               !has_consistent_resolved_target(
+            case DependencyKind::Installed:
+            case DependencyKind::Repo:
+                edge_is_consistent = edge_is_consistent &&
+                                     edge.resolved_package_name.has_value() &&
+                                     requirement_name.has_value() &&
+                                     is_valid_package_name(
+                                         edge.resolved_package_name.value()) &&
+                                     edge.resolved_package_name.value() ==
+                                         requirement_name.value() &&
+                                     !edge.resolved_package_base.has_value() &&
+                                     !edge.resolved_provider.has_value();
+                break;
+            case DependencyKind::Aur:
+                edge_is_consistent = edge_is_consistent &&
+                                     edge.resolved_package_name.has_value() &&
+                                     edge.resolved_package_base.has_value() &&
+                                     requirement_name.has_value() &&
+                                     is_valid_package_name(
+                                         edge.resolved_package_name.value()) &&
+                                     is_valid_package_name(
+                                         edge.resolved_package_base.value()) &&
+                                     edge.resolved_package_name.value() ==
+                                         requirement_name.value() &&
+                                     !edge.resolved_provider.has_value();
+                if(edge.resolved_package_name.has_value() &&
+                   edge.resolved_package_base.has_value() &&
+                   !has_consistent_resolved_target(
                        edge.resolved_package_name.value(),
                        edge.resolved_package_base)) {
-                edge_is_consistent = false;
-            }
-            break;
-        case DependencyKind::Provided:
-            edge_is_consistent = edge_is_consistent &&
-                    edge.resolved_provider.has_value() &&
-                    !edge.resolved_package_name.has_value() &&
-                    !edge.resolved_package_base.has_value();
-            if(edge.resolved_provider.has_value()) {
-                edge_is_consistent = edge_is_consistent &&
-                        is_valid_package_name(
-                                edge.resolved_provider->package_name);
-                if(const auto* repository =
-                           std::get_if<RepositoryProviderOrigin>(
-                                   &edge.resolved_provider->origin);
-                   repository != nullptr) {
-                    edge_is_consistent = edge_is_consistent &&
-                            !repository->repository_name.empty() &&
-                            !contains_control_character(
-                                    repository->repository_name);
-                } else if(!has_consistent_resolved_target(
-                                  edge.resolved_provider->package_name,
-                                  std::nullopt)) {
                     edge_is_consistent = false;
                 }
-            }
-            break;
-        case DependencyKind::AmbiguousProvider:
-            edge_is_consistent = edge_is_consistent &&
-                    !edge.resolved_package_name.has_value() &&
-                    !edge.resolved_package_base.has_value() &&
-                    !edge.resolved_provider.has_value();
-            edge_is_consistent = edge_is_consistent && std::any_of(
-                    plan.ambiguous_providers.begin(),
-                    plan.ambiguous_providers.end(),
-                    [&edge, &legacy_requirement](
-                            const AmbiguousProvidedDependency& ambiguous) {
-                        const std::string canonical_edge =
-                                legacy_requirement.has_value()
-                                ? legacy_requirement->raw
-                                : edge.dependency_spec;
-                        const std::string canonical_ambiguous =
-                                legacy_requirement.has_value()
-                                ? parse_dependency_string(
-                                          ambiguous.dependency)
-                                          .raw
-                                : ambiguous.dependency;
-                        return canonical_ambiguous == canonical_edge;
-                    });
-            add_attributed_issue(
+                break;
+            case DependencyKind::Provided:
+                edge_is_consistent = edge_is_consistent &&
+                                     edge.resolved_provider.has_value() &&
+                                     !edge.resolved_package_name.has_value() &&
+                                     !edge.resolved_package_base.has_value();
+                if(edge.resolved_provider.has_value()) {
+                    edge_is_consistent = edge_is_consistent &&
+                                         is_valid_package_name(
+                                             edge.resolved_provider->package_name);
+                    if(const auto* repository =
+                           std::get_if<RepositoryProviderOrigin>(
+                               &edge.resolved_provider->origin);
+                       repository != nullptr) {
+                        edge_is_consistent = edge_is_consistent &&
+                                             !repository->repository_name.empty() &&
+                                             !contains_control_character(
+                                                 repository->repository_name);
+                    } else if(!has_consistent_resolved_target(
+                                  edge.resolved_provider->package_name,
+                                  std::nullopt)) {
+                        edge_is_consistent = false;
+                    }
+                }
+                break;
+            case DependencyKind::AmbiguousProvider:
+                edge_is_consistent = edge_is_consistent &&
+                                     !edge.resolved_package_name.has_value() &&
+                                     !edge.resolved_package_base.has_value() &&
+                                     !edge.resolved_provider.has_value();
+                edge_is_consistent = edge_is_consistent && std::any_of(
+                                                               plan.ambiguous_providers.begin(),
+                                                               plan.ambiguous_providers.end(),
+                                                               [&edge, &legacy_requirement](
+                                                                   const AmbiguousProvidedDependency& ambiguous) {
+                                                                   const std::string canonical_edge =
+                                                                       legacy_requirement.has_value()
+                                                                           ? legacy_requirement->raw
+                                                                           : edge.dependency_spec;
+                                                                   const std::string canonical_ambiguous =
+                                                                       legacy_requirement.has_value()
+                                                                           ? parse_dependency_string(
+                                                                                 ambiguous.dependency)
+                                                                                 .raw
+                                                                           : ambiguous.dependency;
+                                                                   return canonical_ambiguous == canonical_edge;
+                                                               });
+                add_attributed_issue(
                     issues,
                     make_localized_execution_issue(
-                            AurUpdateExecutionReason::AmbiguousProvider,
-                            localization::format_translated_message(
-                                    // TRANSLATORS: The placeholder is a literal dependency specification.
-                                    "Dependency has multiple provider candidates: {}",
-                                    edge.dependency_spec),
-                            edge.parent_package_name,
-                            edge.parent_package_base,
+                        AurUpdateExecutionReason::AmbiguousProvider,
+                        localization::format_translated_message(
+                            // TRANSLATORS: The placeholder is a literal dependency specification.
+                            "Dependency has multiple provider candidates: {}",
                             edge.dependency_spec),
+                        edge.parent_package_name,
+                        edge.parent_package_base,
+                        edge.dependency_spec),
                     roots);
-            break;
-        case DependencyKind::Unknown:
-            edge_is_consistent = edge_is_consistent &&
-                    !edge.resolved_package_name.has_value() &&
-                    !edge.resolved_package_base.has_value() &&
-                    !edge.resolved_provider.has_value();
-            break;
-        default:
-            edge_is_consistent = false;
-            break;
+                break;
+            case DependencyKind::Unknown:
+                edge_is_consistent = edge_is_consistent &&
+                                     !edge.resolved_package_name.has_value() &&
+                                     !edge.resolved_package_base.has_value() &&
+                                     !edge.resolved_provider.has_value();
+                break;
+            default:
+                edge_is_consistent = false;
+                break;
         }
         if(!edge_is_consistent) {
             add_attributed_issue(
-                    issues,
-                    make_localized_execution_issue(
-                            AurUpdateExecutionReason::BuildPlanInconsistent,
-                            "Dependency edge fields or root attribution are inconsistent.",
-                            edge.parent_package_name,
-                            edge.parent_package_base,
-                            edge.dependency_spec),
-                    roots);
+                issues,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    "Dependency edge fields or root attribution are inconsistent.",
+                    edge.parent_package_name,
+                    edge.parent_package_base,
+                    edge.dependency_spec),
+                roots);
         }
         if(edge.constraint_evaluation.has_value()) {
             const ConstraintSatisfaction satisfaction =
-                    edge.constraint_evaluation->satisfaction();
+                edge.constraint_evaluation->satisfaction();
             if(satisfaction == ConstraintSatisfaction::Unsatisfied ||
                satisfaction == ConstraintSatisfaction::Unknown) {
                 add_attributed_issue(
-                        issues,
-                        make_localized_execution_issue(
-                                AurUpdateExecutionReason::
-                                        VersionConstraintUnverified,
-                                localization::format_translated_message(
-                                        "Dependency {} is {}: {}",
-                                        edge.dependency_spec,
-                                        constraint_satisfaction_display(
-                                                satisfaction),
-                                        constraint_evaluation_reason_display(
-                                                edge.constraint_evaluation
-                                                        .value())),
-                                edge.parent_package_name,
-                                edge.parent_package_base,
-                                edge.dependency_spec),
-                        roots);
+                    issues,
+                    make_localized_execution_issue(
+                        AurUpdateExecutionReason::
+                            VersionConstraintUnverified,
+                        localization::format_translated_message(
+                            "Dependency {} is {}: {}",
+                            edge.dependency_spec,
+                            constraint_satisfaction_display(
+                                satisfaction),
+                            constraint_evaluation_reason_display(
+                                edge.constraint_evaluation
+                                    .value())),
+                        edge.parent_package_name,
+                        edge.parent_package_base,
+                        edge.dependency_spec),
+                    roots);
             }
         }
 
         const bool malformed_legacy_requirement =
-                legacy_requirement.has_value() &&
-                (legacy_requirement->has_malformed_constraint() ||
-                 !is_valid_package_name(legacy_requirement->name));
+            legacy_requirement.has_value() &&
+            (legacy_requirement->has_malformed_constraint() ||
+             !is_valid_package_name(legacy_requirement->name));
         const bool invalid_typed_requirement =
-                edge.requirement.has_value() &&
-                !requirement_name.has_value() &&
-                !std::holds_alternative<SonameDependencyRequirement>(
-                        edge.requirement.value());
+            edge.requirement.has_value() &&
+            !requirement_name.has_value() &&
+            !std::holds_alternative<SonameDependencyRequirement>(
+                edge.requirement.value());
         if(malformed_legacy_requirement || invalid_typed_requirement ||
            edge.kind == DependencyKind::Unknown) {
             add_attributed_issue(
-                    issues,
-                    make_localized_execution_issue(
-                            AurUpdateExecutionReason::UnresolvedDependency,
-                            localization::format_translated_message(
-                                    // TRANSLATORS: The placeholder is a literal dependency specification.
-                                    "Dependency could not be resolved: {}",
-                                    edge.dependency_spec),
-                            edge.parent_package_name,
-                            edge.parent_package_base,
-                            edge.dependency_spec),
-                    roots);
+                issues,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::UnresolvedDependency,
+                    localization::format_translated_message(
+                        // TRANSLATORS: The placeholder is a literal dependency specification.
+                        "Dependency could not be resolved: {}",
+                        edge.dependency_spec),
+                    edge.parent_package_name,
+                    edge.parent_package_base,
+                    edge.dependency_spec),
+                roots);
             represented_unresolved_values.insert(edge.dependency_spec);
         }
         if(legacy_requirement.has_value() &&
            legacy_requirement->has_parseable_constraint()) {
             add_attributed_issue(
-                    issues,
-                    make_localized_execution_issue(
-                            AurUpdateExecutionReason::
-                                    VersionConstraintUnverified,
-                            localization::format_translated_message(
-                                    "Dependency version constraint is not verified: {}",
-                                    legacy_requirement->raw),
-                            edge.parent_package_name,
-                            edge.parent_package_base,
-                            edge.dependency_spec),
-                    roots);
+                issues,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::
+                        VersionConstraintUnverified,
+                    localization::format_translated_message(
+                        "Dependency version constraint is not verified: {}",
+                        legacy_requirement->raw),
+                    edge.parent_package_name,
+                    edge.parent_package_base,
+                    edge.dependency_spec),
+                roots);
             represented_unresolved_values.insert(
-                    dependency_constraint_unresolved_reason(
-                            edge.dependency_spec));
+                dependency_constraint_unresolved_reason(
+                    edge.dependency_spec));
         }
     }
 }
 
 void inspect_unresolved_cycles_and_risks(
-        const BuildPlan& plan,
-        const std::vector<ReachableDependencyCycle>& reachable_cycles,
-        std::vector<AttributedBuildPlanIssue>& issues,
-        const std::set<std::string>& represented_unresolved_values) {
+    const BuildPlan& plan,
+    const std::vector<ReachableDependencyCycle>& reachable_cycles,
+    std::vector<AttributedBuildPlanIssue>& issues,
+    const std::set<std::string>& represented_unresolved_values) {
     // POLICY(#267): legacy unresolved textは解析しない。typed edgeから対応できない
     // blockerだけをinvocation-wide issueとして残す。
     for(const auto& unresolved : plan.unresolved) {
@@ -974,177 +1039,176 @@ void inspect_unresolved_cycles_and_risks(
             if(root.requested_name == unresolved) add_root_identity(roots, root);
         }
         add_attributed_issue(
-                issues,
-                make_localized_execution_issue(
-                        AurUpdateExecutionReason::UnresolvedDependency,
-                        localization::format_translated_message(
-                                // TRANSLATORS: The first placeholder is the literal
-                                // internal type name "BuildPlan"; the second is a
-                                // package or dependency identity.
-                                "{} contains an unresolved dependency: {}",
-                                BUILD_PLAN_TYPE_NAME, unresolved),
-                        std::nullopt, std::nullopt, unresolved),
-                roots);
+            issues,
+            make_localized_execution_issue(
+                AurUpdateExecutionReason::UnresolvedDependency,
+                localization::format_translated_message(
+                    // TRANSLATORS: The first placeholder is the literal
+                    // internal type name "BuildPlan"; the second is a
+                    // package or dependency identity.
+                    "{} contains an unresolved dependency: {}",
+                    BUILD_PLAN_TYPE_NAME, unresolved),
+                std::nullopt, std::nullopt, unresolved),
+            roots);
     }
 
     std::set<std::string> summarized_cycles;
     for(const auto& cycle : plan.cycles) {
         summarized_cycles.insert(cycle);
         const ReachableDependencyCycle* reachable_cycle =
-                find_reachable_cycle(reachable_cycles, cycle);
+            find_reachable_cycle(reachable_cycles, cycle);
         if(reachable_cycle != nullptr) continue;
         std::vector<RootTargetIdentity> roots =
-                roots_for_package(plan, std::nullopt, cycle);
+            roots_for_package(plan, std::nullopt, cycle);
         add_attributed_issue(
-                issues,
-                make_localized_execution_issue(
-                        AurUpdateExecutionReason::DependencyCycle,
-                        localization::format_translated_message(
-                                // TRANSLATORS: The first placeholder is the literal
-                                // field name "PackageBase"; the second is that
-                                // field's package identity.
-                                "Dependency cycle contains {}: {}",
-                                PACKAGE_BASE_FIELD_NAME, cycle),
-                        std::nullopt, cycle),
-                roots);
+            issues,
+            make_localized_execution_issue(
+                AurUpdateExecutionReason::DependencyCycle,
+                localization::format_translated_message(
+                    // TRANSLATORS: The first placeholder is the literal
+                    // field name "PackageBase"; the second is that
+                    // field's package identity.
+                    "Dependency cycle contains {}: {}",
+                    PACKAGE_BASE_FIELD_NAME, cycle),
+                std::nullopt, cycle),
+            roots);
         add_attributed_issue(
-                issues,
-                make_localized_execution_issue(
-                        AurUpdateExecutionReason::BuildPlanInconsistent,
-                        localization::format_translated_message(
-                                // TRANSLATORS: {} is the literal internal type name "BuildPlan".
-                                "{} cycle summary has no matching reachable dependency cycle.",
-                                BUILD_PLAN_TYPE_NAME),
-                        std::nullopt, cycle),
-                std::move(roots));
+            issues,
+            make_localized_execution_issue(
+                AurUpdateExecutionReason::BuildPlanInconsistent,
+                localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                    "{} cycle summary has no matching reachable dependency cycle.",
+                    BUILD_PLAN_TYPE_NAME),
+                std::nullopt, cycle),
+            std::move(roots));
     }
     for(const auto& reachable_cycle : reachable_cycles) {
         auto summarized_member = std::find_if(
-                reachable_cycle.package_bases.begin(),
-                reachable_cycle.package_bases.end(),
-                [&summarized_cycles](const std::string& package_base) {
-                    return summarized_cycles.contains(package_base);
-                });
+            reachable_cycle.package_bases.begin(),
+            reachable_cycle.package_bases.end(),
+            [&summarized_cycles](const std::string& package_base) {
+                return summarized_cycles.contains(package_base);
+            });
         const bool is_summarized =
-                summarized_member != reachable_cycle.package_bases.end();
+            summarized_member != reachable_cycle.package_bases.end();
         const std::string& representative = is_summarized
-                ? *summarized_member
-                : reachable_cycle.package_bases.front();
+                                                ? *summarized_member
+                                                : reachable_cycle.package_bases.front();
         add_attributed_issue(
-                issues,
-                make_localized_execution_issue(
-                        AurUpdateExecutionReason::DependencyCycle,
-                        localization::format_translated_message(
-                                // TRANSLATORS: The first placeholder is the literal
-                                // field name "PackageBase"; the second is that
-                                // field's package identity.
-                                "Typed dependency graph contains a cycle at {}: {}",
-                                PACKAGE_BASE_FIELD_NAME, representative),
-                        std::nullopt, representative),
-                reachable_cycle.roots);
+            issues,
+            make_localized_execution_issue(
+                AurUpdateExecutionReason::DependencyCycle,
+                localization::format_translated_message(
+                    // TRANSLATORS: The first placeholder is the literal
+                    // field name "PackageBase"; the second is that
+                    // field's package identity.
+                    "Typed dependency graph contains a cycle at {}: {}",
+                    PACKAGE_BASE_FIELD_NAME, representative),
+                std::nullopt, representative),
+            reachable_cycle.roots);
         if(is_summarized) continue;
         add_attributed_issue(
-                issues,
-                make_localized_execution_issue(
-                        AurUpdateExecutionReason::BuildPlanInconsistent,
-                        localization::format_translated_message(
-                                // TRANSLATORS: {} is the literal internal type name "BuildPlan".
-                                "Reachable dependency cycle is missing from {} summary.",
-                                BUILD_PLAN_TYPE_NAME),
-                        std::nullopt, representative),
-                reachable_cycle.roots);
+            issues,
+            make_localized_execution_issue(
+                AurUpdateExecutionReason::BuildPlanInconsistent,
+                localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                    "Reachable dependency cycle is missing from {} summary.",
+                    BUILD_PLAN_TYPE_NAME),
+                std::nullopt, representative),
+            reachable_cycle.roots);
     }
 
     for(const auto& ambiguous : plan.ambiguous_providers) {
         std::vector<RootTargetIdentity> roots;
         bool has_matching_edge = false;
         const std::string canonical_dependency =
-                parse_dependency_string(ambiguous.dependency).raw;
+            parse_dependency_string(ambiguous.dependency).raw;
         for(const auto& edge : plan.dependency_edges) {
             if(edge.kind != DependencyKind::AmbiguousProvider ||
                (edge.requirement.has_value()
-                                ? edge.dependency_spec
-                                : parse_dependency_string(
-                                          edge.dependency_spec)
-                                          .raw) != canonical_dependency) {
+                    ? edge.dependency_spec
+                    : parse_dependency_string(
+                          edge.dependency_spec)
+                          .raw) != canonical_dependency) {
                 continue;
             }
             has_matching_edge = true;
             for(const auto& root : roots_for_package(
-                        plan, edge.parent_package_name,
-                        edge.parent_package_base)) {
+                    plan, edge.parent_package_name,
+                    edge.parent_package_base)) {
                 add_root_identity(roots, root);
             }
         }
         if(!has_matching_edge) {
             add_attributed_issue(
-                    issues,
-                    make_localized_execution_issue(
-                            AurUpdateExecutionReason::AmbiguousProvider,
-                            localization::format_translated_message(
-                                    // TRANSLATORS: The placeholder is a literal dependency specification.
-                                    "Ambiguous provider summary has no matching dependency edge: {}",
-                                    canonical_dependency),
-                            std::nullopt, std::nullopt,
-                            ambiguous.dependency),
-                    roots);
+                issues,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::AmbiguousProvider,
+                    localization::format_translated_message(
+                        // TRANSLATORS: The placeholder is a literal dependency specification.
+                        "Ambiguous provider summary has no matching dependency edge: {}",
+                        canonical_dependency),
+                    std::nullopt, std::nullopt,
+                    ambiguous.dependency),
+                roots);
         }
     }
 
     const PlanStateProjection state = project_build_plan_state(plan);
     const ExecutionReadiness& install_readiness = execution_readiness(
-            state, ExecutionCapability::Install);
+        state, ExecutionCapability::Install);
     for(const auto& readiness_reason : install_readiness.reasons) {
         const auto* relation = std::get_if<PlanDeclaredRelationReason>(
-                &readiness_reason.reason);
+            &readiness_reason.reason);
         if(relation == nullptr ||
            !readiness_reason.blocks_production_guard) {
             continue;
         }
         AurUpdateExecutionIssue issue = make_localized_execution_issue(
-                AurUpdateExecutionReason::ConflictsOrReplacesUnresolved,
-                package_relation_assessment_diagnostic_display(
-                        relation->assessment),
-                relation->assessment.declaring_package.package_name,
-                relation->assessment.declaring_package.package_base,
-                std::nullopt);
+            AurUpdateExecutionReason::ConflictsOrReplacesUnresolved,
+            package_relation_assessment_diagnostic_display(
+                relation->assessment),
+            relation->assessment.declaring_package.package_name,
+            relation->assessment.declaring_package.package_base,
+            std::nullopt);
         issue.relation_reason = *relation;
 
         std::vector<RootTargetIdentity> roots;
         for(const auto& root :
             relation->assessment.declaring_package.roots) {
             add_root_identity(
-                    roots,
-                    RootTargetIdentity{
-                            root.invocation_index, root.requested_name});
+                roots,
+                RootTargetIdentity{
+                    root.invocation_index, root.requested_name});
         }
         add_attributed_issue(
-                issues, std::move(issue), std::move(roots));
+            issues, std::move(issue), std::move(roots));
     }
-
 }
 
 void inspect_package_targets_and_order(
-        const BuildPlan& plan,
-        const std::vector<AurDependencyGraphEdge>& dependency_graph,
-        const std::vector<RootGraphReachability>& root_reachability,
-        std::vector<AttributedBuildPlanIssue>& issues) {
+    const BuildPlan& plan,
+    const std::vector<AurDependencyGraphEdge>& dependency_graph,
+    const std::vector<RootGraphReachability>& root_reachability,
+    std::vector<AttributedBuildPlanIssue>& issues) {
     BuildPlanArtifactTargetProjectionResult projection =
-            project_build_plan_required_artifact_targets(plan);
+        project_build_plan_required_artifact_targets(plan);
     if(!projection.is_success()) {
         for(const auto& projection_issue : projection.failure()->issues) {
             AurUpdateExecutionIssue issue = make_localized_execution_issue(
-                    projection_issue.kind ==
-                                    BuildPlanArtifactTargetProjectionIssueKind::
-                                            PackageBaseMismatch
-                            ? AurUpdateExecutionReason::PackageBaseMismatch
-                            : AurUpdateExecutionReason::BuildPlanInconsistent,
-                    projection_issue.diagnostic,
-                    projection_issue.package_name,
-                    projection_issue.package_base);
+                projection_issue.kind ==
+                        BuildPlanArtifactTargetProjectionIssueKind::
+                            PackageBaseMismatch
+                    ? AurUpdateExecutionReason::PackageBaseMismatch
+                    : AurUpdateExecutionReason::BuildPlanInconsistent,
+                projection_issue.diagnostic,
+                projection_issue.package_name,
+                projection_issue.package_base);
             issue.build_plan_projection_issue = projection_issue;
             add_attributed_issue(
-                    issues, std::move(issue), projection_issue.roots);
+                issues, std::move(issue), projection_issue.roots);
         }
     }
 
@@ -1155,90 +1219,90 @@ void inspect_package_targets_and_order(
         }
 
         bool roles_are_consistent = !target.roles.empty() && std::all_of(
-                target.roles.begin(), target.roles.end(),
-                [](PackageRole role) { return is_known_package_role(role); });
+                                                                 target.roles.begin(), target.roles.end(),
+                                                                 [](PackageRole role) { return is_known_package_role(role); });
         if(roles_are_consistent &&
            !has_package_role(target, PackageRole::Root)) {
             roles_are_consistent = std::any_of(
-                    target.roles.begin(), target.roles.end(),
-                    [](PackageRole role) { return is_dependency_role(role); });
+                target.roles.begin(), target.roles.end(),
+                [](PackageRole role) { return is_dependency_role(role); });
         }
 
         bool has_self_root = !has_package_role(target, PackageRole::Root);
         if(!has_self_root) {
             has_self_root = std::any_of(
-                    target.roots.begin(), target.roots.end(),
-                    [&target](const RootTargetIdentity& root) {
-                        return root.requested_name == target.package_name;
-                    });
+                target.roots.begin(), target.roots.end(),
+                [&target](const RootTargetIdentity& root) {
+                    return root.requested_name == target.package_name;
+                });
         }
         if(!is_valid_package_name(target.package_name) ||
            !is_valid_package_name(target.package_base) ||
            !roots_are_consistent || !roles_are_consistent ||
            !has_self_root) {
             add_attributed_issue(
-                    issues,
-                    make_localized_execution_issue(
-                            AurUpdateExecutionReason::BuildPlanInconsistent,
-                            localization::format_translated_message(
-                                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
-                                    "{} package target identity or root ownership is inconsistent.",
-                                    BUILD_PLAN_TYPE_NAME),
-                            target.package_name, target.package_base),
-                    target.roots);
+                issues,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                        "{} package target identity or root ownership is inconsistent.",
+                        BUILD_PLAN_TYPE_NAME),
+                    target.package_name, target.package_base),
+                target.roots);
         }
         if(roles_are_consistent && roots_are_consistent &&
            !dependency_target_is_grounded_by_rooted_graph(
-                   target, dependency_graph, root_reachability)) {
+               target, dependency_graph, root_reachability)) {
             add_attributed_issue(
-                    issues,
-                    make_localized_execution_issue(
-                            AurUpdateExecutionReason::BuildPlanInconsistent,
-                            localization::format_translated_message(
-                                    // TRANSLATORS: The placeholders are the literal
-                                    // internal type name "BuildPlan" and service
-                                    // name "AUR", respectively.
-                                    "{} {} dependency target is not grounded in the rooted dependency graph.",
-                                    BUILD_PLAN_TYPE_NAME,
-                                    AUR_SERVICE_NAME),
-                            target.package_name, target.package_base),
-                    target.roots);
+                issues,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    localization::format_translated_message(
+                        // TRANSLATORS: The placeholders are the literal
+                        // internal type name "BuildPlan" and service
+                        // name "AUR", respectively.
+                        "{} {} dependency target is not grounded in the rooted dependency graph.",
+                        BUILD_PLAN_TYPE_NAME,
+                        AUR_SERVICE_NAME),
+                    target.package_name, target.package_base),
+                target.roots);
         }
     }
 }
 
 std::vector<AttributedBuildPlanIssue> inspect_build_plan(
-        const BuildPlan& plan) {
+    const BuildPlan& plan) {
     std::vector<AttributedBuildPlanIssue> issues;
     std::set<std::string> represented_unresolved_values;
     const std::vector<AurDependencyGraphEdge> dependency_graph =
-            collect_aur_dependency_graph(plan);
+        collect_aur_dependency_graph(plan);
     const std::vector<RootGraphReachability> root_reachability =
-            collect_root_graph_reachability(plan, dependency_graph);
+        collect_root_graph_reachability(plan, dependency_graph);
     const std::vector<ReachableDependencyCycle> reachable_cycles =
-            collect_reachable_dependency_cycles(
-                    dependency_graph, root_reachability);
+        collect_reachable_dependency_cycles(
+            dependency_graph, root_reachability);
 
     inspect_resolution_failures(
-            plan, issues, represented_unresolved_values);
+        plan, issues, represented_unresolved_values);
     inspect_dependency_edges(
-            plan, issues, represented_unresolved_values);
+        plan, issues, represented_unresolved_values);
     inspect_unresolved_cycles_and_risks(
-            plan, reachable_cycles, issues, represented_unresolved_values);
+        plan, reachable_cycles, issues, represented_unresolved_values);
     inspect_package_targets_and_order(
-            plan, dependency_graph, root_reachability, issues);
+        plan, dependency_graph, root_reachability, issues);
     return issues;
 }
 
 AurUpdateExecutionTarget& candidate_target(
-        AurUpdateExecutionPreflight& preflight,
-        const CandidateMapping& candidate) {
+    AurUpdateExecutionPreflight& preflight,
+    const CandidateMapping& candidate) {
     return preflight.targets[candidate.update_plan_index];
 }
 
 const CandidateMapping* find_candidate_for_root(
-        const std::vector<CandidateMapping>& candidates,
-        const RootTargetIdentity& root) {
+    const std::vector<CandidateMapping>& candidates,
+    const RootTargetIdentity& root) {
     auto same_root = [&root](const CandidateMapping& candidate) {
         return candidate.candidate_index == root.invocation_index &&
                candidate.requested_name == root.requested_name;
@@ -1248,31 +1312,31 @@ const CandidateMapping* find_candidate_for_root(
 }
 
 void add_issue_to_all_candidates(
-        AurUpdateExecutionPreflight& preflight,
-        const std::vector<CandidateMapping>& candidates,
-        const AurUpdateExecutionIssue& issue) {
+    AurUpdateExecutionPreflight& preflight,
+    const std::vector<CandidateMapping>& candidates,
+    const AurUpdateExecutionIssue& issue) {
     for(const auto& candidate : candidates) {
         add_issue(candidate_target(preflight, candidate), issue);
     }
 }
 
 void apply_attributed_build_plan_issues(
-        AurUpdateExecutionPreflight& preflight,
-        const std::vector<CandidateMapping>& candidates,
-        const std::vector<AttributedBuildPlanIssue>& issues) {
+    AurUpdateExecutionPreflight& preflight,
+    const std::vector<CandidateMapping>& candidates,
+    const std::vector<AttributedBuildPlanIssue>& issues) {
     for(const auto& attributed : issues) {
         std::vector<const CandidateMapping*> affected_candidates;
         bool has_unattributed_root = attributed.roots.empty();
         for(const auto& root : attributed.roots) {
             const CandidateMapping* candidate =
-                    find_candidate_for_root(candidates, root);
+                find_candidate_for_root(candidates, root);
             if(candidate == nullptr) {
                 has_unattributed_root = true;
                 continue;
             }
             if(std::find(
-                       affected_candidates.begin(), affected_candidates.end(),
-                       candidate) == affected_candidates.end()) {
+                   affected_candidates.begin(), affected_candidates.end(),
+                   candidate) == affected_candidates.end()) {
                 affected_candidates.push_back(candidate);
             }
         }
@@ -1280,13 +1344,13 @@ void apply_attributed_build_plan_issues(
         if(has_unattributed_root) {
             add_issue_to_all_candidates(preflight, candidates, attributed.issue);
             add_issue_to_all_candidates(
-                    preflight, candidates,
-                    make_localized_execution_issue(
-                            AurUpdateExecutionReason::BuildPlanInconsistent,
-                            localization::format_translated_message(
-                                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
-                                    "A blocking {} issue could not be attributed to every affected root.",
-                                    BUILD_PLAN_TYPE_NAME)));
+                preflight, candidates,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                        "A blocking {} issue could not be attributed to every affected root.",
+                        BUILD_PLAN_TYPE_NAME)));
             continue;
         }
 
@@ -1297,49 +1361,49 @@ void apply_attributed_build_plan_issues(
 }
 
 void inspect_combined_build_plan_consistency(
-        AurUpdateExecutionPreflight& preflight,
-        const std::vector<CandidateMapping>& candidates) {
+    AurUpdateExecutionPreflight& preflight,
+    const std::vector<CandidateMapping>& candidates) {
     const BuildPlan& plan = preflight.build_plan.value();
     if(plan.root_targets.size() != candidates.size()) {
         add_issue_to_all_candidates(
-                preflight, candidates,
-                make_localized_execution_issue(
-                        AurUpdateExecutionReason::BuildPlanInconsistent,
-                        localization::format_translated_message(
-                                // TRANSLATORS: {} is the literal internal type name "BuildPlan".
-                                "Combined {} root count does not match the update candidate count.",
-                                BUILD_PLAN_TYPE_NAME)));
+            preflight, candidates,
+            make_localized_execution_issue(
+                AurUpdateExecutionReason::BuildPlanInconsistent,
+                localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                    "Combined {} root count does not match the update candidate count.",
+                    BUILD_PLAN_TYPE_NAME)));
     }
 
     for(const auto& candidate : candidates) {
         AurUpdateExecutionTarget& target =
-                candidate_target(preflight, candidate);
+            candidate_target(preflight, candidate);
         if(candidate.candidate_index >= plan.root_targets.size()) {
             add_issue(
-                    target,
-                    make_localized_execution_issue(
-                            AurUpdateExecutionReason::BuildPlanInconsistent,
-                            localization::format_translated_message(
-                                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
-                                    "Combined {} is missing the candidate root.",
-                                    BUILD_PLAN_TYPE_NAME),
-                            candidate.requested_name));
+                target,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                        "Combined {} is missing the candidate root.",
+                        BUILD_PLAN_TYPE_NAME),
+                    candidate.requested_name));
             continue;
         }
 
         const RootTargetIdentity& root =
-                plan.root_targets[candidate.candidate_index];
+            plan.root_targets[candidate.candidate_index];
         if(root.invocation_index != candidate.candidate_index ||
            root.requested_name != candidate.requested_name) {
             add_issue(
-                    target,
-                    make_localized_execution_issue(
-                            AurUpdateExecutionReason::BuildPlanInconsistent,
-                            localization::format_translated_message(
-                                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
-                                    "Combined {} root identity or order differs from the candidate mapping.",
-                                    BUILD_PLAN_TYPE_NAME),
-                            candidate.requested_name));
+                target,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                        "Combined {} root identity or order differs from the candidate mapping.",
+                        BUILD_PLAN_TYPE_NAME),
+                    candidate.requested_name));
             continue;
         }
         target.build_plan_root_index = candidate.candidate_index;
@@ -1349,43 +1413,43 @@ void inspect_combined_build_plan_consistency(
             if(package_target.package_name != root.requested_name ||
                !has_package_role(package_target, PackageRole::Root) ||
                std::find(
-                       package_target.roots.begin(),
-                       package_target.roots.end(), root) ==
-                       package_target.roots.end()) {
+                   package_target.roots.begin(),
+                   package_target.roots.end(), root) ==
+                   package_target.roots.end()) {
                 continue;
             }
             matching_root_targets.push_back(&package_target);
         }
         if(matching_root_targets.size() != 1) {
             add_issue(
-                    target,
-                    make_localized_execution_issue(
-                            AurUpdateExecutionReason::BuildPlanInconsistent,
-                            "Candidate root does not have exactly one matching planned package target.",
-                            candidate.requested_name));
+                target,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    "Candidate root does not have exactly one matching planned package target.",
+                    candidate.requested_name));
             continue;
         }
 
         if(!target.update.aur_package.has_value()) continue;
         const PlannedPackageTarget& package_target =
-                *matching_root_targets.front();
+            *matching_root_targets.front();
         if(package_target.package_name !=
-                   target.update.aur_package->aur_name ||
+               target.update.aur_package->aur_name ||
            package_target.package_base !=
-                   target.update.aur_package->package_base) {
+               target.update.aur_package->package_base) {
             add_issue(
-                    target,
-                    make_localized_execution_issue(
-                            AurUpdateExecutionReason::PackageBaseMismatch,
-                            localization::format_translated_message(
-                                    // TRANSLATORS: The placeholders are the literal
-                                    // service name "AUR" and internal type name
-                                    // "BuildPlan", respectively.
-                                    "{} update metadata and {} root identity differ.",
-                                    AUR_SERVICE_NAME,
-                                    BUILD_PLAN_TYPE_NAME),
-                            package_target.package_name,
-                            package_target.package_base));
+                target,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::PackageBaseMismatch,
+                    localization::format_translated_message(
+                        // TRANSLATORS: The placeholders are the literal
+                        // service name "AUR" and internal type name
+                        // "BuildPlan", respectively.
+                        "{} update metadata and {} root identity differ.",
+                        AUR_SERVICE_NAME,
+                        BUILD_PLAN_TYPE_NAME),
+                    package_target.package_name,
+                    package_target.package_base));
         }
     }
 
@@ -1393,29 +1457,29 @@ void inspect_combined_build_plan_consistency(
         if(!has_package_role(package_target, PackageRole::Root)) continue;
         if(package_target.roots.empty()) {
             add_issue_to_all_candidates(
-                    preflight, candidates,
-                    make_localized_execution_issue(
-                            AurUpdateExecutionReason::BuildPlanInconsistent,
-                            localization::format_translated_message(
-                                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
-                                    "A {} root package target has no root identity.",
-                                    BUILD_PLAN_TYPE_NAME),
-                            package_target.package_name,
-                            package_target.package_base));
+                preflight, candidates,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                        "A {} root package target has no root identity.",
+                        BUILD_PLAN_TYPE_NAME),
+                    package_target.package_name,
+                    package_target.package_base));
             continue;
         }
         for(const auto& root : package_target.roots) {
             if(find_candidate_for_root(candidates, root) != nullptr) continue;
             add_issue_to_all_candidates(
-                    preflight, candidates,
-                    make_localized_execution_issue(
-                            AurUpdateExecutionReason::BuildPlanInconsistent,
-                            localization::format_translated_message(
-                                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
-                                    "A {} root package target references an unknown candidate root.",
-                                    BUILD_PLAN_TYPE_NAME),
-                            package_target.package_name,
-                            package_target.package_base));
+                preflight, candidates,
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                        "A {} root package target references an unknown candidate root.",
+                        BUILD_PLAN_TYPE_NAME),
+                    package_target.package_name,
+                    package_target.package_base));
         }
     }
 }
@@ -1423,14 +1487,14 @@ void inspect_combined_build_plan_consistency(
 } // namespace
 
 AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
-        const AurUpdatePlan& update_plan) {
+    const AurUpdatePlan& update_plan) {
     return resolve_aur_update_execution_preflight(
-            update_plan, ProviderSelectionCallback{});
+        update_plan, ProviderSelectionCallback{});
 }
 
 AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
-        const AurUpdatePlan& update_plan,
-        const ProviderSelectionCallback& select_provider) {
+    const AurUpdatePlan& update_plan,
+    const ProviderSelectionCallback& select_provider) {
     AurUpdateExecutionPreflight preflight;
     preflight.targets.reserve(update_plan.entries.size());
 
@@ -1445,34 +1509,34 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
         target.update = update_plan.entries[plan_index];
         add_initial_classification_issue(target);
 
-        if(target.update.classification ==
-           AurUpdateClassification::UpdateAvailable) {
+        if(project_aur_update_effective_state(target.update) ==
+           AurUpdateEffectiveState::UpdateAvailable) {
             target.desired_install_reason =
-                    desired_install_reason_for_aur_update_root(
-                            target.update.install_reason);
+                desired_install_reason_for_aur_update_root(
+                    target.update.install_reason);
             if(!target.desired_install_reason.has_value()) {
                 add_issue(
-                        target,
-                        make_localized_execution_issue(
-                                AurUpdateExecutionReason::InstalledReasonUnknown,
-                                "Installed package reason is unknown.",
-                                target.update.installed_name));
+                    target,
+                    make_localized_execution_issue(
+                        AurUpdateExecutionReason::InstalledReasonUnknown,
+                        "Installed package reason is unknown.",
+                        target.update.installed_name));
             }
 
             const std::size_t candidate_index = candidates.size();
             candidates.push_back(CandidateMapping{
-                    candidate_index, plan_index,
-                    target.update.installed_name});
+                candidate_index, plan_index,
+                target.update.installed_name});
             candidate_indices_by_name[target.update.installed_name].push_back(
-                    plan_index);
+                plan_index);
             if(!is_valid_package_name(target.update.installed_name)) {
                 has_invalid_candidate_name = true;
                 add_issue(
-                        target,
-                        make_localized_execution_issue(
-                                AurUpdateExecutionReason::UpdatePlanInconsistent,
-                                "Update candidate has an invalid installed package name.",
-                                target.update.installed_name));
+                    target,
+                    make_localized_execution_issue(
+                        AurUpdateExecutionReason::UpdatePlanInconsistent,
+                        "Update candidate has an invalid installed package name.",
+                        target.update.installed_name));
             }
         }
 
@@ -1486,29 +1550,31 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
         has_duplicate_candidate = true;
         for(const auto plan_index : plan_indices) {
             add_issue(
-                    preflight.targets[plan_index],
-                    make_localized_execution_issue(
-                            AurUpdateExecutionReason::DuplicateUpdateTarget,
-                            "Update candidate occurs more than once in the invocation.",
-                            package_name));
+                preflight.targets[plan_index],
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::DuplicateUpdateTarget,
+                    "Update candidate occurs more than once in the invocation.",
+                    package_name));
         }
     }
 
     if(candidates.empty()) {
-        for(auto& target : preflight.targets) reduce_target_status(target);
+        for(auto& target : preflight.targets)
+            reduce_target_status(target);
         return preflight;
     }
 
     if(has_duplicate_candidate || has_invalid_candidate_name) {
         add_issue_to_all_candidates(
-                preflight, candidates,
-                make_localized_execution_issue(
-                        AurUpdateExecutionReason::BuildPlanInconsistent,
-                        localization::format_translated_message(
-                                // TRANSLATORS: {} is the literal internal type name "BuildPlan".
-                                "Combined {} resolution was skipped because the candidate set is inconsistent.",
-                                BUILD_PLAN_TYPE_NAME)));
-        for(auto& target : preflight.targets) reduce_target_status(target);
+            preflight, candidates,
+            make_localized_execution_issue(
+                AurUpdateExecutionReason::BuildPlanInconsistent,
+                localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                    "Combined {} resolution was skipped because the candidate set is inconsistent.",
+                    BUILD_PLAN_TYPE_NAME)));
+        for(auto& target : preflight.targets)
+            reduce_target_status(target);
         return preflight;
     }
 
@@ -1520,36 +1586,37 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
 
     // POLICY(#267): invocation全体で一度だけ解決し、candidate順とexecution順を混ぜない。
     preflight.build_plan = resolve_build_plan_for_preflight(
-            candidate_names, select_provider);
+        candidate_names, select_provider);
     inspect_combined_build_plan_consistency(preflight, candidates);
     apply_attributed_build_plan_issues(
-            preflight, candidates,
-            inspect_build_plan(preflight.build_plan.value()));
+        preflight, candidates,
+        inspect_build_plan(preflight.build_plan.value()));
 
-    for(auto& target : preflight.targets) reduce_target_status(target);
+    for(auto& target : preflight.targets)
+        reduce_target_status(target);
     return preflight;
 }
 
 bool has_executable_targets(
-        const AurUpdateExecutionPreflight& preflight) noexcept {
+    const AurUpdateExecutionPreflight& preflight) noexcept {
     return std::any_of(
-            preflight.targets.begin(), preflight.targets.end(),
-            [](const AurUpdateExecutionTarget& target) {
-                return target.status ==
-                        AurUpdateExecutionTargetStatus::Executable;
-            });
+        preflight.targets.begin(), preflight.targets.end(),
+        [](const AurUpdateExecutionTarget& target) {
+            return target.status ==
+                   AurUpdateExecutionTargetStatus::Executable;
+        });
 }
 
 bool has_blocking_targets(
-        const AurUpdateExecutionPreflight& preflight) noexcept {
+    const AurUpdateExecutionPreflight& preflight) noexcept {
     return std::any_of(
-            preflight.targets.begin(), preflight.targets.end(),
-            [](const AurUpdateExecutionTarget& target) {
-                return target.status ==
-                               AurUpdateExecutionTargetStatus::Unsupported ||
-                       target.status ==
-                               AurUpdateExecutionTargetStatus::Incomplete;
-            });
+        preflight.targets.begin(), preflight.targets.end(),
+        [](const AurUpdateExecutionTarget& target) {
+            return target.status ==
+                       AurUpdateExecutionTargetStatus::Unsupported ||
+                   target.status ==
+                       AurUpdateExecutionTargetStatus::Incomplete;
+        });
 }
 
 bool can_execute(const AurUpdateExecutionPreflight& preflight) noexcept {

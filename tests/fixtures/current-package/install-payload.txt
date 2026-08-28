@@ -1,4 +1,5 @@
 /usr/bin/moguet
+/usr/libexec/moguet/moguet-alpm-receipt-helper
 /usr/share/bash-completion/completions/moguet
 /usr/share/doc/moguet/README.ja.md
 /usr/share/doc/moguet/README.md

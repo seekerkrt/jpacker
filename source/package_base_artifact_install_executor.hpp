@@ -17,17 +17,17 @@ class PackageBaseArtifactInstallPreparationResult;
 class PackageBaseArtifactInstallExecutionResult;
 
 struct PreparedPackageBaseArtifactInstallSelectedArtifact {
-    std::size_t                            artifact_index;
-    ArtifactPackageIdentity                identity;
-    DesiredInstallReason                   desired_reason;
-    InstalledVersionState                  installed_version_state;
-    std::optional<ExistingInstallReason>   existing_reason;
-    InstallReasonDirective                 directive;
+    std::size_t artifact_index;
+    ArtifactPackageIdentity identity;
+    DesiredInstallReason desired_reason;
+    InstalledVersionState installed_version_state;
+    std::optional<ExistingInstallReason> existing_reason;
+    InstallReasonDirective directive;
     PackageBaseArtifactInstallExpectedOutcome expected_outcome;
 };
 
 struct PreparedPackageBaseArtifactInstallUnselectedArtifact {
-    std::size_t             artifact_index;
+    std::size_t artifact_index;
     ArtifactPackageIdentity identity;
 };
 
@@ -46,24 +46,24 @@ class PreparedPackageBaseArtifactInstall final {
     // Aggregate順のprivate identity snapshot。executor直前のindex相関再証明に使う。
     std::vector<ArtifactPackageIdentity> aggregate_identities_;
     std::vector<PreparedPackageBaseArtifactInstallSelectedArtifact>
-            selected_artifacts_;
+        selected_artifacts_;
     std::vector<PreparedPackageBaseArtifactInstallUnselectedArtifact>
-            unselected_artifacts_;
+        unselected_artifacts_;
     InstallReasonDirective transaction_directive_ =
-            InstallReasonDirective::Default;
-    bool  needed_ = false;
+        InstallReasonDirective::Default;
+    bool needed_ = false;
     State state_ = State::Active;
 
     PreparedPackageBaseArtifactInstall(
-            std::string&& package_base,
-            ValidatedPackageArtifactSet&& artifacts,
-            std::vector<ArtifactPackageIdentity>&& aggregate_identities,
-            std::vector<PreparedPackageBaseArtifactInstallSelectedArtifact>&&
-                    selected_artifacts,
-            std::vector<PreparedPackageBaseArtifactInstallUnselectedArtifact>&&
-                    unselected_artifacts,
-            InstallReasonDirective transaction_directive,
-            bool needed) noexcept;
+        std::string&& package_base,
+        ValidatedPackageArtifactSet&& artifacts,
+        std::vector<ArtifactPackageIdentity>&& aggregate_identities,
+        std::vector<PreparedPackageBaseArtifactInstallSelectedArtifact>&&
+            selected_artifacts,
+        std::vector<PreparedPackageBaseArtifactInstallUnselectedArtifact>&&
+            unselected_artifacts,
+        InstallReasonDirective transaction_directive,
+        bool needed) noexcept;
 
     void require_not_moved_from() const;
     void require_active_for_execution() const;
@@ -72,26 +72,26 @@ class PreparedPackageBaseArtifactInstall final {
     friend class PackageBaseArtifactInstallPreparationResult;
     friend PackageBaseArtifactInstallPreparationResult
     prepare_package_base_artifact_install(
-            ValidatedPackageArtifactSet& artifacts,
-            const std::string& package_base,
-            const std::vector<RequiredPackageArtifactTarget>& required_targets,
-            const ArtifactInstallPreparationOptions& options,
-            const PacmanDatabasePaths& database_paths);
+        ValidatedPackageArtifactSet& artifacts,
+        const std::string& package_base,
+        const std::vector<RequiredPackageArtifactTarget>& required_targets,
+        const ArtifactInstallPreparationOptions& options,
+        const PacmanDatabasePaths& database_paths);
     friend class PackageBaseArtifactInstallExecutionResult;
     friend PackageBaseArtifactInstallExecutionResult
     execute_prepared_package_base_artifact_install(
-            PreparedPackageBaseArtifactInstall& install,
-            const ArtifactInstallExecutionOptions& options);
+        PreparedPackageBaseArtifactInstall& install,
+        const ArtifactInstallExecutionOptions& options);
 
 public:
     PreparedPackageBaseArtifactInstall(
-            const PreparedPackageBaseArtifactInstall&) = delete;
+        const PreparedPackageBaseArtifactInstall&) = delete;
     PreparedPackageBaseArtifactInstall& operator=(
-            const PreparedPackageBaseArtifactInstall&) = delete;
+        const PreparedPackageBaseArtifactInstall&) = delete;
     PreparedPackageBaseArtifactInstall(
-            PreparedPackageBaseArtifactInstall&& other) noexcept;
+        PreparedPackageBaseArtifactInstall&& other) noexcept;
     PreparedPackageBaseArtifactInstall& operator=(
-            PreparedPackageBaseArtifactInstall&&) = delete;
+        PreparedPackageBaseArtifactInstall&&) = delete;
     ~PreparedPackageBaseArtifactInstall() noexcept = default;
 
     const std::string& package_base() const;
@@ -111,13 +111,13 @@ class PackageBaseArtifactInstallPreparationFailure final {
 public:
     PackageBaseArtifactInstallPreparationFailure() = delete;
     PackageBaseArtifactInstallPreparationFailure(
-            const PackageBaseArtifactInstallPreparationFailure&) = default;
+        const PackageBaseArtifactInstallPreparationFailure&) = default;
     PackageBaseArtifactInstallPreparationFailure(
-            PackageBaseArtifactInstallPreparationFailure&&) noexcept = default;
+        PackageBaseArtifactInstallPreparationFailure&&) noexcept = default;
     PackageBaseArtifactInstallPreparationFailure& operator=(
-            const PackageBaseArtifactInstallPreparationFailure&) = delete;
+        const PackageBaseArtifactInstallPreparationFailure&) = delete;
     PackageBaseArtifactInstallPreparationFailure& operator=(
-            PackageBaseArtifactInstallPreparationFailure&&) noexcept = delete;
+        PackageBaseArtifactInstallPreparationFailure&&) noexcept = delete;
     ~PackageBaseArtifactInstallPreparationFailure() = default;
 
     [[nodiscard]] const PackageBaseArtifactIdentitySelectionFailure*
@@ -130,113 +130,113 @@ public:
     // production constructorやartifact capabilityは公開しない。
     static PackageBaseArtifactInstallPreparationFailure
     make_selection_failure_for_aur_update_runner_test(
-            PackageBaseArtifactIdentitySelectionFailure failure) {
+        PackageBaseArtifactIdentitySelectionFailure failure) {
         return PackageBaseArtifactInstallPreparationFailure(
-                AurUpdateRunnerTestTag{}, std::move(failure));
+            AurUpdateRunnerTestTag{}, std::move(failure));
     }
 
     static PackageBaseArtifactInstallPreparationFailure
     make_mixed_reason_failure_for_aur_update_runner_test(
-            MixedPackageBaseInstallReasonUnsupported failure) {
+        MixedPackageBaseInstallReasonUnsupported failure) {
         return PackageBaseArtifactInstallPreparationFailure(
-                AurUpdateRunnerTestTag{}, std::move(failure));
+            AurUpdateRunnerTestTag{}, std::move(failure));
     }
 #endif
 
 private:
     explicit PackageBaseArtifactInstallPreparationFailure(
-            PackageBaseArtifactIdentitySelectionFailure failure);
+        PackageBaseArtifactIdentitySelectionFailure failure);
     explicit PackageBaseArtifactInstallPreparationFailure(
-            MixedPackageBaseInstallReasonUnsupported failure);
+        MixedPackageBaseInstallReasonUnsupported failure);
 
     std::variant<PackageBaseArtifactIdentitySelectionFailure,
                  MixedPackageBaseInstallReasonUnsupported>
-            failure_;
+        failure_;
 
 #ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     struct AurUpdateRunnerTestTag {};
 
     PackageBaseArtifactInstallPreparationFailure(
-            AurUpdateRunnerTestTag,
-            PackageBaseArtifactIdentitySelectionFailure failure)
+        AurUpdateRunnerTestTag,
+        PackageBaseArtifactIdentitySelectionFailure failure)
         : failure_(
-                  std::in_place_type<
-                          PackageBaseArtifactIdentitySelectionFailure>,
-                  std::move(failure)) {
+              std::in_place_type<
+                  PackageBaseArtifactIdentitySelectionFailure>,
+              std::move(failure)) {
     }
 
     PackageBaseArtifactInstallPreparationFailure(
-            AurUpdateRunnerTestTag,
-            MixedPackageBaseInstallReasonUnsupported failure)
+        AurUpdateRunnerTestTag,
+        MixedPackageBaseInstallReasonUnsupported failure)
         : failure_(
-                  std::in_place_type<
-                          MixedPackageBaseInstallReasonUnsupported>,
-                  std::move(failure)) {
+              std::in_place_type<
+                  MixedPackageBaseInstallReasonUnsupported>,
+              std::move(failure)) {
     }
 #endif
 
     friend PackageBaseArtifactInstallPreparationResult
     prepare_package_base_artifact_install(
-            ValidatedPackageArtifactSet& artifacts,
-            const std::string& package_base,
-            const std::vector<RequiredPackageArtifactTarget>& required_targets,
-            const ArtifactInstallPreparationOptions& options,
-            const PacmanDatabasePaths& database_paths);
+        ValidatedPackageArtifactSet& artifacts,
+        const std::string& package_base,
+        const std::vector<RequiredPackageArtifactTarget>& required_targets,
+        const ArtifactInstallPreparationOptions& options,
+        const PacmanDatabasePaths& database_paths);
 };
 
 class PackageBaseArtifactInstallPreparationResult final {
 public:
     PackageBaseArtifactInstallPreparationResult() = delete;
     PackageBaseArtifactInstallPreparationResult(
-            const PackageBaseArtifactInstallPreparationResult&) = delete;
+        const PackageBaseArtifactInstallPreparationResult&) = delete;
     PackageBaseArtifactInstallPreparationResult(
-            PackageBaseArtifactInstallPreparationResult&&) noexcept = default;
+        PackageBaseArtifactInstallPreparationResult&&) noexcept = default;
     PackageBaseArtifactInstallPreparationResult& operator=(
-            const PackageBaseArtifactInstallPreparationResult&) = delete;
+        const PackageBaseArtifactInstallPreparationResult&) = delete;
     PackageBaseArtifactInstallPreparationResult& operator=(
-            PackageBaseArtifactInstallPreparationResult&&) noexcept = delete;
+        PackageBaseArtifactInstallPreparationResult&&) noexcept = delete;
     ~PackageBaseArtifactInstallPreparationResult() noexcept = default;
 
     [[nodiscard]] bool is_prepared() const noexcept;
     [[nodiscard]] PreparedPackageBaseArtifactInstall* prepared() noexcept;
     [[nodiscard]] const PreparedPackageBaseArtifactInstall* prepared()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const PackageBaseArtifactInstallPreparationFailure* failure()
-            const noexcept;
+        const noexcept;
 
 private:
     explicit PackageBaseArtifactInstallPreparationResult(
-            PreparedPackageBaseArtifactInstall&& prepared) noexcept;
+        PreparedPackageBaseArtifactInstall&& prepared) noexcept;
     explicit PackageBaseArtifactInstallPreparationResult(
-            PackageBaseArtifactInstallPreparationFailure&& failure) noexcept;
+        PackageBaseArtifactInstallPreparationFailure&& failure) noexcept;
 
     std::variant<PreparedPackageBaseArtifactInstall,
                  PackageBaseArtifactInstallPreparationFailure>
-            outcome_;
+        outcome_;
 
     friend PackageBaseArtifactInstallPreparationResult
     prepare_package_base_artifact_install(
-            ValidatedPackageArtifactSet& artifacts,
-            const std::string& package_base,
-            const std::vector<RequiredPackageArtifactTarget>& required_targets,
-            const ArtifactInstallPreparationOptions& options,
-            const PacmanDatabasePaths& database_paths);
+        ValidatedPackageArtifactSet& artifacts,
+        const std::string& package_base,
+        const std::vector<RequiredPackageArtifactTarget>& required_targets,
+        const ArtifactInstallPreparationOptions& options,
+        const PacmanDatabasePaths& database_paths);
 };
 
 // identity setやselection index/directiveをcaller入力にせず、一つのoperationで
 // query、selection、metadata、policy、ownership commitまで閉じる。
 PackageBaseArtifactInstallPreparationResult
 prepare_package_base_artifact_install(
-        ValidatedPackageArtifactSet& artifacts,
-        const std::string& package_base,
-        const std::vector<RequiredPackageArtifactTarget>& required_targets,
-        const ArtifactInstallPreparationOptions& options,
-        const PacmanDatabasePaths& database_paths);
+    ValidatedPackageArtifactSet& artifacts,
+    const std::string& package_base,
+    const std::vector<RequiredPackageArtifactTarget>& required_targets,
+    const ArtifactInstallPreparationOptions& options,
+    const PacmanDatabasePaths& database_paths);
 
 struct PackageBaseArtifactInstallExecutionArtifactResult {
-    std::size_t             artifact_index;
+    std::size_t artifact_index;
     ArtifactPackageIdentity identity;
-    DesiredInstallReason    desired_reason;
+    DesiredInstallReason desired_reason;
     PackageBaseArtifactInstallExpectedOutcome outcome;
 };
 
@@ -244,7 +244,7 @@ struct PackageBaseArtifactInstallExecutionArtifactResult {
 // path、stable artifact index、directive、expected/success outcomeを持たない。
 struct PackageBaseArtifactInstallTransactionAttempt {
     ArtifactPackageIdentity identity;
-    DesiredInstallReason    desired_reason;
+    DesiredInstallReason desired_reason;
 };
 
 enum class PackageBaseArtifactInstallTransactionFailureKind {
@@ -258,36 +258,36 @@ enum class PackageBaseArtifactInstallTransactionFailureKind {
 class PackageBaseArtifactInstallTransactionError final
     : public std::runtime_error {
     PackageBaseArtifactInstallTransactionFailureKind failure_kind_;
-    std::string                                      package_base_;
+    std::string package_base_;
     std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts_;
     std::optional<int> exit_code_;
     std::optional<ProductionSourceBuildStagedOutcome>
-            production_outcome_;
+        production_outcome_;
 
     PackageBaseArtifactInstallTransactionError(
-            PackageBaseArtifactInstallTransactionFailureKind failure_kind,
-            std::string package_base,
-            std::vector<PackageBaseArtifactInstallTransactionAttempt>
-                    attempts,
-            std::optional<int> exit_code,
-            const std::string& diagnostic);
+        PackageBaseArtifactInstallTransactionFailureKind failure_kind,
+        std::string package_base,
+        std::vector<PackageBaseArtifactInstallTransactionAttempt>
+            attempts,
+        std::optional<int> exit_code,
+        const std::string& diagnostic);
 
     friend PackageBaseArtifactInstallExecutionResult
     execute_prepared_package_base_artifact_install(
-            PreparedPackageBaseArtifactInstall& install,
-            const ArtifactInstallExecutionOptions& options);
+        PreparedPackageBaseArtifactInstall& install,
+        const ArtifactInstallExecutionOptions& options);
 
 #ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     struct AurUpdateRunnerTestTag {};
 
     PackageBaseArtifactInstallTransactionError(
-            AurUpdateRunnerTestTag,
-            PackageBaseArtifactInstallTransactionFailureKind failure_kind,
-            std::string package_base,
-            std::vector<PackageBaseArtifactInstallTransactionAttempt>
-                    attempts,
-            std::optional<int> exit_code,
-            const std::string& diagnostic)
+        AurUpdateRunnerTestTag,
+        PackageBaseArtifactInstallTransactionFailureKind failure_kind,
+        std::string package_base,
+        std::vector<PackageBaseArtifactInstallTransactionAttempt>
+            attempts,
+        std::optional<int> exit_code,
+        const std::string& diagnostic)
         : std::runtime_error(diagnostic), failure_kind_(failure_kind),
           package_base_(std::move(package_base)),
           attempts_(std::move(attempts)), exit_code_(exit_code) {
@@ -296,17 +296,17 @@ class PackageBaseArtifactInstallTransactionError final
 
 public:
     PackageBaseArtifactInstallTransactionError(
-            const PackageBaseArtifactInstallTransactionError&) = default;
+        const PackageBaseArtifactInstallTransactionError&) = default;
     PackageBaseArtifactInstallTransactionError(
-            PackageBaseArtifactInstallTransactionError&&) noexcept = default;
+        PackageBaseArtifactInstallTransactionError&&) noexcept = default;
     PackageBaseArtifactInstallTransactionError& operator=(
-            const PackageBaseArtifactInstallTransactionError&) = delete;
+        const PackageBaseArtifactInstallTransactionError&) = delete;
     PackageBaseArtifactInstallTransactionError& operator=(
-            PackageBaseArtifactInstallTransactionError&&) noexcept = delete;
+        PackageBaseArtifactInstallTransactionError&&) noexcept = delete;
     ~PackageBaseArtifactInstallTransactionError() = default;
 
     PackageBaseArtifactInstallTransactionFailureKind failure_kind()
-            const noexcept;
+        const noexcept;
     const std::string& package_base() const noexcept;
     const std::vector<PackageBaseArtifactInstallTransactionAttempt>&
     attempts() const noexcept;
@@ -318,7 +318,7 @@ public:
     // staged production outcomeを付与する。artifact transaction classificationや
     // retry/rollback authorityは変更しない。
     void attach_production_outcome(
-            ProductionSourceBuildStagedOutcome production_outcome);
+        ProductionSourceBuildStagedOutcome production_outcome);
 
     std::vector<PackageBaseArtifactInstallTransactionAttempt>
     release_attempts() && noexcept;
@@ -326,16 +326,16 @@ public:
 #ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     static PackageBaseArtifactInstallTransactionError
     make_for_aur_update_runner_test(
-            PackageBaseArtifactInstallTransactionFailureKind failure_kind,
-            std::string package_base,
-            std::vector<PackageBaseArtifactInstallTransactionAttempt>
-                    attempts,
-            std::optional<int> exit_code,
-            const std::string& diagnostic) {
+        PackageBaseArtifactInstallTransactionFailureKind failure_kind,
+        std::string package_base,
+        std::vector<PackageBaseArtifactInstallTransactionAttempt>
+            attempts,
+        std::optional<int> exit_code,
+        const std::string& diagnostic) {
         return PackageBaseArtifactInstallTransactionError(
-                AurUpdateRunnerTestTag{}, failure_kind,
-                std::move(package_base), std::move(attempts), exit_code,
-                diagnostic);
+            AurUpdateRunnerTestTag{}, failure_kind,
+            std::move(package_base), std::move(attempts), exit_code,
+            diagnostic);
     }
 #endif
 };
@@ -344,13 +344,13 @@ class PackageBaseArtifactInstallExecutionResult final {
 public:
     PackageBaseArtifactInstallExecutionResult() = delete;
     PackageBaseArtifactInstallExecutionResult(
-            const PackageBaseArtifactInstallExecutionResult&) = default;
+        const PackageBaseArtifactInstallExecutionResult&) = default;
     PackageBaseArtifactInstallExecutionResult(
-            PackageBaseArtifactInstallExecutionResult&&) noexcept = default;
+        PackageBaseArtifactInstallExecutionResult&&) noexcept = default;
     PackageBaseArtifactInstallExecutionResult& operator=(
-            const PackageBaseArtifactInstallExecutionResult&) = delete;
+        const PackageBaseArtifactInstallExecutionResult&) = delete;
     PackageBaseArtifactInstallExecutionResult& operator=(
-            PackageBaseArtifactInstallExecutionResult&&) noexcept = delete;
+        PackageBaseArtifactInstallExecutionResult&&) noexcept = delete;
     ~PackageBaseArtifactInstallExecutionResult() = default;
 
     const std::string& package_base() const noexcept;
@@ -366,23 +366,23 @@ public:
 
 private:
     PackageBaseArtifactInstallExecutionResult(
-            std::string package_base,
-            std::vector<PackageBaseArtifactInstallExecutionArtifactResult>
-                    selected_artifacts) noexcept;
+        std::string package_base,
+        std::vector<PackageBaseArtifactInstallExecutionArtifactResult>
+            selected_artifacts) noexcept;
 
     std::string package_base_;
     std::vector<PackageBaseArtifactInstallExecutionArtifactResult>
-            selected_artifacts_;
+        selected_artifacts_;
     bool is_success_ = true;
 
     friend PackageBaseArtifactInstallExecutionResult
     execute_prepared_package_base_artifact_install(
-            PreparedPackageBaseArtifactInstall& install,
-            const ArtifactInstallExecutionOptions& options);
+        PreparedPackageBaseArtifactInstall& install,
+        const ArtifactInstallExecutionOptions& options);
 };
 
 // POLICY(#268): raw path executorは公開せず、correlated one-shot capabilityだけを受ける。
 PackageBaseArtifactInstallExecutionResult
 execute_prepared_package_base_artifact_install(
-        PreparedPackageBaseArtifactInstall& install,
-        const ArtifactInstallExecutionOptions& options);
+    PreparedPackageBaseArtifactInstall& install,
+    const ArtifactInstallExecutionOptions& options);

@@ -27,7 +27,7 @@ struct BuildConfig {
 struct UserConfig {
     std::int64_t schema_version = 1;
     ReviewConfig review;
-    BuildConfig  build;
+    BuildConfig build;
 };
 
 class UserConfigError final : public std::runtime_error {

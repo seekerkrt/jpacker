@@ -18,7 +18,7 @@ enum class EventKind {
 };
 
 struct Event {
-    EventKind   kind;
+    EventKind kind;
     std::string subject;
 
     bool operator==(const Event&) const = default;
@@ -27,19 +27,19 @@ struct Event {
 void reset();
 
 void enqueue_source_preference_result(
-        const std::string& package_name,
-        StrictSourcePreferenceResult result);
+    const std::string& package_name,
+    StrictSourcePreferenceResult result);
 
 void set_database_paths(PacmanDatabasePaths paths);
 void set_database_failure(PackageMetadataFailure failure);
 
 void fail_supported_options_guard(std::string diagnostic);
 void fail_pkgdest_guard_on_call(
-        std::size_t one_based_call_index,
-        std::string diagnostic);
+    std::size_t one_based_call_index,
+    std::string diagnostic);
 void fail_reviewed_state_preflight_on_call(
-        std::size_t one_based_call_index,
-        std::string diagnostic);
+    std::size_t one_based_call_index,
+    std::string diagnostic);
 
 const std::vector<std::string>& strict_preference_read_history();
 const std::vector<bool>& supported_options_guard_history();

@@ -107,7 +107,7 @@ include / link graph、negative compile recipeを所有しない。
 | `build/cmake-production` | `BUILD_TESTING=OFF` | 通常の`make`、install / uninstall、production smoke |
 | `build/cmake-testing` | `BUILD_TESTING=ON` | developer、CTest、host / release validation、focused test |
 
-通常の`make`はproduction treeだけから`moguet`をbuildし、94個のC++ test executableや117件の
+通常の`make`はproduction treeだけから`moguet`をbuildし、96個のC++ test executableや119件の
 CTest registrationを不用意にbuildしない。`make test`はtesting treeをbuildし、CTestを実行してから
 gettext、shell、docs、packaging等のrepository-specific validationを実行する。`make test-<area>`は
 互換entrypointとして残るが、exact target / CTest selectionは
@@ -179,16 +179,16 @@ inventoryを所有する。
 
 | Inventory | Expected |
 | --- | ---: |
-| C++ test executables | 94 |
+| C++ test executables | 96 |
 | support / stub translation units | 29 |
 | link firewalls | 49 |
 | firewall descriptors | 49 |
-| CTest registrations | 117 |
+| CTest registrations | 119 |
 
 stub / real implementation exclusion、replacement ABI、ALPM stub、exact source closureをtarget-localに
 維持する。単一production libraryを全testへ無条件linkしない。negative compileはCTest registrationから
 effective CMake compiler / launcher / compile optionを取得し、GNU Make recursive compileへ戻さない。
-Make focused aliasとCMake focused targetは各97件で一致し、missing / unexpectedを0に保つ。
+Make focused aliasとCMake focused targetは各99件で一致し、missing / unexpectedを0に保つ。
 
 completion生成が使う`moguet-cli-authority-exporter`もCMake targetであり、Python generatorはcompilerを
 直接起動しない。このtargetは`EXCLUDE_FROM_ALL`なので通常のproduction/package buildへ混ざらず、
@@ -201,10 +201,12 @@ environment markerを自称してもこのfreshness boundaryを代替できな�
 #### Install / package consumer
 
 CMake install graphと`install_manifest.txt`がinstall / uninstall payloadのcanonical authorityである。
-Makeの`PREFIX`、`BINDIR`、completion、man、license、doc、locale destination overrideはCMake cacheへ
+Makeの`PREFIX`、`BINDIR`、internal `LIBEXECDIR`、completion、man、license、doc、locale destination overrideはCMake cacheへ
 mappingし、別のMake install graphを持たない。`PKGBUILD`はgenerator-neutralなCMake configure / build /
 install consumerで、`BUILD_TESTING=OFF`を指定する。package payload / permission / layout validationは
-repository validation側で維持し、通常のpackage buildへfull CTestを追加しない。
+repository validation側で維持し、通常のpackage buildへfull CTestを追加しない。current internal payloadには
+`/usr/libexec/moguet/moguet-alpm-receipt-helper` mode `0755`を含む。public commandとして扱わず、
+production root hookはconfigure / install graphが確定したabsolute helper pathだけを使用する。
 
 ### Host validation execution graph
 
@@ -254,6 +256,19 @@ statusをhostへ返す。実行containerは成功時・失敗時とも`--rm`で�
 このlaneはhostの通常build、`make test`、`make release-check`を置き換えず、それらから再帰的に
 呼び出さない。release前にはhost validationとcontainer validationを別々に確認する。
 
+Issue #404 Slice 3.6のroot trust / ALPM receipt boundaryは、追加のsecurity-specific installed fixtureで
+確認する。
+
+    make test-container-receipt
+
+このtargetは既存のlocal `moguet-arch-validation:local` imageをdependency/toolchain baseとしてreuseし、
+current sourceをhost bindではなくstandalone Docker contextからcopyする。image buildとruntimeはいずれも
+`--network=none`で、CMake install graphが配置したroot-owned
+`/usr/libexec/moguet/moguet-alpm-receipt-helper`だけをhookから実行する。actual Install、Upgrade non-match、
+solver-introduced dependency、transaction failure / ABORTをephemeral container package databaseで確認し、
+host package database、host `/run`、development-tree helperを共有しない。このtargetはsecurity Slice evidenceであり、
+host A–D、offline E、actual provider / AUR / local Fを相互に代替しない。
+
 Issue #372のlive aggregate gateは、provider selection、real AUR install、real local
 PKGBUILD build / installを単一のfail-fast recipeから別containerで順に実行する。parallel makeの
 contextでも後続laneを並行開始せず、providerまたはAUR failure後は残りのlaneを開始しない。
@@ -293,6 +308,7 @@ ccache / mold parityは必要なreleaseでの追加validationであり、上記d
         README.md \
         README.ja.md \
         RELEASE_NOTES.md \
+        containers/arch-validation/Dockerfile \
         docs/DEVELOPMENT.md \
         man/moguet.1 \
         man/ja/moguet.1 \
@@ -306,11 +322,11 @@ ccache / mold parityは必要なreleaseでの追加validationであり、上記d
 
     gh pr create --base main --head release/vX.Y.Z
 
-上記の`git add`は、現在のv2.4.1 release preparationでstage対象とするpathを1件ずつ明示した
+上記の`git add`は、現在のv2.5.0 release preparationでstage対象とするpathを1件ずつ明示した
 current release用のexact path setです。`git add .`や代表pathだけのpartial listへ置き換えません。commit前に
 cached path一覧をこのreleaseのdiffと再照合し、release scopeのunstaged / untracked pathや
-unrelatedなstaged pathがないことを確認します。現在のv2.4.1 release preparationでは、上記の
-9-path listがstage対象のcurrent release scopeのauthorityです。`PKGBUILD`はroot `VERSION`を動的に
+unrelatedなstaged pathがないことを確認します。現在のv2.5.0 release preparationでは、上記の
+10-path listがstage対象のcurrent release scopeのauthorityです。`PKGBUILD`はroot `VERSION`を動的に
 読み、published tagへprojectします。man templateは`@VERSION@` authorityを維持し、completionは
 version independent、`po/POTFILES.in`はsource inventory変更なしのため、これらはcurrent listへ
 含めません。v2.1.0固有の履歴は、下記の

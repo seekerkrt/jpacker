@@ -10,13 +10,13 @@
 #include <vector>
 
 inline constexpr std::size_t REVIEWED_SOURCE_LOGICAL_LINE_LIMIT =
-        1U * 1024U * 1024U;
+    1U * 1024U * 1024U;
 inline constexpr std::size_t REVIEWED_SOURCE_SINGLE_RAW_PATCH_LIMIT =
-        16U * 1024U * 1024U;
+    16U * 1024U * 1024U;
 
 struct ReviewedSourceTextLine {
     std::string bytes;
-    bool        has_newline = true;
+    bool has_newline = true;
 
     bool operator==(const ReviewedSourceTextLine&) const = default;
 };
@@ -35,7 +35,7 @@ enum class ReviewedSourcePatchLineKind {
 
 struct ReviewedSourcePatchLine {
     ReviewedSourcePatchLineKind kind = ReviewedSourcePatchLineKind::Context;
-    ReviewedSourceTextLine      line;
+    ReviewedSourceTextLine line;
 
     bool operator==(const ReviewedSourcePatchLine&) const = default;
 };
@@ -62,9 +62,9 @@ struct ReviewedSourceTextPatch {
 // reparsing raw Git patch output. This is a defense-in-depth check for a
 // materialized review that has already crossed the trusted 3B1 finalizer.
 [[nodiscard]] bool reviewed_source_text_patch_replays(
-        const ReviewedSourceTextPatch& patch,
-        const ReviewedSourceTextContent& old_content,
-        const ReviewedSourceTextContent& new_content);
+    const ReviewedSourceTextPatch& patch,
+    const ReviewedSourceTextContent& old_content,
+    const ReviewedSourceTextContent& new_content);
 
 enum class ReviewedSourcePatchFailureReason {
     RawPatchLimitExceeded,
@@ -83,16 +83,16 @@ struct ReviewedSourcePatchFailure {
 };
 
 using ReviewedSourcePatchParseResult = std::variant<
-        ReviewedSourceTextPatch,
-        ReviewedSourcePatchFailure>;
+    ReviewedSourceTextPatch,
+    ReviewedSourcePatchFailure>;
 
 // Parses the fixed, pathless blob-to-blob Git patch protocol and proves the
 // parsed hunks by replaying them against old_blob. Raw patch bytes are never
 // retained in the success value.
 [[nodiscard]] ReviewedSourcePatchParseResult
 parse_and_verify_reviewed_source_patch(
-        std::string_view patch_output,
-        const ReviewedSourceObjectId& old_object_id,
-        const ReviewedSourceObjectId& new_object_id,
-        std::string_view old_blob,
-        std::string_view new_blob);
+    std::string_view patch_output,
+    const ReviewedSourceObjectId& old_object_id,
+    const ReviewedSourceObjectId& new_object_id,
+    std::string_view old_blob,
+    std::string_view new_blob);

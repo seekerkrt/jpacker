@@ -1,0 +1,11 @@
+pkgname=moguet-receipt-dependency
+pkgver=1
+pkgrel=1
+pkgdesc='Moguet trusted receipt dependency v1 fixture'
+arch=('any')
+license=('GPL-3.0-or-later')
+
+package() {
+    install -Dm644 /dev/null \
+        "$pkgdir/usr/share/moguet-receipt/dependency-v1"
+}

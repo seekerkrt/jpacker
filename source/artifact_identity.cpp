@@ -19,8 +19,8 @@ namespace {
 [[noreturn]] void throw_malformed_artifact_identity() {
     // POLICY: package-controlled stdoutをdiagnosticへ埋め込まず、control characterも漏らさない。
     throw std::runtime_error(localization::format_translated_message(
-            // TRANSLATORS: {} is the literal command name "pacman".
-            "{} returned malformed package artifact identity.", "pacman"));
+        // TRANSLATORS: {} is the literal command name "pacman".
+        "{} returned malformed package artifact identity.", "pacman"));
 }
 
 bool is_ascii_control(unsigned char character) {
@@ -28,11 +28,11 @@ bool is_ascii_control(unsigned char character) {
 }
 
 ArtifactPackageIdentity parse_artifact_package_identity(
-        const std::string& raw_output) {
+    const std::string& raw_output) {
     if(raw_output.empty()) {
         throw std::runtime_error(localization::format_translated_message(
-                // TRANSLATORS: {} is the literal command name "pacman".
-                "{} returned no package artifact identity.", "pacman"));
+            // TRANSLATORS: {} is the literal command name "pacman".
+            "{} returned no package artifact identity.", "pacman"));
     }
     if(raw_output.find('\r') != std::string::npos) {
         throw_malformed_artifact_identity();
@@ -64,25 +64,25 @@ ArtifactPackageIdentity parse_artifact_package_identity(
     }
     if(!is_valid_package_name(package_name)) {
         throw std::runtime_error(localization::format_translated_message(
-                // TRANSLATORS: {} is the literal command name "pacman".
-                "{} returned an invalid package name for the artifact.",
-                "pacman"));
+            // TRANSLATORS: {} is the literal command name "pacman".
+            "{} returned an invalid package name for the artifact.",
+            "pacman"));
     }
 
     return ArtifactPackageIdentity{
-            std::move(package_name), std::move(full_version)};
+        std::move(package_name), std::move(full_version)};
 }
 
 CapturedCommandResult capture_artifact_package_identity_output(
-        const std::filesystem::path& artifact_path) {
+    const std::filesystem::path& artifact_path) {
     // POLICY(#406): archive identityはtransaction dependency resolutionから分離する。
     const std::vector<std::string> arguments = {
-            "pacman",
-            "-Qp",
-            "--color",
-            "never",
-            "--",
-            artifact_path.string(),
+        "pacman",
+        "-Qp",
+        "--color",
+        "never",
+        "--",
+        artifact_path.string(),
     };
     const std::string command = "LC_ALL=C " + shell_words::join(arguments);
     Logger::raw_cmd(command);
@@ -90,13 +90,13 @@ CapturedCommandResult capture_artifact_package_identity_output(
 }
 
 ArtifactPackageIdentity require_artifact_package_identity(
-        const CapturedCommandResult& result) {
+    const CapturedCommandResult& result) {
     if(result.exit_code != 0) {
         throw std::runtime_error(localization::format_translated_message(
-                // TRANSLATORS: The first placeholder is the literal command
-                // name "pacman"; the second is its numeric exit code.
-                "{} failed to read package artifact identity with exit code {}.",
-                "pacman", result.exit_code));
+            // TRANSLATORS: The first placeholder is the literal command
+            // name "pacman"; the second is its numeric exit code.
+            "{} failed to read package artifact identity with exit code {}.",
+            "pacman", result.exit_code));
     }
     return parse_artifact_package_identity(result.output);
 }
@@ -104,19 +104,19 @@ ArtifactPackageIdentity require_artifact_package_identity(
 } // namespace
 
 ArtifactPackageIdentity query_artifact_package_identity(
-        const ValidatedPackageArtifactPath& artifact) {
+    const ValidatedPackageArtifactPath& artifact) {
     // LANDMINE: pacmanへpathを渡す直前とstdoutを信用する直前の両方で、同じartifactを再証明する。
     artifact.require_validity();
 
     CapturedCommandResult result =
-            capture_artifact_package_identity_output(artifact.path());
+        capture_artifact_package_identity_output(artifact.path());
 
     artifact.require_validity();
     return require_artifact_package_identity(result);
 }
 
 ArtifactPackageIdentitySet query_artifact_package_identities(
-        const ValidatedPackageArtifactSet& artifacts) {
+    const ValidatedPackageArtifactSet& artifacts) {
     // LANDMINE(#268): individual pathではなくaggregate全体を、最初のcommandより前から
     // result返却直前まで各boundaryで再証明する。途中まで得たidentityは公開しない。
     artifacts.require_validity();
@@ -127,8 +127,8 @@ ArtifactPackageIdentitySet query_artifact_package_identities(
     for(std::size_t index = 0; index < artifact_count; ++index) {
         artifacts.require_validity();
         CapturedCommandResult result =
-                capture_artifact_package_identity_output(
-                        artifacts.path_at(index));
+            capture_artifact_package_identity_output(
+                artifacts.path_at(index));
         artifacts.require_validity();
         identities.push_back(require_artifact_package_identity(result));
     }

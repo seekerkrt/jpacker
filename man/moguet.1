@@ -1,4 +1,4 @@
-.TH MOGUET 1 "August 2026" "Moguet 2.4.1" "User Commands"
+.TH MOGUET 1 "August 2026" "Moguet 2.5.0" "User Commands"
 .\" parity:name
 .SH NAME
 moguet \- pacman-first AUR helper with verified source builds
@@ -122,6 +122,11 @@ instead when registered source preferences must not be scanned.
 .TP
 .B "upgrade-aur"
 Update installed packages that still resolve to exact AUR packages.
+An exact AUR package with only a conventional devel suffix and no newer normal
+AUR version is reported as requiring a check and blocks the whole AUR
+execution before mutation; it is not rebuilt automatically.
+Moguet does not yet compare upstream VCS revisions or publish devel build
+provenance.
 This target-less operation does not run
 .B pacman -Syu
 and does not update packages selected only by source-build preferences.
@@ -136,6 +141,42 @@ pacman, or sudo work in that phase; earlier phases may already have completed.
 This is not one atomic transaction: execution stops on the first failure,
 does not roll back completed package transactions, and reports later work as
 not attempted.
+.
+.PP
+Only after the repository system-upgrade phase fails, Moguet may append a
+supplemental possible repository/AUR cross-source version-lock diagnostic.
+It appears only when at least one candidate correlation can be presented;
+otherwise the existing failure output is unchanged. The absence of
+supplemental text does not itself prove candidate absence.
+.
+.PP
+The diagnostic can show the installed package and version corresponding
+to the observed repository candidate, the observed repository candidate and
+version, an installed foreign package and
+version with its direct exact dependency requirement, and an observed AUR
+replacement candidate with its direct runtime requirement.
+The foreign classification reflects that the installed package's exact name is
+absent from the currently configured repository metadata; it does not prove
+historical AUR provenance.
+.
+.PP
+An observed repository candidate is read-only metadata, not the actual pacman
+transaction target, and a possible candidate is not a confirmed blocker or an
+identified failure cause. A compatible replacement means only that the
+replacement candidate's direct runtime requirement is satisfied by the
+observed repository candidate version; it does not prove pacman's selection,
+the failure cause, or authorization for a safe coordinated update.
+Incompatible, not-found, unknown, query-failure, and ambiguous replacement
+outcomes remain distinct. A query failure is not a missing replacement, and
+an incomplete or failed observation is not candidate absence.
+.
+.PP
+This supplemental diagnostic does not replace the original pacman or sudo
+output, the existing Moguet failure result, or its failure exit behavior; the
+command remains failed. Moguet presents versions and dependency constraints
+for manual review. It does not automatically coordinate repository/AUR
+updates, remove and reinstall packages, roll back or retry the failed
+transaction, create a partial upgrade, or bypass dependency checks.
 .
 .TP
 .B "clean"
@@ -324,6 +365,9 @@ preflight.
 .B "-Qua"
 Ask pacman for foreign-package updates, including installed packages that may
 have AUR updates.
+Conventional exact-AUR devel suffix candidates without a newer normal version
+are shown with a check-required reason instead of a version-update arrow.
+This check-required result alone retains query exit status zero.
 This remains a pacman-compatible query and is distinct from executing
 .BR upgrade-aur .
 The pacman-compatible forms above are examples of delegated open grammar, not

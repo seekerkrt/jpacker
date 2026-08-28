@@ -18,8 +18,8 @@ constexpr std::string_view LOCALE_DIRECTORY = MOGUET_LOCALE_DIRECTORY;
 // NO_TRANSLATE(Issue #308): Compile-time developer diagnostic; it cannot
 // reach a user-visible CLI runtime path.
 static_assert(
-        !LOCALE_DIRECTORY.empty() && LOCALE_DIRECTORY.starts_with('/'),
-        "MOGUET_LOCALE_DIRECTORY must be an absolute path");
+    !LOCALE_DIRECTORY.empty() && LOCALE_DIRECTORY.starts_with('/'),
+    "MOGUET_LOCALE_DIRECTORY must be an absolute path");
 
 } // namespace
 

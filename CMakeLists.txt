@@ -122,6 +122,44 @@ include(GNUInstallDirs)
 
 include(cmake/MoguetSources.cmake)
 
+set(
+    MOGUET_INSTALL_INTERNAL_EXECUTABLE_DIRECTORY
+    "${CMAKE_INSTALL_LIBEXECDIR}/moguet"
+    CACHE PATH
+    "Installation directory for Moguet internal executables"
+)
+if(IS_ABSOLUTE "${MOGUET_INSTALL_INTERNAL_EXECUTABLE_DIRECTORY}")
+    set(
+        MOGUET_FULL_INTERNAL_EXECUTABLE_DIRECTORY
+        "${MOGUET_INSTALL_INTERNAL_EXECUTABLE_DIRECTORY}"
+    )
+else()
+    get_filename_component(
+        MOGUET_FULL_INTERNAL_EXECUTABLE_DIRECTORY
+        "${CMAKE_INSTALL_PREFIX}/${MOGUET_INSTALL_INTERNAL_EXECUTABLE_DIRECTORY}"
+        ABSOLUTE
+    )
+endif()
+set(
+    MOGUET_ALPM_RECEIPT_HELPER_INSTALL_PATH
+    "${MOGUET_FULL_INTERNAL_EXECUTABLE_DIRECTORY}/moguet-alpm-receipt-helper"
+)
+if(
+    NOT IS_ABSOLUTE "${MOGUET_ALPM_RECEIPT_HELPER_INSTALL_PATH}"
+    OR MOGUET_ALPM_RECEIPT_HELPER_INSTALL_PATH MATCHES "//"
+    OR MOGUET_ALPM_RECEIPT_HELPER_INSTALL_PATH MATCHES "(^|/)\\.(/|$)"
+    OR MOGUET_ALPM_RECEIPT_HELPER_INSTALL_PATH MATCHES "(^|/)\\.\\.(/|$)"
+    OR NOT MOGUET_ALPM_RECEIPT_HELPER_INSTALL_PATH MATCHES
+        "^/[A-Za-z0-9_./+-]+$"
+)
+    message(
+        FATAL_ERROR
+        "MOGUET_INSTALL_INTERNAL_EXECUTABLE_DIRECTORY cannot be represented "
+        "as a shell-free ALPM hook Exec path: "
+        "${MOGUET_INSTALL_INTERNAL_EXECUTABLE_DIRECTORY}"
+    )
+endif()
+
 find_package(CURL REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -307,6 +345,21 @@ function(
             )
         endif()
 
+        if(
+            _moguet_argument MATCHES
+                "^-DMOGUET_ALPM_RECEIPT_HELPER_PATH($|[^A-Za-z0-9_])"
+            OR _moguet_argument MATCHES
+                "^-UMOGUET_ALPM_RECEIPT_HELPER_PATH($|[^A-Za-z0-9_])"
+        )
+            message(
+                FATAL_ERROR
+                "External ${input_name} defines or undefines "
+                "MOGUET_ALPM_RECEIPT_HELPER_PATH, which is reserved for "
+                "the configured package install graph. Remove the external "
+                "helper-path -D or -U option."
+            )
+        endif()
+
         if(NOT _moguet_pending_macro_option STREQUAL "")
             if(
                 _moguet_argument MATCHES
@@ -318,6 +371,18 @@ function(
                     "MOGUET_VERSION, which is reserved for the repository "
                     "root VERSION file. Remove the external MOGUET_VERSION "
                     "-D or -U option."
+                )
+            endif()
+            if(
+                _moguet_argument MATCHES
+                    "^MOGUET_ALPM_RECEIPT_HELPER_PATH($|[^A-Za-z0-9_])"
+            )
+                message(
+                    FATAL_ERROR
+                    "External ${input_name} defines or undefines "
+                    "MOGUET_ALPM_RECEIPT_HELPER_PATH, which is reserved "
+                    "for the configured package install graph. Remove the "
+                    "external helper-path -D or -U option."
                 )
             endif()
             set(_moguet_pending_macro_option "")
@@ -418,6 +483,7 @@ target_compile_definitions(
     moguet_build_contract
     INTERFACE
     "MOGUET_VERSION=\"${MOGUET_VERSION}\""
+    "MOGUET_ALPM_RECEIPT_HELPER_PATH=\"${MOGUET_ALPM_RECEIPT_HELPER_INSTALL_PATH}\""
 )
 target_include_directories(
     moguet_build_contract
@@ -446,6 +512,28 @@ if(ALPM_INCLUDE_DIRS)
         ${ALPM_INCLUDE_DIRS}
     )
 endif()
+
+add_executable(
+    moguet-alpm-receipt-helper
+    ${MOGUET_ALPM_RECEIPT_HELPER_SOURCES}
+)
+set_target_properties(
+    moguet-alpm-receipt-helper
+    PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED YES
+        CXX_EXTENSIONS NO
+)
+target_link_libraries(
+    moguet-alpm-receipt-helper
+    PRIVATE
+        moguet_external_cppflags
+        moguet_build_contract
+)
+target_include_directories(
+    moguet-alpm-receipt-helper
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/source"
+)
 if(ALPM_CFLAGS_OTHER)
     target_compile_options(
         moguet_alpm_compile_contract
@@ -626,7 +714,7 @@ target_link_libraries(
         CURL::libcurl
         PkgConfig::ALPM
 )
-add_dependencies(moguet moguet_catalogs)
+add_dependencies(moguet moguet_catalogs moguet-alpm-receipt-helper)
 
 # Completion generation consumes a small C++ projection helper.  Keep its
 # compile/link graph in CMake and exclude it from ordinary production/package
@@ -678,6 +766,16 @@ add_dependencies(
 )
 
 install(TARGETS moguet RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(
+    TARGETS moguet-alpm-receipt-helper
+    # The executable destination and compiled hook Exec path are one security
+    # authority. An install-time --prefix must not relocate only the file.
+    RUNTIME DESTINATION "${MOGUET_FULL_INTERNAL_EXECUTABLE_DIRECTORY}"
+    PERMISSIONS
+        OWNER_READ OWNER_WRITE OWNER_EXECUTE
+        GROUP_READ GROUP_EXECUTE
+        WORLD_READ WORLD_EXECUTE
+)
 foreach(_moguet_locale _moguet_catalog_file IN ZIP_LISTS MOGUET_LINGUAS MOGUET_CATALOG_FILES)
     install(
         FILES "${_moguet_catalog_file}"
@@ -816,6 +914,7 @@ foreach(
     _moguet_install_destination
     IN ITEMS
         "${CMAKE_INSTALL_BINDIR}"
+        "${MOGUET_FULL_INTERNAL_EXECUTABLE_DIRECTORY}"
         "${MOGUET_INSTALL_BASH_COMPLETION_DIRECTORY}"
         "${MOGUET_INSTALL_ZSH_COMPLETION_DIRECTORY}"
         "${MOGUET_INSTALL_FISH_COMPLETION_DIRECTORY}"

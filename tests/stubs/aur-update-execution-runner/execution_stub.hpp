@@ -28,7 +28,7 @@ enum class InvocationEventKind {
 
 struct Event {
     std::size_t call_index = 0;
-    EventKind   kind = EventKind::Checkout;
+    EventKind kind = EventKind::Checkout;
     // singular compatibility snapshot。multipleではempty。
     std::string package_name;
     std::string package_base;
@@ -41,9 +41,9 @@ struct ExpectedExecution {
     std::size_t call_index = 0;
     std::string package_base;
     std::vector<RequiredPackageArtifactTarget> ordered_required_targets;
-    bool               needed = false;
+    bool needed = false;
     PacmanDatabasePaths database_paths;
-    AppConfig           config;
+    AppConfig config;
 };
 
 struct ExecutionCall {
@@ -51,67 +51,67 @@ struct ExecutionCall {
     std::string package_base;
     std::vector<RequiredPackageArtifactTarget> ordered_required_targets;
     // singular compatibility snapshot。multipleではempty。
-    std::string              package_name;
+    std::string package_name;
     std::vector<std::string> plan_package_names;
-    bool                     needed = false;
-    PacmanDatabasePaths      database_paths;
-    AppConfig                config;
-    std::vector<EventKind>   events;
+    bool needed = false;
+    PacmanDatabasePaths database_paths;
+    AppConfig config;
+    std::vector<EventKind> events;
 };
 
 void reset();
 
 void enqueue_success(
-        ExpectedExecution expected,
-        std::string returned_package_base,
-        std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
-        std::vector<ArtifactPackageIdentity> unselected_artifacts = {});
+    ExpectedExecution expected,
+    std::string returned_package_base,
+    std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
+    std::vector<ArtifactPackageIdentity> unselected_artifacts = {});
 
 void enqueue_cleanup_failure(
-        ExpectedExecution expected,
-        std::string returned_package_base,
-        std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
-        std::vector<ArtifactPackageIdentity> unselected_artifacts,
-        std::string diagnostic);
+    ExpectedExecution expected,
+    std::string returned_package_base,
+    std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
+    std::vector<ArtifactPackageIdentity> unselected_artifacts,
+    std::string diagnostic);
 
 void enqueue_phase_failure(
-        ExpectedExecution expected,
-        SeparatedPackageBaseSourceBuildFailurePhase phase,
-        std::string diagnostic,
-        std::optional<ReviewedSourceProductionFailure>
-                reviewed_source_failure = std::nullopt,
-        std::optional<PackageMetadataFailure>
-                package_metadata_failure = std::nullopt,
-        std::optional<ProductionSourceBuildStagedOutcome>
-                production_outcome = std::nullopt);
+    ExpectedExecution expected,
+    SeparatedPackageBaseSourceBuildFailurePhase phase,
+    std::string diagnostic,
+    std::optional<ReviewedSourceProductionFailure>
+        reviewed_source_failure = std::nullopt,
+    std::optional<PackageMetadataFailure>
+        package_metadata_failure = std::nullopt,
+    std::optional<ProductionSourceBuildStagedOutcome>
+        production_outcome = std::nullopt);
 
 void enqueue_selection_failure(
-        ExpectedExecution expected,
-        PackageBaseArtifactIdentitySelectionFailure failure,
-        std::string diagnostic);
+    ExpectedExecution expected,
+    PackageBaseArtifactIdentitySelectionFailure failure,
+    std::string diagnostic);
 
 void enqueue_mixed_reason_failure(
-        ExpectedExecution expected,
-        MixedPackageBaseInstallReasonUnsupported failure,
-        std::string diagnostic);
+    ExpectedExecution expected,
+    MixedPackageBaseInstallReasonUnsupported failure,
+    std::string diagnostic);
 
 void enqueue_metadata_failure(
-        ExpectedExecution expected,
-        PackageMetadataFailure failure);
+    ExpectedExecution expected,
+    PackageMetadataFailure failure);
 
 void enqueue_trusted_cache_failure(
-        ExpectedExecution expected,
-        TrustedCacheFailure failure);
+    ExpectedExecution expected,
+    TrustedCacheFailure failure);
 
 void enqueue_transaction_failure(
-        ExpectedExecution expected,
-        PackageBaseArtifactInstallTransactionFailureKind failure_kind,
-        std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts,
-        std::optional<int> exit_code,
-        std::string diagnostic,
-        std::optional<std::string> returned_package_base = std::nullopt,
-        std::optional<ProductionSourceBuildStagedOutcome>
-                production_outcome = std::nullopt);
+    ExpectedExecution expected,
+    PackageBaseArtifactInstallTransactionFailureKind failure_kind,
+    std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts,
+    std::optional<int> exit_code,
+    std::string diagnostic,
+    std::optional<std::string> returned_package_base = std::nullopt,
+    std::optional<ProductionSourceBuildStagedOutcome>
+        production_outcome = std::nullopt);
 
 void enqueue_unknown_failure(ExpectedExecution expected);
 

@@ -31,10 +31,10 @@ void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
 }
 
-template<typename Expected, typename... Alternatives>
+template <typename Expected, typename... Alternatives>
 Expected require_alternative(
-        const std::variant<Alternatives...>& result,
-        const std::string& context) {
+    const std::variant<Alternatives...>& result,
+    const std::string& context) {
     const Expected* value = std::get_if<Expected>(&result);
     if(value == nullptr) {
         throw std::runtime_error(context + ": unexpected result alternative");
@@ -44,141 +44,141 @@ Expected require_alternative(
 
 PackageMetadataSession open_installed_session() {
     return PackageMetadataSession::open(
-            PacmanDatabasePaths{"/", "/var/lib/pacman/"});
+        PacmanDatabasePaths{"/", "/var/lib/pacman/"});
 }
 
 PacmanRepositoryConfiguration repository_configuration(
-        std::vector<std::string> repository_names = {"core", "extra"}) {
+    std::vector<std::string> repository_names = {"core", "extra"}) {
     return PacmanRepositoryConfiguration{
-            PacmanDatabasePaths{"/", "/var/lib/pacman/"},
-            std::move(repository_names)};
+        PacmanDatabasePaths{"/", "/var/lib/pacman/"},
+        std::move(repository_names)};
 }
 
 RepositoryExactPackageObservation require_repository_observation(
-        const RepositoryExactPackageObservationResult& result,
-        const std::string& context) {
+    const RepositoryExactPackageObservationResult& result,
+    const std::string& context) {
     return require_alternative<RepositoryExactPackageObservation>(
-            result,
-            context);
+        result,
+        context);
 }
 
 DeclaredPackageRelation require_relation(
-        PackageRelationKind kind, const std::string& specification) {
+    PackageRelationKind kind, const std::string& specification) {
     const DeclaredPackageRelationParseResult parsed =
-            parse_declared_package_relation(
-                    "declaring-child", "declaring-base", kind,
-                    specification);
+        parse_declared_package_relation(
+            "declaring-child", "declaring-base", kind,
+            specification);
     expect(parsed.relation() != nullptr, "Relation fixture did not parse");
     return *parsed.relation();
 }
 
 PackageRelationInstalledDatabaseIdentity installed_relation_source() {
     return PackageRelationInstalledDatabaseIdentity{
-            "/", "/var/lib/pacman"};
+        "/", "/var/lib/pacman"};
 }
 
 RepositoryExactPackage repository_relation_package(
-        ConfiguredRepositoryIdentity repository,
-        std::string package_name,
-        std::vector<RepositoryProviderCapability> provides = {}) {
+    ConfiguredRepositoryIdentity repository,
+    std::string package_name,
+    std::vector<RepositoryProviderCapability> provides = {}) {
     return RepositoryExactPackage{
-            std::move(repository),
-            package_name,
-            package_name + "-base",
-            ObservedVersion::available(
-                    ObservedVersionSource::RepositoryExactPackage, "1"),
-            std::move(provides)};
+        std::move(repository),
+        package_name,
+        package_name + "-base",
+        ObservedVersion::available(
+            ObservedVersionSource::RepositoryExactPackage, "1"),
+        std::move(provides)};
 }
 
 RepositoryProviderCapability repository_relation_capability(
-        const std::string& specification) {
+    const std::string& specification) {
     const ProviderCapabilityParseResult parsed =
-            parse_provider_capability(specification);
+        parse_provider_capability(specification);
     expect(
-            parsed.capability() != nullptr,
-            "Repository relation capability fixture did not parse");
+        parsed.capability() != nullptr,
+        "Repository relation capability fixture did not parse");
     const ProviderCapability capability = *parsed.capability();
     return RepositoryProviderCapability{
-            capability,
-            capability.version().has_value()
-                    ? ObservedVersion::available(
-                              ObservedVersionSource::
-                                      RepositoryProviderCapability,
-                              capability.version().value())
-                    : ObservedVersion::unknown(
-                              ObservedVersionSource::
-                                      RepositoryProviderCapability,
-                              ObservedVersionUnknownReason::
-                                      UnversionedProviderCapability)};
+        capability,
+        capability.version().has_value()
+            ? ObservedVersion::available(
+                  ObservedVersionSource::
+                      RepositoryProviderCapability,
+                  capability.version().value())
+            : ObservedVersion::unknown(
+                  ObservedVersionSource::
+                      RepositoryProviderCapability,
+                  ObservedVersionUnknownReason::
+                      UnversionedProviderCapability)};
 }
 
 RepositoryProviderCapability require_single_provide_projection(
-        RepositoryProvidedPackageMetadata metadata,
-        ObservedVersionSource source,
-        const std::string& context) {
+    RepositoryProvidedPackageMetadata metadata,
+    ObservedVersionSource source,
+    const std::string& context) {
     const std::vector<RepositoryProviderCapability> projected =
-            require_alternative<
-                    std::vector<RepositoryProviderCapability>>(
-                    project_package_metadata_provides(
-                            {std::move(metadata)}, source),
-                    context);
+        require_alternative<
+            std::vector<RepositoryProviderCapability>>(
+            project_package_metadata_provides(
+                {std::move(metadata)}, source),
+            context);
     expect(projected.size() == 1, context + ": capability count differs");
     return projected.front();
 }
 
 DependencyConstraintParseFailure require_provide_projection_failure(
-        RepositoryProvidedPackageMetadata metadata,
-        const std::string& context) {
+    RepositoryProvidedPackageMetadata metadata,
+    const std::string& context) {
     return require_alternative<DependencyConstraintParseFailure>(
-            project_package_metadata_provides(
-                    {std::move(metadata)},
-                    ObservedVersionSource::RepositoryProviderCapability),
-            context);
+        project_package_metadata_provides(
+            {std::move(metadata)},
+            ObservedVersionSource::RepositoryProviderCapability),
+        context);
 }
 
 PackageMetadataFailure repository_relation_query_failure(
-        const std::string& diagnostic) {
+    const std::string& diagnostic) {
     return PackageMetadataFailure{
-            PackageMetadataErrorCode::QueryFailed, diagnostic};
+        PackageMetadataErrorCode::QueryFailed, diagnostic};
 }
 
 void expect_version_comparison(
-        const std::string& lhs, const std::string& rhs,
-        const std::string& result) {
+    const std::string& lhs, const std::string& rhs,
+    const std::string& result) {
     expect(
+        ::setenv(
+            "MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS",
+            lhs.c_str(), 1) == 0 &&
             ::setenv(
-                    "MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS",
-                    lhs.c_str(), 1) == 0 &&
-                    ::setenv(
-                            "MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS",
-                            rhs.c_str(), 1) == 0 &&
-                    ::setenv(
-                            "MOGUET_TEST_ALPM_VERCMP_RESULT",
-                            result.c_str(), 1) == 0,
-            "Failed to configure version comparison stub");
+                "MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS",
+                rhs.c_str(), 1) == 0 &&
+            ::setenv(
+                "MOGUET_TEST_ALPM_VERCMP_RESULT",
+                result.c_str(), 1) == 0,
+        "Failed to configure version comparison stub");
 }
 
 void test_installed_exact_package_observed_version() {
     stub::reset_alpm_stub();
     stub::set_package_metadata(
-            "installed-package", "2:1.2-3", ALPM_PKG_REASON_EXPLICIT);
+        "installed-package", "2:1.2-3", ALPM_PKG_REASON_EXPLICIT);
     PackageMetadataSession session = open_installed_session();
 
     InstalledExactPackageObservationResult result =
-            observe_installed_exact_package(session, "installed-package");
+        observe_installed_exact_package(session, "installed-package");
     const InstalledExactPackage& installed =
-            require_alternative<InstalledExactPackage>(
-                    result,
-                    "installed exact package");
+        require_alternative<InstalledExactPackage>(
+            result,
+            "installed exact package");
     expect(
-            installed.package_name == "installed-package",
-            "Installed package identity was not retained");
+        installed.package_name == "installed-package",
+        "Installed package identity was not retained");
     expect(
-            installed.observed_version.source() ==
-                            ObservedVersionSource::InstalledExactPackage &&
-                    installed.observed_version.version() != nullptr &&
-                    *installed.observed_version.version() == "2:1.2-3",
-            "Installed exact version was not projected as authoritative input");
+        installed.observed_version.source() ==
+                ObservedVersionSource::InstalledExactPackage &&
+            installed.observed_version.version() != nullptr &&
+            *installed.observed_version.version() == "2:1.2-3",
+        "Installed exact version was not projected as authoritative input");
 }
 
 void test_installed_absence_and_query_failure_are_distinct() {
@@ -186,141 +186,141 @@ void test_installed_absence_and_query_failure_are_distinct() {
     stub::set_package_absent();
     PackageMetadataSession absent_session = open_installed_session();
     InstalledExactPackageObservationResult absent_result =
-            observe_installed_exact_package(absent_session, "missing-package");
+        observe_installed_exact_package(absent_session, "missing-package");
     const InstalledExactPackageAbsent& absent =
-            require_alternative<InstalledExactPackageAbsent>(
-                    absent_result,
-                    "installed confirmed absence");
+        require_alternative<InstalledExactPackageAbsent>(
+            absent_result,
+            "installed confirmed absence");
     expect(
-            absent.package_name == "missing-package",
-            "Installed absence lost package identity");
+        absent.package_name == "missing-package",
+        "Installed absence lost package identity");
 
     stub::reset_alpm_stub();
     stub::set_package_query_failure(ALPM_ERR_DB_OPEN);
     PackageMetadataSession failure_session = open_installed_session();
     InstalledExactPackageObservationResult failure_result =
-            observe_installed_exact_package(failure_session, "failed-package");
+        observe_installed_exact_package(failure_session, "failed-package");
     const InstalledExactPackageQueryFailure& failure =
-            require_alternative<InstalledExactPackageQueryFailure>(
-                    failure_result,
-                    "installed query failure");
+        require_alternative<InstalledExactPackageQueryFailure>(
+            failure_result,
+            "installed query failure");
     expect(
-            failure.package_name == "failed-package" &&
-                    failure.failure.code == PackageMetadataErrorCode::QueryFailed,
-            "Installed query failure was flattened or lost provenance");
+        failure.package_name == "failed-package" &&
+            failure.failure.code == PackageMetadataErrorCode::QueryFailed,
+        "Installed query failure was flattened or lost provenance");
 }
 
 void test_installed_missing_and_invalid_versions_are_typed() {
     stub::reset_alpm_stub();
     stub::set_package_metadata(
-            "missing-version", "1.0-1", ALPM_PKG_REASON_DEPEND);
+        "missing-version", "1.0-1", ALPM_PKG_REASON_DEPEND);
     stub::set_null_package_version();
     PackageMetadataSession missing_session = open_installed_session();
     const InstalledExactPackage& missing =
-            require_alternative<InstalledExactPackage>(
-                    observe_installed_exact_package(
-                            missing_session,
-                            "missing-version"),
-                    "installed missing version");
+        require_alternative<InstalledExactPackage>(
+            observe_installed_exact_package(
+                missing_session,
+                "missing-version"),
+            "installed missing version");
     expect(
-            missing.observed_version.unknown_reason() != nullptr &&
-                    *missing.observed_version.unknown_reason() ==
-                            ObservedVersionUnknownReason::MissingVersionMetadata,
-            "Installed missing version was not retained as Unknown");
+        missing.observed_version.unknown_reason() != nullptr &&
+            *missing.observed_version.unknown_reason() ==
+                ObservedVersionUnknownReason::MissingVersionMetadata,
+        "Installed missing version was not retained as Unknown");
 
     stub::reset_alpm_stub();
     stub::set_package_metadata(
-            "invalid-version", "1.0 bad", ALPM_PKG_REASON_DEPEND);
+        "invalid-version", "1.0 bad", ALPM_PKG_REASON_DEPEND);
     PackageMetadataSession invalid_session = open_installed_session();
     const InstalledExactPackage& invalid =
-            require_alternative<InstalledExactPackage>(
-                    observe_installed_exact_package(
-                            invalid_session,
-                            "invalid-version"),
-                    "installed invalid version");
+        require_alternative<InstalledExactPackage>(
+            observe_installed_exact_package(
+                invalid_session,
+                "invalid-version"),
+            "installed invalid version");
     expect(
-            invalid.observed_version.invalid_reason() != nullptr &&
-                    *invalid.observed_version.invalid_reason() ==
-                            ConstraintInvalidReason::InvalidVersionIdentity,
-            "Installed invalid version was not retained as Invalid");
+        invalid.observed_version.invalid_reason() != nullptr &&
+            *invalid.observed_version.invalid_reason() ==
+                ConstraintInvalidReason::InvalidVersionIdentity,
+        "Installed invalid version was not retained as Invalid");
 }
 
 void test_repository_exact_packages_retain_order_and_provenance() {
     stub::reset_alpm_stub();
     stub::set_repository_package_metadata(
-            "core", "shared-package", 10, 20);
+        "core", "shared-package", 10, 20);
     stub::set_repository_package_version(
-            "core", "shared-package", "3.0-1");
+        "core", "shared-package", "3.0-1");
     stub::set_repository_package_metadata(
-            "extra", "shared-package", 30, 40);
+        "extra", "shared-package", 30, 40);
     stub::set_repository_package_version(
-            "extra", "shared-package", "2.0-2");
+        "extra", "shared-package", "2.0-2");
     PacmanRepositoryConfiguration configuration = repository_configuration();
 
     const RepositoryExactPackageObservation& observation =
-            require_repository_observation(
-                    observe_repository_exact_package(
-                            configuration,
-                            "shared-package"),
-                    "repository order and provenance");
+        require_repository_observation(
+            observe_repository_exact_package(
+                configuration,
+                "shared-package"),
+            "repository order and provenance");
     expect(
-            observation.configured_repository_order ==
-                    std::vector<std::string>({"core", "extra"}),
-            "Configured repository order was not retained");
+        observation.configured_repository_order ==
+            std::vector<std::string>({"core", "extra"}),
+        "Configured repository order was not retained");
     expect(
-            observation.source_results.size() == 2,
-            "Repository observation did not retain every configured source");
+        observation.source_results.size() == 2,
+        "Repository observation did not retain every configured source");
 
     const RepositoryExactPackage& core =
-            require_alternative<RepositoryExactPackage>(
-                    observation.source_results[0],
-                    "core exact package");
+        require_alternative<RepositoryExactPackage>(
+            observation.source_results[0],
+            "core exact package");
     const RepositoryExactPackage& extra =
-            require_alternative<RepositoryExactPackage>(
-                    observation.source_results[1],
-                    "extra exact package");
+        require_alternative<RepositoryExactPackage>(
+            observation.source_results[1],
+            "extra exact package");
     expect(
-            core.repository == ConfiguredRepositoryIdentity{"core", 0} &&
-                    core.package_name == "shared-package" &&
-                    core.package_base == "shared-package" &&
-                    core.package_version.version() != nullptr &&
-                    *core.package_version.version() == "3.0-1",
-            "First repository exact package identity/version differs");
+        core.repository == ConfiguredRepositoryIdentity{"core", 0} &&
+            core.package_name == "shared-package" &&
+            core.package_base == "shared-package" &&
+            core.package_version.version() != nullptr &&
+            *core.package_version.version() == "3.0-1",
+        "First repository exact package identity/version differs");
     expect(
-            extra.repository == ConfiguredRepositoryIdentity{"extra", 1} &&
-                    extra.package_name == "shared-package" &&
-                    extra.package_base == "shared-package" &&
-                    extra.package_version.version() != nullptr &&
-                    *extra.package_version.version() == "2.0-2",
-            "Second repository exact package identity/version differs");
+        extra.repository == ConfiguredRepositoryIdentity{"extra", 1} &&
+            extra.package_name == "shared-package" &&
+            extra.package_base == "shared-package" &&
+            extra.package_version.version() != nullptr &&
+            *extra.package_version.version() == "2.0-2",
+        "Second repository exact package identity/version differs");
 }
 
 void test_repository_split_package_base_is_lossless() {
     stub::reset_alpm_stub();
     stub::set_repository_package_metadata(
-            "core", "suite-child", 10, 20);
+        "core", "suite-child", 10, 20);
     stub::set_repository_package_version(
-            "core", "suite-child", "4.0-1");
+        "core", "suite-child", "4.0-1");
     stub::set_repository_package_base(
-            "core", "suite-child", "suite");
+        "core", "suite-child", "suite");
     PacmanRepositoryConfiguration configuration =
-            repository_configuration({"core"});
+        repository_configuration({"core"});
 
     const RepositoryExactPackageObservation& observation =
-            require_repository_observation(
-                    observe_repository_exact_package(
-                            configuration, "suite-child"),
-                    "repository split PackageBase projection");
+        require_repository_observation(
+            observe_repository_exact_package(
+                configuration, "suite-child"),
+            "repository split PackageBase projection");
     const RepositoryExactPackage& package =
-            require_alternative<RepositoryExactPackage>(
-                    observation.source_results.front(),
-                    "repository split exact package");
+        require_alternative<RepositoryExactPackage>(
+            observation.source_results.front(),
+            "repository split exact package");
     expect(
-            package.package_name == "suite-child" &&
-                    package.package_base == "suite" &&
-                    package.package_version.version() != nullptr &&
-                    *package.package_version.version() == "4.0-1",
-            "Repository constraint projection flattened split PackageBase");
+        package.package_name == "suite-child" &&
+            package.package_base == "suite" &&
+            package.package_version.version() != nullptr &&
+            *package.package_version.version() == "4.0-1",
+        "Repository constraint projection flattened split PackageBase");
 }
 
 void test_repository_confirmed_absence() {
@@ -330,68 +330,68 @@ void test_repository_confirmed_absence() {
     PacmanRepositoryConfiguration configuration = repository_configuration();
 
     const RepositoryExactPackageObservation& observation =
-            require_repository_observation(
-                    observe_repository_exact_package(
-                            configuration,
-                            "missing-package"),
-                    "repository confirmed absence");
+        require_repository_observation(
+            observe_repository_exact_package(
+                configuration,
+                "missing-package"),
+            "repository confirmed absence");
     expect(
-            observation.source_results.size() == 2,
-            "Repository absence did not retain all configured sources");
+        observation.source_results.size() == 2,
+        "Repository absence did not retain all configured sources");
     const RepositoryExactPackageAbsent& core =
-            require_alternative<RepositoryExactPackageAbsent>(
-                    observation.source_results[0],
-                    "core confirmed absence");
+        require_alternative<RepositoryExactPackageAbsent>(
+            observation.source_results[0],
+            "core confirmed absence");
     const RepositoryExactPackageAbsent& extra =
-            require_alternative<RepositoryExactPackageAbsent>(
-                    observation.source_results[1],
-                    "extra confirmed absence");
+        require_alternative<RepositoryExactPackageAbsent>(
+            observation.source_results[1],
+            "extra confirmed absence");
     expect(
-            core.repository == ConfiguredRepositoryIdentity{"core", 0} &&
-                    extra.repository ==
-                            ConfiguredRepositoryIdentity{"extra", 1},
-            "Repository absence lost configured provenance/order");
+        core.repository == ConfiguredRepositoryIdentity{"core", 0} &&
+            extra.repository ==
+                ConfiguredRepositoryIdentity{"extra", 1},
+        "Repository absence lost configured provenance/order");
 }
 
 void test_partial_repository_failure_is_not_absence() {
     stub::reset_alpm_stub();
     stub::set_repository_package_query_failure(
-            "core", "partial-package", ALPM_ERR_DB_OPEN);
+        "core", "partial-package", ALPM_ERR_DB_OPEN);
     stub::set_repository_package_metadata(
-            "extra", "partial-package", 30, 40);
+        "extra", "partial-package", 30, 40);
     stub::set_repository_package_version(
-            "extra", "partial-package", "1.5-2");
+        "extra", "partial-package", "1.5-2");
     PacmanRepositoryConfiguration configuration = repository_configuration();
 
     const RepositoryExactPackageObservation& observation =
-            require_repository_observation(
-                    observe_repository_exact_package(
-                            configuration,
-                            "partial-package"),
-                    "partial repository failure");
+        require_repository_observation(
+            observe_repository_exact_package(
+                configuration,
+                "partial-package"),
+            "partial repository failure");
     const RepositoryExactPackageSourceFailure& core_failure =
-            require_alternative<RepositoryExactPackageSourceFailure>(
-                    observation.source_results[0],
-                    "failed repository source");
+        require_alternative<RepositoryExactPackageSourceFailure>(
+            observation.source_results[0],
+            "failed repository source");
     const PackageMetadataFailure& query_failure =
-            require_alternative<PackageMetadataFailure>(
-                    core_failure.reason,
-                    "repository query failure reason");
+        require_alternative<PackageMetadataFailure>(
+            core_failure.reason,
+            "repository query failure reason");
     const RepositoryExactPackage& extra_package =
-            require_alternative<RepositoryExactPackage>(
-                    observation.source_results[1],
-                    "successful repository after failure");
+        require_alternative<RepositoryExactPackage>(
+            observation.source_results[1],
+            "successful repository after failure");
     expect(
-            core_failure.repository ==
-                            ConfiguredRepositoryIdentity{"core", 0} &&
-                    query_failure.code == PackageMetadataErrorCode::QueryFailed,
-            "Repository query failure lost source provenance");
+        core_failure.repository ==
+                ConfiguredRepositoryIdentity{"core", 0} &&
+            query_failure.code == PackageMetadataErrorCode::QueryFailed,
+        "Repository query failure lost source provenance");
     expect(
-            extra_package.repository ==
-                            ConfiguredRepositoryIdentity{"extra", 1} &&
-                    extra_package.package_version.version() != nullptr &&
-                    *extra_package.package_version.version() == "1.5-2",
-            "Later repository result was lost after a partial failure");
+        extra_package.repository ==
+                ConfiguredRepositoryIdentity{"extra", 1} &&
+            extra_package.package_version.version() != nullptr &&
+            *extra_package.package_version.version() == "1.5-2",
+        "Later repository result was lost after a partial failure");
 }
 
 enum class RepositoryOpenFailurePhase {
@@ -401,18 +401,18 @@ enum class RepositoryOpenFailurePhase {
 };
 
 void expect_partial_repository_open_failure(
-        RepositoryOpenFailurePhase phase,
-        const std::vector<std::string>& expected_operations,
-        const std::string& context) {
+    RepositoryOpenFailurePhase phase,
+    const std::vector<std::string>& expected_operations,
+    const std::string& context) {
     stub::reset_alpm_stub();
     stub::set_repository_package_metadata(
-            "core", "open-partial-package", 10, 20);
+        "core", "open-partial-package", 10, 20);
     stub::set_repository_package_version(
-            "core", "open-partial-package", "3.0-1");
+        "core", "open-partial-package", "3.0-1");
     stub::set_repository_package_metadata(
-            "testing", "open-partial-package", 30, 40);
+        "testing", "open-partial-package", 30, 40);
     stub::set_repository_package_version(
-            "testing", "open-partial-package", "4.0-2");
+        "testing", "open-partial-package", "4.0-2");
     switch(phase) {
         case RepositoryOpenFailurePhase::Registration:
             stub::set_sync_database_register_failure("extra");
@@ -426,96 +426,111 @@ void expect_partial_repository_open_failure(
     }
 
     PacmanRepositoryConfiguration configuration =
-            repository_configuration({"core", "extra", "testing"});
+        repository_configuration({"core", "extra", "testing"});
     const RepositoryExactPackageObservation& observation =
-            require_repository_observation(
-                    observe_repository_exact_package(
-                            configuration,
-                            "open-partial-package"),
-                    context);
+        require_repository_observation(
+            observe_repository_exact_package(
+                configuration,
+                "open-partial-package"),
+            context);
     expect(
-            observation.configured_repository_order ==
-                    std::vector<std::string>({"core", "extra", "testing"}),
-            context + ": configured order differs");
+        observation.configured_repository_order ==
+            std::vector<std::string>({"core", "extra", "testing"}),
+        context + ": configured order differs");
     expect(
-            observation.source_results.size() == 3,
-            context + ": source result count differs");
+        observation.source_results.size() == 3,
+        context + ": source result count differs");
 
     const RepositoryExactPackage& core =
-            require_alternative<RepositoryExactPackage>(
-                    observation.source_results[0],
-                    context + ": core source");
+        require_alternative<RepositoryExactPackage>(
+            observation.source_results[0],
+            context + ": core source");
     const RepositoryExactPackageSourceFailure& extra_failure =
-            require_alternative<RepositoryExactPackageSourceFailure>(
-                    observation.source_results[1],
-                    context + ": extra source failure");
+        require_alternative<RepositoryExactPackageSourceFailure>(
+            observation.source_results[1],
+            context + ": extra source failure");
     const PackageMetadataFailure& open_failure =
-            require_alternative<PackageMetadataFailure>(
-                    extra_failure.reason,
-                    context + ": extra failure reason");
+        require_alternative<PackageMetadataFailure>(
+            extra_failure.reason,
+            context + ": extra failure reason");
     const RepositoryExactPackage& testing =
-            require_alternative<RepositoryExactPackage>(
-                    observation.source_results[2],
-                    context + ": testing source");
+        require_alternative<RepositoryExactPackage>(
+            observation.source_results[2],
+            context + ": testing source");
     expect(
-            core.repository == ConfiguredRepositoryIdentity{"core", 0} &&
-                    extra_failure.repository ==
-                            ConfiguredRepositoryIdentity{"extra", 1} &&
-                    testing.repository ==
-                            ConfiguredRepositoryIdentity{"testing", 2},
-            context + ": source provenance/order differs");
+        core.repository == ConfiguredRepositoryIdentity{"core", 0} &&
+            extra_failure.repository ==
+                ConfiguredRepositoryIdentity{"extra", 1} &&
+            testing.repository ==
+                ConfiguredRepositoryIdentity{"testing", 2},
+        context + ": source provenance/order differs");
     expect(
-            open_failure.code ==
-                    PackageMetadataErrorCode::SyncDatabaseUnavailable,
-            context + ": open failure was flattened");
+        open_failure.code ==
+            PackageMetadataErrorCode::SyncDatabaseUnavailable,
+        context + ": open failure was flattened");
 
     const std::vector<stub::RepositoryPackageQuery> query_history =
-            stub::repository_package_query_history();
+        stub::repository_package_query_history();
     expect(
-            query_history.size() == 2 &&
-                    query_history[0].repository_name == "core" &&
-                    query_history[1].repository_name == "testing",
-            context + ": successful sources were not queried independently");
+        query_history.size() == 2 &&
+            query_history[0].repository_name == "core" &&
+            query_history[1].repository_name == "testing",
+        context + ": successful sources were not queried independently");
     expect(
-            stub::sync_database_operation_history() == expected_operations,
-            context + ": repository open did not continue in configured order");
+        stub::sync_database_operation_history() == expected_operations,
+        context + ": repository open did not continue in configured order");
     expect(
-            stub::created_handle_count() == 3 &&
-                    stub::release_call_count() == 3,
-            context + ": per-source read phases were not released exactly once");
+        stub::created_handle_count() == 3 &&
+            stub::release_call_count() == 3,
+        context + ": per-source read phases were not released exactly once");
 }
 
 void test_repository_open_failures_are_source_local() {
     expect_partial_repository_open_failure(
-            RepositoryOpenFailurePhase::Registration,
-            {
-                    "register core", "valid core", "cache core",
-                    "query core/open-partial-package",
-                    "register extra",
-                    "register testing", "valid testing", "cache testing",
-                    "query testing/open-partial-package",
-            },
-            "repository registration partial failure");
+        RepositoryOpenFailurePhase::Registration,
+        {
+            "register core",
+            "valid core",
+            "cache core",
+            "query core/open-partial-package",
+            "register extra",
+            "register testing",
+            "valid testing",
+            "cache testing",
+            "query testing/open-partial-package",
+        },
+        "repository registration partial failure");
     expect_partial_repository_open_failure(
-            RepositoryOpenFailurePhase::Validation,
-            {
-                    "register core", "valid core", "cache core",
-                    "query core/open-partial-package",
-                    "register extra", "valid extra",
-                    "register testing", "valid testing", "cache testing",
-                    "query testing/open-partial-package",
-            },
-            "repository validation partial failure");
+        RepositoryOpenFailurePhase::Validation,
+        {
+            "register core",
+            "valid core",
+            "cache core",
+            "query core/open-partial-package",
+            "register extra",
+            "valid extra",
+            "register testing",
+            "valid testing",
+            "cache testing",
+            "query testing/open-partial-package",
+        },
+        "repository validation partial failure");
     expect_partial_repository_open_failure(
-            RepositoryOpenFailurePhase::CacheLoad,
-            {
-                    "register core", "valid core", "cache core",
-                    "query core/open-partial-package",
-                    "register extra", "valid extra", "cache extra",
-                    "register testing", "valid testing", "cache testing",
-                    "query testing/open-partial-package",
-            },
-            "repository cache-load partial failure");
+        RepositoryOpenFailurePhase::CacheLoad,
+        {
+            "register core",
+            "valid core",
+            "cache core",
+            "query core/open-partial-package",
+            "register extra",
+            "valid extra",
+            "cache extra",
+            "register testing",
+            "valid testing",
+            "cache testing",
+            "query testing/open-partial-package",
+        },
+        "repository cache-load partial failure");
 }
 
 void test_global_repository_open_failure_remains_top_level() {
@@ -523,270 +538,270 @@ void test_global_repository_open_failure_remains_top_level() {
     stub::set_initialize_failure(ALPM_ERR_SYSTEM);
 
     RepositoryExactPackageObservationResult result =
-            observe_repository_exact_package(
-                    repository_configuration({"core", "extra"}),
-                    "initialization-package");
+        observe_repository_exact_package(
+            repository_configuration({"core", "extra"}),
+            "initialization-package");
     const RepositoryExactPackageObservationFailure& failure =
-            require_alternative<RepositoryExactPackageObservationFailure>(
-                    result,
-                    "global repository initialization failure");
+        require_alternative<RepositoryExactPackageObservationFailure>(
+            result,
+            "global repository initialization failure");
     expect(
-            failure.package_name == "initialization-package" &&
-                    failure.failure.code ==
-                            PackageMetadataErrorCode::InitializationFailed,
-            "Global initialization failure became a source-local result");
+        failure.package_name == "initialization-package" &&
+            failure.failure.code ==
+                PackageMetadataErrorCode::InitializationFailed,
+        "Global initialization failure became a source-local result");
     expect(
-            stub::initialize_call_count() == 1 &&
-                    stub::sync_database_operation_history().empty(),
-            "Global initialization failure continued into repository sources");
+        stub::initialize_call_count() == 1 &&
+            stub::sync_database_operation_history().empty(),
+        "Global initialization failure continued into repository sources");
 }
 
 void test_repository_missing_and_invalid_versions_are_typed() {
     stub::reset_alpm_stub();
     stub::set_repository_package_metadata(
-            "core", "version-package", 10, 20);
+        "core", "version-package", 10, 20);
     stub::set_repository_package_version_null(
-            "core", "version-package");
+        "core", "version-package");
     stub::set_repository_package_metadata(
-            "extra", "version-package", 30, 40);
+        "extra", "version-package", 30, 40);
     stub::set_repository_package_version(
-            "extra", "version-package", "bad version");
+        "extra", "version-package", "bad version");
     PacmanRepositoryConfiguration configuration = repository_configuration();
 
     const RepositoryExactPackageObservation& observation =
-            require_repository_observation(
-                    observe_repository_exact_package(
-                            configuration,
-                            "version-package"),
-                    "repository version states");
+        require_repository_observation(
+            observe_repository_exact_package(
+                configuration,
+                "version-package"),
+            "repository version states");
     const RepositoryExactPackage& missing =
-            require_alternative<RepositoryExactPackage>(
-                    observation.source_results[0],
-                    "repository missing version");
+        require_alternative<RepositoryExactPackage>(
+            observation.source_results[0],
+            "repository missing version");
     const RepositoryExactPackage& invalid =
-            require_alternative<RepositoryExactPackage>(
-                    observation.source_results[1],
-                    "repository invalid version");
+        require_alternative<RepositoryExactPackage>(
+            observation.source_results[1],
+            "repository invalid version");
     expect(
-            missing.package_version.unknown_reason() != nullptr &&
-                    *missing.package_version.unknown_reason() ==
-                            ObservedVersionUnknownReason::MissingVersionMetadata,
-            "Repository missing version was not retained as Unknown");
+        missing.package_version.unknown_reason() != nullptr &&
+            *missing.package_version.unknown_reason() ==
+                ObservedVersionUnknownReason::MissingVersionMetadata,
+        "Repository missing version was not retained as Unknown");
     expect(
-            invalid.package_version.invalid_reason() != nullptr &&
-                    *invalid.package_version.invalid_reason() ==
-                            ConstraintInvalidReason::InvalidVersionIdentity,
-            "Repository invalid version was not retained as Invalid");
+        invalid.package_version.invalid_reason() != nullptr &&
+            *invalid.package_version.invalid_reason() ==
+                ConstraintInvalidReason::InvalidVersionIdentity,
+        "Repository invalid version was not retained as Invalid");
 }
 
 void test_repository_provides_use_equality_only_capabilities() {
     stub::reset_alpm_stub();
     stub::set_repository_package_metadata(
-            "core", "provider-package", 10, 20);
+        "core", "provider-package", 10, 20);
     stub::set_repository_package_version(
-            "core", "provider-package", "9.0-1");
+        "core", "provider-package", "9.0-1");
     stub::set_repository_package_provides(
-            "core",
-            "provider-package",
-            {
-                    stub::RepositoryProvidedPackageMetadata{
-                            std::string("foo"),
-                            std::nullopt,
-                            ALPM_DEP_MOD_ANY},
-                    stub::RepositoryProvidedPackageMetadata{
-                            std::string("bar"),
-                            std::string("1.2-3"),
-                            ALPM_DEP_MOD_EQ},
-            });
+        "core",
+        "provider-package",
+        {
+            stub::RepositoryProvidedPackageMetadata{
+                std::string("foo"),
+                std::nullopt,
+                ALPM_DEP_MOD_ANY},
+            stub::RepositoryProvidedPackageMetadata{
+                std::string("bar"),
+                std::string("1.2-3"),
+                ALPM_DEP_MOD_EQ},
+        });
     stub::set_repository_package_absent("extra", "provider-package");
     PacmanRepositoryConfiguration configuration = repository_configuration();
 
     const RepositoryExactPackageObservation& observation =
-            require_repository_observation(
-                    observe_repository_exact_package(
-                            configuration,
-                            "provider-package"),
-                    "repository Provides");
+        require_repository_observation(
+            observe_repository_exact_package(
+                configuration,
+                "provider-package"),
+            "repository Provides");
     const RepositoryExactPackage& package =
-            require_alternative<RepositoryExactPackage>(
-                    observation.source_results[0],
-                    "repository provider package");
+        require_alternative<RepositoryExactPackage>(
+            observation.source_results[0],
+            "repository provider package");
     expect(
-            package.provides.size() == 2,
-            "Repository Provides capability count differs");
+        package.provides.size() == 2,
+        "Repository Provides capability count differs");
 
     const RepositoryProviderCapability& unversioned = package.provides[0];
     expect(
-            unversioned.capability.raw_specification() == "foo" &&
-                    unversioned.capability.package_name() == "foo" &&
-                    !unversioned.capability.version().has_value() &&
-                    unversioned.provided_version.source() ==
-                            ObservedVersionSource::RepositoryProviderCapability &&
-                    unversioned.provided_version.unknown_reason() != nullptr &&
-                    *unversioned.provided_version.unknown_reason() ==
-                            ObservedVersionUnknownReason::
-                                    UnversionedProviderCapability,
-            "Unversioned repository Provide was not projected strictly");
+        unversioned.capability.raw_specification() == "foo" &&
+            unversioned.capability.package_name() == "foo" &&
+            !unversioned.capability.version().has_value() &&
+            unversioned.provided_version.source() ==
+                ObservedVersionSource::RepositoryProviderCapability &&
+            unversioned.provided_version.unknown_reason() != nullptr &&
+            *unversioned.provided_version.unknown_reason() ==
+                ObservedVersionUnknownReason::
+                    UnversionedProviderCapability,
+        "Unversioned repository Provide was not projected strictly");
 
     const RepositoryProviderCapability& equality = package.provides[1];
     expect(
-            equality.capability.raw_specification() == "bar=1.2-3" &&
-                    equality.capability.package_name() == "bar" &&
-                    equality.capability.version() ==
-                            std::optional<std::string>("1.2-3") &&
-                    equality.provided_version.version() != nullptr &&
-                    *equality.provided_version.version() == "1.2-3",
-            "Equality repository Provide was not projected strictly");
+        equality.capability.raw_specification() == "bar=1.2-3" &&
+            equality.capability.package_name() == "bar" &&
+            equality.capability.version() ==
+                std::optional<std::string>("1.2-3") &&
+            equality.provided_version.version() != nullptr &&
+            *equality.provided_version.version() == "1.2-3",
+        "Equality repository Provide was not projected strictly");
     expect(
-            package.package_version.version() != nullptr &&
-                    *package.package_version.version() == "9.0-1" &&
-                    *equality.provided_version.version() !=
-                            *package.package_version.version(),
-            "Provider package version was substituted for capability version");
+        package.package_version.version() != nullptr &&
+            *package.package_version.version() == "9.0-1" &&
+            *equality.provided_version.version() !=
+                *package.package_version.version(),
+        "Provider package version was substituted for capability version");
 }
 
 void test_typed_provides_projection_relation_contract() {
     const RepositoryProviderCapability installed_null =
-            require_single_provide_projection(
-                    RepositoryProvidedPackageMetadata{
-                            std::string("installed-null"),
-                            std::nullopt,
-                            RepositoryProvidedPackageRelation::Unversioned},
-                    ObservedVersionSource::InstalledProviderCapability,
-                    "installed ANY plus null");
+        require_single_provide_projection(
+            RepositoryProvidedPackageMetadata{
+                std::string("installed-null"),
+                std::nullopt,
+                RepositoryProvidedPackageRelation::Unversioned},
+            ObservedVersionSource::InstalledProviderCapability,
+            "installed ANY plus null");
     const RepositoryProviderCapability installed_empty =
-            require_single_provide_projection(
-                    RepositoryProvidedPackageMetadata{
-                            std::string("installed-empty"),
-                            std::string(""),
-                            RepositoryProvidedPackageRelation::Unversioned},
-                    ObservedVersionSource::InstalledProviderCapability,
-                    "installed ANY plus empty");
+        require_single_provide_projection(
+            RepositoryProvidedPackageMetadata{
+                std::string("installed-empty"),
+                std::string(""),
+                RepositoryProvidedPackageRelation::Unversioned},
+            ObservedVersionSource::InstalledProviderCapability,
+            "installed ANY plus empty");
     expect(
-            !installed_null.capability.version().has_value() &&
-                    !installed_empty.capability.version().has_value() &&
-                    installed_null.provided_version.unknown_reason() !=
-                            nullptr &&
-                    installed_empty.provided_version.unknown_reason() !=
-                            nullptr &&
-                    *installed_null.provided_version.unknown_reason() ==
-                            ObservedVersionUnknownReason::
-                                    UnversionedProviderCapability &&
-                    *installed_empty.provided_version.unknown_reason() ==
-                            ObservedVersionUnknownReason::
-                                    UnversionedProviderCapability,
-            "Installed ANY null/empty did not share unversioned semantics");
+        !installed_null.capability.version().has_value() &&
+            !installed_empty.capability.version().has_value() &&
+            installed_null.provided_version.unknown_reason() !=
+                nullptr &&
+            installed_empty.provided_version.unknown_reason() !=
+                nullptr &&
+            *installed_null.provided_version.unknown_reason() ==
+                ObservedVersionUnknownReason::
+                    UnversionedProviderCapability &&
+            *installed_empty.provided_version.unknown_reason() ==
+                ObservedVersionUnknownReason::
+                    UnversionedProviderCapability,
+        "Installed ANY null/empty did not share unversioned semantics");
 
     const RepositoryProviderCapability repository_null =
-            require_single_provide_projection(
-                    RepositoryProvidedPackageMetadata{
-                            std::string("repository-null"),
-                            std::nullopt,
-                            RepositoryProvidedPackageRelation::Unversioned},
-                    ObservedVersionSource::RepositoryProviderCapability,
-                    "repository ANY plus null");
+        require_single_provide_projection(
+            RepositoryProvidedPackageMetadata{
+                std::string("repository-null"),
+                std::nullopt,
+                RepositoryProvidedPackageRelation::Unversioned},
+            ObservedVersionSource::RepositoryProviderCapability,
+            "repository ANY plus null");
     const RepositoryProviderCapability repository_empty =
-            require_single_provide_projection(
-                    RepositoryProvidedPackageMetadata{
-                            std::string("repository-empty"),
-                            std::string(""),
-                            RepositoryProvidedPackageRelation::Unversioned},
-                    ObservedVersionSource::RepositoryProviderCapability,
-                    "repository ANY plus empty");
+        require_single_provide_projection(
+            RepositoryProvidedPackageMetadata{
+                std::string("repository-empty"),
+                std::string(""),
+                RepositoryProvidedPackageRelation::Unversioned},
+            ObservedVersionSource::RepositoryProviderCapability,
+            "repository ANY plus empty");
     expect(
-            !repository_null.capability.version().has_value() &&
-                    repository_null.capability.raw_specification() ==
-                            "repository-null" &&
-                    !repository_empty.capability.version().has_value() &&
-                    repository_empty.capability.raw_specification() ==
-                            "repository-empty",
-            "Repository ANY null/empty did not normalize without an operator");
+        !repository_null.capability.version().has_value() &&
+            repository_null.capability.raw_specification() ==
+                "repository-null" &&
+            !repository_empty.capability.version().has_value() &&
+            repository_empty.capability.raw_specification() ==
+                "repository-empty",
+        "Repository ANY null/empty did not normalize without an operator");
 
     const DependencyConstraintParseFailure unversioned_with_value =
-            require_provide_projection_failure(
-                    RepositoryProvidedPackageMetadata{
-                            std::string("foo"),
-                            std::string("1"),
-                            RepositoryProvidedPackageRelation::Unversioned},
-                    "ANY plus non-empty version");
+        require_provide_projection_failure(
+            RepositoryProvidedPackageMetadata{
+                std::string("foo"),
+                std::string("1"),
+                RepositoryProvidedPackageRelation::Unversioned},
+            "ANY plus non-empty version");
     expect(
-            unversioned_with_value.kind ==
-                            DependencyConstraintParseFailureKind::
-                                    InvalidVersion &&
-                    unversioned_with_value.raw_specification == "foo=1",
-            "ANY plus non-empty version was not rejected as inconsistent");
+        unversioned_with_value.kind ==
+                DependencyConstraintParseFailureKind::
+                    InvalidVersion &&
+            unversioned_with_value.raw_specification == "foo=1",
+        "ANY plus non-empty version was not rejected as inconsistent");
 
     const RepositoryProviderCapability ordinary =
-            require_single_provide_projection(
-                    RepositoryProvidedPackageMetadata{
-                            std::string("virtual-api"),
-                            std::string("2:1.0-3"),
-                            RepositoryProvidedPackageRelation::Equal},
-                    ObservedVersionSource::RepositoryProviderCapability,
-                    "ordinary equality Provide");
+        require_single_provide_projection(
+            RepositoryProvidedPackageMetadata{
+                std::string("virtual-api"),
+                std::string("2:1.0-3"),
+                RepositoryProvidedPackageRelation::Equal},
+            ObservedVersionSource::RepositoryProviderCapability,
+            "ordinary equality Provide");
     expect(
-            ordinary.capability.version() ==
-                            std::optional<std::string>("2:1.0-3") &&
-                    ordinary.provided_version.version() != nullptr &&
-                    *ordinary.provided_version.version() == "2:1.0-3",
-            "Ordinary equality Provide did not retain its exact version");
+        ordinary.capability.version() ==
+                std::optional<std::string>("2:1.0-3") &&
+            ordinary.provided_version.version() != nullptr &&
+            *ordinary.provided_version.version() == "2:1.0-3",
+        "Ordinary equality Provide did not retain its exact version");
 
     for(const std::optional<std::string>& missing_version :
         {std::optional<std::string>{},
          std::optional<std::string>{std::string("")}}) {
         const DependencyConstraintParseFailure failure =
-                require_provide_projection_failure(
-                        RepositoryProvidedPackageMetadata{
-                                std::string("foo"),
-                                missing_version,
-                                RepositoryProvidedPackageRelation::Equal},
-                        "EQ plus missing/empty version");
+            require_provide_projection_failure(
+                RepositoryProvidedPackageMetadata{
+                    std::string("foo"),
+                    missing_version,
+                    RepositoryProvidedPackageRelation::Equal},
+                "EQ plus missing/empty version");
         expect(
-                failure.kind ==
-                        DependencyConstraintParseFailureKind::MissingVersion,
-                "EQ plus missing/empty version was not malformed");
+            failure.kind ==
+                DependencyConstraintParseFailureKind::MissingVersion,
+            "EQ plus missing/empty version was not malformed");
     }
 
     const RepositoryProviderCapability soname =
-            require_single_provide_projection(
-                    RepositoryProvidedPackageMetadata{
-                            std::string("libgegl-npd-0.4.so"),
-                            std::string("libgegl-npd-0.4.so-64"),
-                            RepositoryProvidedPackageRelation::Equal},
-                    ObservedVersionSource::RepositoryProviderCapability,
-                    "legacy SONAME v1 Provide");
+        require_single_provide_projection(
+            RepositoryProvidedPackageMetadata{
+                std::string("libgegl-npd-0.4.so"),
+                std::string("libgegl-npd-0.4.so-64"),
+                RepositoryProvidedPackageRelation::Equal},
+            ObservedVersionSource::RepositoryProviderCapability,
+            "legacy SONAME v1 Provide");
     expect(
-            soname.capability.raw_specification() ==
-                            "libgegl-npd-0.4.so="
-                            "libgegl-npd-0.4.so-64" &&
-                    soname.capability.version() ==
-                            std::optional<std::string>(
-                                    "libgegl-npd-0.4.so-64") &&
-                    soname.provided_version.version() != nullptr &&
-                    *soname.provided_version.version() ==
-                            "libgegl-npd-0.4.so-64",
-            "Legacy SONAME v1 Provide was not retained exactly");
+        soname.capability.raw_specification() ==
+                "libgegl-npd-0.4.so="
+                "libgegl-npd-0.4.so-64" &&
+            soname.capability.version() ==
+                std::optional<std::string>(
+                    "libgegl-npd-0.4.so-64") &&
+            soname.provided_version.version() != nullptr &&
+            *soname.provided_version.version() ==
+                "libgegl-npd-0.4.so-64",
+        "Legacy SONAME v1 Provide was not retained exactly");
 
     for(const std::string& ordinary_version :
         {std::string("libexample.so-128"),
          std::string("other.so-64")}) {
         const RepositoryProviderCapability ordinary_ambiguous =
-                require_single_provide_projection(
-                        RepositoryProvidedPackageMetadata{
-                                std::string("libexample.so"),
-                                ordinary_version,
-                                RepositoryProvidedPackageRelation::Equal},
-                        ObservedVersionSource::
-                                RepositoryProviderCapability,
-                        "ordinary ambiguous equality " + ordinary_version);
+            require_single_provide_projection(
+                RepositoryProvidedPackageMetadata{
+                    std::string("libexample.so"),
+                    ordinary_version,
+                    RepositoryProvidedPackageRelation::Equal},
+                ObservedVersionSource::
+                    RepositoryProviderCapability,
+                "ordinary ambiguous equality " + ordinary_version);
         expect(
-                ordinary_ambiguous.capability.version() ==
-                                std::optional<std::string>(ordinary_version) &&
-                        ordinary_ambiguous.provided_version.version() !=
-                                nullptr &&
-                        *ordinary_ambiguous.provided_version.version() ==
-                                ordinary_version,
-                "Valid ordinary equality was rejected as malformed SONAME");
+            ordinary_ambiguous.capability.version() ==
+                    std::optional<std::string>(ordinary_version) &&
+                ordinary_ambiguous.provided_version.version() !=
+                    nullptr &&
+                *ordinary_ambiguous.provided_version.version() ==
+                    ordinary_version,
+            "Valid ordinary equality was rejected as malformed SONAME");
     }
 
     for(const std::string& malformed_version :
@@ -795,17 +810,17 @@ void test_typed_provides_projection_relation_contract() {
          std::string("libgegl-npd-0.4.so-x86_64"),
          std::string("libgegl-npd-0.4.so/path-64")}) {
         const DependencyConstraintParseFailure failure =
-                require_provide_projection_failure(
-                        RepositoryProvidedPackageMetadata{
-                                std::string("libgegl-npd-0.4.so"),
-                                malformed_version,
-                                RepositoryProvidedPackageRelation::Equal},
-                        "malformed ordinary/SONAME version " +
-                                malformed_version);
+            require_provide_projection_failure(
+                RepositoryProvidedPackageMetadata{
+                    std::string("libgegl-npd-0.4.so"),
+                    malformed_version,
+                    RepositoryProvidedPackageRelation::Equal},
+                "malformed ordinary/SONAME version " +
+                    malformed_version);
         expect(
-                failure.kind ==
-                        DependencyConstraintParseFailureKind::InvalidVersion,
-                "Malformed ordinary/SONAME version did not fail closed");
+            failure.kind ==
+                DependencyConstraintParseFailureKind::InvalidVersion,
+            "Malformed ordinary/SONAME version did not fail closed");
     }
 
     for(const RepositoryProvidedPackageRelation relation :
@@ -816,17 +831,17 @@ void test_typed_provides_projection_relation_contract() {
          RepositoryProvidedPackageRelation::Unsupported,
          static_cast<RepositoryProvidedPackageRelation>(999)}) {
         const DependencyConstraintParseFailure failure =
-                require_provide_projection_failure(
-                        RepositoryProvidedPackageMetadata{
-                                std::string("foo"),
-                                std::string("1"),
-                                relation},
-                        "unsupported provider relation");
+            require_provide_projection_failure(
+                RepositoryProvidedPackageMetadata{
+                    std::string("foo"),
+                    std::string("1"),
+                    relation},
+                "unsupported provider relation");
         expect(
-                failure.kind ==
-                        DependencyConstraintParseFailureKind::
-                                UnsupportedProviderOperator,
-                "Unsupported/future provider relation did not fail closed");
+            failure.kind ==
+                DependencyConstraintParseFailureKind::
+                    UnsupportedProviderOperator,
+            "Unsupported/future provider relation did not fail closed");
     }
 
     for(const std::optional<std::string>& invalid_name :
@@ -834,280 +849,280 @@ void test_typed_provides_projection_relation_contract() {
          std::optional<std::string>{std::string("")},
          std::optional<std::string>{std::string("bad/name")}}) {
         const DependencyConstraintParseFailure failure =
-                require_provide_projection_failure(
-                        RepositoryProvidedPackageMetadata{
-                                invalid_name,
-                                std::nullopt,
-                                RepositoryProvidedPackageRelation::
-                                        Unversioned},
-                        "invalid provider identity");
+            require_provide_projection_failure(
+                RepositoryProvidedPackageMetadata{
+                    invalid_name,
+                    std::nullopt,
+                    RepositoryProvidedPackageRelation::
+                        Unversioned},
+                "invalid provider identity");
         expect(
-                failure.kind ==
-                        DependencyConstraintParseFailureKind::
-                                InvalidPackageIdentity,
-                "Invalid provider identity did not fail closed");
+            failure.kind ==
+                DependencyConstraintParseFailureKind::
+                    InvalidPackageIdentity,
+            "Invalid provider identity did not fail closed");
     }
 }
 
 void test_repository_provides_normalize_empty_unversioned_metadata() {
     stub::reset_alpm_stub();
     stub::set_repository_package_metadata(
-            "core", "empty-unversioned-provider", 10, 20);
+        "core", "empty-unversioned-provider", 10, 20);
     stub::set_repository_package_version(
-            "core", "empty-unversioned-provider", "7.0-1");
+        "core", "empty-unversioned-provider", "7.0-1");
     stub::set_repository_package_provides(
-            "core",
-            "empty-unversioned-provider",
-            {stub::RepositoryProvidedPackageMetadata{
-                    std::string("foo"),
-                    std::string(""),
-                    ALPM_DEP_MOD_ANY}});
+        "core",
+        "empty-unversioned-provider",
+        {stub::RepositoryProvidedPackageMetadata{
+            std::string("foo"),
+            std::string(""),
+            ALPM_DEP_MOD_ANY}});
     stub::set_repository_package_absent(
-            "extra", "empty-unversioned-provider");
+        "extra", "empty-unversioned-provider");
     PacmanRepositoryConfiguration configuration = repository_configuration();
 
     const RepositoryExactPackageObservation& observation =
-            require_repository_observation(
-                    observe_repository_exact_package(
-                            configuration,
-                            "empty-unversioned-provider"),
-                    "empty unversioned repository Provide");
+        require_repository_observation(
+            observe_repository_exact_package(
+                configuration,
+                "empty-unversioned-provider"),
+            "empty unversioned repository Provide");
     const RepositoryExactPackage& package =
-            require_alternative<RepositoryExactPackage>(
-                    observation.source_results[0],
-                    "empty unversioned provider package");
+        require_alternative<RepositoryExactPackage>(
+            observation.source_results[0],
+            "empty unversioned provider package");
     expect(
-            package.repository ==
-                            ConfiguredRepositoryIdentity{"core", 0} &&
-                    package.provides.size() == 1 &&
-                    package.provides.front().capability.raw_specification() ==
-                            "foo" &&
-                    !package.provides.front().capability.version().has_value() &&
-                    package.provides.front().provided_version.unknown_reason() !=
-                            nullptr &&
-                    *package.provides.front()
-                             .provided_version.unknown_reason() ==
-                            ObservedVersionUnknownReason::
-                                    UnversionedProviderCapability,
-            "Empty unversioned repository Provide did not normalize");
+        package.repository ==
+                ConfiguredRepositoryIdentity{"core", 0} &&
+            package.provides.size() == 1 &&
+            package.provides.front().capability.raw_specification() ==
+                "foo" &&
+            !package.provides.front().capability.version().has_value() &&
+            package.provides.front().provided_version.unknown_reason() !=
+                nullptr &&
+            *package.provides.front()
+                    .provided_version.unknown_reason() ==
+                ObservedVersionUnknownReason::
+                    UnversionedProviderCapability,
+        "Empty unversioned repository Provide did not normalize");
 }
 
 void test_repository_provides_reject_non_equality_operator() {
     stub::reset_alpm_stub();
     stub::set_repository_package_metadata(
-            "core", "invalid-provider", 10, 20);
+        "core", "invalid-provider", 10, 20);
     stub::set_repository_package_version(
-            "core", "invalid-provider", "7.0-1");
+        "core", "invalid-provider", "7.0-1");
     stub::set_repository_package_provides(
-            "core",
-            "invalid-provider",
-            {stub::RepositoryProvidedPackageMetadata{
-                    std::string("foo"),
-                    std::string("1"),
-                    ALPM_DEP_MOD_GE}});
+        "core",
+        "invalid-provider",
+        {stub::RepositoryProvidedPackageMetadata{
+            std::string("foo"),
+            std::string("1"),
+            ALPM_DEP_MOD_GE}});
     stub::set_repository_package_absent("extra", "invalid-provider");
     PacmanRepositoryConfiguration configuration = repository_configuration();
 
     const RepositoryExactPackageObservation& observation =
-            require_repository_observation(
-                    observe_repository_exact_package(
-                            configuration,
-                            "invalid-provider"),
-                    "invalid repository Provide");
+        require_repository_observation(
+            observe_repository_exact_package(
+                configuration,
+                "invalid-provider"),
+            "invalid repository Provide");
     const RepositoryExactPackageSourceFailure& source_failure =
-            require_alternative<RepositoryExactPackageSourceFailure>(
-                    observation.source_results[0],
-                    "non-equality provider source failure");
+        require_alternative<RepositoryExactPackageSourceFailure>(
+            observation.source_results[0],
+            "non-equality provider source failure");
     const DependencyConstraintParseFailure& parse_failure =
-            require_alternative<DependencyConstraintParseFailure>(
-                    source_failure.reason,
-                    "non-equality provider parse failure");
+        require_alternative<DependencyConstraintParseFailure>(
+            source_failure.reason,
+            "non-equality provider parse failure");
     expect(
-            source_failure.repository ==
-                            ConfiguredRepositoryIdentity{"core", 0} &&
-                    parse_failure.kind ==
-                            DependencyConstraintParseFailureKind::
-                                    UnsupportedProviderOperator &&
-                    parse_failure.raw_specification == "foo>=1",
-            "Non-equality repository Provide was not rejected strictly");
+        source_failure.repository ==
+                ConfiguredRepositoryIdentity{"core", 0} &&
+            parse_failure.kind ==
+                DependencyConstraintParseFailureKind::
+                    UnsupportedProviderOperator &&
+            parse_failure.raw_specification == "foo>=1",
+        "Non-equality repository Provide was not rejected strictly");
 }
 
 void test_installed_relation_inventory_retains_versions_and_provides() {
     stub::reset_alpm_stub();
     stub::set_local_packages(
-            {stub::LocalPackageMetadata{
-                    "real-package",
-                    "2.0",
-                    ALPM_PKG_REASON_EXPLICIT,
-                    {stub::RepositoryProvidedPackageMetadata{
-                             std::string("virtual-unversioned"),
-                             std::nullopt,
-                             ALPM_DEP_MOD_ANY},
-                     stub::RepositoryProvidedPackageMetadata{
-                             std::string("virtual-api"),
-                             std::string("3"),
-                             ALPM_DEP_MOD_EQ},
-                     stub::RepositoryProvidedPackageMetadata{
-                             std::string("other-api"),
-                             std::string("8"),
-                             ALPM_DEP_MOD_EQ}}}});
+        {stub::LocalPackageMetadata{
+            "real-package",
+            "2.0",
+            ALPM_PKG_REASON_EXPLICIT,
+            {stub::RepositoryProvidedPackageMetadata{
+                 std::string("virtual-unversioned"),
+                 std::nullopt,
+                 ALPM_DEP_MOD_ANY},
+             stub::RepositoryProvidedPackageMetadata{
+                 std::string("virtual-api"),
+                 std::string("3"),
+                 ALPM_DEP_MOD_EQ},
+             stub::RepositoryProvidedPackageMetadata{
+                 std::string("other-api"),
+                 std::string("8"),
+                 ALPM_DEP_MOD_EQ}}}});
     PackageMetadataSession session = open_installed_session();
     const InstalledPackageRelationInventory& inventory =
-            require_alternative<InstalledPackageRelationInventory>(
-                    observe_installed_package_relations(
-                            session, installed_relation_source()),
-                    "installed relation inventory");
+        require_alternative<InstalledPackageRelationInventory>(
+            observe_installed_package_relations(
+                session, installed_relation_source()),
+            "installed relation inventory");
     expect(
-            inventory.source == installed_relation_source() &&
-                    inventory.packages.size() == 1,
-            "Installed inventory lost source identity or package");
+        inventory.source == installed_relation_source() &&
+            inventory.packages.size() == 1,
+        "Installed inventory lost source identity or package");
     const PackageRelationObservedPackage& package = inventory.packages.front();
     expect(
-            package.package_name == "real-package" &&
-                    package.role ==
-                            PackageRelationObservationRole::Installed &&
-                    !package.package_base.has_value() &&
-                    package.package_version.version() != nullptr &&
-                    *package.package_version.version() == "2.0" &&
-                    package.provides.size() == 3,
-            "Installed exact package observation differs");
+        package.package_name == "real-package" &&
+            package.role ==
+                PackageRelationObservationRole::Installed &&
+            !package.package_base.has_value() &&
+            package.package_version.version() != nullptr &&
+            *package.package_version.version() == "2.0" &&
+            package.provides.size() == 3,
+        "Installed exact package observation differs");
     expect(
-            package.provides[0].capability.package_name() ==
-                            "virtual-unversioned" &&
-                    package.provides[0].observed_version.source() ==
-                            ObservedVersionSource::
-                                    InstalledProviderCapability &&
-                    package.provides[0].observed_version.version() ==
-                            nullptr &&
-                    package.provides[0].observed_version.unknown_reason() !=
-                            nullptr &&
-                    *package.provides[0]
-                             .observed_version.unknown_reason() ==
-                            ObservedVersionUnknownReason::
-                                    UnversionedProviderCapability,
-            "Unversioned installed Provide inherited a package version");
+        package.provides[0].capability.package_name() ==
+                "virtual-unversioned" &&
+            package.provides[0].observed_version.source() ==
+                ObservedVersionSource::
+                    InstalledProviderCapability &&
+            package.provides[0].observed_version.version() ==
+                nullptr &&
+            package.provides[0].observed_version.unknown_reason() !=
+                nullptr &&
+            *package.provides[0]
+                    .observed_version.unknown_reason() ==
+                ObservedVersionUnknownReason::
+                    UnversionedProviderCapability,
+        "Unversioned installed Provide inherited a package version");
     expect(
-            package.provides[1].capability.package_name() ==
-                            "virtual-api" &&
-                    package.provides[1].observed_version.version() !=
-                            nullptr &&
-                    *package.provides[1].observed_version.version() == "3" &&
-                    package.provides[2].capability.package_name() ==
-                            "other-api",
-            "Versioned or multiple installed Provides were not retained");
+        package.provides[1].capability.package_name() ==
+                "virtual-api" &&
+            package.provides[1].observed_version.version() !=
+                nullptr &&
+            *package.provides[1].observed_version.version() == "3" &&
+            package.provides[2].capability.package_name() ==
+                "other-api",
+        "Versioned or multiple installed Provides were not retained");
 
     const PackageRelationObservationSet observations =
-            project_installed_relation_observations(
-                    InstalledPackageRelationInventoryResult{inventory});
+        project_installed_relation_observations(
+            InstalledPackageRelationInventoryResult{inventory});
     expect_version_comparison("2.0", "2", "1");
     const PackageRelationMatchingEvidence exact =
-            match_declared_package_relation(
-                    require_relation(
-                            PackageRelationKind::Conflict,
-                            "real-package>=2"),
-                    observations);
+        match_declared_package_relation(
+            require_relation(
+                PackageRelationKind::Conflict,
+                "real-package>=2"),
+            observations);
     expect_version_comparison("3", "3", "0");
     const PackageRelationMatchingEvidence provided =
-            match_declared_package_relation(
-                    require_relation(
-                            PackageRelationKind::Replacement,
-                            "virtual-api>=3"),
-                    observations);
+        match_declared_package_relation(
+            require_relation(
+                PackageRelationKind::Replacement,
+                "virtual-api>=3"),
+            observations);
     const PackageRelationMatchingEvidence unavailable =
-            match_declared_package_relation(
-                    require_relation(
-                            PackageRelationKind::Conflict,
-                            "virtual-unversioned>=1"),
-                    observations);
+        match_declared_package_relation(
+            require_relation(
+                PackageRelationKind::Conflict,
+                "virtual-unversioned>=1"),
+            observations);
     expect(
-            package_relation_has_confirmed_match(exact) &&
-                    package_relation_has_confirmed_match(provided) &&
-                    !package_relation_has_confirmed_match(unavailable) &&
-                    !package_relation_confirms_no_match(unavailable) &&
-                    unavailable.package_evidence.front().version_match ==
-                            PackageRelationVersionMatchKind::Unavailable,
-            "Installed exact/provided matching semantics differ");
+        package_relation_has_confirmed_match(exact) &&
+            package_relation_has_confirmed_match(provided) &&
+            !package_relation_has_confirmed_match(unavailable) &&
+            !package_relation_confirms_no_match(unavailable) &&
+            unavailable.package_evidence.front().version_match ==
+                PackageRelationVersionMatchKind::Unavailable,
+        "Installed exact/provided matching semantics differ");
 
     const PackageRelationMatchingEvidence exact_miss =
-            match_declared_package_relation(
-                    require_relation(
-                            PackageRelationKind::Conflict,
-                            "missing-package"),
-                    observations);
+        match_declared_package_relation(
+            require_relation(
+                PackageRelationKind::Conflict,
+                "missing-package"),
+            observations);
     expect(
-            package_relation_confirms_no_match(exact_miss),
-            "Complete installed inventory did not prove exact miss");
+        package_relation_confirms_no_match(exact_miss),
+        "Complete installed inventory did not prove exact miss");
 }
 
 void test_installed_gegl_soname_inventory_remains_complete() {
     stub::reset_alpm_stub();
     stub::set_local_packages(
-            {stub::LocalPackageMetadata{
-                     "before-package",
-                     "1.0-1",
-                     ALPM_PKG_REASON_EXPLICIT,
-                     {stub::RepositoryProvidedPackageMetadata{
-                             std::string("before-capability"),
-                             std::nullopt,
-                             ALPM_DEP_MOD_ANY}}},
-             stub::LocalPackageMetadata{
-                     "gegl",
-                     "0.4.70-3",
-                     ALPM_PKG_REASON_EXPLICIT,
-                     {stub::RepositoryProvidedPackageMetadata{
-                              std::string("libgegl-0.4.so"),
-                              std::string("0-64"),
-                              ALPM_DEP_MOD_EQ},
-                      stub::RepositoryProvidedPackageMetadata{
-                              std::string("libgegl-npd-0.4.so"),
-                              std::string("libgegl-npd-0.4.so-64"),
-                              ALPM_DEP_MOD_EQ},
-                      stub::RepositoryProvidedPackageMetadata{
-                              std::string("libgegl-sc-0.4.so"),
-                              std::string("libgegl-sc-0.4.so-64"),
-                              ALPM_DEP_MOD_EQ}}},
-             stub::LocalPackageMetadata{
-                     "after-package",
-                     "2.0-1",
-                     ALPM_PKG_REASON_EXPLICIT,
-                     {stub::RepositoryProvidedPackageMetadata{
-                             std::string("after-capability"),
-                             std::string(""),
-                             ALPM_DEP_MOD_ANY}}}});
+        {stub::LocalPackageMetadata{
+             "before-package",
+             "1.0-1",
+             ALPM_PKG_REASON_EXPLICIT,
+             {stub::RepositoryProvidedPackageMetadata{
+                 std::string("before-capability"),
+                 std::nullopt,
+                 ALPM_DEP_MOD_ANY}}},
+         stub::LocalPackageMetadata{
+             "gegl",
+             "0.4.70-3",
+             ALPM_PKG_REASON_EXPLICIT,
+             {stub::RepositoryProvidedPackageMetadata{
+                  std::string("libgegl-0.4.so"),
+                  std::string("0-64"),
+                  ALPM_DEP_MOD_EQ},
+              stub::RepositoryProvidedPackageMetadata{
+                  std::string("libgegl-npd-0.4.so"),
+                  std::string("libgegl-npd-0.4.so-64"),
+                  ALPM_DEP_MOD_EQ},
+              stub::RepositoryProvidedPackageMetadata{
+                  std::string("libgegl-sc-0.4.so"),
+                  std::string("libgegl-sc-0.4.so-64"),
+                  ALPM_DEP_MOD_EQ}}},
+         stub::LocalPackageMetadata{
+             "after-package",
+             "2.0-1",
+             ALPM_PKG_REASON_EXPLICIT,
+             {stub::RepositoryProvidedPackageMetadata{
+                 std::string("after-capability"),
+                 std::string(""),
+                 ALPM_DEP_MOD_ANY}}}});
 
     PackageMetadataSession session = open_installed_session();
     const InstalledPackageRelationInventory inventory =
-            require_alternative<InstalledPackageRelationInventory>(
-                    observe_installed_package_relations(
-                            session, installed_relation_source()),
-                    "installed gegl SONAME inventory");
+        require_alternative<InstalledPackageRelationInventory>(
+            observe_installed_package_relations(
+                session, installed_relation_source()),
+            "installed gegl SONAME inventory");
     expect(
-            inventory.packages.size() == 3 &&
-                    inventory.packages[0].package_name == "before-package" &&
-                    inventory.packages[1].package_name == "gegl" &&
-                    inventory.packages[1].provides.size() == 3 &&
-                    inventory.packages[1]
-                                    .provides[1]
-                                    .capability.raw_specification() ==
-                            "libgegl-npd-0.4.so="
-                            "libgegl-npd-0.4.so-64" &&
-                    inventory.packages[2].package_name == "after-package" &&
-                    inventory.packages[2].provides.size() == 1 &&
-                    !inventory.packages[2]
-                             .provides[0]
-                             .capability.version()
-                             .has_value(),
-            "Installed gegl-shaped inventory lost valid package/capability entries");
+        inventory.packages.size() == 3 &&
+            inventory.packages[0].package_name == "before-package" &&
+            inventory.packages[1].package_name == "gegl" &&
+            inventory.packages[1].provides.size() == 3 &&
+            inventory.packages[1]
+                    .provides[1]
+                    .capability.raw_specification() ==
+                "libgegl-npd-0.4.so="
+                "libgegl-npd-0.4.so-64" &&
+            inventory.packages[2].package_name == "after-package" &&
+            inventory.packages[2].provides.size() == 1 &&
+            !inventory.packages[2]
+                 .provides[0]
+                 .capability.version()
+                 .has_value(),
+        "Installed gegl-shaped inventory lost valid package/capability entries");
 
     const PackageRelationObservationSet observations =
-            project_installed_relation_observations(
-                    InstalledPackageRelationInventoryResult{inventory});
+        project_installed_relation_observations(
+            InstalledPackageRelationInventoryResult{inventory});
     expect(
-            observations.completeness ==
-                            PackageRelationObservationCompleteness::Complete &&
-                    observations.packages.size() == 3 &&
-                    observations.failures.empty(),
-            "Valid SONAME v1 poisoned installed relation completeness");
+        observations.completeness ==
+                PackageRelationObservationCompleteness::Complete &&
+            observations.packages.size() == 3 &&
+            observations.failures.empty(),
+        "Valid SONAME v1 poisoned installed relation completeness");
 }
 
 void test_repository_gegl_soname_projection_and_unrelated_lookup() {
@@ -1116,318 +1131,318 @@ void test_repository_gegl_soname_projection_and_unrelated_lookup() {
     stub::set_repository_package_metadata("extra", "gegl", 10, 20);
     stub::set_repository_package_version("extra", "gegl", "0.4.70-3");
     stub::set_repository_package_provides(
-            "extra",
-            "gegl",
-            {stub::RepositoryProvidedPackageMetadata{
-                     std::string("libgegl-0.4.so"),
-                     std::string("0-64"),
-                     ALPM_DEP_MOD_EQ},
-             stub::RepositoryProvidedPackageMetadata{
-                     std::string("libgegl-npd-0.4.so"),
-                     std::string("libgegl-npd-0.4.so-64"),
-                     ALPM_DEP_MOD_EQ},
-             stub::RepositoryProvidedPackageMetadata{
-                     std::string("libgegl-sc-0.4.so"),
-                     std::string("libgegl-sc-0.4.so-64"),
-                     ALPM_DEP_MOD_EQ},
-             stub::RepositoryProvidedPackageMetadata{
-                     std::string("unrelated-capability"),
-                     std::nullopt,
-                     ALPM_DEP_MOD_ANY}});
+        "extra",
+        "gegl",
+        {stub::RepositoryProvidedPackageMetadata{
+             std::string("libgegl-0.4.so"),
+             std::string("0-64"),
+             ALPM_DEP_MOD_EQ},
+         stub::RepositoryProvidedPackageMetadata{
+             std::string("libgegl-npd-0.4.so"),
+             std::string("libgegl-npd-0.4.so-64"),
+             ALPM_DEP_MOD_EQ},
+         stub::RepositoryProvidedPackageMetadata{
+             std::string("libgegl-sc-0.4.so"),
+             std::string("libgegl-sc-0.4.so-64"),
+             ALPM_DEP_MOD_EQ},
+         stub::RepositoryProvidedPackageMetadata{
+             std::string("unrelated-capability"),
+             std::nullopt,
+             ALPM_DEP_MOD_ANY}});
     const PacmanRepositoryConfiguration configuration =
-            repository_configuration();
+        repository_configuration();
 
     const RepositoryExactPackageObservation exact_observation =
-            require_repository_observation(
-                    observe_repository_exact_package(configuration, "gegl"),
-                    "repository gegl exact observation");
+        require_repository_observation(
+            observe_repository_exact_package(configuration, "gegl"),
+            "repository gegl exact observation");
     const RepositoryExactPackage exact_package =
-            require_alternative<RepositoryExactPackage>(
-                    exact_observation.source_results[1],
-                    "repository gegl exact package");
+        require_alternative<RepositoryExactPackage>(
+            exact_observation.source_results[1],
+            "repository gegl exact package");
     expect(
-            exact_package.repository ==
-                            ConfiguredRepositoryIdentity{"extra", 1} &&
-                    exact_package.package_name == "gegl" &&
-                    exact_package.provides.size() == 4 &&
-                    exact_package.provides[1]
-                                    .capability.raw_specification() ==
-                            "libgegl-npd-0.4.so="
-                            "libgegl-npd-0.4.so-64",
-            "Repository exact gegl SONAME projection failed");
+        exact_package.repository ==
+                ConfiguredRepositoryIdentity{"extra", 1} &&
+            exact_package.package_name == "gegl" &&
+            exact_package.provides.size() == 4 &&
+            exact_package.provides[1]
+                    .capability.raw_specification() ==
+                "libgegl-npd-0.4.so="
+                "libgegl-npd-0.4.so-64",
+        "Repository exact gegl SONAME projection failed");
 
     const RepositoryProviderObservation provider_observation =
-            require_alternative<RepositoryProviderObservation>(
-                    observe_repository_providers(
-                            configuration, "unrelated-capability"),
-                    "repository unrelated capability lookup");
+        require_alternative<RepositoryProviderObservation>(
+            observe_repository_providers(
+                configuration, "unrelated-capability"),
+            "repository unrelated capability lookup");
     const RepositoryProviderSourceObservation extra_source =
-            require_alternative<RepositoryProviderSourceObservation>(
-                    provider_observation.source_results[1],
-                    "repository unrelated capability source");
+        require_alternative<RepositoryProviderSourceObservation>(
+            provider_observation.source_results[1],
+            "repository unrelated capability source");
     expect(
-            extra_source.repository ==
-                            ConfiguredRepositoryIdentity{"extra", 1} &&
-                    extra_source.packages.size() == 1 &&
-                    extra_source.packages.front().package_name == "gegl" &&
-                    extra_source.packages.front().provides.size() == 4,
-            "Valid SONAME entry poisoned an unrelated repository capability lookup");
+        extra_source.repository ==
+                ConfiguredRepositoryIdentity{"extra", 1} &&
+            extra_source.packages.size() == 1 &&
+            extra_source.packages.front().package_name == "gegl" &&
+            extra_source.packages.front().provides.size() == 4,
+        "Valid SONAME entry poisoned an unrelated repository capability lookup");
 }
 
 void test_installed_inventory_empty_and_failures_are_distinct() {
     stub::reset_alpm_stub();
     stub::set_empty_package_cache();
     const InstalledPackageRelationInventory& empty =
-            require_alternative<InstalledPackageRelationInventory>(
-                    query_installed_package_relations(
-                            PacmanDatabasePaths{"/", "/var/lib/pacman"}),
-                    "successful empty installed inventory");
+        require_alternative<InstalledPackageRelationInventory>(
+            query_installed_package_relations(
+                PacmanDatabasePaths{"/", "/var/lib/pacman"}),
+            "successful empty installed inventory");
     expect(
-            empty.packages.empty(),
-            "Successful empty inventory was not retained");
+        empty.packages.empty(),
+        "Successful empty inventory was not retained");
     expect(
-            project_installed_relation_observations(
-                    InstalledPackageRelationInventoryResult{empty})
-                            .completeness ==
-                    PackageRelationObservationCompleteness::Complete,
-            "Successful empty inventory was not Complete");
+        project_installed_relation_observations(
+            InstalledPackageRelationInventoryResult{empty})
+                .completeness ==
+            PackageRelationObservationCompleteness::Complete,
+        "Successful empty inventory was not Complete");
 
     stub::reset_alpm_stub();
     stub::set_initialize_failure(ALPM_ERR_SYSTEM);
     const InstalledPackageRelationInventoryFailure& session_failure =
-            require_alternative<InstalledPackageRelationInventoryFailure>(
-                    query_installed_package_relations(
-                            PacmanDatabasePaths{"/", "/var/lib/pacman"}),
-                    "installed session failure");
+        require_alternative<InstalledPackageRelationInventoryFailure>(
+            query_installed_package_relations(
+                PacmanDatabasePaths{"/", "/var/lib/pacman"}),
+            "installed session failure");
     expect(
-            std::get<PackageMetadataFailure>(session_failure.reason).code ==
-                    PackageMetadataErrorCode::InitializationFailed,
-            "Installed session failure was flattened");
+        std::get<PackageMetadataFailure>(session_failure.reason).code ==
+            PackageMetadataErrorCode::InitializationFailed,
+        "Installed session failure was flattened");
     expect(
-            project_installed_relation_observations(
-                    InstalledPackageRelationInventoryResult{
-                            session_failure})
-                            .completeness ==
-                    PackageRelationObservationCompleteness::Unavailable,
-            "Installed session failure did not remain Unavailable");
+        project_installed_relation_observations(
+            InstalledPackageRelationInventoryResult{
+                session_failure})
+                .completeness ==
+            PackageRelationObservationCompleteness::Unavailable,
+        "Installed session failure did not remain Unavailable");
 
     stub::reset_alpm_stub();
     stub::set_local_database_unavailable();
     const InstalledPackageRelationInventoryFailure& database_failure =
-            require_alternative<InstalledPackageRelationInventoryFailure>(
-                    query_installed_package_relations(
-                            PacmanDatabasePaths{"/", "/var/lib/pacman"}),
-                    "installed local DB failure");
+        require_alternative<InstalledPackageRelationInventoryFailure>(
+            query_installed_package_relations(
+                PacmanDatabasePaths{"/", "/var/lib/pacman"}),
+            "installed local DB failure");
     expect(
-            std::get<PackageMetadataFailure>(database_failure.reason).code ==
-                    PackageMetadataErrorCode::LocalDatabaseUnavailable,
-            "Local DB failure became an empty inventory");
+        std::get<PackageMetadataFailure>(database_failure.reason).code ==
+            PackageMetadataErrorCode::LocalDatabaseUnavailable,
+        "Local DB failure became an empty inventory");
 
     stub::reset_alpm_stub();
     stub::set_local_packages(
-            {stub::LocalPackageMetadata{
-                    "query-package", "1", ALPM_PKG_REASON_EXPLICIT, {}}});
+        {stub::LocalPackageMetadata{
+            "query-package", "1", ALPM_PKG_REASON_EXPLICIT, {}}});
     PackageMetadataSession query_session = open_installed_session();
     stub::set_local_package_cache_entry_null(0);
     const InstalledPackageRelationInventoryFailure& query_failure =
-            require_alternative<InstalledPackageRelationInventoryFailure>(
-                    observe_installed_package_relations(
-                            query_session, installed_relation_source()),
-                    "installed inventory query failure");
+        require_alternative<InstalledPackageRelationInventoryFailure>(
+            observe_installed_package_relations(
+                query_session, installed_relation_source()),
+            "installed inventory query failure");
     expect(
-            std::get<PackageMetadataFailure>(query_failure.reason).code ==
-                    PackageMetadataErrorCode::QueryFailed,
-            "Installed query failure became an empty inventory");
+        std::get<PackageMetadataFailure>(query_failure.reason).code ==
+            PackageMetadataErrorCode::QueryFailed,
+        "Installed query failure became an empty inventory");
 }
 
 void test_installed_inventory_rejects_invalid_identity_and_provides() {
     stub::reset_alpm_stub();
     stub::set_local_packages(
-            {stub::LocalPackageMetadata{
-                    "bad/name", "1", ALPM_PKG_REASON_EXPLICIT, {}}});
+        {stub::LocalPackageMetadata{
+            "bad/name", "1", ALPM_PKG_REASON_EXPLICIT, {}}});
     PackageMetadataSession identity_session = open_installed_session();
     const InstalledPackageRelationInventoryFailure& invalid_identity =
-            require_alternative<InstalledPackageRelationInventoryFailure>(
-                    observe_installed_package_relations(
-                            identity_session,
-                            installed_relation_source()),
-                    "installed invalid identity");
+        require_alternative<InstalledPackageRelationInventoryFailure>(
+            observe_installed_package_relations(
+                identity_session,
+                installed_relation_source()),
+            "installed invalid identity");
     expect(
-            std::get<PackageMetadataFailure>(invalid_identity.reason).code ==
-                    PackageMetadataErrorCode::MalformedMetadata,
-            "Invalid installed identity was not rejected");
+        std::get<PackageMetadataFailure>(invalid_identity.reason).code ==
+            PackageMetadataErrorCode::MalformedMetadata,
+        "Invalid installed identity was not rejected");
 
     stub::reset_alpm_stub();
     stub::set_local_packages(
-            {stub::LocalPackageMetadata{
-                    "provider-package",
-                    "5",
-                    ALPM_PKG_REASON_EXPLICIT,
-                    {stub::RepositoryProvidedPackageMetadata{
-                            std::nullopt,
-                            std::string("3"),
-                            ALPM_DEP_MOD_EQ}}}});
+        {stub::LocalPackageMetadata{
+            "provider-package",
+            "5",
+            ALPM_PKG_REASON_EXPLICIT,
+            {stub::RepositoryProvidedPackageMetadata{
+                std::nullopt,
+                std::string("3"),
+                ALPM_DEP_MOD_EQ}}}});
     PackageMetadataSession provide_session = open_installed_session();
     const InstalledPackageRelationInventoryFailure& malformed_provide =
-            require_alternative<InstalledPackageRelationInventoryFailure>(
-                    observe_installed_package_relations(
-                            provide_session,
-                            installed_relation_source()),
-                    "installed malformed provide");
+        require_alternative<InstalledPackageRelationInventoryFailure>(
+            observe_installed_package_relations(
+                provide_session,
+                installed_relation_source()),
+            "installed malformed provide");
     expect(
-            malformed_provide.package_name ==
-                            std::optional<std::string>("provider-package") &&
-                    std::holds_alternative<
-                            DependencyConstraintParseFailure>(
-                            malformed_provide.reason),
-            "Malformed installed Provide was not typed per package");
+        malformed_provide.package_name ==
+                std::optional<std::string>("provider-package") &&
+            std::holds_alternative<
+                DependencyConstraintParseFailure>(
+                malformed_provide.reason),
+        "Malformed installed Provide was not typed per package");
     expect(
-            project_installed_relation_observations(
-                    InstalledPackageRelationInventoryResult{
-                            malformed_provide})
-                            .completeness ==
-                    PackageRelationObservationCompleteness::Invalid,
-            "Malformed installed Provide was not Invalid observation");
+        project_installed_relation_observations(
+            InstalledPackageRelationInventoryResult{
+                malformed_provide})
+                .completeness ==
+            PackageRelationObservationCompleteness::Invalid,
+        "Malformed installed Provide was not Invalid observation");
 
     stub::reset_alpm_stub();
     stub::set_local_packages(
-            {stub::LocalPackageMetadata{
-                     "retained-package",
-                     "2",
-                     ALPM_PKG_REASON_EXPLICIT,
-                     {}},
-             stub::LocalPackageMetadata{
-                     "broken-provider",
-                     "1",
-                     ALPM_PKG_REASON_EXPLICIT,
-                     {stub::RepositoryProvidedPackageMetadata{
-                             std::nullopt,
-                             std::string("1"),
-                             ALPM_DEP_MOD_EQ}}}});
+        {stub::LocalPackageMetadata{
+             "retained-package",
+             "2",
+             ALPM_PKG_REASON_EXPLICIT,
+             {}},
+         stub::LocalPackageMetadata{
+             "broken-provider",
+             "1",
+             ALPM_PKG_REASON_EXPLICIT,
+             {stub::RepositoryProvidedPackageMetadata{
+                 std::nullopt,
+                 std::string("1"),
+                 ALPM_DEP_MOD_EQ}}}});
     PackageMetadataSession partial_session = open_installed_session();
     const InstalledPackageRelationInventoryFailure& partial_failure =
-            require_alternative<InstalledPackageRelationInventoryFailure>(
-                    observe_installed_package_relations(
-                            partial_session,
-                            installed_relation_source()),
-                    "installed partial malformed inventory");
+        require_alternative<InstalledPackageRelationInventoryFailure>(
+            observe_installed_package_relations(
+                partial_session,
+                installed_relation_source()),
+            "installed partial malformed inventory");
     const PackageRelationObservationSet partial_observations =
-            project_installed_relation_observations(
-                    InstalledPackageRelationInventoryResult{
-                            partial_failure});
+        project_installed_relation_observations(
+            InstalledPackageRelationInventoryResult{
+                partial_failure});
     const PackageRelationMatchingEvidence retained_match =
-            match_declared_package_relation(
-                    require_relation(
-                            PackageRelationKind::Conflict,
-                            "retained-package"),
-                    partial_observations);
+        match_declared_package_relation(
+            require_relation(
+                PackageRelationKind::Conflict,
+                "retained-package"),
+            partial_observations);
     expect(
-            partial_failure.package_index == 1 &&
-                    partial_failure.observed_packages.size() == 1 &&
-                    partial_observations.completeness ==
-                            PackageRelationObservationCompleteness::Invalid &&
-                    partial_observations.packages.size() == 1 &&
-                    partial_observations.failures.size() == 1 &&
-                    package_relation_has_confirmed_match(retained_match) &&
-                    !package_relation_confirms_no_match(retained_match),
-            "Installed invalid entry discarded prior confirmed evidence");
+        partial_failure.package_index == 1 &&
+            partial_failure.observed_packages.size() == 1 &&
+            partial_observations.completeness ==
+                PackageRelationObservationCompleteness::Invalid &&
+            partial_observations.packages.size() == 1 &&
+            partial_observations.failures.size() == 1 &&
+            package_relation_has_confirmed_match(retained_match) &&
+            !package_relation_confirms_no_match(retained_match),
+        "Installed invalid entry discarded prior confirmed evidence");
 }
 
 void test_repository_and_aur_observation_adapters_retain_source() {
     const RepositoryExactPackage repository_package{
-            ConfiguredRepositoryIdentity{"extra", 1},
-            "repo-child",
-            "repo-base",
+        ConfiguredRepositoryIdentity{"extra", 1},
+        "repo-child",
+        "repo-base",
+        ObservedVersion::available(
+            ObservedVersionSource::RepositoryExactPackage,
+            "6"),
+        {RepositoryProviderCapability{
+            ProviderCapability(
+                "repo-virtual=2", "repo-virtual", "2"),
             ObservedVersion::available(
-                    ObservedVersionSource::RepositoryExactPackage,
-                    "6"),
-            {RepositoryProviderCapability{
-                    ProviderCapability(
-                            "repo-virtual=2", "repo-virtual", "2"),
-                    ObservedVersion::available(
-                            ObservedVersionSource::
-                                    RepositoryProviderCapability,
-                            "2")}}};
+                ObservedVersionSource::
+                    RepositoryProviderCapability,
+                "2")}}};
     const PackageRelationObservedPackage repository =
-            project_repository_relation_observation(
-                    repository_package,
-                    PackageRelationObservationRole::RepositoryCandidate);
+        project_repository_relation_observation(
+            repository_package,
+            PackageRelationObservationRole::RepositoryCandidate);
     expect(
-            repository.package_name == "repo-child" &&
-                    repository.package_base ==
-                            std::optional<std::string>("repo-base") &&
-                    std::get<ConfiguredRepositoryIdentity>(
-                            repository.source) ==
-                            ConfiguredRepositoryIdentity{"extra", 1} &&
-                    repository.provides.size() == 1,
-            "Repository observation adapter flattened source or provides");
+        repository.package_name == "repo-child" &&
+            repository.package_base ==
+                std::optional<std::string>("repo-base") &&
+            std::get<ConfiguredRepositoryIdentity>(
+                repository.source) ==
+                ConfiguredRepositoryIdentity{"extra", 1} &&
+            repository.provides.size() == 1,
+        "Repository observation adapter flattened source or provides");
 
     const RepositoryExactPackageObservationResult partial_input =
-            RepositoryExactPackageObservation{
-                    {"core", "extra", "testing"},
-                    {RepositoryExactPackageAbsent{
-                             ConfiguredRepositoryIdentity{"core", 0},
-                             "repo-child"},
-                     repository_package,
-                     RepositoryExactPackageSourceFailure{
-                             ConfiguredRepositoryIdentity{"testing", 2},
-                             "repo-child",
-                             PackageMetadataFailure{
-                                     PackageMetadataErrorCode::QueryFailed,
-                                     "testing source unavailable"}}}};
+        RepositoryExactPackageObservation{
+            {"core", "extra", "testing"},
+            {RepositoryExactPackageAbsent{
+                 ConfiguredRepositoryIdentity{"core", 0},
+                 "repo-child"},
+             repository_package,
+             RepositoryExactPackageSourceFailure{
+                 ConfiguredRepositoryIdentity{"testing", 2},
+                 "repo-child",
+                 PackageMetadataFailure{
+                     PackageMetadataErrorCode::QueryFailed,
+                     "testing source unavailable"}}}};
     const PackageRelationObservationSet partial =
-            project_repository_exact_relation_observations(partial_input);
+        project_repository_exact_relation_observations(partial_input);
     expect(
-            partial.completeness ==
-                            PackageRelationObservationCompleteness::Partial &&
-                    partial.required_sources ==
-                            std::vector<PackageRelationSourceIdentity>{
-                                    ConfiguredRepositoryIdentity{"core", 0},
-                                    ConfiguredRepositoryIdentity{"extra", 1},
-                                    ConfiguredRepositoryIdentity{"testing", 2}} &&
-                    partial.packages.size() == 1 &&
-                    partial.failures.size() == 1,
-            "Repository partial source evidence was flattened");
+        partial.completeness ==
+                PackageRelationObservationCompleteness::Partial &&
+            partial.required_sources ==
+                std::vector<PackageRelationSourceIdentity>{
+                    ConfiguredRepositoryIdentity{"core", 0},
+                    ConfiguredRepositoryIdentity{"extra", 1},
+                    ConfiguredRepositoryIdentity{"testing", 2}} &&
+            partial.packages.size() == 1 &&
+            partial.failures.size() == 1,
+        "Repository partial source evidence was flattened");
 
     const DeclaredPackageRelation aur_relation = require_relation(
-            PackageRelationKind::Conflict, "old-component<2");
+        PackageRelationKind::Conflict, "old-component<2");
     const AurPackageConstraintMetadata aur_metadata{
-            "aur-child",
-            "aur-base",
+        "aur-child",
+        "aur-base",
+        ObservedVersion::available(
+            ObservedVersionSource::AurExactPackage, "3"),
+        {},
+        {},
+        {},
+        {AurProviderCapabilityMetadata{
+            ProviderCapability(
+                "aur-virtual=4", "aur-virtual", "4"),
             ObservedVersion::available(
-                    ObservedVersionSource::AurExactPackage, "3"),
-            {},
-            {},
-            {},
-            {AurProviderCapabilityMetadata{
-                    ProviderCapability(
-                            "aur-virtual=4", "aur-virtual", "4"),
-                    ObservedVersion::available(
-                            ObservedVersionSource::AurProviderCapability,
-                            "4")}},
-            {aur_relation}};
+                ObservedVersionSource::AurProviderCapability,
+                "4")}},
+        {aur_relation}};
     const PlannedPackageRelationObservation aur =
-            project_aur_relation_observation(
-                    aur_metadata,
-                    {PackageRelationRootAttribution{2, "aur-child"}});
+        project_aur_relation_observation(
+            aur_metadata,
+            {PackageRelationRootAttribution{2, "aur-child"}});
     expect(
-            aur.package.package_name == "aur-child" &&
-                    aur.package.package_base ==
-                            std::optional<std::string>("aur-base") &&
-                    std::get<PackageRelationAurSourceIdentity>(
-                            aur.package.source) ==
-                            PackageRelationAurSourceIdentity{
-                                    "aur-child", "aur-base"} &&
-                    aur.package.package_version.version() != nullptr &&
-                    *aur.package.package_version.version() == "3" &&
-                    aur.package.provides.size() == 1 &&
-                    aur.package.roots ==
-                            std::vector<PackageRelationRootAttribution>{
-                                    {2, "aur-child"}} &&
-                    aur.declarations ==
-                            std::vector<DeclaredPackageRelation>{
-                                    aur_relation},
-            "AUR observation adapter lost direct typed metadata");
+        aur.package.package_name == "aur-child" &&
+            aur.package.package_base ==
+                std::optional<std::string>("aur-base") &&
+            std::get<PackageRelationAurSourceIdentity>(
+                aur.package.source) ==
+                PackageRelationAurSourceIdentity{
+                    "aur-child", "aur-base"} &&
+            aur.package.package_version.version() != nullptr &&
+            *aur.package.package_version.version() == "3" &&
+            aur.package.provides.size() == 1 &&
+            aur.package.roots ==
+                std::vector<PackageRelationRootAttribution>{
+                    {2, "aur-child"}} &&
+            aur.declarations ==
+                std::vector<DeclaredPackageRelation>{
+                    aur_relation},
+        "AUR observation adapter lost direct typed metadata");
 }
 
 void test_repository_relation_composite_requires_both_identity_channels() {
@@ -1435,200 +1450,200 @@ void test_repository_relation_composite_requires_both_identity_channels() {
     const ConfiguredRepositoryIdentity core{"core", 0};
     const ConfiguredRepositoryIdentity extra{"extra", 1};
     const RepositoryProviderObservationResult empty_providers =
-            RepositoryProviderObservation{
-                    order,
-                    {RepositoryProviderSourceObservation{core, {}},
-                     RepositoryProviderSourceObservation{extra, {}}}};
+        RepositoryProviderObservation{
+            order,
+            {RepositoryProviderSourceObservation{core, {}},
+             RepositoryProviderSourceObservation{extra, {}}}};
 
     const RepositoryExactPackageObservationResult virtual_exact_absent =
-            RepositoryExactPackageObservation{
-                    order,
-                    {RepositoryExactPackageAbsent{core, "virtual-api"},
-                     RepositoryExactPackageAbsent{extra, "virtual-api"}}};
+        RepositoryExactPackageObservation{
+            order,
+            {RepositoryExactPackageAbsent{core, "virtual-api"},
+             RepositoryExactPackageAbsent{extra, "virtual-api"}}};
     const RepositoryExactPackage provider_package =
-            repository_relation_package(
-                    core, "provider-package",
-                    {repository_relation_capability("virtual-api")});
+        repository_relation_package(
+            core, "provider-package",
+            {repository_relation_capability("virtual-api")});
     const RepositoryProviderObservationResult virtual_provider_present =
-            RepositoryProviderObservation{
-                    order,
-                    {RepositoryProviderSourceObservation{
-                             core, {provider_package}},
-                     RepositoryProviderSourceObservation{extra, {}}}};
+        RepositoryProviderObservation{
+            order,
+            {RepositoryProviderSourceObservation{
+                 core, {provider_package}},
+             RepositoryProviderSourceObservation{extra, {}}}};
     const DeclaredPackageRelation virtual_relation = require_relation(
-            PackageRelationKind::Conflict, "virtual-api");
+        PackageRelationKind::Conflict, "virtual-api");
 
     const PackageRelationMatchingEvidence exact_only =
-            match_declared_package_relation(
-                    virtual_relation,
-                    project_repository_exact_relation_observations(
-                            virtual_exact_absent));
+        match_declared_package_relation(
+            virtual_relation,
+            project_repository_exact_relation_observations(
+                virtual_exact_absent));
     expect(
-            exact_only.observation_completeness ==
-                            PackageRelationObservationCompleteness::Complete &&
-                    !package_relation_has_complete_identity_coverage(
-                            exact_only) &&
-                    !package_relation_confirms_no_match(exact_only),
-            "Exact-only repository coverage proved NoMatch");
+        exact_only.observation_completeness ==
+                PackageRelationObservationCompleteness::Complete &&
+            !package_relation_has_complete_identity_coverage(
+                exact_only) &&
+            !package_relation_confirms_no_match(exact_only),
+        "Exact-only repository coverage proved NoMatch");
 
     const PackageRelationObservationSet provider_composite =
-            project_repository_relation_observations(
-                    virtual_exact_absent, virtual_provider_present);
+        project_repository_relation_observations(
+            virtual_exact_absent, virtual_provider_present);
     const PackageRelationMatchingEvidence provider_match =
-            match_declared_package_relation(
-                    virtual_relation, provider_composite);
+        match_declared_package_relation(
+            virtual_relation, provider_composite);
     expect(
-            provider_composite.completeness ==
-                            PackageRelationObservationCompleteness::Complete &&
-                    package_relation_has_complete_identity_coverage(
-                            provider_match) &&
-                    package_relation_has_confirmed_match(provider_match) &&
-                    !package_relation_confirms_no_match(provider_match) &&
-                    provider_composite.required_sources ==
-                            std::vector<PackageRelationSourceIdentity>{
-                                    core, extra},
-            "Exact absence hid a matching repository provider");
+        provider_composite.completeness ==
+                PackageRelationObservationCompleteness::Complete &&
+            package_relation_has_complete_identity_coverage(
+                provider_match) &&
+            package_relation_has_confirmed_match(provider_match) &&
+            !package_relation_confirms_no_match(provider_match) &&
+            provider_composite.required_sources ==
+                std::vector<PackageRelationSourceIdentity>{
+                    core, extra},
+        "Exact absence hid a matching repository provider");
 
     const RepositoryExactPackage exact_package =
-            repository_relation_package(core, "exact-target");
+        repository_relation_package(core, "exact-target");
     const RepositoryExactPackageObservationResult exact_present =
-            RepositoryExactPackageObservation{
-                    order,
-                    {exact_package,
-                     RepositoryExactPackageAbsent{extra, "exact-target"}}};
+        RepositoryExactPackageObservation{
+            order,
+            {exact_package,
+             RepositoryExactPackageAbsent{extra, "exact-target"}}};
     const DeclaredPackageRelation exact_relation = require_relation(
-            PackageRelationKind::Replacement, "exact-target");
+        PackageRelationKind::Replacement, "exact-target");
     const PackageRelationMatchingEvidence provider_only =
-            match_declared_package_relation(
-                    exact_relation,
-                    project_repository_provider_relation_observations(
-                            empty_providers));
+        match_declared_package_relation(
+            exact_relation,
+            project_repository_provider_relation_observations(
+                empty_providers));
     expect(
-            provider_only.observation_completeness ==
-                            PackageRelationObservationCompleteness::Complete &&
-                    !package_relation_has_complete_identity_coverage(
-                            provider_only) &&
-                    !package_relation_confirms_no_match(provider_only),
-            "Provider-only repository coverage proved NoMatch");
+        provider_only.observation_completeness ==
+                PackageRelationObservationCompleteness::Complete &&
+            !package_relation_has_complete_identity_coverage(
+                provider_only) &&
+            !package_relation_confirms_no_match(provider_only),
+        "Provider-only repository coverage proved NoMatch");
 
     const PackageRelationMatchingEvidence exact_match =
-            match_declared_package_relation(
-                    exact_relation,
-                    project_repository_relation_observations(
-                            exact_present, empty_providers));
+        match_declared_package_relation(
+            exact_relation,
+            project_repository_relation_observations(
+                exact_present, empty_providers));
     expect(
-            package_relation_has_confirmed_match(exact_match) &&
-                    !package_relation_confirms_no_match(exact_match),
-            "Empty provider search hid an exact repository package");
+        package_relation_has_confirmed_match(exact_match) &&
+            !package_relation_confirms_no_match(exact_match),
+        "Empty provider search hid an exact repository package");
 
     const RepositoryExactPackageObservationResult missing_exact =
-            RepositoryExactPackageObservation{
-                    order,
-                    {RepositoryExactPackageAbsent{core, "missing-target"},
-                     RepositoryExactPackageAbsent{
-                             extra, "missing-target"}}};
+        RepositoryExactPackageObservation{
+            order,
+            {RepositoryExactPackageAbsent{core, "missing-target"},
+             RepositoryExactPackageAbsent{
+                 extra, "missing-target"}}};
     const DeclaredPackageRelation missing_relation = require_relation(
-            PackageRelationKind::Conflict, "missing-target");
+        PackageRelationKind::Conflict, "missing-target");
     const PackageRelationMatchingEvidence confirmed_absence =
-            match_declared_package_relation(
-                    missing_relation,
-                    project_repository_relation_observations(
-                            missing_exact, empty_providers));
+        match_declared_package_relation(
+            missing_relation,
+            project_repository_relation_observations(
+                missing_exact, empty_providers));
     expect(
-            package_relation_has_complete_identity_coverage(
-                    confirmed_absence) &&
-                    package_relation_confirms_no_match(confirmed_absence),
-            "Complete exact/provider repository absence did not prove NoMatch");
+        package_relation_has_complete_identity_coverage(
+            confirmed_absence) &&
+            package_relation_confirms_no_match(confirmed_absence),
+        "Complete exact/provider repository absence did not prove NoMatch");
 
     const RepositoryExactPackageObservationResult exact_query_failure =
-            RepositoryExactPackageObservationFailure{
-                    "missing-target",
-                    repository_relation_query_failure(
-                            "exact repository query failed")};
+        RepositoryExactPackageObservationFailure{
+            "missing-target",
+            repository_relation_query_failure(
+                "exact repository query failed")};
     const PackageRelationMatchingEvidence failed_exact =
-            match_declared_package_relation(
-                    missing_relation,
-                    project_repository_relation_observations(
-                            exact_query_failure, empty_providers));
+        match_declared_package_relation(
+            missing_relation,
+            project_repository_relation_observations(
+                exact_query_failure, empty_providers));
     expect(
-            !failed_exact.observation_failures.empty() &&
-                    !package_relation_has_complete_identity_coverage(
-                            failed_exact) &&
-                    !package_relation_confirms_no_match(failed_exact),
-            "Exact query failure was flattened by an empty provider search");
+        !failed_exact.observation_failures.empty() &&
+            !package_relation_has_complete_identity_coverage(
+                failed_exact) &&
+            !package_relation_confirms_no_match(failed_exact),
+        "Exact query failure was flattened by an empty provider search");
 
     const RepositoryProviderObservationResult provider_query_failure =
-            RepositoryProviderObservationFailure{
-                    "missing-target",
-                    repository_relation_query_failure(
-                            "provider repository query failed")};
+        RepositoryProviderObservationFailure{
+            "missing-target",
+            repository_relation_query_failure(
+                "provider repository query failed")};
     const PackageRelationMatchingEvidence failed_provider =
-            match_declared_package_relation(
-                    missing_relation,
-                    project_repository_relation_observations(
-                            missing_exact, provider_query_failure));
+        match_declared_package_relation(
+            missing_relation,
+            project_repository_relation_observations(
+                missing_exact, provider_query_failure));
     expect(
-            !failed_provider.observation_failures.empty() &&
-                    !package_relation_has_complete_identity_coverage(
-                            failed_provider) &&
-                    !package_relation_confirms_no_match(failed_provider),
-            "Provider query failure was flattened by exact absence");
+        !failed_provider.observation_failures.empty() &&
+            !package_relation_has_complete_identity_coverage(
+                failed_provider) &&
+            !package_relation_confirms_no_match(failed_provider),
+        "Provider query failure was flattened by exact absence");
 
     const RepositoryProviderObservationResult partial_providers =
-            RepositoryProviderObservation{
-                    order,
-                    {RepositoryProviderSourceObservation{core, {}},
-                     RepositoryProviderSourceFailure{
-                             extra,
-                             repository_relation_query_failure(
-                                     "extra provider query failed")}}};
+        RepositoryProviderObservation{
+            order,
+            {RepositoryProviderSourceObservation{core, {}},
+             RepositoryProviderSourceFailure{
+                 extra,
+                 repository_relation_query_failure(
+                     "extra provider query failed")}}};
     const PackageRelationMatchingEvidence exact_match_with_failure =
-            match_declared_package_relation(
-                    exact_relation,
-                    project_repository_relation_observations(
-                            exact_present, partial_providers));
+        match_declared_package_relation(
+            exact_relation,
+            project_repository_relation_observations(
+                exact_present, partial_providers));
     expect(
-            package_relation_has_confirmed_match(
-                    exact_match_with_failure) &&
-                    exact_match_with_failure.observation_failures.size() == 1 &&
-                    exact_match_with_failure.observation_failures.front()
-                                    .source ==
-                            std::optional<PackageRelationSourceIdentity>(
-                                    extra) &&
-                    !package_relation_has_complete_identity_coverage(
-                            exact_match_with_failure) &&
-                    !package_relation_confirms_no_match(
-                            exact_match_with_failure),
-            "Exact match did not coexist with provider source failure");
+        package_relation_has_confirmed_match(
+            exact_match_with_failure) &&
+            exact_match_with_failure.observation_failures.size() == 1 &&
+            exact_match_with_failure.observation_failures.front()
+                    .source ==
+                std::optional<PackageRelationSourceIdentity>(
+                    extra) &&
+            !package_relation_has_complete_identity_coverage(
+                exact_match_with_failure) &&
+            !package_relation_confirms_no_match(
+                exact_match_with_failure),
+        "Exact match did not coexist with provider source failure");
 
     const RepositoryExactPackageObservationResult partial_exact =
-            RepositoryExactPackageObservation{
-                    order,
-                    {RepositoryExactPackageAbsent{core, "virtual-api"},
-                     RepositoryExactPackageSourceFailure{
-                             extra,
-                             "virtual-api",
-                             repository_relation_query_failure(
-                                     "extra exact query failed")}}};
+        RepositoryExactPackageObservation{
+            order,
+            {RepositoryExactPackageAbsent{core, "virtual-api"},
+             RepositoryExactPackageSourceFailure{
+                 extra,
+                 "virtual-api",
+                 repository_relation_query_failure(
+                     "extra exact query failed")}}};
     const PackageRelationMatchingEvidence provider_match_with_failure =
-            match_declared_package_relation(
-                    virtual_relation,
-                    project_repository_relation_observations(
-                            partial_exact, virtual_provider_present));
+        match_declared_package_relation(
+            virtual_relation,
+            project_repository_relation_observations(
+                partial_exact, virtual_provider_present));
     expect(
-            package_relation_has_confirmed_match(
-                    provider_match_with_failure) &&
-                    provider_match_with_failure.observation_failures.size() ==
-                            1 &&
-                    provider_match_with_failure.observation_failures.front()
-                                    .source ==
-                            std::optional<PackageRelationSourceIdentity>(
-                                    extra) &&
-                    !package_relation_has_complete_identity_coverage(
-                            provider_match_with_failure) &&
-                    !package_relation_confirms_no_match(
-                            provider_match_with_failure),
-            "Provider match did not coexist with exact source failure");
+        package_relation_has_confirmed_match(
+            provider_match_with_failure) &&
+            provider_match_with_failure.observation_failures.size() ==
+                1 &&
+            provider_match_with_failure.observation_failures.front()
+                    .source ==
+                std::optional<PackageRelationSourceIdentity>(
+                    extra) &&
+            !package_relation_has_complete_identity_coverage(
+                provider_match_with_failure) &&
+            !package_relation_confirms_no_match(
+                provider_match_with_failure),
+        "Provider match did not coexist with exact source failure");
 }
 
 } // namespace

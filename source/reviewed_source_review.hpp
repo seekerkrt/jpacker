@@ -17,17 +17,17 @@ class TrustedAurReviewedSourceProjection;
 
 inline constexpr std::size_t REVIEWED_SOURCE_REVIEW_ENTRY_LIMIT = 4096;
 inline constexpr std::uintmax_t REVIEWED_SOURCE_LINE_REVIEWABLE_BLOB_LIMIT =
-        8U * 1024U * 1024U;
+    8U * 1024U * 1024U;
 inline constexpr std::uintmax_t
-        REVIEWED_SOURCE_AGGREGATE_LINE_REVIEWABLE_BLOB_LIMIT =
-                32U * 1024U * 1024U;
-inline constexpr std::size_t REVIEWED_SOURCE_AGGREGATE_RAW_PATCH_LIMIT =
+    REVIEWED_SOURCE_AGGREGATE_LINE_REVIEWABLE_BLOB_LIMIT =
         32U * 1024U * 1024U;
+inline constexpr std::size_t REVIEWED_SOURCE_AGGREGATE_RAW_PATCH_LIMIT =
+    32U * 1024U * 1024U;
 
 // Filesystem overlay proof uses one fixed collision-resistant content
 // identity independently of the repository's SHA-1/SHA-256 object format.
 [[nodiscard]] std::string reviewed_source_sha256_content_identity(
-        std::string_view content);
+    std::string_view content);
 
 enum class ReviewedSourceReviewResourceKind {
     ReviewEntries,
@@ -60,16 +60,16 @@ struct ReviewedSourceReviewFailure {
 };
 
 using ReviewedSourceReviewResourceResult = std::variant<
-        std::monostate,
-        ReviewedSourceReviewFailure>;
+    std::monostate,
+    ReviewedSourceReviewFailure>;
 
 [[nodiscard]] std::uintmax_t reviewed_source_review_resource_limit(
-        ReviewedSourceReviewResourceKind resource) noexcept;
+    ReviewedSourceReviewResourceKind resource) noexcept;
 
 [[nodiscard]] ReviewedSourceReviewResourceResult
 preflight_reviewed_source_review_resource(
-        ReviewedSourceReviewResourceKind resource,
-        std::uintmax_t observed);
+    ReviewedSourceReviewResourceKind resource,
+    std::uintmax_t observed);
 
 struct ReviewedSourceBlobRequest {
     ReviewedSourceObjectId object_id;
@@ -86,29 +86,29 @@ struct ReviewedSourceRawBlob {
 };
 
 using ReviewedSourceBlobRequestPlanResult = std::variant<
-        std::vector<ReviewedSourceBlobRequest>,
-        ReviewedSourceReviewFailure>;
+    std::vector<ReviewedSourceBlobRequest>,
+    ReviewedSourceReviewFailure>;
 
 using ReviewedSourceBlobBatchParseResult = std::variant<
-        std::vector<ReviewedSourceRawBlob>,
-        ReviewedSourceReviewFailure>;
+    std::vector<ReviewedSourceRawBlob>,
+    ReviewedSourceReviewFailure>;
 
 using ReviewedSourceBlobBatchSizeResult = std::variant<
-        std::size_t,
-        ReviewedSourceReviewFailure>;
+    std::size_t,
+    ReviewedSourceReviewFailure>;
 
 [[nodiscard]] ReviewedSourceBlobRequestPlanResult
 plan_reviewed_source_blob_requests(
-        const ReviewedSourceProjection& projection);
+    const ReviewedSourceProjection& projection);
 
 [[nodiscard]] ReviewedSourceBlobBatchSizeResult
 reviewed_source_blob_batch_capture_size(
-        const std::vector<ReviewedSourceBlobRequest>& requests);
+    const std::vector<ReviewedSourceBlobRequest>& requests);
 
 [[nodiscard]] ReviewedSourceBlobBatchParseResult
 parse_reviewed_source_blob_batch_output(
-        const std::vector<ReviewedSourceBlobRequest>& requests,
-        std::string_view output);
+    const std::vector<ReviewedSourceBlobRequest>& requests,
+    std::string_view output);
 
 enum class ReviewedSourceBlobContentKind {
     LineReviewable,
@@ -122,7 +122,7 @@ enum class ReviewedSourceBlobContentKind {
 // it does not mean the bytes are safe to write directly to a terminal.
 struct ReviewedSourceBlobObservation {
     ReviewedSourceBlobContentKind kind =
-            ReviewedSourceBlobContentKind::ContainsNul;
+        ReviewedSourceBlobContentKind::ContainsNul;
     std::shared_ptr<const ReviewedSourceTextContent> text;
 
     bool operator==(const ReviewedSourceBlobObservation& other) const;
@@ -153,13 +153,13 @@ struct ReviewedSourceReviewEntry {
     // rename similarity, file classification, and the advisory Git marker.
     ReviewedSourceFileChange change;
     ReviewedSourceReviewEmphasis emphasis =
-            ReviewedSourceReviewEmphasis::Ordinary;
+        ReviewedSourceReviewEmphasis::Ordinary;
     std::optional<ReviewedSourceBlobObservation> old_observation;
     std::optional<ReviewedSourceBlobObservation> new_observation;
     ReviewedSourceReviewRepresentation representation =
-            ReviewedSourceReviewRepresentation::NoContentChange;
+        ReviewedSourceReviewRepresentation::NoContentChange;
     ReviewedSourceReviewReadiness readiness =
-            ReviewedSourceReviewReadiness::Complete;
+        ReviewedSourceReviewReadiness::Complete;
     std::optional<ReviewedSourceTextPatch> patch;
 
     bool operator==(const ReviewedSourceReviewEntry&) const = default;
@@ -195,12 +195,12 @@ struct ReviewedSourceRawPatch {
 };
 
 using ReviewedSourceReviewPreparationResult = std::variant<
-        ReviewedSourceReviewPreparation,
-        ReviewedSourceReviewFailure>;
+    ReviewedSourceReviewPreparation,
+    ReviewedSourceReviewFailure>;
 
 struct ReviewedSourceReviewBody {
     ReviewedSourceReviewReadiness readiness =
-            ReviewedSourceReviewReadiness::Complete;
+        ReviewedSourceReviewReadiness::Complete;
     std::vector<ReviewedSourceReviewEntry> entries;
 
     bool operator==(const ReviewedSourceReviewBody&) const = default;
@@ -211,14 +211,14 @@ struct ReviewedSourceMaterializedInitialFullReview {
     ReviewedSourceReviewBody review;
 
     bool operator==(const ReviewedSourceMaterializedInitialFullReview&) const =
-            default;
+        default;
 };
 
 struct ReviewedSourceMaterializedAlreadyReviewed {
     SourceRevisionIdentity revision;
 
     bool operator==(const ReviewedSourceMaterializedAlreadyReviewed&) const =
-            default;
+        default;
 };
 
 struct ReviewedSourceMaterializedUpdateReview {
@@ -228,7 +228,7 @@ struct ReviewedSourceMaterializedUpdateReview {
     ReviewedSourceReviewBody review;
 
     bool operator==(const ReviewedSourceMaterializedUpdateReview&) const =
-            default;
+        default;
 };
 
 struct ReviewedSourceMaterializedRebaselineFullReview {
@@ -238,15 +238,15 @@ struct ReviewedSourceMaterializedRebaselineFullReview {
     ReviewedSourceReviewBody review;
 
     bool operator==(
-            const ReviewedSourceMaterializedRebaselineFullReview&) const =
-            default;
+        const ReviewedSourceMaterializedRebaselineFullReview&) const =
+        default;
 };
 
 using ReviewedSourceMaterializedReview = std::variant<
-        ReviewedSourceMaterializedInitialFullReview,
-        ReviewedSourceMaterializedAlreadyReviewed,
-        ReviewedSourceMaterializedUpdateReview,
-        ReviewedSourceMaterializedRebaselineFullReview>;
+    ReviewedSourceMaterializedInitialFullReview,
+    ReviewedSourceMaterializedAlreadyReviewed,
+    ReviewedSourceMaterializedUpdateReview,
+    ReviewedSourceMaterializedRebaselineFullReview>;
 
 // Capability proving that the materialized model crossed the trusted Git 3B1
 // content-address, strict patch replay, and readiness finalization path. The
@@ -255,20 +255,20 @@ using ReviewedSourceMaterializedReview = std::variant<
 class ReviewedSourceVerifiedMaterializedReview final {
 public:
     ReviewedSourceVerifiedMaterializedReview(
-            const ReviewedSourceVerifiedMaterializedReview&) = default;
+        const ReviewedSourceVerifiedMaterializedReview&) = default;
     ReviewedSourceVerifiedMaterializedReview(
-            ReviewedSourceVerifiedMaterializedReview&&) noexcept = default;
+        ReviewedSourceVerifiedMaterializedReview&&) noexcept = default;
     ReviewedSourceVerifiedMaterializedReview& operator=(
-            const ReviewedSourceVerifiedMaterializedReview&) = default;
+        const ReviewedSourceVerifiedMaterializedReview&) = default;
     ReviewedSourceVerifiedMaterializedReview& operator=(
-            ReviewedSourceVerifiedMaterializedReview&&) noexcept = default;
+        ReviewedSourceVerifiedMaterializedReview&&) noexcept = default;
     ~ReviewedSourceVerifiedMaterializedReview() = default;
 
     [[nodiscard]] const ReviewedSourceMaterializedReview& review()
-            const noexcept;
+        const noexcept;
 
     bool operator==(
-            const ReviewedSourceVerifiedMaterializedReview&) const = default;
+        const ReviewedSourceVerifiedMaterializedReview&) const = default;
 
 private:
     // Exact non-inline trusted Git boundary. It consumes a sealed Slice 3A
@@ -276,16 +276,16 @@ private:
     // capability.
     friend ReviewedSourceVerifiedMaterializedReview
     materialize_verified_review_from_trusted_git(
-            const ValidatedCachePath& checkout,
-            TrustedAurReviewedSourceProjection projection);
+        const ValidatedCachePath& checkout,
+        TrustedAurReviewedSourceProjection projection);
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_PRESENTATION_TEST_HOOKS
     friend ReviewedSourceVerifiedMaterializedReview
     seal_reviewed_source_materialized_review_for_test(
-            ReviewedSourceMaterializedReview review);
+        ReviewedSourceMaterializedReview review);
 #endif
 
     explicit ReviewedSourceVerifiedMaterializedReview(
-            ReviewedSourceMaterializedReview review) noexcept;
+        ReviewedSourceMaterializedReview review) noexcept;
 
     ReviewedSourceMaterializedReview review_;
 };
@@ -294,29 +294,29 @@ private:
 // lifecycle/body invariant that is not attributable to one existing entry.
 [[nodiscard]] std::optional<std::size_t>
 reviewed_source_materialized_review_inconsistent_entry(
-        const ReviewedSourceMaterializedReview& review);
+    const ReviewedSourceMaterializedReview& review);
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_PRESENTATION_TEST_HOOKS
 // Test-only seam for exercising the renderer's defense-in-depth rejection.
 // Production builds have no general sealing function.
 [[nodiscard]] ReviewedSourceVerifiedMaterializedReview
 seal_reviewed_source_materialized_review_for_test(
-        ReviewedSourceMaterializedReview review);
+    ReviewedSourceMaterializedReview review);
 #endif
 
 using ReviewedSourceReviewFinalizationResult = std::variant<
-        ReviewedSourceMaterializedReview,
-        ReviewedSourceReviewFailure>;
+    ReviewedSourceMaterializedReview,
+    ReviewedSourceReviewFailure>;
 
 [[nodiscard]] ReviewedSourceReviewEmphasis reviewed_source_review_emphasis(
-        const ReviewedSourcePath& path) noexcept;
+    const ReviewedSourcePath& path) noexcept;
 
 [[nodiscard]] ReviewedSourceReviewPreparationResult
 prepare_reviewed_source_review(
-        const ReviewedSourceProjection& projection,
-        std::vector<ReviewedSourceRawBlob> blobs);
+    const ReviewedSourceProjection& projection,
+    std::vector<ReviewedSourceRawBlob> blobs);
 
 [[nodiscard]] ReviewedSourceReviewFinalizationResult
 finalize_reviewed_source_review(
-        ReviewedSourceReviewPreparation preparation,
-        std::vector<ReviewedSourceRawPatch> patches);
+    ReviewedSourceReviewPreparation preparation,
+    std::vector<ReviewedSourceRawPatch> patches);

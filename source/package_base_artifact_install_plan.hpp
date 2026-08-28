@@ -10,9 +10,9 @@
 #include <vector>
 
 struct SelectedPackageBaseArtifactInstallReasonPolicyInput {
-    ArtifactPackageIdentity              identity;
-    DesiredInstallReason                 desired_reason;
-    InstalledVersionState                installed_version_state;
+    ArtifactPackageIdentity identity;
+    DesiredInstallReason desired_reason;
+    InstalledVersionState installed_version_state;
     std::optional<ExistingInstallReason> existing_reason;
 };
 
@@ -20,7 +20,7 @@ struct PackageBaseArtifactInstallReasonPolicyInput {
     std::string package_base;
     // POLICY(#268): selectionで確定したrequired target順を維持する。
     std::vector<SelectedPackageBaseArtifactInstallReasonPolicyInput>
-            selected_artifacts;
+        selected_artifacts;
     bool needed = false;
 };
 
@@ -30,11 +30,11 @@ enum class PackageBaseArtifactInstallExpectedOutcome {
 };
 
 struct PlannedPackageBaseArtifactInstallReason {
-    ArtifactPackageIdentity                   identity;
-    DesiredInstallReason                      desired_reason;
-    InstalledVersionState                     installed_version_state;
-    std::optional<ExistingInstallReason>      existing_reason;
-    InstallReasonDirective                    directive;
+    ArtifactPackageIdentity identity;
+    DesiredInstallReason desired_reason;
+    InstalledVersionState installed_version_state;
+    std::optional<ExistingInstallReason> existing_reason;
+    InstallReasonDirective directive;
     PackageBaseArtifactInstallExpectedOutcome expected_outcome;
 };
 
@@ -42,15 +42,15 @@ struct PackageBaseArtifactInstallReasonPlan {
     std::string package_base;
     std::vector<PlannedPackageBaseArtifactInstallReason> selected_artifacts;
     InstallReasonDirective transaction_directive;
-    bool                   needed;
+    bool needed;
 };
 
 struct MixedPackageBaseInstallReasonArtifact {
-    ArtifactPackageIdentity              identity;
-    DesiredInstallReason                 desired_reason;
-    InstalledVersionState                installed_version_state;
+    ArtifactPackageIdentity identity;
+    DesiredInstallReason desired_reason;
+    InstalledVersionState installed_version_state;
     std::optional<ExistingInstallReason> existing_reason;
-    InstallReasonDirective               directive;
+    InstallReasonDirective directive;
 };
 
 struct MixedPackageBaseInstallReasonUnsupported {
@@ -60,48 +60,48 @@ struct MixedPackageBaseInstallReasonUnsupported {
 };
 
 class PackageBaseArtifactInstallReasonPlanResult final {
-  public:
+public:
     PackageBaseArtifactInstallReasonPlanResult() = delete;
     PackageBaseArtifactInstallReasonPlanResult(
-            const PackageBaseArtifactInstallReasonPlanResult&) = default;
+        const PackageBaseArtifactInstallReasonPlanResult&) = default;
     PackageBaseArtifactInstallReasonPlanResult(
-            PackageBaseArtifactInstallReasonPlanResult&&) noexcept = default;
+        PackageBaseArtifactInstallReasonPlanResult&&) noexcept = default;
     PackageBaseArtifactInstallReasonPlanResult& operator=(
-            const PackageBaseArtifactInstallReasonPlanResult&) = delete;
+        const PackageBaseArtifactInstallReasonPlanResult&) = delete;
     PackageBaseArtifactInstallReasonPlanResult& operator=(
-            PackageBaseArtifactInstallReasonPlanResult&&) noexcept = delete;
+        PackageBaseArtifactInstallReasonPlanResult&&) noexcept = delete;
     ~PackageBaseArtifactInstallReasonPlanResult() = default;
 
     [[nodiscard]] bool is_success() const noexcept;
     [[nodiscard]] const PackageBaseArtifactInstallReasonPlan* success()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const MixedPackageBaseInstallReasonUnsupported* failure()
-            const noexcept;
+        const noexcept;
 
-  private:
+private:
     explicit PackageBaseArtifactInstallReasonPlanResult(
-            PackageBaseArtifactInstallReasonPlan plan);
+        PackageBaseArtifactInstallReasonPlan plan);
     explicit PackageBaseArtifactInstallReasonPlanResult(
-            MixedPackageBaseInstallReasonUnsupported failure);
+        MixedPackageBaseInstallReasonUnsupported failure);
 
     std::variant<PackageBaseArtifactInstallReasonPlan,
                  MixedPackageBaseInstallReasonUnsupported>
-            outcome_;
+        outcome_;
 
     friend PackageBaseArtifactInstallReasonPlanResult
     resolve_package_base_artifact_install_reason_plan(
-            const PackageBaseArtifactInstallReasonPolicyInput& input);
+        const PackageBaseArtifactInstallReasonPolicyInput& input);
 };
 
 // Per-artifact policyを既存singular reducerで確定し、一回のpacman -Uで
 // 安全に表現できるtransaction-wide directiveへ畳む。
 PackageBaseArtifactInstallReasonPlanResult
 resolve_package_base_artifact_install_reason_plan(
-        const PackageBaseArtifactInstallReasonPolicyInput& input);
+    const PackageBaseArtifactInstallReasonPolicyInput& input);
 
 #ifdef MOGUET_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS
 using PackageBaseArtifactInstallReasonPlanObserverForTest = void (*)();
 
 void set_package_base_artifact_install_reason_plan_observer_for_test(
-        PackageBaseArtifactInstallReasonPlanObserverForTest observer);
+    PackageBaseArtifactInstallReasonPlanObserverForTest observer);
 #endif

@@ -24,45 +24,45 @@ void expect(bool condition, const std::string& message) {
 }
 
 AurUpdatePlanEntry remote_entry(
-        const std::string& installed_name,
-        InstalledPackageReason installed_reason,
-        AurUpdateClassification classification =
-                AurUpdateClassification::UpdateAvailable,
-        const std::string& aur_name = {},
-        const std::string& package_base = {}) {
+    const std::string& installed_name,
+    InstalledPackageReason installed_reason,
+    AurUpdateClassification classification =
+        AurUpdateClassification::UpdateAvailable,
+    const std::string& aur_name = {},
+    const std::string& package_base = {}) {
     const std::string resolved_aur_name =
-            aur_name.empty() ? installed_name : aur_name;
+        aur_name.empty() ? installed_name : aur_name;
     const std::string resolved_package_base =
-            package_base.empty() ? resolved_aur_name : package_base;
+        package_base.empty() ? resolved_aur_name : package_base;
     return AurUpdatePlanEntry{
-            installed_name,
-            "1.0-1",
-            installed_reason,
-            AurUpdateRemotePackage{
-                    resolved_aur_name,
-                    resolved_package_base,
-                    "2.0-1",
-                    classification == AurUpdateClassification::UpToDate
-                            ? AurVersionRelation::SameAsInstalled
-                            : classification ==
-                                              AurUpdateClassification::
-                                                      VersionComparisonUnavailable
-                                      ? AurVersionRelation::Unavailable
-                                      : AurVersionRelation::NewerThanInstalled},
-            classification};
+        installed_name,
+        "1.0-1",
+        installed_reason,
+        AurUpdateRemotePackage{
+            resolved_aur_name,
+            resolved_package_base,
+            "2.0-1",
+            classification == AurUpdateClassification::UpToDate
+                ? AurVersionRelation::SameAsInstalled
+            : classification ==
+                    AurUpdateClassification::
+                        VersionComparisonUnavailable
+                ? AurVersionRelation::Unavailable
+                : AurVersionRelation::NewerThanInstalled},
+        classification};
 }
 
 AurUpdatePlanEntry entry_without_remote(
-        const std::string& installed_name,
-        AurUpdateClassification classification,
-        InstalledPackageReason installed_reason =
-                InstalledPackageReason::Unknown) {
+    const std::string& installed_name,
+    AurUpdateClassification classification,
+    InstalledPackageReason installed_reason =
+        InstalledPackageReason::Unknown) {
     return AurUpdatePlanEntry{
-            installed_name,
-            "1.0-1",
-            installed_reason,
-            std::nullopt,
-            classification};
+        installed_name,
+        "1.0-1",
+        installed_reason,
+        std::nullopt,
+        classification};
 }
 
 struct RootFixture {
@@ -72,29 +72,29 @@ struct RootFixture {
 };
 
 PlannedPackageTarget* find_package_target(
-        BuildPlan& plan, const std::string& package_name) {
+    BuildPlan& plan, const std::string& package_name) {
     auto found = std::find_if(
-            plan.package_targets.begin(), plan.package_targets.end(),
-            [&package_name](const PlannedPackageTarget& target) {
-                return target.package_name == package_name;
-            });
+        plan.package_targets.begin(), plan.package_targets.end(),
+        [&package_name](const PlannedPackageTarget& target) {
+            return target.package_name == package_name;
+        });
     return found == plan.package_targets.end() ? nullptr : &(*found);
 }
 
 void add_root_fixture(
-        BuildPlan& plan, std::size_t invocation_index,
-        const RootFixture& fixture) {
+    BuildPlan& plan, std::size_t invocation_index,
+    const RootFixture& fixture) {
     RootTargetIdentity root{invocation_index, fixture.requested_name};
     plan.root_targets.push_back(root);
 
     PlannedPackageTarget* target =
-            find_package_target(plan, fixture.package_name);
+        find_package_target(plan, fixture.package_name);
     if(target == nullptr) {
         plan.package_targets.push_back(PlannedPackageTarget{
-                fixture.package_name,
-                fixture.package_base,
-                {PackageRole::Root},
-                {root}});
+            fixture.package_name,
+            fixture.package_base,
+            {PackageRole::Root},
+            {root}});
     } else {
         if(std::find(target->roles.begin(), target->roles.end(), PackageRole::Root) ==
            target->roles.end()) {
@@ -107,14 +107,14 @@ void add_root_fixture(
         return entry.package_base == fixture.package_base;
     };
     auto order_entry =
-            std::find_if(plan.order.begin(), plan.order.end(), same_base);
+        std::find_if(plan.order.begin(), plan.order.end(), same_base);
     if(order_entry == plan.order.end()) {
         plan.order.push_back(
-                BuildPlanEntry{fixture.package_base, {fixture.package_name}});
+            BuildPlanEntry{fixture.package_base, {fixture.package_name}});
     } else if(std::find(
-                      order_entry->package_names.begin(),
-                      order_entry->package_names.end(),
-                      fixture.package_name) == order_entry->package_names.end()) {
+                  order_entry->package_names.begin(),
+                  order_entry->package_names.end(),
+                  fixture.package_name) == order_entry->package_names.end()) {
         order_entry->package_names.push_back(fixture.package_name);
     }
 }
@@ -128,292 +128,376 @@ BuildPlan build_plan_for(const std::vector<RootFixture>& roots) {
 }
 
 PackageRelationAssessment relation_assessment_fixture(
-        PackageRelationAssessmentKind kind,
-        std::string package_name = "relation-root",
-        std::string package_base = "relation-root",
-        std::vector<PackageRelationRootAttribution> roots = {
-                {0, "relation-root"}}) {
+    PackageRelationAssessmentKind kind,
+    std::string package_name = "relation-root",
+    std::string package_base = "relation-root",
+    std::vector<PackageRelationRootAttribution> roots = {
+        {0, "relation-root"}}) {
     const PackageRelationKind declaration_kind =
-            kind == PackageRelationAssessmentKind::PotentialReplacement
+        kind == PackageRelationAssessmentKind::PotentialReplacement
             ? PackageRelationKind::Replacement
             : PackageRelationKind::Conflict;
     const std::string source_name = package_name;
     const std::string source_base = package_base;
     PackageRelationObservedPackage declaring{
-            package_name,
-            package_base,
-            ObservedVersion::available(
-                    ObservedVersionSource::AurExactPackage, "2"),
-            {},
-            PackageRelationAurSourceIdentity{source_name, source_base},
-            PackageRelationObservationRole::PlannedTarget,
-            std::move(roots)};
+        package_name,
+        package_base,
+        ObservedVersion::available(
+            ObservedVersionSource::AurExactPackage, "2"),
+        {},
+        PackageRelationAurSourceIdentity{source_name, source_base},
+        PackageRelationObservationRole::PlannedTarget,
+        std::move(roots)};
     DeclaredPackageRelation declaration(
-            package_name, package_base, declaration_kind,
-            "relation-target", "relation-target", std::nullopt);
+        package_name, package_base, declaration_kind,
+        "relation-target", "relation-target", std::nullopt);
     PackageRelationMatchingEvidence evidence{
-            PackageRelationObservationCompleteness::Complete,
-            {},
-            {},
-            {},
-            {}};
+        PackageRelationObservationCompleteness::Complete,
+        {},
+        {},
+        {},
+        {}};
     std::optional<PackageRelationMatchEvidence> package_evidence;
     std::optional<PackageRelationObservationFailure> observation_failure;
 
     if(kind == PackageRelationAssessmentKind::
-                       ConfirmedInstalledConflict ||
+                   ConfirmedInstalledConflict ||
        kind == PackageRelationAssessmentKind::PotentialReplacement) {
         const PackageRelationInstalledDatabaseIdentity source{
-                "/", "/var/lib/pacman"};
+            "/", "/var/lib/pacman"};
         package_evidence = PackageRelationMatchEvidence{
-                PackageRelationObservedPackage{
-                        "relation-target",
-                        std::nullopt,
-                        ObservedVersion::available(
-                                ObservedVersionSource::
-                                        InstalledExactPackage,
-                                "1"),
-                        {},
-                        source,
-                        PackageRelationObservationRole::Installed,
-                        {}},
-                PackageRelationIdentityMatchKind::ExactPackage,
-                PackageRelationVersionMatchKind::Unconstrained,
+            PackageRelationObservedPackage{
+                "relation-target",
+                std::nullopt,
+                ObservedVersion::available(
+                    ObservedVersionSource::
+                        InstalledExactPackage,
+                    "1"),
                 {},
-                std::nullopt};
+                source,
+                PackageRelationObservationRole::Installed,
+                {}},
+            PackageRelationIdentityMatchKind::ExactPackage,
+            PackageRelationVersionMatchKind::Unconstrained,
+            {},
+            std::nullopt};
         evidence.package_evidence.push_back(*package_evidence);
     } else if(kind == PackageRelationAssessmentKind::
-                              ConfirmedPlannedTargetConflict) {
+                          ConfirmedPlannedTargetConflict) {
         package_evidence = PackageRelationMatchEvidence{
-                PackageRelationObservedPackage{
-                        "relation-target",
-                        "relation-target-base",
-                        ObservedVersion::available(
-                                ObservedVersionSource::AurExactPackage,
-                                "1"),
-                        {},
-                        PackageRelationAurSourceIdentity{
-                                "relation-target", "relation-target-base"},
-                        PackageRelationObservationRole::PlannedTarget,
-                        {{0, "relation-root"}}},
-                PackageRelationIdentityMatchKind::ExactPackage,
-                PackageRelationVersionMatchKind::Unconstrained,
+            PackageRelationObservedPackage{
+                "relation-target",
+                "relation-target-base",
+                ObservedVersion::available(
+                    ObservedVersionSource::AurExactPackage,
+                    "1"),
                 {},
-                std::nullopt};
+                PackageRelationAurSourceIdentity{
+                    "relation-target", "relation-target-base"},
+                PackageRelationObservationRole::PlannedTarget,
+                {{0, "relation-root"}}},
+            PackageRelationIdentityMatchKind::ExactPackage,
+            PackageRelationVersionMatchKind::Unconstrained,
+            {},
+            std::nullopt};
         evidence.package_evidence.push_back(*package_evidence);
     } else if(kind == PackageRelationAssessmentKind::Unknown ||
               kind == PackageRelationAssessmentKind::Invalid) {
         const bool is_invalid =
-                kind == PackageRelationAssessmentKind::Invalid;
+            kind == PackageRelationAssessmentKind::Invalid;
         evidence.observation_completeness = is_invalid
-                ? PackageRelationObservationCompleteness::Invalid
-                : PackageRelationObservationCompleteness::Unavailable;
+                                                ? PackageRelationObservationCompleteness::Invalid
+                                                : PackageRelationObservationCompleteness::Unavailable;
         observation_failure = PackageRelationObservationFailure{
-                is_invalid
-                        ? PackageRelationObservationFailureKind::
-                                  MalformedMetadata
-                        : PackageRelationObservationFailureKind::
-                                  SourceUnavailable,
-                PackageRelationObservationRole::Installed,
-                std::nullopt,
-                std::nullopt,
-                is_invalid ? "invalid relation observation"
-                           : "relation observation unavailable"};
+            is_invalid
+                ? PackageRelationObservationFailureKind::
+                      MalformedMetadata
+                : PackageRelationObservationFailureKind::
+                      SourceUnavailable,
+            PackageRelationObservationRole::Installed,
+            std::nullopt,
+            std::nullopt,
+            is_invalid ? "invalid relation observation"
+                       : "relation observation unavailable"};
         evidence.observation_failures.push_back(*observation_failure);
     } else if(kind == PackageRelationAssessmentKind::DeclaredRelation) {
         evidence.observation_completeness =
-                PackageRelationObservationCompleteness::Unavailable;
+            PackageRelationObservationCompleteness::Unavailable;
     }
 
     return PackageRelationAssessment{
-            std::move(declaration),
-            kind,
-            std::move(declaring),
-            std::move(evidence),
-            std::nullopt,
-            std::move(package_evidence),
-            std::move(observation_failure)};
+        std::move(declaration),
+        kind,
+        std::move(declaring),
+        std::move(evidence),
+        std::nullopt,
+        std::move(package_evidence),
+        std::move(observation_failure)};
 }
 
 void add_dependency_target(
-        BuildPlan& plan, const std::string& package_name,
-        const std::string& package_base,
-        const std::vector<RootTargetIdentity>& roots,
-        PackageRole role = PackageRole::RuntimeDependency) {
+    BuildPlan& plan, const std::string& package_name,
+    const std::string& package_base,
+    const std::vector<RootTargetIdentity>& roots,
+    PackageRole role = PackageRole::RuntimeDependency) {
     plan.package_targets.push_back(
-            PlannedPackageTarget{package_name, package_base, {role}, roots});
+        PlannedPackageTarget{package_name, package_base, {role}, roots});
 }
 
 BuildPlanDependencyEdge provided_dependency_edge(
-        const std::string& parent_package_name,
-        const std::string& dependency_spec,
-        std::optional<ProvidedDependency> provider) {
+    const std::string& parent_package_name,
+    const std::string& dependency_spec,
+    std::optional<ProvidedDependency> provider) {
     return BuildPlanDependencyEdge{
-            parent_package_name,
-            parent_package_name,
-            dependency_spec,
-            PackageRole::RuntimeDependency,
-            DependencyKind::Provided,
-            std::nullopt,
-            std::nullopt,
-            std::move(provider)};
+        parent_package_name,
+        parent_package_name,
+        dependency_spec,
+        PackageRole::RuntimeDependency,
+        DependencyKind::Provided,
+        std::nullopt,
+        std::nullopt,
+        std::move(provider)};
 }
 
 void return_build_plan(BuildPlan plan) {
     set_resolver_handler(
-            [plan = std::move(plan)](const std::vector<std::string>&) {
-                return plan;
-            });
+        [plan = std::move(plan)](const std::vector<std::string>&) {
+            return plan;
+        });
 }
 
 bool has_issue(
-        const AurUpdateExecutionTarget& target,
-        AurUpdateExecutionReason reason) {
+    const AurUpdateExecutionTarget& target,
+    AurUpdateExecutionReason reason) {
     return std::any_of(
-            target.issues.begin(), target.issues.end(),
-            [reason](const AurUpdateExecutionIssue& issue) {
-                return issue.reason == reason;
-            });
+        target.issues.begin(), target.issues.end(),
+        [reason](const AurUpdateExecutionIssue& issue) {
+            return issue.reason == reason;
+        });
 }
 
 std::size_t issue_count(
-        const AurUpdateExecutionTarget& target,
-        AurUpdateExecutionReason reason) {
+    const AurUpdateExecutionTarget& target,
+    AurUpdateExecutionReason reason) {
     return static_cast<std::size_t>(std::count_if(
-            target.issues.begin(), target.issues.end(),
-            [reason](const AurUpdateExecutionIssue& issue) {
-                return issue.reason == reason;
-            }));
+        target.issues.begin(), target.issues.end(),
+        [reason](const AurUpdateExecutionIssue& issue) {
+            return issue.reason == reason;
+        }));
 }
 
 void expect_status(
-        const AurUpdateExecutionTarget& target,
-        AurUpdateExecutionTargetStatus expected,
-        const std::string& context) {
+    const AurUpdateExecutionTarget& target,
+    AurUpdateExecutionTargetStatus expected,
+    const std::string& context) {
     expect(target.status == expected, context + ": status differs");
 }
 
 void expect_single_resolver_call(
-        const std::vector<std::string>& expected_targets,
-        const std::string& context) {
+    const std::vector<std::string>& expected_targets,
+    const std::string& context) {
     expect(resolver_call_count() == 1, context + ": resolver call count differs");
     expect(
-            resolver_calls().front() == expected_targets,
-            context + ": resolver target vector differs");
+        resolver_calls().front() == expected_targets,
+        context + ": resolver target vector differs");
 }
 
 void test_classification_order_and_combined_resolution() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{
-            remote_entry(
-                    "update-explicit", InstalledPackageReason::Explicit),
-            remote_entry(
-                    "current-package", InstalledPackageReason::Unknown,
-                    AurUpdateClassification::UpToDate),
-            entry_without_remote(
-                    "foreign-package",
-                    AurUpdateClassification::NonAurForeign),
-            remote_entry(
-                    "update-dependency", InstalledPackageReason::Dependency),
-            entry_without_remote(
-                    "metadata-failed",
-                    AurUpdateClassification::MetadataUnavailable),
-            remote_entry(
-                    "version-failed", InstalledPackageReason::Explicit,
-                    AurUpdateClassification::VersionComparisonUnavailable),
+        remote_entry(
+            "update-explicit", InstalledPackageReason::Explicit),
+        remote_entry(
+            "current-package", InstalledPackageReason::Unknown,
+            AurUpdateClassification::UpToDate),
+        entry_without_remote(
+            "foreign-package",
+            AurUpdateClassification::NonAurForeign),
+        remote_entry(
+            "update-dependency", InstalledPackageReason::Dependency),
+        entry_without_remote(
+            "metadata-failed",
+            AurUpdateClassification::MetadataUnavailable),
+        remote_entry(
+            "version-failed", InstalledPackageReason::Explicit,
+            AurUpdateClassification::VersionComparisonUnavailable),
     }};
     return_build_plan(build_plan_for({
-            {"update-explicit", "update-explicit", "update-explicit"},
-            {"update-dependency", "update-dependency", "update-dependency"},
+        {"update-explicit", "update-explicit", "update-explicit"},
+        {"update-dependency", "update-dependency", "update-dependency"},
     }));
 
     AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
 
     expect(preflight.targets.size() == update_plan.entries.size(), "Target count differs");
     for(std::size_t i = 0; i < preflight.targets.size(); ++i) {
         expect(
-                preflight.targets[i].update_plan_index == i,
-                "Original update-plan index differs at " + std::to_string(i));
+            preflight.targets[i].update_plan_index == i,
+            "Original update-plan index differs at " + std::to_string(i));
         expect(
-                preflight.targets[i].update.installed_name ==
-                        update_plan.entries[i].installed_name,
-                "Target order differs at " + std::to_string(i));
+            preflight.targets[i].update.installed_name ==
+                update_plan.entries[i].installed_name,
+            "Target order differs at " + std::to_string(i));
     }
     expect_single_resolver_call(
-            {"update-explicit", "update-dependency"},
-            "Combined classification plan");
+        {"update-explicit", "update-dependency"},
+        "Combined classification plan");
     expect(preflight.build_plan.has_value(), "Combined BuildPlan is missing");
 
     expect_status(
-            preflight.targets[0], AurUpdateExecutionTargetStatus::Executable,
-            "Explicit update");
+        preflight.targets[0], AurUpdateExecutionTargetStatus::Executable,
+        "Explicit update");
     expect(
-            preflight.targets[0].build_plan_root_index ==
-                    std::optional<std::size_t>{0},
-            "First candidate root index differs");
+        preflight.targets[0].build_plan_root_index ==
+            std::optional<std::size_t>{0},
+        "First candidate root index differs");
     expect(
-            preflight.targets[0].desired_install_reason ==
-                    std::optional<DesiredInstallReason>{
-                            DesiredInstallReason::Explicit},
-            "Explicit update reason differs");
+        preflight.targets[0].desired_install_reason ==
+            std::optional<DesiredInstallReason>{
+                DesiredInstallReason::Explicit},
+        "Explicit update reason differs");
 
     expect_status(
-            preflight.targets[1], AurUpdateExecutionTargetStatus::Skipped,
-            "Up-to-date target");
+        preflight.targets[1], AurUpdateExecutionTargetStatus::Skipped,
+        "Up-to-date target");
     expect(
-            has_issue(preflight.targets[1], AurUpdateExecutionReason::UpToDate),
-            "Up-to-date reason is missing");
+        has_issue(preflight.targets[1], AurUpdateExecutionReason::UpToDate),
+        "Up-to-date reason is missing");
     expect(!preflight.targets[1].build_plan_root_index.has_value(), "Skipped target has a root index");
 
     expect_status(
-            preflight.targets[2], AurUpdateExecutionTargetStatus::Skipped,
-            "Non-AUR target");
+        preflight.targets[2], AurUpdateExecutionTargetStatus::Skipped,
+        "Non-AUR target");
     expect(
-            has_issue(
-                    preflight.targets[2],
-                    AurUpdateExecutionReason::NonAurForeign),
-            "Non-AUR reason is missing");
+        has_issue(
+            preflight.targets[2],
+            AurUpdateExecutionReason::NonAurForeign),
+        "Non-AUR reason is missing");
 
     expect_status(
-            preflight.targets[3], AurUpdateExecutionTargetStatus::Executable,
-            "Dependency update");
+        preflight.targets[3], AurUpdateExecutionTargetStatus::Executable,
+        "Dependency update");
     expect(
-            preflight.targets[3].build_plan_root_index ==
-                    std::optional<std::size_t>{1},
-            "Second candidate root index differs");
+        preflight.targets[3].build_plan_root_index ==
+            std::optional<std::size_t>{1},
+        "Second candidate root index differs");
     expect(
-            preflight.targets[3].desired_install_reason ==
-                    std::optional<DesiredInstallReason>{
-                            DesiredInstallReason::Dependency},
-            "Dependency update reason differs");
+        preflight.targets[3].desired_install_reason ==
+            std::optional<DesiredInstallReason>{
+                DesiredInstallReason::Dependency},
+        "Dependency update reason differs");
 
     expect_status(
-            preflight.targets[4], AurUpdateExecutionTargetStatus::Incomplete,
-            "Metadata failure");
+        preflight.targets[4], AurUpdateExecutionTargetStatus::Incomplete,
+        "Metadata failure");
     expect(
-            has_issue(
-                    preflight.targets[4],
-                    AurUpdateExecutionReason::AurMetadataUnavailable),
-            "Metadata-unavailable reason is missing");
+        has_issue(
+            preflight.targets[4],
+            AurUpdateExecutionReason::AurMetadataUnavailable),
+        "Metadata-unavailable reason is missing");
     expect_status(
-            preflight.targets[5], AurUpdateExecutionTargetStatus::Incomplete,
-            "Version comparison failure");
+        preflight.targets[5], AurUpdateExecutionTargetStatus::Incomplete,
+        "Version comparison failure");
     expect(
-            has_issue(
-                    preflight.targets[5],
-                    AurUpdateExecutionReason::VersionComparisonUnavailable),
-            "Version-comparison reason is missing");
+        has_issue(
+            preflight.targets[5],
+            AurUpdateExecutionReason::VersionComparisonUnavailable),
+        "Version-comparison reason is missing");
 
     expect(has_executable_targets(preflight), "Executable targets were not detected");
     expect(has_blocking_targets(preflight), "Blocking targets were not detected");
     expect(!can_execute(preflight), "Incomplete invocation was executable");
 }
 
+void test_devel_requires_check_blocks_without_candidate_promotion() {
+    reset_preflight_stub();
+    const AurUpdatePlanEntry requires_check = classify_aur_update(
+        AurUpdatePlanInput{
+            "manual-check-git",
+            "1.0-1",
+            InstalledPackageReason::Explicit,
+            AurUpdateRemotePackage{
+                "manual-check-git",
+                "manual-check-git",
+                "1.0-1",
+                AurVersionRelation::SameAsInstalled}});
+    AurUpdatePlan update_plan{{
+        remote_entry(
+            "normal-update-git", InstalledPackageReason::Explicit),
+        requires_check,
+    }};
+    return_build_plan(build_plan_for({
+        {"normal-update-git", "normal-update-git", "normal-update-git"},
+    }));
+
+    const AurUpdateExecutionPreflight preflight =
+        resolve_aur_update_execution_preflight(update_plan);
+
+    expect_single_resolver_call(
+        {"normal-update-git"},
+        "RequiresCheck candidate firewall");
+    expect_status(
+        preflight.targets[0],
+        AurUpdateExecutionTargetStatus::Executable,
+        "Normal update precedence");
+    expect_status(
+        preflight.targets[1],
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Devel RequiresCheck target");
+    expect(
+        has_issue(
+            preflight.targets[1],
+            AurUpdateExecutionReason::DevelRequiresCheck),
+        "Devel RequiresCheck reason is missing");
+    expect(
+        preflight.targets[1].issues.size() == 1 &&
+            preflight.targets[1]
+                    .issues.front()
+                    .devel_requires_check_reason ==
+                DevelRequiresCheckReason::SuffixCandidateOnly &&
+            preflight.targets[1]
+                    .issues.front()
+                    .package_base ==
+                std::optional<std::string>{"manual-check-git"},
+        "Devel RequiresCheck reason or PackageBase was flattened");
+    expect(
+        has_executable_targets(preflight) &&
+            has_blocking_targets(preflight) &&
+            !can_execute(preflight),
+        "Mixed RequiresCheck invocation bypassed all-target preflight");
+}
+
+void test_five_field_suffix_up_to_date_is_inconsistent() {
+    reset_preflight_stub();
+    AurUpdatePlan update_plan{{remote_entry(
+        "legacy-current-git", InstalledPackageReason::Explicit,
+        AurUpdateClassification::UpToDate)}};
+
+    const AurUpdateExecutionPreflight preflight =
+        resolve_aur_update_execution_preflight(update_plan);
+
+    expect(
+        resolver_call_count() == 0,
+        "Inconsistent five-field suffix entry called the resolver");
+    expect_status(
+        preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Five-field suffix UpToDate consistency");
+    expect(
+        has_issue(
+            preflight.targets.front(),
+            AurUpdateExecutionReason::UpdatePlanInconsistent) &&
+            !has_issue(
+                preflight.targets.front(),
+                AurUpdateExecutionReason::UpToDate),
+        "Five-field suffix entry remained a normal up-to-date skip");
+}
+
 void test_empty_and_skip_only_plans_suppress_resolution() {
     reset_preflight_stub();
     AurUpdateExecutionPreflight empty =
-            resolve_aur_update_execution_preflight(AurUpdatePlan{});
+        resolve_aur_update_execution_preflight(AurUpdatePlan{});
     expect(empty.targets.empty(), "Empty update plan produced targets");
     expect(!empty.build_plan.has_value(), "Empty update plan produced a BuildPlan");
     expect(resolver_call_count() == 0, "Empty update plan called the resolver");
@@ -423,15 +507,15 @@ void test_empty_and_skip_only_plans_suppress_resolution() {
 
     reset_preflight_stub();
     AurUpdatePlan skip_only{{
-            remote_entry(
-                    "current-package", InstalledPackageReason::Unknown,
-                    AurUpdateClassification::UpToDate),
-            entry_without_remote(
-                    "foreign-package",
-                    AurUpdateClassification::NonAurForeign),
+        remote_entry(
+            "current-package", InstalledPackageReason::Unknown,
+            AurUpdateClassification::UpToDate),
+        entry_without_remote(
+            "foreign-package",
+            AurUpdateClassification::NonAurForeign),
     }};
     AurUpdateExecutionPreflight skipped =
-            resolve_aur_update_execution_preflight(skip_only);
+        resolve_aur_update_execution_preflight(skip_only);
     expect(resolver_call_count() == 0, "Skip-only update plan called the resolver");
     expect(!skipped.build_plan.has_value(), "Skip-only update plan produced a BuildPlan");
     expect(!has_executable_targets(skipped), "Skip-only preflight has executable targets");
@@ -442,136 +526,136 @@ void test_empty_and_skip_only_plans_suppress_resolution() {
 void test_installed_reason_mapping_and_root_dependency_overlap() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{
-            remote_entry("dependency-root", InstalledPackageReason::Dependency),
-            remote_entry("explicit-root", InstalledPackageReason::Explicit),
-            remote_entry("unknown-root", InstalledPackageReason::Unknown),
+        remote_entry("dependency-root", InstalledPackageReason::Dependency),
+        remote_entry("explicit-root", InstalledPackageReason::Explicit),
+        remote_entry("unknown-root", InstalledPackageReason::Unknown),
     }};
     BuildPlan plan = build_plan_for({
-            {"dependency-root", "dependency-root", "dependency-root"},
-            {"explicit-root", "explicit-root", "explicit-root"},
-            {"unknown-root", "unknown-root", "unknown-root"},
+        {"dependency-root", "dependency-root", "dependency-root"},
+        {"explicit-root", "explicit-root", "explicit-root"},
+        {"unknown-root", "unknown-root", "unknown-root"},
     });
     PlannedPackageTarget* dependency_root =
-            find_package_target(plan, "dependency-root");
+        find_package_target(plan, "dependency-root");
     expect(dependency_root != nullptr, "Dependency root fixture is missing");
     dependency_root->roles.push_back(PackageRole::RuntimeDependency);
     dependency_root->roots.push_back(RootTargetIdentity{1, "explicit-root"});
     plan.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "explicit-root",
-            "explicit-root",
-            "dependency-root",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Aur,
-            std::optional<std::string>{"dependency-root"},
-            std::optional<std::string>{"dependency-root"},
-            std::nullopt});
+        "explicit-root",
+        "explicit-root",
+        "dependency-root",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Aur,
+        std::optional<std::string>{"dependency-root"},
+        std::optional<std::string>{"dependency-root"},
+        std::nullopt});
     return_build_plan(std::move(plan));
 
     AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
 
     expect_single_resolver_call(
-            {"dependency-root", "explicit-root", "unknown-root"},
-            "Installed reason plan");
+        {"dependency-root", "explicit-root", "unknown-root"},
+        "Installed reason plan");
     expect(
-            preflight.targets[0].desired_install_reason ==
-                    std::optional<DesiredInstallReason>{
-                            DesiredInstallReason::Dependency},
-            "Dependency root was promoted to explicit");
+        preflight.targets[0].desired_install_reason ==
+            std::optional<DesiredInstallReason>{
+                DesiredInstallReason::Dependency},
+        "Dependency root was promoted to explicit");
     expect_status(
-            preflight.targets[0], AurUpdateExecutionTargetStatus::Executable,
-            "Dependency root overlap");
+        preflight.targets[0], AurUpdateExecutionTargetStatus::Executable,
+        "Dependency root overlap");
     expect(
-            preflight.targets[1].desired_install_reason ==
-                    std::optional<DesiredInstallReason>{
-                            DesiredInstallReason::Explicit},
-            "Explicit root reason differs");
+        preflight.targets[1].desired_install_reason ==
+            std::optional<DesiredInstallReason>{
+                DesiredInstallReason::Explicit},
+        "Explicit root reason differs");
     expect(
-            !preflight.targets[2].desired_install_reason.has_value(),
-            "Unknown root acquired an install reason");
+        !preflight.targets[2].desired_install_reason.has_value(),
+        "Unknown root acquired an install reason");
     expect_status(
-            preflight.targets[2], AurUpdateExecutionTargetStatus::Incomplete,
-            "Unknown installed reason");
+        preflight.targets[2], AurUpdateExecutionTargetStatus::Incomplete,
+        "Unknown installed reason");
     expect(
-            has_issue(
-                    preflight.targets[2],
-                    AurUpdateExecutionReason::InstalledReasonUnknown),
-            "Unknown installed reason issue is missing");
+        has_issue(
+            preflight.targets[2],
+            AurUpdateExecutionReason::InstalledReasonUnknown),
+        "Unknown installed reason issue is missing");
 }
 
 void test_typed_unsatisfied_constraint_blocks_update_preflight() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{
-            remote_entry("constraint-root", InstalledPackageReason::Explicit),
+        remote_entry("constraint-root", InstalledPackageReason::Explicit),
     }};
     BuildPlan plan = build_plan_for({
-            {"constraint-root", "constraint-root", "constraint-root"},
+        {"constraint-root", "constraint-root", "constraint-root"},
     });
     const RootTargetIdentity root{0, "constraint-root"};
     add_dependency_target(
-            plan, "constraint-child", "constraint-child", {root});
+        plan, "constraint-child", "constraint-child", {root});
     plan.order.insert(
-            plan.order.begin(),
-            BuildPlanEntry{"constraint-child", {"constraint-child"}});
+        plan.order.begin(),
+        BuildPlanEntry{"constraint-child", {"constraint-child"}});
     ConsumerDependencyRequirement requirement(
-            "constraint-child>=3", "constraint-child",
-            DependencyVersionConstraint(
-                    DependencyVersionRelation::GreaterThanOrEqual, "3"));
+        "constraint-child>=3", "constraint-child",
+        DependencyVersionConstraint(
+            DependencyVersionRelation::GreaterThanOrEqual, "3"));
     plan.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "constraint-root",
-            "constraint-root",
-            "constraint-child>=3",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Aur,
-            std::optional<std::string>{"constraint-child"},
-            std::optional<std::string>{"constraint-child"},
-            std::nullopt,
-            ProviderResolutionKind::Unique,
-            DependencyRequirement{requirement},
-            ResolvedDependencyCandidate{AurResolvedDependencyCandidate{
-                    "constraint-child",
-                    "constraint-child",
-                    ObservedVersion::available(
-                            ObservedVersionSource::AurExactPackage,
-                            "2.0-1")}},
-            ConstraintEvaluation::unsatisfied()});
+        "constraint-root",
+        "constraint-root",
+        "constraint-child>=3",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Aur,
+        std::optional<std::string>{"constraint-child"},
+        std::optional<std::string>{"constraint-child"},
+        std::nullopt,
+        ProviderResolutionKind::Unique,
+        DependencyRequirement{requirement},
+        ResolvedDependencyCandidate{AurResolvedDependencyCandidate{
+            "constraint-child",
+            "constraint-child",
+            ObservedVersion::available(
+                ObservedVersionSource::AurExactPackage,
+                "2.0-1")}},
+        ConstraintEvaluation::unsatisfied()});
     return_build_plan(std::move(plan));
 
     AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Typed Unsatisfied update preflight");
+        preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Typed Unsatisfied update preflight");
     expect(
-            has_issue(
-                    preflight.targets.front(),
-                    AurUpdateExecutionReason::VersionConstraintUnverified),
-            "Typed Unsatisfied update constraint did not produce a blocker");
+        has_issue(
+            preflight.targets.front(),
+            AurUpdateExecutionReason::VersionConstraintUnverified),
+        "Typed Unsatisfied update constraint did not produce a blocker");
     expect(!can_execute(preflight), "Unsatisfied update preflight was executable");
 }
 
 void test_duplicate_update_targets_suppress_resolution() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{
-            remote_entry("duplicate-root", InstalledPackageReason::Explicit),
-            remote_entry("duplicate-root", InstalledPackageReason::Dependency),
+        remote_entry("duplicate-root", InstalledPackageReason::Explicit),
+        remote_entry("duplicate-root", InstalledPackageReason::Dependency),
     }};
 
     AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
 
     expect(resolver_call_count() == 0, "Duplicate roots reached the resolver");
     expect(!preflight.build_plan.has_value(), "Duplicate roots produced a BuildPlan");
     for(const auto& target : preflight.targets) {
         expect_status(
-                target, AurUpdateExecutionTargetStatus::Incomplete,
-                "Duplicate update target");
+            target, AurUpdateExecutionTargetStatus::Incomplete,
+            "Duplicate update target");
         expect(
-                has_issue(
-                        target,
-                        AurUpdateExecutionReason::DuplicateUpdateTarget),
-                "Duplicate update issue is missing");
+            has_issue(
+                target,
+                AurUpdateExecutionReason::DuplicateUpdateTarget),
+            "Duplicate update issue is missing");
     }
     expect(!can_execute(preflight), "Duplicate update preflight was executable");
 }
@@ -579,325 +663,325 @@ void test_duplicate_update_targets_suppress_resolution() {
 void test_update_plan_and_build_plan_consistency() {
     reset_preflight_stub();
     AurUpdatePlan invalid_update{{entry_without_remote(
-            "missing-update-metadata",
-            AurUpdateClassification::UpdateAvailable,
-            InstalledPackageReason::Explicit)}};
+        "missing-update-metadata",
+        AurUpdateClassification::UpdateAvailable,
+        InstalledPackageReason::Explicit)}};
     return_build_plan(build_plan_for({
-            {"missing-update-metadata", "missing-update-metadata",
-             "missing-update-metadata"},
+        {"missing-update-metadata", "missing-update-metadata",
+         "missing-update-metadata"},
     }));
     AurUpdateExecutionPreflight invalid =
-            resolve_aur_update_execution_preflight(invalid_update);
+        resolve_aur_update_execution_preflight(invalid_update);
     expect_single_resolver_call(
-            {"missing-update-metadata"},
-            "Inconsistent UpdateAvailable target");
+        {"missing-update-metadata"},
+        "Inconsistent UpdateAvailable target");
     expect_status(
-            invalid.targets.front(), AurUpdateExecutionTargetStatus::Incomplete,
-            "Inconsistent update plan");
+        invalid.targets.front(), AurUpdateExecutionTargetStatus::Incomplete,
+        "Inconsistent update plan");
     expect(
-            has_issue(
-                    invalid.targets.front(),
-                    AurUpdateExecutionReason::UpdatePlanInconsistent),
-            "Update-plan inconsistency issue is missing");
+        has_issue(
+            invalid.targets.front(),
+            AurUpdateExecutionReason::UpdatePlanInconsistent),
+        "Update-plan inconsistency issue is missing");
 
     reset_preflight_stub();
     AurUpdatePlan mismatched{{remote_entry(
-            "split-cli", InstalledPackageReason::Explicit,
-            AurUpdateClassification::UpdateAvailable,
-            "split-cli", "expected-base")}};
+        "split-cli", InstalledPackageReason::Explicit,
+        AurUpdateClassification::UpdateAvailable,
+        "split-cli", "expected-base")}};
     return_build_plan(build_plan_for(
-            {{"split-cli", "split-cli", "different-base"}}));
+        {{"split-cli", "split-cli", "different-base"}}));
     AurUpdateExecutionPreflight mismatch =
-            resolve_aur_update_execution_preflight(mismatched);
+        resolve_aur_update_execution_preflight(mismatched);
     expect_status(
-            mismatch.targets.front(), AurUpdateExecutionTargetStatus::Incomplete,
-            "PackageBase mismatch");
+        mismatch.targets.front(), AurUpdateExecutionTargetStatus::Incomplete,
+        "PackageBase mismatch");
     expect(
-            has_issue(
-                    mismatch.targets.front(),
-                    AurUpdateExecutionReason::PackageBaseMismatch),
-            "PackageBase mismatch issue is missing");
+        has_issue(
+            mismatch.targets.front(),
+            AurUpdateExecutionReason::PackageBaseMismatch),
+        "PackageBase mismatch issue is missing");
 
     reset_preflight_stub();
     AurUpdatePlan missing_root{{remote_entry(
-            "missing-root", InstalledPackageReason::Explicit)}};
+        "missing-root", InstalledPackageReason::Explicit)}};
     return_build_plan(BuildPlan{});
     AurUpdateExecutionPreflight missing =
-            resolve_aur_update_execution_preflight(missing_root);
+        resolve_aur_update_execution_preflight(missing_root);
     expect_status(
-            missing.targets.front(), AurUpdateExecutionTargetStatus::Incomplete,
-            "Missing BuildPlan root");
+        missing.targets.front(), AurUpdateExecutionTargetStatus::Incomplete,
+        "Missing BuildPlan root");
     expect(
-            has_issue(
-                    missing.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Missing BuildPlan root inconsistency is absent");
+        has_issue(
+            missing.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Missing BuildPlan root inconsistency is absent");
 
     reset_preflight_stub();
     AurUpdatePlan duplicate_package_target{{remote_entry(
-            "duplicate-plan-root", InstalledPackageReason::Explicit)}};
+        "duplicate-plan-root", InstalledPackageReason::Explicit)}};
     BuildPlan duplicate_plan = build_plan_for({
-            {"duplicate-plan-root", "duplicate-plan-root", "duplicate-plan-root"},
+        {"duplicate-plan-root", "duplicate-plan-root", "duplicate-plan-root"},
     });
     duplicate_plan.package_targets.push_back(
-            duplicate_plan.package_targets.front());
+        duplicate_plan.package_targets.front());
     return_build_plan(std::move(duplicate_plan));
     AurUpdateExecutionPreflight duplicate =
-            resolve_aur_update_execution_preflight(duplicate_package_target);
+        resolve_aur_update_execution_preflight(duplicate_package_target);
     expect_status(
-            duplicate.targets.front(), AurUpdateExecutionTargetStatus::Incomplete,
-            "Duplicate BuildPlan package target");
+        duplicate.targets.front(), AurUpdateExecutionTargetStatus::Incomplete,
+        "Duplicate BuildPlan package target");
     expect(
-            has_issue(
-                    duplicate.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Duplicate BuildPlan target inconsistency is absent");
+        has_issue(
+            duplicate.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Duplicate BuildPlan target inconsistency is absent");
 }
 
 void test_projection_payload_keeps_distinct_target_indices() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{remote_entry(
-            "payload-root", InstalledPackageReason::Explicit)}};
+        "payload-root", InstalledPackageReason::Explicit)}};
     const RootTargetIdentity root{0, "payload-root"};
     BuildPlan plan;
     plan.root_targets.push_back(root);
     const PlannedPackageTarget duplicated_target{
-            "payload-root",
-            "payload-root",
-            {PackageRole::Root},
-            {root, root}};
+        "payload-root",
+        "payload-root",
+        {PackageRole::Root},
+        {root, root}};
     plan.package_targets = {duplicated_target, duplicated_target};
     plan.order.push_back(
-            BuildPlanEntry{"payload-root", {"payload-root"}});
+        BuildPlanEntry{"payload-root", {"payload-root"}});
     return_build_plan(std::move(plan));
 
     const AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     const AurUpdateExecutionTarget& target = preflight.targets.front();
     std::vector<std::size_t> projection_target_indices;
     for(const auto& issue : target.issues) {
         if(!issue.build_plan_projection_issue.has_value()) continue;
         const auto& projection = *issue.build_plan_projection_issue;
         if(projection.kind !=
-                   BuildPlanArtifactTargetProjectionIssueKind::
-                           RootAttributionInconsistent ||
+               BuildPlanArtifactTargetProjectionIssueKind::
+                   RootAttributionInconsistent ||
            projection.package_target_indices.size() != 1) {
             continue;
         }
         projection_target_indices.push_back(
-                projection.package_target_indices.front());
+            projection.package_target_indices.front());
     }
 
     expect_status(
-            target,
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Projection payload distinction");
+        target,
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Projection payload distinction");
     expect(
-            projection_target_indices == std::vector<std::size_t>{0, 1},
-            "Projection issues differing only by target index were deduplicated");
+        projection_target_indices == std::vector<std::size_t>{0, 1},
+        "Projection issues differing only by target index were deduplicated");
 }
 
 void test_incomplete_build_plan_issues_are_typed_and_deduplicated() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{remote_entry(
-            "incomplete-root", InstalledPackageReason::Explicit)}};
+        "incomplete-root", InstalledPackageReason::Explicit)}};
     BuildPlan plan = build_plan_for({
-            {"incomplete-root", "incomplete-root", "incomplete-root"},
+        {"incomplete-root", "incomplete-root", "incomplete-root"},
     });
     const RootTargetIdentity root{0, "incomplete-root"};
     add_dependency_target(plan, "cycle-package", "cycle-base", {root});
     plan.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "incomplete-root",
-            "incomplete-root",
-            "missing-dependency",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Unknown,
-            std::nullopt,
-            std::nullopt,
-            std::nullopt});
+        "incomplete-root",
+        "incomplete-root",
+        "missing-dependency",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Unknown,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt});
     plan.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "incomplete-root",
-            "incomplete-root",
-            "constrained-dependency>=2",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Aur,
-            std::optional<std::string>{"constrained-dependency"},
-            std::optional<std::string>{"constrained-dependency"},
-            std::nullopt});
+        "incomplete-root",
+        "incomplete-root",
+        "constrained-dependency>=2",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Aur,
+        std::optional<std::string>{"constrained-dependency"},
+        std::optional<std::string>{"constrained-dependency"},
+        std::nullopt});
     plan.unresolved = {
-            "missing-dependency",
-            "constrained-dependency>=2 (version constraint is not verified)",
+        "missing-dependency",
+        "constrained-dependency>=2 (version constraint is not verified)",
     };
     plan.cycles = {"cycle-base"};
 
     BuildPlanResolutionFailure metadata_failure{
-            BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
-            std::optional<std::string>{"incomplete-root"},
-            std::optional<std::string>{"incomplete-root"},
-            "metadata-dependency",
-            std::optional<std::string>{"metadata-dependency"},
-            {root},
-            "metadata unavailable"};
+        BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
+        std::optional<std::string>{"incomplete-root"},
+        std::optional<std::string>{"incomplete-root"},
+        "metadata-dependency",
+        std::optional<std::string>{"metadata-dependency"},
+        {root},
+        "metadata unavailable"};
     plan.resolution_failures.push_back(metadata_failure);
     plan.resolution_failures.push_back(metadata_failure);
     plan.resolution_failures.push_back(BuildPlanResolutionFailure{
-            BuildPlanResolutionFailureKind::
-                    InstalledPackageMetadataUnavailable,
-            std::optional<std::string>{"incomplete-root"},
-            std::optional<std::string>{"incomplete-root"},
-            "installed-dependency",
-            std::optional<std::string>{"installed-dependency"},
-            {root},
-            "installed metadata unavailable"});
+        BuildPlanResolutionFailureKind::
+            InstalledPackageMetadataUnavailable,
+        std::optional<std::string>{"incomplete-root"},
+        std::optional<std::string>{"incomplete-root"},
+        "installed-dependency",
+        std::optional<std::string>{"installed-dependency"},
+        {root},
+        "installed metadata unavailable"});
     plan.resolution_failures.push_back(BuildPlanResolutionFailure{
-            BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable,
-            std::optional<std::string>{"incomplete-root"},
-            std::optional<std::string>{"incomplete-root"},
-            "repository-dependency",
-            std::optional<std::string>{"repository-dependency"},
-            {root},
-            "repository metadata unavailable"});
+        BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable,
+        std::optional<std::string>{"incomplete-root"},
+        std::optional<std::string>{"incomplete-root"},
+        "repository-dependency",
+        std::optional<std::string>{"repository-dependency"},
+        {root},
+        "repository metadata unavailable"});
     plan.resolution_failures.push_back(BuildPlanResolutionFailure{
-            BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
-            std::optional<std::string>{"incomplete-root"},
-            std::optional<std::string>{"incomplete-root"},
-            "virtual-dependency",
-            std::optional<std::string>{"virtual-dependency"},
-            {root},
-            "provider search unavailable"});
+        BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
+        std::optional<std::string>{"incomplete-root"},
+        std::optional<std::string>{"incomplete-root"},
+        "virtual-dependency",
+        std::optional<std::string>{"virtual-dependency"},
+        {root},
+        "provider search unavailable"});
     plan.resolution_failures.push_back(BuildPlanResolutionFailure{
-            BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable,
-            std::optional<std::string>{"incomplete-root"},
-            std::optional<std::string>{"incomplete-root"},
-            "provider-candidate",
-            std::optional<std::string>{"virtual-dependency"},
-            {root},
-            "provider candidate unavailable"});
+        BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable,
+        std::optional<std::string>{"incomplete-root"},
+        std::optional<std::string>{"incomplete-root"},
+        "provider-candidate",
+        std::optional<std::string>{"virtual-dependency"},
+        {root},
+        "provider candidate unavailable"});
     return_build_plan(std::move(plan));
 
     AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     const AurUpdateExecutionTarget& target = preflight.targets.front();
 
     expect_status(
-            target, AurUpdateExecutionTargetStatus::Incomplete,
-            "Typed incomplete BuildPlan");
+        target, AurUpdateExecutionTargetStatus::Incomplete,
+        "Typed incomplete BuildPlan");
     expect(
-            has_issue(target, AurUpdateExecutionReason::UnresolvedDependency),
-            "Unresolved dependency issue is missing");
+        has_issue(target, AurUpdateExecutionReason::UnresolvedDependency),
+        "Unresolved dependency issue is missing");
     expect(
-            has_issue(
-                    target,
-                    AurUpdateExecutionReason::
-                            InstalledPackageMetadataUnavailable),
-            "Installed package metadata issue is missing");
+        has_issue(
+            target,
+            AurUpdateExecutionReason::
+                InstalledPackageMetadataUnavailable),
+        "Installed package metadata issue is missing");
     expect(
-            has_issue(
-                    target,
-                    AurUpdateExecutionReason::RepositoryMetadataUnavailable),
-            "Repository metadata issue is missing");
+        has_issue(
+            target,
+            AurUpdateExecutionReason::RepositoryMetadataUnavailable),
+        "Repository metadata issue is missing");
     expect(
-            has_issue(
-                    target,
-                    AurUpdateExecutionReason::VersionConstraintUnverified),
-            "Version constraint issue is missing");
+        has_issue(
+            target,
+            AurUpdateExecutionReason::VersionConstraintUnverified),
+        "Version constraint issue is missing");
     expect(
-            has_issue(target, AurUpdateExecutionReason::DependencyCycle),
-            "Dependency cycle issue is missing");
+        has_issue(target, AurUpdateExecutionReason::DependencyCycle),
+        "Dependency cycle issue is missing");
     expect(
-            has_issue(
-                    target,
-                    AurUpdateExecutionReason::AurDependencyMetadataUnavailable),
-            "AUR dependency metadata issue is missing");
+        has_issue(
+            target,
+            AurUpdateExecutionReason::AurDependencyMetadataUnavailable),
+        "AUR dependency metadata issue is missing");
     expect(
-            has_issue(
-                    target,
-                    AurUpdateExecutionReason::ProviderMetadataUnavailable),
-            "Provider metadata issue is missing");
+        has_issue(
+            target,
+            AurUpdateExecutionReason::ProviderMetadataUnavailable),
+        "Provider metadata issue is missing");
     expect(
-            issue_count(
-                    target,
-                    AurUpdateExecutionReason::AurDependencyMetadataUnavailable) == 1,
-            "Duplicate metadata failure produced duplicate target issues");
+        issue_count(
+            target,
+            AurUpdateExecutionReason::AurDependencyMetadataUnavailable) == 1,
+        "Duplicate metadata failure produced duplicate target issues");
 }
 
 void test_complete_split_build_plan_is_model_valid() {
     reset_preflight_stub();
     AurUpdatePlan split_root_plan{{remote_entry(
-            "split-cli", InstalledPackageReason::Explicit,
-            AurUpdateClassification::UpdateAvailable,
-            "split-cli", "split-suite")}};
+        "split-cli", InstalledPackageReason::Explicit,
+        AurUpdateClassification::UpdateAvailable,
+        "split-cli", "split-suite")}};
     BuildPlan root_plan = build_plan_for({
-            {"split-cli", "split-cli", "split-suite"},
+        {"split-cli", "split-cli", "split-suite"},
     });
     root_plan.split_package_targets.push_back(
-            BuildPlanSplitPackageTarget{"split-suite", "split-cli"});
+        BuildPlanSplitPackageTarget{"split-suite", "split-cli"});
     return_build_plan(std::move(root_plan));
     AurUpdateExecutionPreflight split_root =
-            resolve_aur_update_execution_preflight(split_root_plan);
+        resolve_aur_update_execution_preflight(split_root_plan);
     expect_status(
-            split_root.targets.front(),
-            AurUpdateExecutionTargetStatus::Executable,
-            "Split update root");
+        split_root.targets.front(),
+        AurUpdateExecutionTargetStatus::Executable,
+        "Split update root");
     expect(
-            !has_issue(
-                    split_root.targets.front(),
-                    AurUpdateExecutionReason::SplitPackageSelectionRequired),
-            "Complete split root retained a model-level split blocker");
+        !has_issue(
+            split_root.targets.front(),
+            AurUpdateExecutionReason::SplitPackageSelectionRequired),
+        "Complete split root retained a model-level split blocker");
 
     reset_preflight_stub();
     AurUpdatePlan complete_multiple_plan{{remote_entry(
-            "complete-root", InstalledPackageReason::Explicit)}};
+        "complete-root", InstalledPackageReason::Explicit)}};
     BuildPlan complete_multiple = build_plan_for({
-            {"complete-root", "complete-root", "complete-root"},
+        {"complete-root", "complete-root", "complete-root"},
     });
     const RootTargetIdentity complete_root{0, "complete-root"};
     add_dependency_target(
-            complete_multiple, "complete-child-a", "complete-suite",
-            {complete_root});
+        complete_multiple, "complete-child-a", "complete-suite",
+        {complete_root});
     add_dependency_target(
-            complete_multiple, "complete-child-b", "complete-suite",
-            {complete_root});
+        complete_multiple, "complete-child-b", "complete-suite",
+        {complete_root});
     complete_multiple.order.push_back(BuildPlanEntry{
-            "complete-suite", {"complete-child-a", "complete-child-b"}});
+        "complete-suite", {"complete-child-a", "complete-child-b"}});
     for(const char* child : {"complete-child-a", "complete-child-b"}) {
         complete_multiple.dependency_edges.push_back(BuildPlanDependencyEdge{
-                "complete-root",
-                "complete-root",
-                child,
-                PackageRole::RuntimeDependency,
-                DependencyKind::Aur,
-                std::optional<std::string>{child},
-                std::optional<std::string>{"complete-suite"},
-                std::nullopt});
+            "complete-root",
+            "complete-root",
+            child,
+            PackageRole::RuntimeDependency,
+            DependencyKind::Aur,
+            std::optional<std::string>{child},
+            std::optional<std::string>{"complete-suite"},
+            std::nullopt});
     }
     return_build_plan(std::move(complete_multiple));
 
     AurUpdateExecutionPreflight complete_preflight =
-            resolve_aur_update_execution_preflight(complete_multiple_plan);
+        resolve_aur_update_execution_preflight(complete_multiple_plan);
     expect_status(
+        complete_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Executable,
+        "Complete same-Base multiple target plan");
+    expect(
+        !has_issue(
             complete_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Executable,
-            "Complete same-Base multiple target plan");
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Complete same-Base coverage was marked inconsistent");
     expect(
-            !has_issue(
-                    complete_preflight.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Complete same-Base coverage was marked inconsistent");
-    expect(
-            !has_issue(
-                    complete_preflight.targets.front(),
-                    AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase),
-            "Complete same-Base coverage retained a multiple-target blocker");
+        !has_issue(
+            complete_preflight.targets.front(),
+            AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase),
+        "Complete same-Base coverage retained a multiple-target blocker");
 }
 
 void test_incomplete_same_base_coverage_is_typed_failure() {
     reset_preflight_stub();
 
     AurUpdatePlan update_plan{{remote_entry(
-            "unsupported-root", InstalledPackageReason::Explicit)}};
+        "unsupported-root", InstalledPackageReason::Explicit)}};
     BuildPlan plan = build_plan_for({
-            {"unsupported-root", "unsupported-root", "unsupported-root"},
+        {"unsupported-root", "unsupported-root", "unsupported-root"},
     });
     const RootTargetIdentity root{0, "unsupported-root"};
     add_dependency_target(plan, "split-child", "shared-suite", {root});
@@ -905,418 +989,415 @@ void test_incomplete_same_base_coverage_is_typed_failure() {
     // same-base blind spotはpackage_namesからsecond-childだけが落ちる形で作る。
     plan.order.push_back(BuildPlanEntry{"shared-suite", {"split-child"}});
     plan.split_package_targets.push_back(
-            BuildPlanSplitPackageTarget{"shared-suite", "split-child"});
+        BuildPlanSplitPackageTarget{"shared-suite", "split-child"});
     plan.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "unsupported-root",
-            "unsupported-root",
-            "split-child",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Aur,
-            std::optional<std::string>{"split-child"},
-            std::optional<std::string>{"shared-suite"},
-            std::nullopt});
+        "unsupported-root",
+        "unsupported-root",
+        "split-child",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Aur,
+        std::optional<std::string>{"split-child"},
+        std::optional<std::string>{"shared-suite"},
+        std::nullopt});
     plan.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "unsupported-root",
-            "unsupported-root",
-            "second-child",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Aur,
-            std::optional<std::string>{"second-child"},
-            std::optional<std::string>{"shared-suite"},
-            std::nullopt});
+        "unsupported-root",
+        "unsupported-root",
+        "second-child",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Aur,
+        std::optional<std::string>{"second-child"},
+        std::optional<std::string>{"shared-suite"},
+        std::nullopt});
     plan.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "unsupported-root",
-            "unsupported-root",
-            "virtual-dependency",
-            PackageRole::RuntimeDependency,
-            DependencyKind::AmbiguousProvider,
-            std::nullopt,
-            std::nullopt,
-            std::nullopt});
+        "unsupported-root",
+        "unsupported-root",
+        "virtual-dependency",
+        PackageRole::RuntimeDependency,
+        DependencyKind::AmbiguousProvider,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt});
     plan.ambiguous_providers.push_back(AmbiguousProvidedDependency{
-            "virtual-dependency",
-            {
-                    ProvidedDependency::from_repository(
-                            "extra", "provider-a"),
-                    ProvidedDependency::from_aur("provider-b"),
-            }});
+        "virtual-dependency",
+        {
+            ProvidedDependency::from_repository(
+                "extra", "provider-a"),
+            ProvidedDependency::from_aur("provider-b"),
+        }});
     plan.metadata_risks.push_back(BuildPlanMetadataRisk{
-            "second-child", "shared-suite", {"old-package"}, {"renamed-package"}});
+        "second-child", "shared-suite", {"old-package"}, {"renamed-package"}});
     plan.relation_assessments.push_back(relation_assessment_fixture(
-            PackageRelationAssessmentKind::ConfirmedInstalledConflict,
-            "second-child", "shared-suite", {{0, "unsupported-root"}}));
+        PackageRelationAssessmentKind::ConfirmedInstalledConflict,
+        "second-child", "shared-suite", {{0, "unsupported-root"}}));
     return_build_plan(std::move(plan));
 
     AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     const AurUpdateExecutionTarget& target = preflight.targets.front();
 
     expect_status(
-            target, AurUpdateExecutionTargetStatus::Incomplete,
-            "Incomplete same-Base coverage plan");
+        target, AurUpdateExecutionTargetStatus::Incomplete,
+        "Incomplete same-Base coverage plan");
     expect(
-            !has_issue(
-                    target,
-                    AurUpdateExecutionReason::SplitPackageSelectionRequired),
-            "Incomplete coverage retained a split-only model blocker");
+        !has_issue(
+            target,
+            AurUpdateExecutionReason::SplitPackageSelectionRequired),
+        "Incomplete coverage retained a split-only model blocker");
     expect(
-            has_issue(target, AurUpdateExecutionReason::AmbiguousProvider),
-            "Ambiguous provider issue is missing");
+        has_issue(target, AurUpdateExecutionReason::AmbiguousProvider),
+        "Ambiguous provider issue is missing");
     expect(
-            has_issue(
-                    target,
-                    AurUpdateExecutionReason::ConflictsOrReplacesUnresolved),
-            "Conflicts/replaces issue is missing");
+        has_issue(
+            target,
+            AurUpdateExecutionReason::ConflictsOrReplacesUnresolved),
+        "Conflicts/replaces issue is missing");
     expect(
-            has_issue(
-                    target,
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Missing same-Base child coverage was not a typed inconsistency");
+        has_issue(
+            target,
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Missing same-Base child coverage was not a typed inconsistency");
     const auto uncovered_issue = std::find_if(
-            target.issues.begin(), target.issues.end(),
-            [](const AurUpdateExecutionIssue& issue) {
-                return issue.build_plan_projection_issue.has_value() &&
-                        issue.build_plan_projection_issue->kind ==
-                                BuildPlanArtifactTargetProjectionIssueKind::
-                                        UncoveredPlannedPackageTarget;
-            });
+        target.issues.begin(), target.issues.end(),
+        [](const AurUpdateExecutionIssue& issue) {
+            return issue.build_plan_projection_issue.has_value() &&
+                   issue.build_plan_projection_issue->kind ==
+                       BuildPlanArtifactTargetProjectionIssueKind::
+                           UncoveredPlannedPackageTarget;
+        });
     expect(
-            uncovered_issue != target.issues.end() &&
-                    uncovered_issue->build_plan_projection_issue
-                                    ->package_name ==
-                            std::optional<std::string>{"second-child"} &&
-                    uncovered_issue->build_plan_projection_issue
-                                    ->package_base ==
-                            std::optional<std::string>{"shared-suite"} &&
-                    uncovered_issue->build_plan_projection_issue
-                                    ->package_target_indices.size() == 1,
-            "Preflight lost the typed uncovered-target projection payload");
+        uncovered_issue != target.issues.end() &&
+            uncovered_issue->build_plan_projection_issue
+                    ->package_name ==
+                std::optional<std::string>{"second-child"} &&
+            uncovered_issue->build_plan_projection_issue
+                    ->package_base ==
+                std::optional<std::string>{"shared-suite"} &&
+            uncovered_issue->build_plan_projection_issue
+                    ->package_target_indices.size() == 1,
+        "Preflight lost the typed uncovered-target projection payload");
     expect(
-            !has_issue(
-                    target,
-                    AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase),
-            "Incomplete coverage was flattened to the legacy multiple-target blocker");
+        !has_issue(
+            target,
+            AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase),
+        "Incomplete coverage was flattened to the legacy multiple-target blocker");
     expect(!can_execute(preflight), "Unsupported invocation was executable");
 }
 
 void test_typed_relation_assessment_preflight_mapping() {
     const std::vector<PackageRelationAssessmentKind> blocking_kinds = {
-            PackageRelationAssessmentKind::ConfirmedInstalledConflict,
-            PackageRelationAssessmentKind::ConfirmedPlannedTargetConflict,
-            PackageRelationAssessmentKind::PotentialReplacement,
-            PackageRelationAssessmentKind::DeclaredRelation,
-            PackageRelationAssessmentKind::Unknown,
-            PackageRelationAssessmentKind::Invalid};
+        PackageRelationAssessmentKind::ConfirmedInstalledConflict,
+        PackageRelationAssessmentKind::ConfirmedPlannedTargetConflict,
+        PackageRelationAssessmentKind::PotentialReplacement,
+        PackageRelationAssessmentKind::DeclaredRelation,
+        PackageRelationAssessmentKind::Unknown,
+        PackageRelationAssessmentKind::Invalid};
     for(const PackageRelationAssessmentKind kind : blocking_kinds) {
         reset_preflight_stub();
         AurUpdatePlan update_plan{{remote_entry(
-                "relation-root", InstalledPackageReason::Explicit)}};
-        BuildPlan plan = build_plan_for({
-                {"relation-root", "relation-root", "relation-root"}});
+            "relation-root", InstalledPackageReason::Explicit)}};
+        BuildPlan plan = build_plan_for({{"relation-root", "relation-root", "relation-root"}});
         plan.metadata_risks.push_back(BuildPlanMetadataRisk{
-                "relation-root", "relation-root", {"relation-target"}, {}});
+            "relation-root", "relation-root", {"relation-target"}, {}});
         plan.relation_assessments.push_back(
-                relation_assessment_fixture(kind));
+            relation_assessment_fixture(kind));
         return_build_plan(std::move(plan));
 
         const AurUpdateExecutionPreflight preflight =
-                resolve_aur_update_execution_preflight(update_plan);
+            resolve_aur_update_execution_preflight(update_plan);
         const AurUpdateExecutionTarget& target = preflight.targets.front();
         expect_status(
-                target, AurUpdateExecutionTargetStatus::Unsupported,
-                "typed relation blocker");
+            target, AurUpdateExecutionTargetStatus::Unsupported,
+            "typed relation blocker");
         expect(
-                issue_count(
-                        target,
-                        AurUpdateExecutionReason::
-                                ConflictsOrReplacesUnresolved) == 1,
-                "Typed relation blocker was duplicated by raw metadata");
+            issue_count(
+                target,
+                AurUpdateExecutionReason::
+                    ConflictsOrReplacesUnresolved) == 1,
+            "Typed relation blocker was duplicated by raw metadata");
         const auto issue = std::find_if(
-                target.issues.begin(), target.issues.end(),
-                [](const AurUpdateExecutionIssue& candidate) {
-                    return candidate.relation_reason.has_value();
-                });
+            target.issues.begin(), target.issues.end(),
+            [](const AurUpdateExecutionIssue& candidate) {
+                return candidate.relation_reason.has_value();
+            });
         expect(
-                issue != target.issues.end() &&
-                        issue->package_name ==
-                                std::optional<std::string>{"relation-root"} &&
-                        issue->package_base ==
-                                std::optional<std::string>{"relation-root"} &&
-                        issue->relation_reason->assessment.kind == kind &&
-                        issue->relation_reason->assessment.declaration
-                                        .target_component() ==
-                                "relation-target" &&
-                        issue->relation_reason->assessment.declaring_package
-                                        .roots ==
-                                std::vector<
-                                        PackageRelationRootAttribution>{
-                                        {0, "relation-root"}},
-                "Preflight lost typed relation target or root attribution");
+            issue != target.issues.end() &&
+                issue->package_name ==
+                    std::optional<std::string>{"relation-root"} &&
+                issue->package_base ==
+                    std::optional<std::string>{"relation-root"} &&
+                issue->relation_reason->assessment.kind == kind &&
+                issue->relation_reason->assessment.declaration
+                        .target_component() ==
+                    "relation-target" &&
+                issue->relation_reason->assessment.declaring_package
+                        .roots ==
+                    std::vector<
+                        PackageRelationRootAttribution>{
+                        {0, "relation-root"}},
+            "Preflight lost typed relation target or root attribution");
         const std::string& diagnostic = issue->diagnostic;
         const std::string expected_outcome = [&]() {
             switch(kind) {
-            case PackageRelationAssessmentKind::
+                case PackageRelationAssessmentKind::
                     ConfirmedInstalledConflict:
-                return std::string("Installed conflict confirmed");
-            case PackageRelationAssessmentKind::
+                    return std::string("Installed conflict confirmed");
+                case PackageRelationAssessmentKind::
                     ConfirmedPlannedTargetConflict:
-                return std::string("Planned-target conflict confirmed");
-            case PackageRelationAssessmentKind::PotentialReplacement:
-                return std::string("Potential replacement impact");
-            case PackageRelationAssessmentKind::DeclaredRelation:
-                return std::string("Declared relation awaiting assessment");
-            case PackageRelationAssessmentKind::Unknown:
-                return std::string("Relation judgment unavailable");
-            case PackageRelationAssessmentKind::Invalid:
-                return std::string(
+                    return std::string("Planned-target conflict confirmed");
+                case PackageRelationAssessmentKind::PotentialReplacement:
+                    return std::string("Potential replacement impact");
+                case PackageRelationAssessmentKind::DeclaredRelation:
+                    return std::string("Declared relation awaiting assessment");
+                case PackageRelationAssessmentKind::Unknown:
+                    return std::string("Relation judgment unavailable");
+                case PackageRelationAssessmentKind::Invalid:
+                    return std::string(
                         "Invalid relation metadata or observation");
-            case PackageRelationAssessmentKind::
+                case PackageRelationAssessmentKind::
                     ConfirmedNoMatchingCurrentOrPlannedTarget:
-                break;
+                    break;
             }
             return std::string();
         }();
         expect(
-                diagnostic.find(expected_outcome) != std::string::npos &&
-                        diagnostic.find("relation-root") !=
-                                std::string::npos &&
-                        diagnostic.find("relation-target") !=
-                                std::string::npos &&
-                        diagnostic.find("ConfirmedInstalledConflict") ==
-                                std::string::npos &&
-                        diagnostic.find("PotentialReplacement") ==
-                                std::string::npos,
-                "Preflight public relation diagnostic lost typed semantics");
+            diagnostic.find(expected_outcome) != std::string::npos &&
+                diagnostic.find("relation-root") !=
+                    std::string::npos &&
+                diagnostic.find("relation-target") !=
+                    std::string::npos &&
+                diagnostic.find("ConfirmedInstalledConflict") ==
+                    std::string::npos &&
+                diagnostic.find("PotentialReplacement") ==
+                    std::string::npos,
+            "Preflight public relation diagnostic lost typed semantics");
         if(kind == PackageRelationAssessmentKind::PotentialReplacement) {
             expect(
-                    diagnostic.find("no automatic replacement is performed") !=
-                                    std::string::npos &&
-                            diagnostic.find("review is required") !=
-                                    std::string::npos,
-                    "Replacement preflight diagnostic implies automatic action");
+                diagnostic.find("no automatic replacement is performed") !=
+                        std::string::npos &&
+                    diagnostic.find("review is required") !=
+                        std::string::npos,
+                "Replacement preflight diagnostic implies automatic action");
         }
         if(kind == PackageRelationAssessmentKind::Unknown) {
             expect(
-                    diagnostic.find("not a confirmed absence") !=
-                            std::string::npos,
-                    "Unknown preflight diagnostic implies a completed absence");
+                diagnostic.find("not a confirmed absence") !=
+                    std::string::npos,
+                "Unknown preflight diagnostic implies a completed absence");
         }
         if(kind == PackageRelationAssessmentKind::Invalid) {
             expect(
-                    diagnostic.find("fail-closed") != std::string::npos,
-                    "Invalid preflight diagnostic lost fail-closed semantics");
+                diagnostic.find("fail-closed") != std::string::npos,
+                "Invalid preflight diagnostic lost fail-closed semantics");
         }
         if(kind == PackageRelationAssessmentKind::
-                           ConfirmedInstalledConflict ||
+                       ConfirmedInstalledConflict ||
            kind == PackageRelationAssessmentKind::
-                           ConfirmedPlannedTargetConflict ||
+                       ConfirmedPlannedTargetConflict ||
            kind == PackageRelationAssessmentKind::PotentialReplacement) {
             expect(
-                    issue->relation_reason->assessment
-                            .attributed_package_evidence.has_value(),
-                    "Confirmed relation lost matched source evidence");
+                issue->relation_reason->assessment
+                    .attributed_package_evidence.has_value(),
+                "Confirmed relation lost matched source evidence");
             const PackageRelationObservationRole expected_role =
-                    kind == PackageRelationAssessmentKind::
-                                    ConfirmedPlannedTargetConflict
+                kind == PackageRelationAssessmentKind::
+                            ConfirmedPlannedTargetConflict
                     ? PackageRelationObservationRole::PlannedTarget
                     : PackageRelationObservationRole::Installed;
             expect(
-                    issue->relation_reason->assessment
-                                    .attributed_package_evidence
-                                    ->observed_package.role == expected_role,
-                    "Confirmed relation source role differs");
+                issue->relation_reason->assessment
+                        .attributed_package_evidence
+                        ->observed_package.role == expected_role,
+                "Confirmed relation source role differs");
         }
     }
 
     reset_preflight_stub();
     AurUpdatePlan update_plan{{remote_entry(
-            "relation-root", InstalledPackageReason::Explicit)}};
-    BuildPlan no_match = build_plan_for({
-            {"relation-root", "relation-root", "relation-root"}});
+        "relation-root", InstalledPackageReason::Explicit)}};
+    BuildPlan no_match = build_plan_for({{"relation-root", "relation-root", "relation-root"}});
     no_match.metadata_risks.push_back(BuildPlanMetadataRisk{
-            "relation-root", "relation-root", {"relation-target"}, {}});
+        "relation-root", "relation-root", {"relation-target"}, {}});
     no_match.relation_assessments.push_back(relation_assessment_fixture(
-            PackageRelationAssessmentKind::
-                    ConfirmedNoMatchingCurrentOrPlannedTarget));
+        PackageRelationAssessmentKind::
+            ConfirmedNoMatchingCurrentOrPlannedTarget));
     return_build_plan(std::move(no_match));
     const AurUpdateExecutionPreflight assessed_clear =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect(
-            assessed_clear.targets.front().status ==
-                            AurUpdateExecutionTargetStatus::Executable &&
-                    !has_issue(
-                            assessed_clear.targets.front(),
-                            AurUpdateExecutionReason::
-                                    ConflictsOrReplacesUnresolved),
-            "Confirmed NoMatch retained a preflight relation blocker");
+        assessed_clear.targets.front().status ==
+                AurUpdateExecutionTargetStatus::Executable &&
+            !has_issue(
+                assessed_clear.targets.front(),
+                AurUpdateExecutionReason::
+                    ConflictsOrReplacesUnresolved),
+        "Confirmed NoMatch retained a preflight relation blocker");
 
     reset_preflight_stub();
-    BuildPlan raw_only = build_plan_for({
-            {"relation-root", "relation-root", "relation-root"}});
+    BuildPlan raw_only = build_plan_for({{"relation-root", "relation-root", "relation-root"}});
     raw_only.metadata_risks.push_back(BuildPlanMetadataRisk{
-            "relation-root", "relation-root", {"relation-target"}, {}});
+        "relation-root", "relation-root", {"relation-target"}, {}});
     return_build_plan(std::move(raw_only));
     const AurUpdateExecutionPreflight compatibility_only =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect(
-            !has_issue(
-                    compatibility_only.targets.front(),
-                    AurUpdateExecutionReason::
-                            ConflictsOrReplacesUnresolved),
-            "Raw compatibility metadata remained a preflight authority");
+        !has_issue(
+            compatibility_only.targets.front(),
+            AurUpdateExecutionReason::
+                ConflictsOrReplacesUnresolved),
+        "Raw compatibility metadata remained a preflight authority");
 }
 
 void test_incomplete_status_preserves_provider_failure_without_split_blocker() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{remote_entry(
-            "mixed-root", InstalledPackageReason::Explicit)}};
+        "mixed-root", InstalledPackageReason::Explicit)}};
     BuildPlan plan = build_plan_for({
-            {"mixed-root", "mixed-root", "mixed-root"},
+        {"mixed-root", "mixed-root", "mixed-root"},
     });
     const RootTargetIdentity root{0, "mixed-root"};
     plan.split_package_targets.push_back(
-            BuildPlanSplitPackageTarget{"mixed-root", "mixed-root"});
+        BuildPlanSplitPackageTarget{"mixed-root", "mixed-root"});
     plan.resolution_failures.push_back(BuildPlanResolutionFailure{
-            BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable,
-            std::optional<std::string>{"mixed-root"},
-            std::optional<std::string>{"mixed-root"},
-            "provider-candidate",
-            std::optional<std::string>{"virtual-dependency"},
-            {root},
-            "provider candidate unavailable"});
+        BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable,
+        std::optional<std::string>{"mixed-root"},
+        std::optional<std::string>{"mixed-root"},
+        "provider-candidate",
+        std::optional<std::string>{"virtual-dependency"},
+        {root},
+        "provider candidate unavailable"});
     return_build_plan(std::move(plan));
 
     AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     const AurUpdateExecutionTarget& target = preflight.targets.front();
     expect_status(
-            target, AurUpdateExecutionTargetStatus::Incomplete,
-            "Incomplete/unsupported reducer");
+        target, AurUpdateExecutionTargetStatus::Incomplete,
+        "Incomplete/unsupported reducer");
     expect(
-            has_issue(
-                    target,
-                    AurUpdateExecutionReason::ProviderMetadataUnavailable),
-            "Incomplete issue was lost");
+        has_issue(
+            target,
+            AurUpdateExecutionReason::ProviderMetadataUnavailable),
+        "Incomplete issue was lost");
     expect(
-            !has_issue(
-                    target,
-                    AurUpdateExecutionReason::SplitPackageSelectionRequired),
-            "Model-valid split summary retained a preflight split blocker");
+        !has_issue(
+            target,
+            AurUpdateExecutionReason::SplitPackageSelectionRequired),
+        "Model-valid split summary retained a preflight split blocker");
 }
 
 void test_issue_attribution_and_global_fallback() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{
-            remote_entry("affected-root", InstalledPackageReason::Explicit),
-            remote_entry("clean-root", InstalledPackageReason::Explicit),
+        remote_entry("affected-root", InstalledPackageReason::Explicit),
+        remote_entry("clean-root", InstalledPackageReason::Explicit),
     }};
     BuildPlan attributed_plan = build_plan_for({
-            {"affected-root", "affected-root", "affected-root"},
-            {"clean-root", "clean-root", "clean-root"},
+        {"affected-root", "affected-root", "affected-root"},
+        {"clean-root", "clean-root", "clean-root"},
     });
     attributed_plan.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "affected-root",
-            "affected-root",
-            "missing-child",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Unknown,
-            std::nullopt,
-            std::nullopt,
-            std::nullopt});
+        "affected-root",
+        "affected-root",
+        "missing-child",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Unknown,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt});
     attributed_plan.unresolved.push_back("missing-child");
     return_build_plan(std::move(attributed_plan));
 
     AurUpdateExecutionPreflight attributed =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            attributed.targets[0], AurUpdateExecutionTargetStatus::Incomplete,
-            "Affected root attribution");
+        attributed.targets[0], AurUpdateExecutionTargetStatus::Incomplete,
+        "Affected root attribution");
     expect(
-            has_issue(
-                    attributed.targets[0],
-                    AurUpdateExecutionReason::UnresolvedDependency),
-            "Affected root unresolved issue is missing");
+        has_issue(
+            attributed.targets[0],
+            AurUpdateExecutionReason::UnresolvedDependency),
+        "Affected root unresolved issue is missing");
     expect_status(
-            attributed.targets[1], AurUpdateExecutionTargetStatus::Executable,
-            "Unaffected root attribution");
+        attributed.targets[1], AurUpdateExecutionTargetStatus::Executable,
+        "Unaffected root attribution");
     expect(
-            !has_issue(
-                    attributed.targets[1],
-                    AurUpdateExecutionReason::UnresolvedDependency),
-            "Unresolved issue leaked to an unaffected root");
+        !has_issue(
+            attributed.targets[1],
+            AurUpdateExecutionReason::UnresolvedDependency),
+        "Unresolved issue leaked to an unaffected root");
 
     reset_preflight_stub();
     BuildPlan global_plan = build_plan_for({
-            {"affected-root", "affected-root", "affected-root"},
-            {"clean-root", "clean-root", "clean-root"},
+        {"affected-root", "affected-root", "affected-root"},
+        {"clean-root", "clean-root", "clean-root"},
     });
     global_plan.resolution_failures.push_back(BuildPlanResolutionFailure{
-            BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
-            std::optional<std::string>{"orphan-parent"},
-            std::optional<std::string>{"orphan-base"},
-            "orphan-virtual",
-            std::optional<std::string>{"orphan-virtual"},
-            {},
-            "unattributed provider search failure"});
+        BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
+        std::optional<std::string>{"orphan-parent"},
+        std::optional<std::string>{"orphan-base"},
+        "orphan-virtual",
+        std::optional<std::string>{"orphan-virtual"},
+        {},
+        "unattributed provider search failure"});
     return_build_plan(std::move(global_plan));
 
     AurUpdateExecutionPreflight global =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     for(const auto& target : global.targets) {
         expect_status(
-                target, AurUpdateExecutionTargetStatus::Incomplete,
-                "Global blocker attribution");
+            target, AurUpdateExecutionTargetStatus::Incomplete,
+            "Global blocker attribution");
         expect(
-                has_issue(
-                        target,
-                        AurUpdateExecutionReason::ProviderMetadataUnavailable),
-                "Global typed blocker is missing");
+            has_issue(
+                target,
+                AurUpdateExecutionReason::ProviderMetadataUnavailable),
+            "Global typed blocker is missing");
         expect(
-                has_issue(
-                        target,
-                        AurUpdateExecutionReason::BuildPlanInconsistent),
-                "Global attribution inconsistency marker is missing");
+            has_issue(
+                target,
+                AurUpdateExecutionReason::BuildPlanInconsistent),
+            "Global attribution inconsistency marker is missing");
     }
 
     reset_preflight_stub();
     BuildPlan mismatched_plan = build_plan_for({
-            {"affected-root", "affected-root", "affected-root"},
-            {"clean-root", "clean-root", "clean-root"},
+        {"affected-root", "affected-root", "affected-root"},
+        {"clean-root", "clean-root", "clean-root"},
     });
     mismatched_plan.resolution_failures.push_back(
-            BuildPlanResolutionFailure{
-                    BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
-                    std::optional<std::string>{"affected-root"},
-                    std::optional<std::string>{"affected-root"},
-                    "virtual-dependency",
-                    std::optional<std::string>{"virtual-dependency"},
-                    {{1, "clean-root"}},
-                    "failure attributed to an unrelated known root"});
+        BuildPlanResolutionFailure{
+            BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
+            std::optional<std::string>{"affected-root"},
+            std::optional<std::string>{"affected-root"},
+            "virtual-dependency",
+            std::optional<std::string>{"virtual-dependency"},
+            {{1, "clean-root"}},
+            "failure attributed to an unrelated known root"});
     return_build_plan(std::move(mismatched_plan));
 
     AurUpdateExecutionPreflight mismatched =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     for(const auto& target : mismatched.targets) {
         expect_status(
-                target, AurUpdateExecutionTargetStatus::Incomplete,
-                "Mismatched failure attribution");
+            target, AurUpdateExecutionTargetStatus::Incomplete,
+            "Mismatched failure attribution");
         expect(
-                has_issue(
-                        target,
-                        AurUpdateExecutionReason::ProviderMetadataUnavailable),
-                "Mismatched typed blocker did not fall back globally");
+            has_issue(
+                target,
+                AurUpdateExecutionReason::ProviderMetadataUnavailable),
+            "Mismatched typed blocker did not fall back globally");
         expect(
-                has_issue(
-                        target,
-                        AurUpdateExecutionReason::BuildPlanInconsistent),
-                "Mismatched failure attribution was not rejected");
+            has_issue(
+                target,
+                AurUpdateExecutionReason::BuildPlanInconsistent),
+            "Mismatched failure attribution was not rejected");
     }
 }
 
 void test_resolution_failure_root_validation() {
     AurUpdatePlan update_plan{{
-            remote_entry("affected-root", InstalledPackageReason::Explicit),
-            remote_entry("clean-root", InstalledPackageReason::Explicit),
+        remote_entry("affected-root", InstalledPackageReason::Explicit),
+        remote_entry("clean-root", InstalledPackageReason::Explicit),
     }};
     const RootTargetIdentity affected_root{0, "affected-root"};
     const RootTargetIdentity clean_root{1, "clean-root"};
@@ -1325,919 +1406,919 @@ void test_resolution_failure_root_validation() {
         reset_preflight_stub();
         return_build_plan(std::move(plan));
         AurUpdateExecutionPreflight preflight =
-                resolve_aur_update_execution_preflight(update_plan);
+            resolve_aur_update_execution_preflight(update_plan);
         for(const auto& target : preflight.targets) {
             expect_status(
-                    target, AurUpdateExecutionTargetStatus::Incomplete,
-                    context);
+                target, AurUpdateExecutionTargetStatus::Incomplete,
+                context);
             expect(
-                    has_issue(
-                            target,
-                            AurUpdateExecutionReason::ProviderMetadataUnavailable),
-                    context + ": typed issue did not fall back globally");
+                has_issue(
+                    target,
+                    AurUpdateExecutionReason::ProviderMetadataUnavailable),
+                context + ": typed issue did not fall back globally");
             expect(
-                    has_issue(
-                            target,
-                            AurUpdateExecutionReason::BuildPlanInconsistent),
-                    context + ": attribution inconsistency is missing");
+                has_issue(
+                    target,
+                    AurUpdateExecutionReason::BuildPlanInconsistent),
+                context + ": attribution inconsistency is missing");
         }
     };
 
     BuildPlan extra_root = build_plan_for({
-            {"affected-root", "affected-root", "affected-root"},
-            {"clean-root", "clean-root", "clean-root"},
+        {"affected-root", "affected-root", "affected-root"},
+        {"clean-root", "clean-root", "clean-root"},
     });
     extra_root.resolution_failures.push_back(BuildPlanResolutionFailure{
-            BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
-            std::optional<std::string>{"affected-root"},
-            std::optional<std::string>{"affected-root"},
-            "virtual-dependency",
-            std::optional<std::string>{"virtual-dependency"},
-            {affected_root, clean_root},
-            "failure contains an extra root"});
+        BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
+        std::optional<std::string>{"affected-root"},
+        std::optional<std::string>{"affected-root"},
+        "virtual-dependency",
+        std::optional<std::string>{"virtual-dependency"},
+        {affected_root, clean_root},
+        "failure contains an extra root"});
     expect_global_fallback(std::move(extra_root), "Failure with extra root");
 
     BuildPlan unknown_root = build_plan_for({
-            {"affected-root", "affected-root", "affected-root"},
-            {"clean-root", "clean-root", "clean-root"},
+        {"affected-root", "affected-root", "affected-root"},
+        {"clean-root", "clean-root", "clean-root"},
     });
     unknown_root.resolution_failures.push_back(BuildPlanResolutionFailure{
-            BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
-            std::optional<std::string>{"affected-root"},
-            std::optional<std::string>{"affected-root"},
-            "virtual-dependency",
-            std::optional<std::string>{"virtual-dependency"},
-            {{99, "unknown-root"}},
-            "failure contains an unknown root"});
+        BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
+        std::optional<std::string>{"affected-root"},
+        std::optional<std::string>{"affected-root"},
+        "virtual-dependency",
+        std::optional<std::string>{"virtual-dependency"},
+        {{99, "unknown-root"}},
+        "failure contains an unknown root"});
     expect_global_fallback(std::move(unknown_root), "Failure with unknown root");
 
     BuildPlan missing_parent = build_plan_for({
-            {"affected-root", "affected-root", "affected-root"},
-            {"clean-root", "clean-root", "clean-root"},
+        {"affected-root", "affected-root", "affected-root"},
+        {"clean-root", "clean-root", "clean-root"},
     });
     missing_parent.resolution_failures.push_back(BuildPlanResolutionFailure{
-            BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
-            std::optional<std::string>{"missing-parent"},
-            std::optional<std::string>{"missing-parent"},
-            "virtual-dependency",
-            std::optional<std::string>{"virtual-dependency"},
-            {affected_root},
-            "failure parent target is missing"});
+        BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
+        std::optional<std::string>{"missing-parent"},
+        std::optional<std::string>{"missing-parent"},
+        "virtual-dependency",
+        std::optional<std::string>{"virtual-dependency"},
+        {affected_root},
+        "failure parent target is missing"});
     expect_global_fallback(std::move(missing_parent), "Failure with missing parent");
 
     BuildPlan incomplete_parent_identity = build_plan_for({
-            {"affected-root", "affected-root", "affected-root"},
-            {"clean-root", "clean-root", "clean-root"},
+        {"affected-root", "affected-root", "affected-root"},
+        {"clean-root", "clean-root", "clean-root"},
     });
     incomplete_parent_identity.resolution_failures.push_back(
-            BuildPlanResolutionFailure{
-                    BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
-                    std::optional<std::string>{"affected-root"},
-                    std::nullopt,
-                    "virtual-dependency",
-                    std::optional<std::string>{"virtual-dependency"},
-                    {affected_root},
-                    "failure parent identity is incomplete"});
+        BuildPlanResolutionFailure{
+            BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
+            std::optional<std::string>{"affected-root"},
+            std::nullopt,
+            "virtual-dependency",
+            std::optional<std::string>{"virtual-dependency"},
+            {affected_root},
+            "failure parent identity is incomplete"});
     expect_global_fallback(
-            std::move(incomplete_parent_identity),
-            "Failure with incomplete parent identity");
+        std::move(incomplete_parent_identity),
+        "Failure with incomplete parent identity");
 
     reset_preflight_stub();
     BuildPlan shared_parent = build_plan_for({
-            {"affected-root", "affected-root", "affected-root"},
-            {"clean-root", "clean-root", "clean-root"},
+        {"affected-root", "affected-root", "affected-root"},
+        {"clean-root", "clean-root", "clean-root"},
     });
     add_dependency_target(
-            shared_parent, "shared-parent", "shared-parent",
-            {affected_root, clean_root});
+        shared_parent, "shared-parent", "shared-parent",
+        {affected_root, clean_root});
     shared_parent.order.insert(
-            shared_parent.order.begin(),
-            BuildPlanEntry{"shared-parent", {"shared-parent"}});
+        shared_parent.order.begin(),
+        BuildPlanEntry{"shared-parent", {"shared-parent"}});
     for(const auto& root : {affected_root, clean_root}) {
         shared_parent.dependency_edges.push_back(BuildPlanDependencyEdge{
-                root.requested_name,
-                root.requested_name,
-                "shared-parent",
-                PackageRole::RuntimeDependency,
-                DependencyKind::Aur,
-                std::optional<std::string>{"shared-parent"},
-                std::optional<std::string>{"shared-parent"},
-                std::nullopt});
+            root.requested_name,
+            root.requested_name,
+            "shared-parent",
+            PackageRole::RuntimeDependency,
+            DependencyKind::Aur,
+            std::optional<std::string>{"shared-parent"},
+            std::optional<std::string>{"shared-parent"},
+            std::nullopt});
     }
     shared_parent.resolution_failures.push_back(BuildPlanResolutionFailure{
-            BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
-            std::optional<std::string>{"shared-parent"},
-            std::optional<std::string>{"shared-parent"},
-            "shared-child",
-            std::optional<std::string>{"shared-child"},
-            {affected_root, clean_root},
-            "valid shared dependency failure"});
+        BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
+        std::optional<std::string>{"shared-parent"},
+        std::optional<std::string>{"shared-parent"},
+        "shared-child",
+        std::optional<std::string>{"shared-child"},
+        {affected_root, clean_root},
+        "valid shared dependency failure"});
     return_build_plan(std::move(shared_parent));
     AurUpdateExecutionPreflight shared =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     for(const auto& target : shared.targets) {
         expect_status(
-                target, AurUpdateExecutionTargetStatus::Incomplete,
-                "Valid shared failure attribution");
+            target, AurUpdateExecutionTargetStatus::Incomplete,
+            "Valid shared failure attribution");
         expect(
-                has_issue(
-                        target,
-                        AurUpdateExecutionReason::AurDependencyMetadataUnavailable),
-                "Shared failure did not reach every owning root");
+            has_issue(
+                target,
+                AurUpdateExecutionReason::AurDependencyMetadataUnavailable),
+            "Shared failure did not reach every owning root");
         expect(
-                !has_issue(
-                        target,
-                        AurUpdateExecutionReason::BuildPlanInconsistent),
-                "Valid shared failure attribution was rejected");
+            !has_issue(
+                target,
+                AurUpdateExecutionReason::BuildPlanInconsistent),
+            "Valid shared failure attribution was rejected");
     }
 
     reset_preflight_stub();
     BuildPlan root_failure = build_plan_for({
-            {"affected-root", "affected-root", "affected-root"},
-            {"clean-root", "clean-root", "clean-root"},
+        {"affected-root", "affected-root", "affected-root"},
+        {"clean-root", "clean-root", "clean-root"},
     });
     root_failure.package_targets.erase(root_failure.package_targets.begin());
     root_failure.order.erase(root_failure.order.begin());
     root_failure.resolution_failures.push_back(BuildPlanResolutionFailure{
-            BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
-            std::nullopt,
-            std::nullopt,
-            "affected-root",
-            std::nullopt,
-            {affected_root},
-            "valid root metadata failure"});
+        BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
+        std::nullopt,
+        std::nullopt,
+        "affected-root",
+        std::nullopt,
+        {affected_root},
+        "valid root metadata failure"});
     return_build_plan(std::move(root_failure));
     AurUpdateExecutionPreflight root =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            root.targets[0], AurUpdateExecutionTargetStatus::Incomplete,
-            "Valid root metadata failure");
+        root.targets[0], AurUpdateExecutionTargetStatus::Incomplete,
+        "Valid root metadata failure");
     expect(
-            has_issue(
-                    root.targets[0],
-                    AurUpdateExecutionReason::AurDependencyMetadataUnavailable),
-            "Root metadata failure lost its owning root");
+        has_issue(
+            root.targets[0],
+            AurUpdateExecutionReason::AurDependencyMetadataUnavailable),
+        "Root metadata failure lost its owning root");
     expect_status(
-            root.targets[1], AurUpdateExecutionTargetStatus::Executable,
-            "Root metadata failure leaked to unrelated root");
+        root.targets[1], AurUpdateExecutionTargetStatus::Executable,
+        "Root metadata failure leaked to unrelated root");
 }
 
 void test_fail_closed_cross_field_consistency() {
     AurUpdatePlan update_plan{{remote_entry(
-            "consistency-root", InstalledPackageReason::Explicit)}};
+        "consistency-root", InstalledPackageReason::Explicit)}};
 
     reset_preflight_stub();
     BuildPlan missing_order = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     missing_order.order.clear();
     return_build_plan(std::move(missing_order));
     AurUpdateExecutionPreflight missing_order_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            missing_order_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Missing BuildPlan execution order");
+        missing_order_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Missing BuildPlan execution order");
     expect(
-            has_issue(
-                    missing_order_preflight.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Missing execution order was not rejected");
+        has_issue(
+            missing_order_preflight.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Missing execution order was not rejected");
 
     reset_preflight_stub();
     BuildPlan wrong_order_name = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     wrong_order_name.order.front().package_names = {"unrelated-package"};
     return_build_plan(std::move(wrong_order_name));
     AurUpdateExecutionPreflight wrong_order_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            wrong_order_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Mismatched BuildPlan order package name");
+        wrong_order_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Mismatched BuildPlan order package name");
 
     reset_preflight_stub();
     BuildPlan ambiguous_edge_only = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     ambiguous_edge_only.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "consistency-root",
-            "consistency-root",
-            "missing-provider-summary",
-            PackageRole::RuntimeDependency,
-            DependencyKind::AmbiguousProvider,
-            std::nullopt,
-            std::nullopt,
-            std::nullopt});
+        "consistency-root",
+        "consistency-root",
+        "missing-provider-summary",
+        PackageRole::RuntimeDependency,
+        DependencyKind::AmbiguousProvider,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt});
     return_build_plan(std::move(ambiguous_edge_only));
     AurUpdateExecutionPreflight ambiguous_edge_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
+        ambiguous_edge_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Ambiguous edge without summary");
+    expect(
+        has_issue(
             ambiguous_edge_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Ambiguous edge without summary");
+            AurUpdateExecutionReason::AmbiguousProvider),
+        "Ambiguous edge blocker was not derived from the typed edge");
     expect(
-            has_issue(
-                    ambiguous_edge_preflight.targets.front(),
-                    AurUpdateExecutionReason::AmbiguousProvider),
-            "Ambiguous edge blocker was not derived from the typed edge");
-    expect(
-            has_issue(
-                    ambiguous_edge_preflight.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Missing ambiguous summary was not rejected");
+        has_issue(
+            ambiguous_edge_preflight.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Missing ambiguous summary was not rejected");
 
     reset_preflight_stub();
     AurUpdatePlan split_plan{{remote_entry(
-            "split-only-cli", InstalledPackageReason::Explicit,
-            AurUpdateClassification::UpdateAvailable,
-            "split-only-cli", "split-only-suite")}};
+        "split-only-cli", InstalledPackageReason::Explicit,
+        AurUpdateClassification::UpdateAvailable,
+        "split-only-cli", "split-only-suite")}};
     return_build_plan(build_plan_for({
-            {"split-only-cli", "split-only-cli", "split-only-suite"},
+        {"split-only-cli", "split-only-cli", "split-only-suite"},
     }));
     AurUpdateExecutionPreflight split_without_summary =
-            resolve_aur_update_execution_preflight(split_plan);
+        resolve_aur_update_execution_preflight(split_plan);
     expect_status(
-            split_without_summary.targets.front(),
-            AurUpdateExecutionTargetStatus::Executable,
-            "Split identity without summary");
+        split_without_summary.targets.front(),
+        AurUpdateExecutionTargetStatus::Executable,
+        "Split identity without summary");
     expect(
-            !has_issue(
-                    split_without_summary.targets.front(),
-                    AurUpdateExecutionReason::SplitPackageSelectionRequired),
-            "Split identity retained a preflight lifecycle blocker");
+        !has_issue(
+            split_without_summary.targets.front(),
+            AurUpdateExecutionReason::SplitPackageSelectionRequired),
+        "Split identity retained a preflight lifecycle blocker");
 
     reset_preflight_stub();
     BuildPlan rootless_dependency = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     add_dependency_target(
-            rootless_dependency, "orphan-dependency", "orphan-dependency", {});
+        rootless_dependency, "orphan-dependency", "orphan-dependency", {});
     rootless_dependency.order.insert(
-            rootless_dependency.order.begin(),
-            BuildPlanEntry{"orphan-dependency", {"orphan-dependency"}});
+        rootless_dependency.order.begin(),
+        BuildPlanEntry{"orphan-dependency", {"orphan-dependency"}});
     return_build_plan(std::move(rootless_dependency));
     AurUpdateExecutionPreflight rootless_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            rootless_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Rootless dependency target");
+        rootless_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Rootless dependency target");
     expect(
-            has_issue(
-                    rootless_preflight.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Rootless dependency target was not a global blocker");
+        has_issue(
+            rootless_preflight.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Rootless dependency target was not a global blocker");
 
     reset_preflight_stub();
     BuildPlan orphan_dependency = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     add_dependency_target(
-            orphan_dependency, "orphan-dependency", "orphan-dependency",
-            {{0, "consistency-root"}});
+        orphan_dependency, "orphan-dependency", "orphan-dependency",
+        {{0, "consistency-root"}});
     orphan_dependency.order.insert(
-            orphan_dependency.order.begin(),
-            BuildPlanEntry{"orphan-dependency", {"orphan-dependency"}});
+        orphan_dependency.order.begin(),
+        BuildPlanEntry{"orphan-dependency", {"orphan-dependency"}});
     return_build_plan(std::move(orphan_dependency));
     AurUpdateExecutionPreflight orphan_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            orphan_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Dependency target without an incoming edge");
+        orphan_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Dependency target without an incoming edge");
     expect(
-            has_issue(
-                    orphan_preflight.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Known-root orphan dependency target was not rejected");
+        has_issue(
+            orphan_preflight.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Known-root orphan dependency target was not rejected");
 
     reset_preflight_stub();
     BuildPlan orphan_cycle = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     add_dependency_target(
-            orphan_cycle, "orphan-cycle", "orphan-cycle",
-            {{0, "consistency-root"}});
+        orphan_cycle, "orphan-cycle", "orphan-cycle",
+        {{0, "consistency-root"}});
     orphan_cycle.order.insert(
-            orphan_cycle.order.begin(),
-            BuildPlanEntry{"orphan-cycle", {"orphan-cycle"}});
+        orphan_cycle.order.begin(),
+        BuildPlanEntry{"orphan-cycle", {"orphan-cycle"}});
     orphan_cycle.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "orphan-cycle",
-            "orphan-cycle",
-            "orphan-cycle",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Aur,
-            std::optional<std::string>{"orphan-cycle"},
-            std::optional<std::string>{"orphan-cycle"},
-            std::nullopt});
+        "orphan-cycle",
+        "orphan-cycle",
+        "orphan-cycle",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Aur,
+        std::optional<std::string>{"orphan-cycle"},
+        std::optional<std::string>{"orphan-cycle"},
+        std::nullopt});
     return_build_plan(std::move(orphan_cycle));
     AurUpdateExecutionPreflight orphan_cycle_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            orphan_cycle_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Unreachable dependency self-cycle");
+        orphan_cycle_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Unreachable dependency self-cycle");
     expect(
-            has_issue(
-                    orphan_cycle_preflight.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Unreachable self-cycle justified its own root ownership");
+        has_issue(
+            orphan_cycle_preflight.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Unreachable self-cycle justified its own root ownership");
 
     reset_preflight_stub();
     BuildPlan reachable_cycle = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     PlannedPackageTarget* cycle_root =
-            find_package_target(reachable_cycle, "consistency-root");
+        find_package_target(reachable_cycle, "consistency-root");
     expect(cycle_root != nullptr, "Reachable cycle root fixture is missing");
     cycle_root->roles.push_back(PackageRole::RuntimeDependency);
     reachable_cycle.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "consistency-root",
-            "consistency-root",
-            "consistency-root",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Aur,
-            std::optional<std::string>{"consistency-root"},
-            std::optional<std::string>{"consistency-root"},
-            std::nullopt});
+        "consistency-root",
+        "consistency-root",
+        "consistency-root",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Aur,
+        std::optional<std::string>{"consistency-root"},
+        std::optional<std::string>{"consistency-root"},
+        std::nullopt});
     return_build_plan(std::move(reachable_cycle));
     AurUpdateExecutionPreflight reachable_cycle_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
+        reachable_cycle_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Reachable self-cycle without summary");
+    expect(
+        has_issue(
             reachable_cycle_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Reachable self-cycle without summary");
+            AurUpdateExecutionReason::DependencyCycle),
+        "Typed graph cycle was lost when the cycle summary was missing");
     expect(
-            has_issue(
-                    reachable_cycle_preflight.targets.front(),
-                    AurUpdateExecutionReason::DependencyCycle),
-            "Typed graph cycle was lost when the cycle summary was missing");
-    expect(
-            has_issue(
-                    reachable_cycle_preflight.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Missing cycle summary was not marked inconsistent");
+        has_issue(
+            reachable_cycle_preflight.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Missing cycle summary was not marked inconsistent");
 
     reset_preflight_stub();
     BuildPlan repository_edge_target = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     add_dependency_target(
-            repository_edge_target, "repository-only-dependency",
-            "repository-only-dependency", {{0, "consistency-root"}});
+        repository_edge_target, "repository-only-dependency",
+        "repository-only-dependency", {{0, "consistency-root"}});
     repository_edge_target.order.insert(
-            repository_edge_target.order.begin(),
-            BuildPlanEntry{
-                    "repository-only-dependency",
-                    {"repository-only-dependency"}});
+        repository_edge_target.order.begin(),
+        BuildPlanEntry{
+            "repository-only-dependency",
+            {"repository-only-dependency"}});
     repository_edge_target.dependency_edges.push_back(
-            BuildPlanDependencyEdge{
-                    "consistency-root",
-                    "consistency-root",
-                    "repository-only-dependency",
-                    PackageRole::RuntimeDependency,
-                    DependencyKind::Repo,
-                    std::optional<std::string>{
-                            "repository-only-dependency"},
-                    std::nullopt,
-                    std::nullopt});
+        BuildPlanDependencyEdge{
+            "consistency-root",
+            "consistency-root",
+            "repository-only-dependency",
+            PackageRole::RuntimeDependency,
+            DependencyKind::Repo,
+            std::optional<std::string>{
+                "repository-only-dependency"},
+            std::nullopt,
+            std::nullopt});
     return_build_plan(std::move(repository_edge_target));
     AurUpdateExecutionPreflight repository_edge_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            repository_edge_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Repository edge cannot justify an AUR dependency target");
+        repository_edge_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Repository edge cannot justify an AUR dependency target");
     expect(
-            has_issue(
-                    repository_edge_preflight.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Repository edge incorrectly justified an AUR target");
+        has_issue(
+            repository_edge_preflight.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Repository edge incorrectly justified an AUR target");
 
     reset_preflight_stub();
     BuildPlan wrong_repo_identity = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     wrong_repo_identity.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "consistency-root",
-            "consistency-root",
-            "expected-repository-dependency",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Repo,
-            std::optional<std::string>{"different-repository-package"},
-            std::nullopt,
-            std::nullopt});
+        "consistency-root",
+        "consistency-root",
+        "expected-repository-dependency",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Repo,
+        std::optional<std::string>{"different-repository-package"},
+        std::nullopt,
+        std::nullopt});
     return_build_plan(std::move(wrong_repo_identity));
     AurUpdateExecutionPreflight wrong_repo_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            wrong_repo_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Mismatched direct repository edge identity");
+        wrong_repo_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Mismatched direct repository edge identity");
 
     reset_preflight_stub();
     AurUpdatePlan two_roots{{
-            remote_entry("owner-root", InstalledPackageReason::Explicit),
-            remote_entry("other-root", InstalledPackageReason::Explicit),
+        remote_entry("owner-root", InstalledPackageReason::Explicit),
+        remote_entry("other-root", InstalledPackageReason::Explicit),
     }};
     BuildPlan wrong_aur_ownership = build_plan_for({
-            {"owner-root", "owner-root", "owner-root"},
-            {"other-root", "other-root", "other-root"},
+        {"owner-root", "owner-root", "owner-root"},
+        {"other-root", "other-root", "other-root"},
     });
     add_dependency_target(
-            wrong_aur_ownership, "owned-dependency", "owned-dependency",
-            {{1, "other-root"}});
+        wrong_aur_ownership, "owned-dependency", "owned-dependency",
+        {{1, "other-root"}});
     wrong_aur_ownership.order.insert(
-            wrong_aur_ownership.order.begin(),
-            BuildPlanEntry{"owned-dependency", {"owned-dependency"}});
+        wrong_aur_ownership.order.begin(),
+        BuildPlanEntry{"owned-dependency", {"owned-dependency"}});
     wrong_aur_ownership.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "owner-root",
-            "owner-root",
-            "owned-dependency",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Aur,
-            std::optional<std::string>{"owned-dependency"},
-            std::optional<std::string>{"owned-dependency"},
-            std::nullopt});
+        "owner-root",
+        "owner-root",
+        "owned-dependency",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Aur,
+        std::optional<std::string>{"owned-dependency"},
+        std::optional<std::string>{"owned-dependency"},
+        std::nullopt});
     return_build_plan(std::move(wrong_aur_ownership));
     AurUpdateExecutionPreflight wrong_ownership_preflight =
-            resolve_aur_update_execution_preflight(two_roots);
+        resolve_aur_update_execution_preflight(two_roots);
     expect_status(
-            wrong_ownership_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "AUR edge resolved target with wrong root ownership");
+        wrong_ownership_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "AUR edge resolved target with wrong root ownership");
 
     reset_preflight_stub();
     BuildPlan missing_roles = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     missing_roles.package_targets.push_back(PlannedPackageTarget{
-            "roleless-dependency",
-            "roleless-dependency",
-            {},
-            {{0, "consistency-root"}}});
+        "roleless-dependency",
+        "roleless-dependency",
+        {},
+        {{0, "consistency-root"}}});
     missing_roles.order.insert(
-            missing_roles.order.begin(),
-            BuildPlanEntry{"roleless-dependency", {"roleless-dependency"}});
+        missing_roles.order.begin(),
+        BuildPlanEntry{"roleless-dependency", {"roleless-dependency"}});
     return_build_plan(std::move(missing_roles));
     AurUpdateExecutionPreflight missing_roles_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            missing_roles_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Roleless planned dependency target");
+        missing_roles_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Roleless planned dependency target");
 
     reset_preflight_stub();
     BuildPlan root_role_edge = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     root_role_edge.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "consistency-root",
-            "consistency-root",
-            "repository-dependency",
-            PackageRole::Root,
-            DependencyKind::Repo,
-            std::optional<std::string>{"repository-dependency"},
-            std::nullopt,
-            std::nullopt});
+        "consistency-root",
+        "consistency-root",
+        "repository-dependency",
+        PackageRole::Root,
+        DependencyKind::Repo,
+        std::optional<std::string>{"repository-dependency"},
+        std::nullopt,
+        std::nullopt});
     return_build_plan(std::move(root_role_edge));
     AurUpdateExecutionPreflight root_role_edge_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            root_role_edge_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Dependency edge with Root role");
+        root_role_edge_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Dependency edge with Root role");
 
     reset_preflight_stub();
     BuildPlan missing_provider = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     missing_provider.dependency_edges.push_back(
-            provided_dependency_edge(
-                    "consistency-root", "virtual-dependency", std::nullopt));
+        provided_dependency_edge(
+            "consistency-root", "virtual-dependency", std::nullopt));
     return_build_plan(std::move(missing_provider));
     AurUpdateExecutionPreflight missing_provider_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            missing_provider_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Provided dependency without resolved provider");
+        missing_provider_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Provided dependency without resolved provider");
     expect(
-            has_issue(
-                    missing_provider_preflight.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Missing resolved provider was accepted");
+        has_issue(
+            missing_provider_preflight.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Missing resolved provider was accepted");
 
     reset_preflight_stub();
     BuildPlan empty_repository_origin = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     empty_repository_origin.dependency_edges.push_back(
-            provided_dependency_edge(
-                    "consistency-root", "virtual-dependency",
-                    ProvidedDependency::from_repository(
-                            "", "provider-package")));
+        provided_dependency_edge(
+            "consistency-root", "virtual-dependency",
+            ProvidedDependency::from_repository(
+                "", "provider-package")));
     return_build_plan(std::move(empty_repository_origin));
     AurUpdateExecutionPreflight empty_repository_origin_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            empty_repository_origin_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Provided dependency with empty repository origin");
+        empty_repository_origin_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Provided dependency with empty repository origin");
     expect(
-            has_issue(
-                    empty_repository_origin_preflight.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Empty repository provider origin was accepted");
+        has_issue(
+            empty_repository_origin_preflight.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Empty repository provider origin was accepted");
 
     reset_preflight_stub();
     BuildPlan provider_with_control_origin = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     provider_with_control_origin.dependency_edges.push_back(
-            provided_dependency_edge(
-                    "consistency-root", "virtual-dependency",
-                    ProvidedDependency::from_repository(
-                            "co\nre", "provider-package")));
+        provided_dependency_edge(
+            "consistency-root", "virtual-dependency",
+            ProvidedDependency::from_repository(
+                "co\nre", "provider-package")));
     return_build_plan(std::move(provider_with_control_origin));
     AurUpdateExecutionPreflight provider_with_control_origin_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            provider_with_control_origin_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Provided dependency with control-character repository origin");
+        provider_with_control_origin_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Provided dependency with control-character repository origin");
     expect(
-            has_issue(
-                    provider_with_control_origin_preflight.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Control-character provider origin was accepted");
+        has_issue(
+            provider_with_control_origin_preflight.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Control-character provider origin was accepted");
 
     reset_preflight_stub();
     BuildPlan repository_provider = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     repository_provider.dependency_edges.push_back(
-            provided_dependency_edge(
-                    "consistency-root", "virtual-dependency",
-                    ProvidedDependency::from_repository(
-                            "aur", "provider-package")));
+        provided_dependency_edge(
+            "consistency-root", "virtual-dependency",
+            ProvidedDependency::from_repository(
+                "aur", "provider-package")));
     return_build_plan(std::move(repository_provider));
     AurUpdateExecutionPreflight repository_provider_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            repository_provider_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Executable,
-            "Repository provider with valid origin");
+        repository_provider_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Executable,
+        "Repository provider with valid origin");
 
     reset_preflight_stub();
     BuildPlan invalid_provider_package = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     invalid_provider_package.dependency_edges.push_back(
-            provided_dependency_edge(
-                    "consistency-root", "virtual-dependency",
-                    ProvidedDependency::from_repository(
-                            "aur", "invalid/provider")));
+        provided_dependency_edge(
+            "consistency-root", "virtual-dependency",
+            ProvidedDependency::from_repository(
+                "aur", "invalid/provider")));
     return_build_plan(std::move(invalid_provider_package));
     AurUpdateExecutionPreflight invalid_provider_package_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            invalid_provider_package_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Provided dependency with invalid provider package");
+        invalid_provider_package_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Provided dependency with invalid provider package");
     expect(
-            has_issue(
-                    invalid_provider_package_preflight.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Invalid provider package was accepted");
+        has_issue(
+            invalid_provider_package_preflight.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Invalid provider package was accepted");
 
     reset_preflight_stub();
     BuildPlan missing_aur_provider_target = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     missing_aur_provider_target.dependency_edges.push_back(
-            provided_dependency_edge(
-                    "consistency-root", "virtual-dependency",
-                    ProvidedDependency::from_aur("missing-provider")));
+        provided_dependency_edge(
+            "consistency-root", "virtual-dependency",
+            ProvidedDependency::from_aur("missing-provider")));
     return_build_plan(std::move(missing_aur_provider_target));
     AurUpdateExecutionPreflight missing_aur_provider_target_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            missing_aur_provider_target_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "AUR provider without planned target");
+        missing_aur_provider_target_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "AUR provider without planned target");
     expect(
-            has_issue(
-                    missing_aur_provider_target_preflight.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "AUR provider without matching target was accepted");
+        has_issue(
+            missing_aur_provider_target_preflight.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "AUR provider without matching target was accepted");
 
     reset_preflight_stub();
     BuildPlan orphan_repository_provider = build_plan_for({
-            {"consistency-root", "consistency-root", "consistency-root"},
+        {"consistency-root", "consistency-root", "consistency-root"},
     });
     const RootTargetIdentity consistency_root{0, "consistency-root"};
     add_dependency_target(
-            orphan_repository_provider, "repository-provider",
-            "repository-provider", {consistency_root});
+        orphan_repository_provider, "repository-provider",
+        "repository-provider", {consistency_root});
     orphan_repository_provider.order.insert(
-            orphan_repository_provider.order.begin(),
-            BuildPlanEntry{
-                    "repository-provider", {"repository-provider"}});
+        orphan_repository_provider.order.begin(),
+        BuildPlanEntry{
+            "repository-provider", {"repository-provider"}});
     orphan_repository_provider.dependency_edges.push_back(
-            provided_dependency_edge(
-                    "consistency-root", "virtual-dependency",
-                    ProvidedDependency::from_repository(
-                            "aur", "repository-provider")));
+        provided_dependency_edge(
+            "consistency-root", "virtual-dependency",
+            ProvidedDependency::from_repository(
+                "aur", "repository-provider")));
     return_build_plan(std::move(orphan_repository_provider));
     AurUpdateExecutionPreflight orphan_repository_provider_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            orphan_repository_provider_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Repository provider with orphan source target");
+        orphan_repository_provider_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Repository provider with orphan source target");
     expect(
-            has_issue(
-                    orphan_repository_provider_preflight.targets.front(),
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Repository provider incorrectly grounded a source target");
+        has_issue(
+            orphan_repository_provider_preflight.targets.front(),
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Repository provider incorrectly grounded a source target");
 }
 
 void test_rooted_aur_dependency_graph() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{
-            remote_entry("first-root", InstalledPackageReason::Explicit),
-            remote_entry("second-root", InstalledPackageReason::Explicit),
+        remote_entry("first-root", InstalledPackageReason::Explicit),
+        remote_entry("second-root", InstalledPackageReason::Explicit),
     }};
     BuildPlan shared = build_plan_for({
-            {"first-root", "first-root", "first-root"},
-            {"second-root", "second-root", "second-root"},
+        {"first-root", "first-root", "first-root"},
+        {"second-root", "second-root", "second-root"},
     });
     const std::vector<RootTargetIdentity> roots{
-            {0, "first-root"},
-            {1, "second-root"},
+        {0, "first-root"},
+        {1, "second-root"},
     };
     add_dependency_target(
-            shared, "shared-dependency", "shared-dependency", roots);
+        shared, "shared-dependency", "shared-dependency", roots);
     shared.order.insert(
-            shared.order.begin(),
-            BuildPlanEntry{"shared-dependency", {"shared-dependency"}});
+        shared.order.begin(),
+        BuildPlanEntry{"shared-dependency", {"shared-dependency"}});
     for(const auto& root : roots) {
         shared.dependency_edges.push_back(BuildPlanDependencyEdge{
-                root.requested_name,
-                root.requested_name,
-                "shared-dependency",
-                PackageRole::RuntimeDependency,
-                DependencyKind::Aur,
-                std::optional<std::string>{"shared-dependency"},
-                std::optional<std::string>{"shared-dependency"},
-                std::nullopt});
+            root.requested_name,
+            root.requested_name,
+            "shared-dependency",
+            PackageRole::RuntimeDependency,
+            DependencyKind::Aur,
+            std::optional<std::string>{"shared-dependency"},
+            std::optional<std::string>{"shared-dependency"},
+            std::nullopt});
     }
     return_build_plan(std::move(shared));
 
     AurUpdateExecutionPreflight shared_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     for(const auto& target : shared_preflight.targets) {
         expect_status(
-                target, AurUpdateExecutionTargetStatus::Executable,
-                "Shared dependency rooted graph");
+            target, AurUpdateExecutionTargetStatus::Executable,
+            "Shared dependency rooted graph");
     }
 
     reset_preflight_stub();
     BuildPlan mutual_cycle = build_plan_for({
-            {"first-root", "first-root", "first-root"},
-            {"second-root", "second-root", "second-root"},
+        {"first-root", "first-root", "first-root"},
+        {"second-root", "second-root", "second-root"},
     });
     PlannedPackageTarget* first_root =
-            find_package_target(mutual_cycle, "first-root");
+        find_package_target(mutual_cycle, "first-root");
     PlannedPackageTarget* second_root =
-            find_package_target(mutual_cycle, "second-root");
+        find_package_target(mutual_cycle, "second-root");
     expect(
-            first_root != nullptr && second_root != nullptr,
-            "Mutual cycle root fixtures are missing");
+        first_root != nullptr && second_root != nullptr,
+        "Mutual cycle root fixtures are missing");
     first_root->roles.push_back(PackageRole::RuntimeDependency);
     second_root->roles.push_back(PackageRole::RuntimeDependency);
     first_root->roots.push_back(roots[1]);
     second_root->roots.push_back(roots[0]);
     mutual_cycle.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "first-root",
-            "first-root",
-            "second-root",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Aur,
-            std::optional<std::string>{"second-root"},
-            std::optional<std::string>{"second-root"},
-            std::nullopt});
+        "first-root",
+        "first-root",
+        "second-root",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Aur,
+        std::optional<std::string>{"second-root"},
+        std::optional<std::string>{"second-root"},
+        std::nullopt});
     mutual_cycle.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "second-root",
-            "second-root",
-            "first-root",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Aur,
-            std::optional<std::string>{"first-root"},
-            std::optional<std::string>{"first-root"},
-            std::nullopt});
+        "second-root",
+        "second-root",
+        "first-root",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Aur,
+        std::optional<std::string>{"first-root"},
+        std::optional<std::string>{"first-root"},
+        std::nullopt});
     // resolverのcycle summaryはSCC全memberではなく、再訪したPackageBaseを持つ。
     mutual_cycle.cycles.push_back("first-root");
     return_build_plan(std::move(mutual_cycle));
 
     AurUpdateExecutionPreflight mutual_cycle_preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     for(const auto& target : mutual_cycle_preflight.targets) {
         expect_status(
-                target, AurUpdateExecutionTargetStatus::Incomplete,
-                "Mutual root cycle");
+            target, AurUpdateExecutionTargetStatus::Incomplete,
+            "Mutual root cycle");
         expect(
-                has_issue(target, AurUpdateExecutionReason::DependencyCycle),
-                "Mutual root cycle was not attributed to every root");
+            has_issue(target, AurUpdateExecutionReason::DependencyCycle),
+            "Mutual root cycle was not attributed to every root");
         expect(
-                !has_issue(
-                        target,
-                        AurUpdateExecutionReason::BuildPlanInconsistent),
-                "Valid cycle summary was compared as an exact back-edge set");
+            !has_issue(
+                target,
+                AurUpdateExecutionReason::BuildPlanInconsistent),
+            "Valid cycle summary was compared as an exact back-edge set");
     }
 
     reset_preflight_stub();
     AurUpdatePlan same_base_cycle_plan{{remote_entry(
-            "same-base-cycle-a", InstalledPackageReason::Explicit,
-            AurUpdateClassification::UpdateAvailable,
-            "same-base-cycle-a", "same-base-cycle-suite")}};
+        "same-base-cycle-a", InstalledPackageReason::Explicit,
+        AurUpdateClassification::UpdateAvailable,
+        "same-base-cycle-a", "same-base-cycle-suite")}};
     BuildPlan same_base_cycle = build_plan_for({
-            {"same-base-cycle-a", "same-base-cycle-a",
-             "same-base-cycle-suite"},
+        {"same-base-cycle-a", "same-base-cycle-a",
+         "same-base-cycle-suite"},
     });
     PlannedPackageTarget* same_base_cycle_a =
-            find_package_target(same_base_cycle, "same-base-cycle-a");
+        find_package_target(same_base_cycle, "same-base-cycle-a");
     expect(
-            same_base_cycle_a != nullptr,
-            "Same-base cycle root fixture is missing");
+        same_base_cycle_a != nullptr,
+        "Same-base cycle root fixture is missing");
     same_base_cycle_a->roles.push_back(PackageRole::RuntimeDependency);
     add_dependency_target(
-            same_base_cycle, "same-base-cycle-b",
-            "same-base-cycle-suite", {{0, "same-base-cycle-a"}});
+        same_base_cycle, "same-base-cycle-b",
+        "same-base-cycle-suite", {{0, "same-base-cycle-a"}});
     same_base_cycle.order.front().package_names.push_back(
-            "same-base-cycle-b");
+        "same-base-cycle-b");
     same_base_cycle.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "same-base-cycle-a",
-            "same-base-cycle-suite",
-            "same-base-cycle-b",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Aur,
-            std::optional<std::string>{"same-base-cycle-b"},
-            std::optional<std::string>{"same-base-cycle-suite"},
-            std::nullopt});
+        "same-base-cycle-a",
+        "same-base-cycle-suite",
+        "same-base-cycle-b",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Aur,
+        std::optional<std::string>{"same-base-cycle-b"},
+        std::optional<std::string>{"same-base-cycle-suite"},
+        std::nullopt});
     same_base_cycle.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "same-base-cycle-b",
-            "same-base-cycle-suite",
-            "same-base-cycle-a",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Aur,
-            std::optional<std::string>{"same-base-cycle-a"},
-            std::optional<std::string>{"same-base-cycle-suite"},
-            std::nullopt});
+        "same-base-cycle-b",
+        "same-base-cycle-suite",
+        "same-base-cycle-a",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Aur,
+        std::optional<std::string>{"same-base-cycle-a"},
+        std::optional<std::string>{"same-base-cycle-suite"},
+        std::nullopt});
 
     BuildPlan same_base_cycle_without_summary = same_base_cycle;
     return_build_plan(std::move(same_base_cycle_without_summary));
     AurUpdateExecutionPreflight missing_summary_preflight =
-            resolve_aur_update_execution_preflight(same_base_cycle_plan);
+        resolve_aur_update_execution_preflight(same_base_cycle_plan);
     const AurUpdateExecutionTarget& missing_summary_target =
-            missing_summary_preflight.targets.front();
+        missing_summary_preflight.targets.front();
     expect(
+        has_issue(
+            missing_summary_target,
+            AurUpdateExecutionReason::DependencyCycle) &&
             has_issue(
-                    missing_summary_target,
-                    AurUpdateExecutionReason::DependencyCycle) &&
-                    has_issue(
-                            missing_summary_target,
-                            AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Same-base typed graph did not detect a missing cycle summary");
+                missing_summary_target,
+                AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Same-base typed graph did not detect a missing cycle summary");
 
     reset_preflight_stub();
     same_base_cycle.cycles.push_back("same-base-cycle-suite");
     return_build_plan(std::move(same_base_cycle));
 
     AurUpdateExecutionPreflight same_base_cycle_preflight =
-            resolve_aur_update_execution_preflight(same_base_cycle_plan);
+        resolve_aur_update_execution_preflight(same_base_cycle_plan);
     const AurUpdateExecutionTarget& same_base_cycle_target =
-            same_base_cycle_preflight.targets.front();
+        same_base_cycle_preflight.targets.front();
     expect_status(
+        same_base_cycle_target,
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Same-base real dependency cycle");
+    expect(
+        has_issue(
             same_base_cycle_target,
-            AurUpdateExecutionTargetStatus::Incomplete,
-            "Same-base real dependency cycle");
+            AurUpdateExecutionReason::DependencyCycle),
+        "Same-base real cycle was lost by PackageBase contraction");
     expect(
-            has_issue(
-                    same_base_cycle_target,
-                    AurUpdateExecutionReason::DependencyCycle),
-            "Same-base real cycle was lost by PackageBase contraction");
-    expect(
-            !has_issue(
-                    same_base_cycle_target,
-                    AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Same-base real cycle did not match its resolver summary");
+        !has_issue(
+            same_base_cycle_target,
+            AurUpdateExecutionReason::BuildPlanInconsistent),
+        "Same-base real cycle did not match its resolver summary");
 
     reset_preflight_stub();
     AurUpdatePlan provider_plan{{remote_entry(
-            "provider-root", InstalledPackageReason::Explicit)}};
+        "provider-root", InstalledPackageReason::Explicit)}};
     BuildPlan provider = build_plan_for({
-            {"provider-root", "provider-root", "provider-root"},
+        {"provider-root", "provider-root", "provider-root"},
     });
     add_dependency_target(
-            provider, "aur-provider", "aur-provider",
-            {{0, "provider-root"}});
+        provider, "aur-provider", "aur-provider",
+        {{0, "provider-root"}});
     provider.order.insert(
-            provider.order.begin(),
-            BuildPlanEntry{"aur-provider", {"aur-provider"}});
+        provider.order.begin(),
+        BuildPlanEntry{"aur-provider", {"aur-provider"}});
     provider.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "provider-root",
-            "provider-root",
-            "virtual-dependency",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Provided,
-            std::nullopt,
-            std::nullopt,
-            ProvidedDependency::from_aur("aur-provider")});
+        "provider-root",
+        "provider-root",
+        "virtual-dependency",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Provided,
+        std::nullopt,
+        std::nullopt,
+        ProvidedDependency::from_aur("aur-provider")});
     return_build_plan(std::move(provider));
 
     AurUpdateExecutionPreflight provider_preflight =
-            resolve_aur_update_execution_preflight(provider_plan);
+        resolve_aur_update_execution_preflight(provider_plan);
     expect_status(
-            provider_preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Executable,
-            "AUR provider rooted graph");
+        provider_preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Executable,
+        "AUR provider rooted graph");
 }
 
 void test_ambiguous_provider_specification_normalization() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{
-            remote_entry("first-root", InstalledPackageReason::Explicit),
-            remote_entry("second-root", InstalledPackageReason::Explicit),
+        remote_entry("first-root", InstalledPackageReason::Explicit),
+        remote_entry("second-root", InstalledPackageReason::Explicit),
     }};
     BuildPlan plan = build_plan_for({
-            {"first-root", "first-root", "first-root"},
-            {"second-root", "second-root", "second-root"},
+        {"first-root", "first-root", "first-root"},
+        {"second-root", "second-root", "second-root"},
     });
     plan.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "first-root", "first-root", "shared-virtual",
-            PackageRole::RuntimeDependency,
-            DependencyKind::AmbiguousProvider,
-            std::nullopt, std::nullopt, std::nullopt});
+        "first-root", "first-root", "shared-virtual",
+        PackageRole::RuntimeDependency,
+        DependencyKind::AmbiguousProvider,
+        std::nullopt, std::nullopt, std::nullopt});
     plan.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "second-root", "second-root", " shared-virtual ",
-            PackageRole::RuntimeDependency,
-            DependencyKind::AmbiguousProvider,
-            std::nullopt, std::nullopt, std::nullopt});
+        "second-root", "second-root", " shared-virtual ",
+        PackageRole::RuntimeDependency,
+        DependencyKind::AmbiguousProvider,
+        std::nullopt, std::nullopt, std::nullopt});
     plan.ambiguous_providers.push_back(AmbiguousProvidedDependency{
-            "shared-virtual",
-            {
-                    ProvidedDependency::from_repository(
-                            "aur", "shared-provider"),
-                    ProvidedDependency::from_aur("shared-provider"),
-            }});
+        "shared-virtual",
+        {
+            ProvidedDependency::from_repository(
+                "aur", "shared-provider"),
+            ProvidedDependency::from_aur("shared-provider"),
+        }});
     return_build_plan(std::move(plan));
 
     AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect(
-            preflight.build_plan.has_value() &&
-                    preflight.build_plan->ambiguous_providers.size() == 1,
-            "Typed ambiguous provider summary is missing");
+        preflight.build_plan.has_value() &&
+            preflight.build_plan->ambiguous_providers.size() == 1,
+        "Typed ambiguous provider summary is missing");
     expect(
-            preflight.build_plan->ambiguous_providers.front().candidates ==
-                    std::vector<ProvidedDependency>{
-                            ProvidedDependency::from_repository(
-                                    "aur", "shared-provider"),
-                            ProvidedDependency::from_aur("shared-provider"),
-                    },
-            "Typed ambiguous provider candidates were reordered or deduplicated");
+        preflight.build_plan->ambiguous_providers.front().candidates ==
+            std::vector<ProvidedDependency>{
+                ProvidedDependency::from_repository(
+                    "aur", "shared-provider"),
+                ProvidedDependency::from_aur("shared-provider"),
+            },
+        "Typed ambiguous provider candidates were reordered or deduplicated");
     for(const auto& target : preflight.targets) {
         expect_status(
-                target, AurUpdateExecutionTargetStatus::Unsupported,
-                "Normalized ambiguous provider attribution");
+            target, AurUpdateExecutionTargetStatus::Unsupported,
+            "Normalized ambiguous provider attribution");
         expect(
-                has_issue(target, AurUpdateExecutionReason::AmbiguousProvider),
-                "Ambiguous provider did not reach every affected root");
+            has_issue(target, AurUpdateExecutionReason::AmbiguousProvider),
+            "Ambiguous provider did not reach every affected root");
     }
 }
 
 void test_skipped_identity_mismatch_is_incomplete() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{remote_entry(
-            "installed-name", InstalledPackageReason::Unknown,
-            AurUpdateClassification::UpToDate,
-            "different-aur-name", "different-aur-name")}};
+        "installed-name", InstalledPackageReason::Unknown,
+        AurUpdateClassification::UpToDate,
+        "different-aur-name", "different-aur-name")}};
 
     AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+        resolve_aur_update_execution_preflight(update_plan);
     expect(resolver_call_count() == 0, "Up-to-date identity mismatch called resolver");
     expect_status(
-            preflight.targets.front(), AurUpdateExecutionTargetStatus::Incomplete,
-            "Up-to-date AUR identity mismatch");
+        preflight.targets.front(), AurUpdateExecutionTargetStatus::Incomplete,
+        "Up-to-date AUR identity mismatch");
     expect(
-            has_issue(
-                    preflight.targets.front(),
-                    AurUpdateExecutionReason::UpdatePlanInconsistent),
-            "Up-to-date identity mismatch was treated as a normal skip");
+        has_issue(
+            preflight.targets.front(),
+            AurUpdateExecutionReason::UpdatePlanInconsistent),
+        "Up-to-date identity mismatch was treated as a normal skip");
 }
 
 void test_invocation_helpers() {
@@ -2261,12 +2342,12 @@ void test_invocation_helpers() {
     expect(!can_execute(skip_only), "Skip-only helper allowed execution");
 
     AurUpdateExecutionPreflight with_unsupported{
-            {executable, unsupported}, std::nullopt};
+        {executable, unsupported}, std::nullopt};
     expect(has_blocking_targets(with_unsupported), "Unsupported blocker was not found");
     expect(!can_execute(with_unsupported), "Unsupported plan allowed execution");
 
     AurUpdateExecutionPreflight with_incomplete{
-            {executable, incomplete}, std::nullopt};
+        {executable, incomplete}, std::nullopt};
     expect(has_blocking_targets(with_incomplete), "Incomplete blocker was not found");
     expect(!can_execute(with_incomplete), "Incomplete plan allowed execution");
 }
@@ -2274,44 +2355,44 @@ void test_invocation_helpers() {
 void test_preflight_uses_combined_resolver_seam() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{remote_entry(
-            "read-only-root", InstalledPackageReason::Explicit)}};
+        "read-only-root", InstalledPackageReason::Explicit)}};
     return_build_plan(build_plan_for({
-            {"read-only-root", "read-only-root", "read-only-root"},
+        {"read-only-root", "read-only-root", "read-only-root"},
     }));
 
     const ProviderSelectionCallback select_provider =
-            [](const std::string&,
-               const std::vector<ProvidedDependency>&)
-                    -> std::optional<ProvidedDependency> {
-                return std::nullopt;
-            };
+        [](const std::string&,
+           const std::vector<ProvidedDependency>&)
+        -> std::optional<ProvidedDependency> {
+        return std::nullopt;
+    };
     AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(
-                    update_plan, select_provider);
+        resolve_aur_update_execution_preflight(
+            update_plan, select_provider);
 
     expect_status(
-            preflight.targets.front(),
-            AurUpdateExecutionTargetStatus::Executable,
-            "Resolver seam preflight");
+        preflight.targets.front(),
+        AurUpdateExecutionTargetStatus::Executable,
+        "Resolver seam preflight");
     expect(
-            resolver_call_count() == 1 &&
-                    resolver_calls() ==
-                            std::vector<std::vector<std::string>>{{"read-only-root"}},
-            "Preflight did not use the combined resolver seam exactly once");
+        resolver_call_count() == 1 &&
+            resolver_calls() ==
+                std::vector<std::vector<std::string>>{{"read-only-root"}},
+        "Preflight did not use the combined resolver seam exactly once");
     expect(
-            resolver_selection_callback_presence() ==
-                    std::vector<bool>{true},
-            "Preflight did not forward the invocation provider selector");
+        resolver_selection_callback_presence() ==
+            std::vector<bool>{true},
+        "Preflight did not forward the invocation provider selector");
 
     reset_preflight_stub();
     return_build_plan(build_plan_for({
-            {"read-only-root", "read-only-root", "read-only-root"},
+        {"read-only-root", "read-only-root", "read-only-root"},
     }));
     static_cast<void>(resolve_aur_update_execution_preflight(update_plan));
     expect(
-            resolver_selection_callback_presence() ==
-                    std::vector<bool>{false},
-            "Legacy preflight API did not delegate with an empty provider selector");
+        resolver_selection_callback_presence() ==
+            std::vector<bool>{false},
+        "Legacy preflight API did not delegate with an empty provider selector");
 }
 
 template <typename Callable>
@@ -2325,63 +2406,69 @@ void run_case(const std::string& name, Callable callable) {
 int main() {
     try {
         run_case(
-                "classification order and combined resolution",
-                test_classification_order_and_combined_resolution);
+            "classification order and combined resolution",
+            test_classification_order_and_combined_resolution);
         run_case(
-                "empty and skip-only plans suppress resolution",
-                test_empty_and_skip_only_plans_suppress_resolution);
+            "devel RequiresCheck blocks without candidate promotion",
+            test_devel_requires_check_blocks_without_candidate_promotion);
         run_case(
-                "installed reason mapping and root/dependency overlap",
-                test_installed_reason_mapping_and_root_dependency_overlap);
+            "five-field suffix UpToDate is inconsistent",
+            test_five_field_suffix_up_to_date_is_inconsistent);
         run_case(
-                "typed Unsatisfied constraint blocks update preflight",
-                test_typed_unsatisfied_constraint_blocks_update_preflight);
+            "empty and skip-only plans suppress resolution",
+            test_empty_and_skip_only_plans_suppress_resolution);
         run_case(
-                "duplicate update targets suppress resolution",
-                test_duplicate_update_targets_suppress_resolution);
+            "installed reason mapping and root/dependency overlap",
+            test_installed_reason_mapping_and_root_dependency_overlap);
         run_case(
-                "update-plan and BuildPlan consistency",
-                test_update_plan_and_build_plan_consistency);
+            "typed Unsatisfied constraint blocks update preflight",
+            test_typed_unsatisfied_constraint_blocks_update_preflight);
         run_case(
-                "projection payload keeps distinct target indices",
-                test_projection_payload_keeps_distinct_target_indices);
+            "duplicate update targets suppress resolution",
+            test_duplicate_update_targets_suppress_resolution);
         run_case(
-                "incomplete BuildPlan issues are typed and deduplicated",
-                test_incomplete_build_plan_issues_are_typed_and_deduplicated);
+            "update-plan and BuildPlan consistency",
+            test_update_plan_and_build_plan_consistency);
         run_case(
-                "complete split BuildPlan is model-valid",
-                test_complete_split_build_plan_is_model_valid);
+            "projection payload keeps distinct target indices",
+            test_projection_payload_keeps_distinct_target_indices);
         run_case(
-                "incomplete same-base coverage is typed failure",
-                test_incomplete_same_base_coverage_is_typed_failure);
+            "incomplete BuildPlan issues are typed and deduplicated",
+            test_incomplete_build_plan_issues_are_typed_and_deduplicated);
         run_case(
-                "typed relation assessment preflight mapping",
-                test_typed_relation_assessment_preflight_mapping);
+            "complete split BuildPlan is model-valid",
+            test_complete_split_build_plan_is_model_valid);
         run_case(
-                "incomplete status preserves provider failure without split blocker",
-                test_incomplete_status_preserves_provider_failure_without_split_blocker);
+            "incomplete same-base coverage is typed failure",
+            test_incomplete_same_base_coverage_is_typed_failure);
         run_case(
-                "issue attribution and global fallback",
-                test_issue_attribution_and_global_fallback);
+            "typed relation assessment preflight mapping",
+            test_typed_relation_assessment_preflight_mapping);
         run_case(
-                "resolution failure root validation",
-                test_resolution_failure_root_validation);
+            "incomplete status preserves provider failure without split blocker",
+            test_incomplete_status_preserves_provider_failure_without_split_blocker);
         run_case(
-                "fail-closed BuildPlan cross-field consistency",
-                test_fail_closed_cross_field_consistency);
+            "issue attribution and global fallback",
+            test_issue_attribution_and_global_fallback);
         run_case(
-                "rooted AUR dependency graph",
-                test_rooted_aur_dependency_graph);
+            "resolution failure root validation",
+            test_resolution_failure_root_validation);
         run_case(
-                "ambiguous provider specification normalization",
-                test_ambiguous_provider_specification_normalization);
+            "fail-closed BuildPlan cross-field consistency",
+            test_fail_closed_cross_field_consistency);
         run_case(
-                "skipped identity mismatch is incomplete",
-                test_skipped_identity_mismatch_is_incomplete);
+            "rooted AUR dependency graph",
+            test_rooted_aur_dependency_graph);
+        run_case(
+            "ambiguous provider specification normalization",
+            test_ambiguous_provider_specification_normalization);
+        run_case(
+            "skipped identity mismatch is incomplete",
+            test_skipped_identity_mismatch_is_incomplete);
         run_case("invocation helpers", test_invocation_helpers);
         run_case(
-                "preflight uses combined resolver seam",
-                test_preflight_uses_combined_resolver_seam);
+            "preflight uses combined resolver seam",
+            test_preflight_uses_combined_resolver_seam);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

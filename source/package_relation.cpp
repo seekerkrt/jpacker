@@ -6,7 +6,7 @@ namespace {
 
 bool has_malformed_operator(std::string_view specification) noexcept {
     const std::size_t operator_position =
-            specification.find_first_of("<>=");
+        specification.find_first_of("<>=");
     if(operator_position == std::string_view::npos) return false;
 
     if(operator_position > 0 &&
@@ -24,35 +24,35 @@ bool has_malformed_operator(std::string_view specification) noexcept {
     }
     const std::size_t version_position = operator_position + operator_size;
     return version_position < specification.size() &&
-            specification.find_first_of("<>=", version_position) !=
-                    std::string_view::npos;
+           specification.find_first_of("<>=", version_position) !=
+               std::string_view::npos;
 }
 
 DependencyConstraintParseFailure relation_failure(
-        DependencyConstraintParseFailure failure,
-        std::string_view raw_specification) {
+    DependencyConstraintParseFailure failure,
+    std::string_view raw_specification) {
     if(has_malformed_operator(raw_specification)) {
         failure.kind = DependencyConstraintParseFailureKind::
-                UnsupportedConsumerOperator;
+            UnsupportedConsumerOperator;
     }
     failure.raw_specification = std::string(raw_specification);
     return failure;
 }
 
 bool version_relation_matches(
-        DependencyVersionRelation relation,
-        ArchVersionOrdering ordering) noexcept {
+    DependencyVersionRelation relation,
+    ArchVersionOrdering ordering) noexcept {
     switch(relation) {
-    case DependencyVersionRelation::LessThan:
-        return ordering == ArchVersionOrdering::Less;
-    case DependencyVersionRelation::LessThanOrEqual:
-        return ordering != ArchVersionOrdering::Greater;
-    case DependencyVersionRelation::Equal:
-        return ordering == ArchVersionOrdering::Equal;
-    case DependencyVersionRelation::GreaterThanOrEqual:
-        return ordering != ArchVersionOrdering::Less;
-    case DependencyVersionRelation::GreaterThan:
-        return ordering == ArchVersionOrdering::Greater;
+        case DependencyVersionRelation::LessThan:
+            return ordering == ArchVersionOrdering::Less;
+        case DependencyVersionRelation::LessThanOrEqual:
+            return ordering != ArchVersionOrdering::Greater;
+        case DependencyVersionRelation::Equal:
+            return ordering == ArchVersionOrdering::Equal;
+        case DependencyVersionRelation::GreaterThanOrEqual:
+            return ordering != ArchVersionOrdering::Less;
+        case DependencyVersionRelation::GreaterThan:
+            return ordering == ArchVersionOrdering::Greater;
     }
     return false;
 }
@@ -60,23 +60,24 @@ bool version_relation_matches(
 } // namespace
 
 DeclaredPackageRelation::DeclaredPackageRelation(
-        std::string declaring_package_name,
-        std::string declaring_package_base, PackageRelationKind kind,
-        std::string raw_specification, std::string target_component,
-        std::optional<DependencyVersionConstraint> constraint)
-        : declaring_package_name_(std::move(declaring_package_name)),
-          declaring_package_base_(std::move(declaring_package_base)),
-          kind_(kind), raw_specification_(std::move(raw_specification)),
-          target_component_(std::move(target_component)),
-          constraint_(std::move(constraint)) {}
+    std::string declaring_package_name,
+    std::string declaring_package_base, PackageRelationKind kind,
+    std::string raw_specification, std::string target_component,
+    std::optional<DependencyVersionConstraint> constraint)
+    : declaring_package_name_(std::move(declaring_package_name)),
+      declaring_package_base_(std::move(declaring_package_base)),
+      kind_(kind), raw_specification_(std::move(raw_specification)),
+      target_component_(std::move(target_component)),
+      constraint_(std::move(constraint)) {
+}
 
 const std::string& DeclaredPackageRelation::declaring_package_name()
-        const noexcept {
+    const noexcept {
     return declaring_package_name_;
 }
 
 const std::string& DeclaredPackageRelation::declaring_package_base()
-        const noexcept {
+    const noexcept {
     return declaring_package_base_;
 }
 
@@ -85,7 +86,7 @@ PackageRelationKind DeclaredPackageRelation::kind() const noexcept {
 }
 
 const std::string& DeclaredPackageRelation::raw_specification()
-        const noexcept {
+    const noexcept {
     return raw_specification_;
 }
 
@@ -99,12 +100,14 @@ DeclaredPackageRelation::constraint() const noexcept {
 }
 
 DeclaredPackageRelationParseResult::DeclaredPackageRelationParseResult(
-        DeclaredPackageRelation relation) noexcept
-        : outcome_(std::move(relation)) {}
+    DeclaredPackageRelation relation) noexcept
+    : outcome_(std::move(relation)) {
+}
 
 DeclaredPackageRelationParseResult::DeclaredPackageRelationParseResult(
-        DependencyConstraintParseFailure failure) noexcept
-        : outcome_(std::move(failure)) {}
+    DependencyConstraintParseFailure failure) noexcept
+    : outcome_(std::move(failure)) {
+}
 
 const DeclaredPackageRelation*
 DeclaredPackageRelationParseResult::relation() const noexcept {
@@ -117,45 +120,45 @@ DeclaredPackageRelationParseResult::failure() const noexcept {
 }
 
 DeclaredPackageRelationParseResult parse_declared_package_relation(
-        std::string declaring_package_name, std::string declaring_package_base,
-        PackageRelationKind kind, std::string_view specification) {
+    std::string declaring_package_name, std::string declaring_package_base,
+    PackageRelationKind kind, std::string_view specification) {
     const DependencyRequirementParseResult parsed =
-            parse_dependency_requirement(specification);
+        parse_dependency_requirement(specification);
     if(const auto* failure = parsed.failure(); failure != nullptr) {
         return DeclaredPackageRelationParseResult(
-                relation_failure(*failure, specification));
+            relation_failure(*failure, specification));
     }
 
     const DependencyRequirement* requirement = parsed.requirement();
     const auto* package_requirement = requirement == nullptr
-            ? nullptr
-            : std::get_if<ConsumerDependencyRequirement>(requirement);
+                                          ? nullptr
+                                          : std::get_if<ConsumerDependencyRequirement>(requirement);
     if(package_requirement == nullptr) {
         return DeclaredPackageRelationParseResult(
-                DependencyConstraintParseFailure{
-                        DependencyConstraintParseFailureKind::
-                                InvalidPackageIdentity,
-                        std::string(specification)});
+            DependencyConstraintParseFailure{
+                DependencyConstraintParseFailureKind::
+                    InvalidPackageIdentity,
+                std::string(specification)});
     }
 
     return DeclaredPackageRelationParseResult(DeclaredPackageRelation(
-            std::move(declaring_package_name),
-            std::move(declaring_package_base), kind,
-            std::string(specification), package_requirement->package_name(),
-            package_requirement->constraint()));
+        std::move(declaring_package_name),
+        std::move(declaring_package_base), kind,
+        std::string(specification), package_requirement->package_name(),
+        package_requirement->constraint()));
 }
 
 bool declared_package_relation_version_matches(
-        const DeclaredPackageRelation& relation,
-        const std::optional<std::string>& observed_component_version) noexcept {
+    const DeclaredPackageRelation& relation,
+    const std::optional<std::string>& observed_component_version) noexcept {
     if(!relation.constraint().has_value()) return true;
     if(!observed_component_version.has_value()) return false;
 
     const DependencyVersionConstraint& constraint =
-            relation.constraint().value();
+        relation.constraint().value();
     return version_relation_matches(
-            constraint.relation(),
-            compare_arch_package_versions(
-                    observed_component_version.value(),
-                    constraint.version()));
+        constraint.relation(),
+        compare_arch_package_versions(
+            observed_component_version.value(),
+            constraint.version()));
 }

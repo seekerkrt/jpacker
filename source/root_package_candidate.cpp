@@ -15,8 +15,8 @@ bool is_continuation_byte(unsigned char byte) noexcept {
 }
 
 bool decode_utf8_code_point(
-        std::string_view value, std::size_t offset,
-        std::uint32_t& code_point, std::size_t& length) noexcept {
+    std::string_view value, std::size_t offset,
+    std::uint32_t& code_point, std::size_t& length) noexcept {
     const auto byte_at = [&value](std::size_t index) {
         return static_cast<unsigned char>(value[index]);
     };
@@ -33,8 +33,8 @@ bool decode_utf8_code_point(
         const unsigned char second = byte_at(offset + 1);
         if(!is_continuation_byte(second)) return false;
         code_point =
-                (static_cast<std::uint32_t>(first & 0x1f) << 6) |
-                static_cast<std::uint32_t>(second & 0x3f);
+            (static_cast<std::uint32_t>(first & 0x1f) << 6) |
+            static_cast<std::uint32_t>(second & 0x3f);
         length = 2;
         return true;
     }
@@ -44,15 +44,15 @@ bool decode_utf8_code_point(
         const unsigned char second = byte_at(offset + 1);
         const unsigned char third = byte_at(offset + 2);
         const bool valid_second =
-                first == 0xe0 ? second >= 0xa0 && second <= 0xbf
-                              : first == 0xed
-                                      ? second >= 0x80 && second <= 0x9f
-                                      : is_continuation_byte(second);
+            first == 0xe0 ? second >= 0xa0 && second <= 0xbf
+            : first == 0xed
+                ? second >= 0x80 && second <= 0x9f
+                : is_continuation_byte(second);
         if(!valid_second || !is_continuation_byte(third)) return false;
         code_point =
-                (static_cast<std::uint32_t>(first & 0x0f) << 12) |
-                (static_cast<std::uint32_t>(second & 0x3f) << 6) |
-                static_cast<std::uint32_t>(third & 0x3f);
+            (static_cast<std::uint32_t>(first & 0x0f) << 12) |
+            (static_cast<std::uint32_t>(second & 0x3f) << 6) |
+            static_cast<std::uint32_t>(third & 0x3f);
         length = 3;
         return true;
     }
@@ -63,19 +63,19 @@ bool decode_utf8_code_point(
         const unsigned char third = byte_at(offset + 2);
         const unsigned char fourth = byte_at(offset + 3);
         const bool valid_second =
-                first == 0xf0 ? second >= 0x90 && second <= 0xbf
-                              : first == 0xf4
-                                      ? second >= 0x80 && second <= 0x8f
-                                      : is_continuation_byte(second);
+            first == 0xf0 ? second >= 0x90 && second <= 0xbf
+            : first == 0xf4
+                ? second >= 0x80 && second <= 0x8f
+                : is_continuation_byte(second);
         if(!valid_second || !is_continuation_byte(third) ||
            !is_continuation_byte(fourth)) {
             return false;
         }
         code_point =
-                (static_cast<std::uint32_t>(first & 0x07) << 18) |
-                (static_cast<std::uint32_t>(second & 0x3f) << 12) |
-                (static_cast<std::uint32_t>(third & 0x3f) << 6) |
-                static_cast<std::uint32_t>(fourth & 0x3f);
+            (static_cast<std::uint32_t>(first & 0x07) << 18) |
+            (static_cast<std::uint32_t>(second & 0x3f) << 12) |
+            (static_cast<std::uint32_t>(third & 0x3f) << 6) |
+            static_cast<std::uint32_t>(fourth & 0x3f);
         length = 4;
         return true;
     }
@@ -93,7 +93,7 @@ bool is_valid_single_line_utf8(std::string_view value) noexcept {
     std::size_t offset = 0;
     while(offset < value.size()) {
         std::uint32_t code_point = 0;
-        std::size_t   length = 0;
+        std::size_t length = 0;
         if(!decode_utf8_code_point(value, offset, code_point, length) ||
            !is_single_line_code_point(code_point)) {
             return false;
@@ -120,85 +120,86 @@ bool is_valid_root_repository_name(const std::string& value) noexcept {
 }
 
 std::optional<std::string> normalize_presentation_value(
-        std::optional<std::string> value) {
+    std::optional<std::string> value) {
     if(value.has_value() && value->empty()) return std::nullopt;
     return value;
 }
 
 void append_presentation_validation_issues(
-        const RootPackageCandidatePresentation& presentation,
-        std::vector<RootPackageCandidateValidationIssue>& issues) {
+    const RootPackageCandidatePresentation& presentation,
+    std::vector<RootPackageCandidateValidationIssue>& issues) {
     if(presentation.version.has_value() &&
        !is_valid_single_line_utf8(presentation.version.value())) {
         issues.push_back(RootPackageCandidateValidationIssue{
-                RootPackageCandidateValidationIssueKind::InvalidVersion,
-                presentation.version.value()});
+            RootPackageCandidateValidationIssueKind::InvalidVersion,
+            presentation.version.value()});
     }
     if(presentation.description.has_value() &&
        !is_valid_single_line_utf8(presentation.description.value())) {
         issues.push_back(RootPackageCandidateValidationIssue{
-                RootPackageCandidateValidationIssueKind::InvalidDescription,
-                presentation.description.value()});
+            RootPackageCandidateValidationIssueKind::InvalidDescription,
+            presentation.description.value()});
     }
 }
 
 RootPackageCandidatePresentation normalize_presentation(
-        std::optional<std::string> version,
-        std::optional<std::string> description) {
+    std::optional<std::string> version,
+    std::optional<std::string> description) {
     return RootPackageCandidatePresentation{
-            normalize_presentation_value(std::move(version)),
-            normalize_presentation_value(std::move(description))};
+        normalize_presentation_value(std::move(version)),
+        normalize_presentation_value(std::move(description))};
 }
 
 std::optional<std::string> merge_presentation_value(
-        const std::optional<std::string>& lhs,
-        const std::optional<std::string>& rhs) {
+    const std::optional<std::string>& lhs,
+    const std::optional<std::string>& rhs) {
     if(lhs.has_value()) return lhs;
     return rhs;
 }
 
 void append_metadata_conflict(
-        const RootPackageCandidate& lhs,
-        RootPackageCandidateMetadataField field,
-        const std::optional<std::string>& lhs_value,
-        const std::optional<std::string>& rhs_value,
-        std::vector<RootPackageCandidatePairIssue>& issues) {
+    const RootPackageCandidate& lhs,
+    RootPackageCandidateMetadataField field,
+    const std::optional<std::string>& lhs_value,
+    const std::optional<std::string>& rhs_value,
+    std::vector<RootPackageCandidatePairIssue>& issues) {
     if(!lhs_value.has_value() || !rhs_value.has_value() ||
        lhs_value == rhs_value) {
         return;
     }
     issues.push_back(ConflictingRootPackageCandidateMetadata{
-            lhs.identity(), field, lhs_value.value(), rhs_value.value()});
+        lhs.identity(), field, lhs_value.value(), rhs_value.value()});
 }
 
 } // namespace
 
 RootPackageSourceKind root_package_source_kind(
-        const RootPackageIdentity& identity) noexcept {
+    const RootPackageIdentity& identity) noexcept {
     return std::holds_alternative<RepositoryRootPackageIdentity>(identity)
-                   ? RootPackageSourceKind::Repository
-                   : RootPackageSourceKind::Aur;
+               ? RootPackageSourceKind::Repository
+               : RootPackageSourceKind::Aur;
 }
 
 const std::string& root_package_name(
-        const RootPackageIdentity& identity) noexcept {
+    const RootPackageIdentity& identity) noexcept {
     return std::visit(
-            [](const auto& source_identity) -> const std::string& {
-                return source_identity.package_name;
-            },
-            identity);
+        [](const auto& source_identity) -> const std::string& {
+            return source_identity.package_name;
+        },
+        identity);
 }
 
 bool same_root_package_identity(
-        const RootPackageIdentity& lhs,
-        const RootPackageIdentity& rhs) noexcept {
+    const RootPackageIdentity& lhs,
+    const RootPackageIdentity& rhs) noexcept {
     return lhs == rhs;
 }
 
 RootPackageCandidate::RootPackageCandidate(
-        RootPackageIdentity identity,
-        RootPackageCandidatePresentation presentation) noexcept
-    : identity_(std::move(identity)), presentation_(std::move(presentation)) {}
+    RootPackageIdentity identity,
+    RootPackageCandidatePresentation presentation) noexcept
+    : identity_(std::move(identity)), presentation_(std::move(presentation)) {
+}
 
 RootPackageSourceKind RootPackageCandidate::source_kind() const noexcept {
     return root_package_source_kind(identity_);
@@ -222,12 +223,14 @@ RootPackageCandidate::presentation() const noexcept {
 }
 
 RootPackageCandidateValidationResult::RootPackageCandidateValidationResult(
-        RootPackageCandidate candidate) noexcept
-    : outcome_(std::move(candidate)) {}
+    RootPackageCandidate candidate) noexcept
+    : outcome_(std::move(candidate)) {
+}
 
 RootPackageCandidateValidationResult::RootPackageCandidateValidationResult(
-        RootPackageCandidateValidationFailure failure) noexcept
-    : outcome_(std::move(failure)) {}
+    RootPackageCandidateValidationFailure failure) noexcept
+    : outcome_(std::move(failure)) {
+}
 
 bool RootPackageCandidateValidationResult::is_valid() const noexcept {
     return std::holds_alternative<RootPackageCandidate>(outcome_);
@@ -244,71 +247,72 @@ RootPackageCandidateValidationResult::failure() const noexcept {
 }
 
 RootPackageCandidateValidationResult make_repository_root_package_candidate(
-        std::string repository_name, std::string package_name,
-        std::optional<std::string> version,
-        std::optional<std::string> description) {
+    std::string repository_name, std::string package_name,
+    std::optional<std::string> version,
+    std::optional<std::string> description) {
     RootPackageCandidatePresentation presentation =
-            normalize_presentation(
-                    std::move(version), std::move(description));
+        normalize_presentation(
+            std::move(version), std::move(description));
     std::vector<RootPackageCandidateValidationIssue> issues;
     if(!is_valid_root_repository_name(repository_name)) {
         issues.push_back(RootPackageCandidateValidationIssue{
-                RootPackageCandidateValidationIssueKind::InvalidRepositoryName,
-                repository_name});
+            RootPackageCandidateValidationIssueKind::InvalidRepositoryName,
+            repository_name});
     }
     if(!is_valid_root_package_name(package_name)) {
         issues.push_back(RootPackageCandidateValidationIssue{
-                RootPackageCandidateValidationIssueKind::InvalidPackageName,
-                package_name});
+            RootPackageCandidateValidationIssueKind::InvalidPackageName,
+            package_name});
     }
     append_presentation_validation_issues(presentation, issues);
 
     if(!issues.empty()) {
         return RootPackageCandidateValidationResult(
-                RootPackageCandidateValidationFailure{
-                        RootPackageSourceKind::Repository,
-                        std::move(issues)});
+            RootPackageCandidateValidationFailure{
+                RootPackageSourceKind::Repository,
+                std::move(issues)});
     }
     return RootPackageCandidateValidationResult(RootPackageCandidate(
-            RepositoryRootPackageIdentity{
-                    std::move(repository_name), std::move(package_name)},
-            std::move(presentation)));
+        RepositoryRootPackageIdentity{
+            std::move(repository_name), std::move(package_name)},
+        std::move(presentation)));
 }
 
 RootPackageCandidateValidationResult make_aur_root_package_candidate(
-        std::string package_name, std::string package_base,
-        std::optional<std::string> version,
-        std::optional<std::string> description) {
+    std::string package_name, std::string package_base,
+    std::optional<std::string> version,
+    std::optional<std::string> description) {
     RootPackageCandidatePresentation presentation =
-            normalize_presentation(
-                    std::move(version), std::move(description));
+        normalize_presentation(
+            std::move(version), std::move(description));
     std::vector<RootPackageCandidateValidationIssue> issues;
     if(!is_valid_root_package_name(package_name)) {
         issues.push_back(RootPackageCandidateValidationIssue{
-                RootPackageCandidateValidationIssueKind::InvalidPackageName,
-                package_name});
+            RootPackageCandidateValidationIssueKind::InvalidPackageName,
+            package_name});
     }
     if(!is_valid_root_package_name(package_base)) {
         issues.push_back(RootPackageCandidateValidationIssue{
-                RootPackageCandidateValidationIssueKind::InvalidPackageBase,
-                package_base});
+            RootPackageCandidateValidationIssueKind::InvalidPackageBase,
+            package_base});
     }
     append_presentation_validation_issues(presentation, issues);
 
     if(!issues.empty()) {
         return RootPackageCandidateValidationResult(
-                RootPackageCandidateValidationFailure{
-                        RootPackageSourceKind::Aur, std::move(issues)});
+            RootPackageCandidateValidationFailure{
+                RootPackageSourceKind::Aur, std::move(issues)});
     }
     return RootPackageCandidateValidationResult(RootPackageCandidate(
-            AurRootPackageIdentity{
-                    std::move(package_name), std::move(package_base)},
-            std::move(presentation)));
+        AurRootPackageIdentity{
+            std::move(package_name), std::move(package_base)},
+        std::move(presentation)));
 }
 
 SelectedRootPackageTarget::SelectedRootPackageTarget(
-        RootPackageIdentity identity) noexcept
-    : identity_(std::move(identity)) {}
+    RootPackageIdentity identity) noexcept
+    : identity_(std::move(identity)) {
+}
 
 RootPackageSourceKind SelectedRootPackageTarget::source_kind() const noexcept {
     return root_package_source_kind(identity_);
@@ -328,21 +332,24 @@ const std::string& SelectedRootPackageTarget::package_name() const noexcept {
 }
 
 SelectedRootPackageTarget select_root_package_target(
-        const RootPackageCandidate& candidate) {
+    const RootPackageCandidate& candidate) {
     return SelectedRootPackageTarget(candidate.identity());
 }
 
 RootPackageCandidatePairResult::RootPackageCandidatePairResult(
-        DistinctRootPackageCandidates distinct) noexcept
-    : outcome_(std::move(distinct)) {}
+    DistinctRootPackageCandidates distinct) noexcept
+    : outcome_(std::move(distinct)) {
+}
 
 RootPackageCandidatePairResult::RootPackageCandidatePairResult(
-        DuplicateRootPackageCandidate duplicate) noexcept
-    : outcome_(std::move(duplicate)) {}
+    DuplicateRootPackageCandidate duplicate) noexcept
+    : outcome_(std::move(duplicate)) {
+}
 
 RootPackageCandidatePairResult::RootPackageCandidatePairResult(
-        InvalidRootPackageCandidatePair invalid) noexcept
-    : outcome_(std::move(invalid)) {}
+    InvalidRootPackageCandidatePair invalid) noexcept
+    : outcome_(std::move(invalid)) {
+}
 
 bool RootPackageCandidatePairResult::is_distinct() const noexcept {
     return std::holds_alternative<DistinctRootPackageCandidates>(outcome_);
@@ -372,47 +379,46 @@ RootPackageCandidatePairResult::invalid() const noexcept {
 }
 
 RootPackageCandidatePairResult assess_root_package_candidate_pair(
-        const RootPackageCandidate& lhs,
-        const RootPackageCandidate& rhs) {
+    const RootPackageCandidate& lhs,
+    const RootPackageCandidate& rhs) {
     const auto* lhs_aur = std::get_if<AurRootPackageIdentity>(&lhs.identity());
     const auto* rhs_aur = std::get_if<AurRootPackageIdentity>(&rhs.identity());
     if(lhs_aur != nullptr && rhs_aur != nullptr &&
        lhs_aur->package_name == rhs_aur->package_name &&
        lhs_aur->package_base != rhs_aur->package_base) {
         return RootPackageCandidatePairResult(
-                InvalidRootPackageCandidatePair{{
-                        InconsistentAurRootPackageBase{
-                                lhs_aur->package_name,
-                                lhs_aur->package_base,
-                                rhs_aur->package_base}}});
+            InvalidRootPackageCandidatePair{{InconsistentAurRootPackageBase{
+                lhs_aur->package_name,
+                lhs_aur->package_base,
+                rhs_aur->package_base}}});
     }
 
     if(!same_root_package_identity(lhs.identity(), rhs.identity())) {
         return RootPackageCandidatePairResult(
-                DistinctRootPackageCandidates{});
+            DistinctRootPackageCandidates{});
     }
 
     std::vector<RootPackageCandidatePairIssue> issues;
     append_metadata_conflict(
-            lhs, RootPackageCandidateMetadataField::Version,
-            lhs.presentation().version, rhs.presentation().version, issues);
+        lhs, RootPackageCandidateMetadataField::Version,
+        lhs.presentation().version, rhs.presentation().version, issues);
     append_metadata_conflict(
-            lhs, RootPackageCandidateMetadataField::Description,
-            lhs.presentation().description,
-            rhs.presentation().description, issues);
+        lhs, RootPackageCandidateMetadataField::Description,
+        lhs.presentation().description,
+        rhs.presentation().description, issues);
     if(!issues.empty()) {
         return RootPackageCandidatePairResult(
-                InvalidRootPackageCandidatePair{std::move(issues)});
+            InvalidRootPackageCandidatePair{std::move(issues)});
     }
 
     return RootPackageCandidatePairResult(DuplicateRootPackageCandidate{
-            RootPackageCandidate(
-                    lhs.identity(),
-                    RootPackageCandidatePresentation{
-                            merge_presentation_value(
-                                    lhs.presentation().version,
-                                    rhs.presentation().version),
-                            merge_presentation_value(
-                                    lhs.presentation().description,
-                                    rhs.presentation().description)})});
+        RootPackageCandidate(
+            lhs.identity(),
+            RootPackageCandidatePresentation{
+                merge_presentation_value(
+                    lhs.presentation().version,
+                    rhs.presentation().version),
+                merge_presentation_value(
+                    lhs.presentation().description,
+                    rhs.presentation().description)})});
 }

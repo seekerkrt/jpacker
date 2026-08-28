@@ -10,11 +10,11 @@
 #include <vector>
 
 inline constexpr std::size_t REVIEWED_SOURCE_MACHINE_STREAM_LIMIT =
-        16U * 1024U * 1024U;
+    16U * 1024U * 1024U;
 inline constexpr std::uintmax_t REVIEWED_SOURCE_SINGLE_BLOB_LIMIT =
-        64U * 1024U * 1024U;
+    64U * 1024U * 1024U;
 inline constexpr std::uintmax_t REVIEWED_SOURCE_AGGREGATE_BLOB_LIMIT =
-        256U * 1024U * 1024U;
+    256U * 1024U * 1024U;
 inline constexpr std::size_t REVIEWED_SOURCE_RENAME_CANDIDATE_LIMIT = 1000;
 
 // Git tree paths are opaque bytes. They are not decoded as UTF-8 or converted
@@ -49,10 +49,10 @@ public:
 
 private:
     ReviewedSourceObjectId(
-            GitObjectFormat format, std::string object_id) noexcept;
+        GitObjectFormat format, std::string object_id) noexcept;
 
     GitObjectFormat format_;
-    std::string     object_id_;
+    std::string object_id_;
 };
 
 enum class ReviewedSourceFileMode {
@@ -74,41 +74,41 @@ enum class ReviewedSourceFileClassification {
 };
 
 [[nodiscard]] ReviewedSourceFileType reviewed_source_file_type(
-        ReviewedSourceFileMode mode) noexcept;
+    ReviewedSourceFileMode mode) noexcept;
 
 class ReviewedSourceFileVersion final {
 public:
     ReviewedSourceFileVersion() = delete;
 
     [[nodiscard]] static ReviewedSourceFileVersion make(
-            ReviewedSourcePath path,
-            ReviewedSourceFileMode mode,
-            ReviewedSourceObjectId object_id,
-            std::optional<std::uintmax_t> blob_size);
+        ReviewedSourcePath path,
+        ReviewedSourceFileMode mode,
+        ReviewedSourceObjectId object_id,
+        std::optional<std::uintmax_t> blob_size);
 
     [[nodiscard]] const ReviewedSourcePath& path() const noexcept;
     [[nodiscard]] ReviewedSourceFileClassification classification()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] ReviewedSourceFileMode mode() const noexcept;
     [[nodiscard]] const ReviewedSourceObjectId& object_id() const noexcept;
     [[nodiscard]] const std::optional<std::uintmax_t>& blob_size()
-            const noexcept;
+        const noexcept;
 
     bool operator==(const ReviewedSourceFileVersion&) const = default;
 
 private:
     ReviewedSourceFileVersion(
-            ReviewedSourcePath path,
-            ReviewedSourceFileClassification classification,
-            ReviewedSourceFileMode mode,
-            ReviewedSourceObjectId object_id,
-            std::optional<std::uintmax_t> blob_size) noexcept;
+        ReviewedSourcePath path,
+        ReviewedSourceFileClassification classification,
+        ReviewedSourceFileMode mode,
+        ReviewedSourceObjectId object_id,
+        std::optional<std::uintmax_t> blob_size) noexcept;
 
-    ReviewedSourcePath               path_;
+    ReviewedSourcePath path_;
     ReviewedSourceFileClassification classification_;
-    ReviewedSourceFileMode           mode_;
-    ReviewedSourceObjectId           object_id_;
-    std::optional<std::uintmax_t>     blob_size_;
+    ReviewedSourceFileMode mode_;
+    ReviewedSourceObjectId object_id_;
+    std::optional<std::uintmax_t> blob_size_;
 };
 
 struct ReviewedSourceTextChange {
@@ -123,8 +123,8 @@ struct ReviewedSourceBinaryChange {
 };
 
 using ReviewedSourceContentChange = std::variant<
-        ReviewedSourceTextChange,
-        ReviewedSourceBinaryChange>;
+    ReviewedSourceTextChange,
+    ReviewedSourceBinaryChange>;
 
 struct ReviewedSourceAdded {
     ReviewedSourceFileVersion new_version;
@@ -166,11 +166,11 @@ struct ReviewedSourceTypeChanged {
 };
 
 using ReviewedSourceFileChange = std::variant<
-        ReviewedSourceAdded,
-        ReviewedSourceModified,
-        ReviewedSourceDeleted,
-        ReviewedSourceRenamed,
-        ReviewedSourceTypeChanged>;
+    ReviewedSourceAdded,
+    ReviewedSourceModified,
+    ReviewedSourceDeleted,
+    ReviewedSourceRenamed,
+    ReviewedSourceTypeChanged>;
 
 struct ReviewedSourceInitialFullReview {
     SourceRevisionIdentity target;
@@ -213,10 +213,10 @@ struct ReviewedSourceRebaselineFullReview {
 };
 
 using ReviewedSourceProjection = std::variant<
-        ReviewedSourceInitialFullReview,
-        ReviewedSourceAlreadyReviewed,
-        ReviewedSourceUpdateReview,
-        ReviewedSourceRebaselineFullReview>;
+    ReviewedSourceInitialFullReview,
+    ReviewedSourceAlreadyReviewed,
+    ReviewedSourceUpdateReview,
+    ReviewedSourceRebaselineFullReview>;
 
 [[nodiscard]] ReviewedSourceObjectId reviewed_source_empty_tree_object_id(
-        GitObjectFormat format);
+    GitObjectFormat format);

@@ -1,3 +1,161 @@
+# Moguet v2.5.0
+
+This tracked file is the source of truth for release bodies. The English and
+Japanese sections for each release describe the same scope.
+
+## English
+
+Moguet v2.5.0 is a minor release focused on safer update classification and
+cross-source diagnostics. Conventional VCS/devel AUR packages no longer fall
+through to a false `UpToDate` result when authoritative revision tracking is
+not yet available, and `upgrade-all` can provide a targeted diagnostic for
+repo/AUR exact-version dependency locks after a failed system transaction.
+
+This release also establishes substantial invocation-owned dependency-cleanup
+authority without enabling unsafe production removal, and makes the repository
+C++ formatting authority and changed-file workflow reproducible.
+
+### Conservative VCS/devel AUR tracking
+
+- Conventional devel-package suffixes such as `-git`, `-svn`, `-hg`, `-bzr`,
+  `-cvs`, and `-darcs` are treated as candidate evidence rather than proof of
+  an available update or an up-to-date state.
+- When normal AUR version comparison says an exact AUR package is current but
+  PackageBase or installed-child evidence identifies a conventional devel
+  candidate, Moguet reports `RequiresCheck` instead of `UpToDate`.
+- `moguet -Qua` exposes the package and reason without presenting the state as
+  an ordinary version-update arrow.
+- `upgrade-aur`, dry-run, and the AUR phase of `upgrade-all` keep
+  `RequiresCheck` as a blocker before mutation. `--noconfirm` and non-TTY use
+  do not turn that state into an automatic rebuild or implicit approval.
+- A normal authoritative AUR version update remains an update candidate even
+  when devel evidence is incomplete.
+- v2.5.0 does not perform Git remote revision queries, checkout/fetch/reset,
+  PKGBUILD evaluation, or build-provenance publication for this classification.
+  Authoritative remote revision observation and installed-build provenance are
+  deferred to follow-up work.
+
+### Repo/AUR exact-version lock diagnostics
+
+- `upgrade-all` now models cross-source version-lock observations separately
+  from a generic system transaction failure.
+- After a failed system phase, Moguet can correlate the repository target,
+  installed blocker, dependency relation, and available AUR observations and
+  present a dedicated diagnostic when the evidence supports that conclusion.
+- Missing, incompatible, ambiguous, or failed AUR observations are not
+  promoted to a compatible coordinated update.
+- Moguet does not bypass pacman dependency checks, use `--nodeps`, choose a
+  partial upgrade, or automatically remove/reinstall an AUR package to force
+  the transaction through.
+- The completed v2.5.0 scope is diagnostic and fail-closed; automatic
+  cross-source transaction orchestration is not implied.
+
+### Invocation-owned dependency cleanup foundation
+
+- The cleanup design now explicitly preserves the rule
+  `NewlyObserved != InvocationOwned`: a package merely appearing between
+  snapshots is not sufficient proof that the current Moguet invocation owns
+  its installation.
+- A typed cleanup classifier, install-reason-aware local snapshot, BuildPlan
+  and lifecycle correlation, transaction identity/outcome records, and
+  machine-readable receipt infrastructure now form the cleanup foundation.
+- A trusted ALPM receipt path exists for the selected repository-provider
+  transaction boundary, while makepkg-internal sync dependency transactions
+  and remaining policy/route authority are intentionally deferred.
+- Pre-existing, explicit, shared, unverified, or otherwise unprovable packages
+  are never promoted to cleanup candidates by guesswork.
+- Broad orphan sweeps are not introduced, and `--noconfirm` is not cleanup
+  approval.
+- Public source-build `--rmdeps` remains unsupported and fail-closed in
+  v2.5.0. Production preview, confirmation, mutation-time revalidation, and
+  exact removal continue in follow-up work.
+
+### Repository C++ formatting authority
+
+- Add a repository-root `.clang-format` as the project-owned C/C++ formatting
+  authority instead of relying on a HOME-level configuration or formatter
+  fallback.
+- Normalize the tracked C++ baseline under `source/` and `tests/` to that
+  authority without intentional semantic changes.
+- Add `scripts/format-changed-cpp.sh` for the normal changed-file workflow.
+  It formats or checks only tracked `.cpp` / `.hpp` files changed from `HEAD`.
+- Untracked C++ is not modified, zero candidates are a normal no-op, and Git
+  changed-file detection failure fails closed instead of falling back to a
+  repository-wide format operation.
+- Developer and AI-agent documentation now share the same changed-file
+  formatting contract before normal validation.
+
+## 日本語
+
+Moguet v2.5.0は、update classificationとcross-source diagnosticの安全性を強化する
+minor releaseです。authoritativeなrevision trackingがまだ成立していないconventionalな
+VCS/devel AUR packageをfalse `UpToDate`へ流さず、`upgrade-all`ではsystem transaction
+failure後にrepo/AUR exact-version dependency lockを根拠付きで診断できるようにします。
+
+さらに、invocation-owned dependency cleanupのauthorityを大きく前進させつつ、安全条件が
+揃っていないproduction removalは有効化せず、repository C++ formatting authorityと
+changed-file workflowも再現可能な形へ統一します。
+
+### conservativeなVCS/devel AUR tracking
+
+- `-git`、`-svn`、`-hg`、`-bzr`、`-cvs`、`-darcs`等のconventionalな
+  devel package suffixは、update / up-to-dateの証明ではなくcandidate evidenceとして扱います。
+- normal AUR version comparisonではcurrentでも、exact AUR packageかつPackageBase /
+  installed childにconventionalなdevel evidenceがある場合、`UpToDate`ではなく
+  `RequiresCheck`を返します。
+- `moguet -Qua`はpackageとreasonを明示し、通常のversion update arrowへ偽装しません。
+- `upgrade-aur`、dry-run、`upgrade-all`のAUR phaseでは`RequiresCheck`をmutation前の
+  blockerとして維持します。`--noconfirm`やnon-TTYからautomatic rebuildやimplicit
+  approvalへ昇格させません。
+- normal AUR version comparisonでauthoritativeなupdateが確定している場合は、その既存
+  update authorityを維持します。
+- v2.5.0のclassificationだけを理由にGit remote query、checkout / fetch / reset、
+  PKGBUILD evaluation、build provenance publicationは行いません。authoritativeなremote
+  revision observationとinstalled build provenanceはfollow-upへ分離しています。
+
+### repo/AUR exact-version lock diagnostic
+
+- `upgrade-all`でcross-source version-lock observationをgenericなsystem transaction
+  failureとは別のtyped stateとして扱います。
+- system phase失敗後、repository target、installed blocker、dependency relation、
+  AUR側observationを相関し、evidenceが成立する場合は専用diagnosticを表示します。
+- AUR candidateがmissing / incompatible / ambiguousな場合やquery failure時に、
+  coordinated update可能と推測しません。
+- pacman dependency checkを無視せず、`--nodeps`、partial upgrade、AUR packageの
+  automatic remove/reinstallで強制突破しません。
+- v2.5.0で完成するscopeはdiagnostic / fail-closedまでであり、cross-source transactionの
+  automatic orchestrationを意味しません。
+
+### invocation-owned dependency cleanup foundation
+
+- cleanup authorityでは`NewlyObserved != InvocationOwned`を明文化し、snapshot間で新しく
+  見えたことだけをcurrent invocation所有の証明にしません。
+- typed cleanup classifier、install reason付きlocal snapshot、BuildPlan / lifecycle
+  correlation、transaction identity / outcome record、machine-readable receipt基盤を
+  整備しました。
+- selected repository provider transactionにはtrusted ALPM receipt pathを構築しましたが、
+  makepkg内部sync dependency transactionと残るpolicy / route authorityはfollow-upへ
+  明示的に延期しています。
+- pre-existing、Explicit、shared、unverified、その他proof不足のpackageを推測でcleanup
+  candidateへ昇格させません。
+- broad orphan sweepを追加せず、`--noconfirm`をcleanup approvalとして扱いません。
+- v2.5.0でもpublic source-build `--rmdeps`はunsupported / fail-closedのままです。
+  production preview、confirmation、mutation-time revalidation、exact removalは
+  follow-upで完成させます。
+
+### repository C++ formatting authority
+
+- repository rootへproject-owned `.clang-format`を追加し、HOME側の個人設定やformatter
+  fallbackではなくrepository自身をC/C++ format authorityとします。
+- `source/` / `tests/`のtracked C++ baselineを、意図的なsemantic changeなしで同じ
+  authorityへ統一しました。
+- normal workflow用に`scripts/format-changed-cpp.sh`を追加し、`HEAD`との差分にある
+  tracked `.cpp` / `.hpp`だけをformat / checkします。
+- untracked C++は変更せず、candidate 0件はnormal no-op、Git changed-file detection
+  failure時はrepository-wide formattingへfallbackせずfail closedします。
+- developer / AI agent documentationも、通常validation前に同じchanged-file formatting
+  contractを使用します。
+
 # Moguet v2.4.1
 
 This tracked file is the source of truth for release bodies. The English and

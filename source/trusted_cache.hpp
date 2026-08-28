@@ -31,8 +31,8 @@ struct LocalSourceWorkspaceCleanupAccess;
 struct TrustedCacheAccess;
 
 LocalSourceWorkspace materialize_local_source_workspace(
-        const LocalSourceRoot& source_root,
-        const ValidatedCacheRoot& cache_root);
+    const LocalSourceRoot& source_root,
+    const ValidatedCacheRoot& cache_root);
 
 enum class TrustedCacheStage {
     RootAdoption,
@@ -63,7 +63,7 @@ enum class TrustedCacheErrorCode {
 };
 
 struct TrustedCacheFailure {
-    TrustedCacheStage     stage = TrustedCacheStage::RootAdoption;
+    TrustedCacheStage stage = TrustedCacheStage::RootAdoption;
     TrustedCacheErrorCode code = TrustedCacheErrorCode::InvalidBoundary;
     std::optional<std::error_code> system_error;
 };
@@ -100,16 +100,16 @@ class ValidatedCacheRoot final {
     friend struct TrustedCacheDirectoryAccess;
     friend struct TrustedCacheAccess;
     friend ValidatedCacheRoot adopt_trusted_cache_root(
-            const xdg_paths::CachePaths& paths,
-            xdg_directory_safety::PreparedDirectory directory);
+        const xdg_paths::CachePaths& paths,
+        xdg_directory_safety::PreparedDirectory directory);
     friend ValidatedCacheRoot require_unchanged_cache_root(
-            const ValidatedCacheRoot& root);
+        const ValidatedCacheRoot& root);
     friend ValidatedPrivateCacheRoot prepare_private_trusted_cache_root(
-            const ValidatedCacheRoot& root);
+        const ValidatedCacheRoot& root);
     friend class ValidatedCachePath;
     friend class WorkDirGuard;
     friend PreparedCacheCleanup preflight_cache_cleanup(
-            const ValidatedCacheRoot& root);
+        const ValidatedCacheRoot& root);
 
 public:
     const std::filesystem::path& path() const noexcept;
@@ -128,38 +128,38 @@ public:
 // 元のValidatedCacheRootと同じadopted inodeからだけ派生できる。
 class ValidatedPrivateCacheRoot final {
     ValidatedCacheRoot trusted_root_;
-    int                directory_descriptor_ = -1;
-    std::uintmax_t     device_ = 0;
-    std::uintmax_t     inode_ = 0;
-    std::uintmax_t     owner_ = 0;
+    int directory_descriptor_ = -1;
+    std::uintmax_t device_ = 0;
+    std::uintmax_t inode_ = 0;
+    std::uintmax_t owner_ = 0;
 
     ValidatedPrivateCacheRoot(
-            ValidatedCacheRoot trusted_root, int directory_descriptor,
-            std::uintmax_t device, std::uintmax_t inode,
-            std::uintmax_t owner) noexcept;
+        ValidatedCacheRoot trusted_root, int directory_descriptor,
+        std::uintmax_t device, std::uintmax_t inode,
+        std::uintmax_t owner) noexcept;
 
     void require_unchanged_identity_for_owner(
-            std::uintmax_t expected_effective_user) const;
+        std::uintmax_t expected_effective_user) const;
 
     int directory_descriptor() const noexcept {
         return directory_descriptor_;
     }
 
     friend ValidatedPrivateCacheRoot prepare_private_trusted_cache_root(
-            const ValidatedCacheRoot& root);
+        const ValidatedCacheRoot& root);
     friend class ArtifactWorkspace;
     friend ArtifactWorkspace create_artifact_workspace(
-            ValidatedPrivateCacheRoot root);
+        ValidatedPrivateCacheRoot root);
 #ifdef MOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS
     friend void require_private_cache_root_identity_for_test(
-            const ValidatedPrivateCacheRoot& root,
-            std::uintmax_t expected_effective_user);
+        const ValidatedPrivateCacheRoot& root,
+        std::uintmax_t expected_effective_user);
 #endif
 
 public:
     ValidatedPrivateCacheRoot(const ValidatedPrivateCacheRoot&) = delete;
     ValidatedPrivateCacheRoot& operator=(
-            const ValidatedPrivateCacheRoot&) = delete;
+        const ValidatedPrivateCacheRoot&) = delete;
     ValidatedPrivateCacheRoot(ValidatedPrivateCacheRoot&& other) noexcept;
     ValidatedPrivateCacheRoot& operator=(ValidatedPrivateCacheRoot&&) = delete;
     ~ValidatedPrivateCacheRoot() noexcept;
@@ -190,22 +190,22 @@ public:
 // validation済みのroot direct childと、そのobserved inode identityを一体で
 // 保持するcapability。Missing capabilityは作成許可そのものではない。
 class ValidatedCachePath final {
-    ValidatedCacheRoot    root_;
+    ValidatedCacheRoot root_;
     std::filesystem::path path_;
     std::filesystem::path canonical_path_;
-    std::string           leaf_name_;
-    bool                  exists_ = false;
-    bool                  is_directory_ = false;
-    std::uintmax_t        device_ = 0;
-    std::uintmax_t        inode_ = 0;
-    std::uintmax_t        owner_ = 0;
-    std::uintmax_t        permissions_ = 0;
+    std::string leaf_name_;
+    bool exists_ = false;
+    bool is_directory_ = false;
+    std::uintmax_t device_ = 0;
+    std::uintmax_t inode_ = 0;
+    std::uintmax_t owner_ = 0;
+    std::uintmax_t permissions_ = 0;
 
     ValidatedCachePath(
-            ValidatedCacheRoot root, std::filesystem::path path,
-            std::string leaf_name, bool exists, bool is_directory,
-            std::uintmax_t device, std::uintmax_t inode,
-            std::uintmax_t owner, std::uintmax_t permissions)
+        ValidatedCacheRoot root, std::filesystem::path path,
+        std::string leaf_name, bool exists, bool is_directory,
+        std::uintmax_t device, std::uintmax_t inode,
+        std::uintmax_t owner, std::uintmax_t permissions)
         : root_(std::move(root)), path_(std::move(path)),
           canonical_path_(path_), leaf_name_(std::move(leaf_name)),
           exists_(exists), is_directory_(is_directory), device_(device),
@@ -213,12 +213,12 @@ class ValidatedCachePath final {
     }
 
     friend ValidatedCachePath require_trusted_cache_path(
-            const ValidatedCacheRoot& root, const std::filesystem::path& path,
-            CachePathRequirement requirement);
+        const ValidatedCacheRoot& root, const std::filesystem::path& path,
+        CachePathRequirement requirement);
     friend ValidatedCachePath revalidate_trusted_cache_path(
-            const ValidatedCachePath& path, CachePathRequirement requirement);
+        const ValidatedCachePath& path, CachePathRequirement requirement);
     friend ValidatedCachePath create_trusted_cache_directory(
-            const ValidatedCacheRoot& root, const std::filesystem::path& path);
+        const ValidatedCacheRoot& root, const std::filesystem::path& path);
     friend void remove_trusted_cache_path(const ValidatedCachePath& path);
     friend class WorkDirGuard;
     friend class DirCleanupGuard;
@@ -254,26 +254,26 @@ public:
 // typed bridge。descriptorはnarrow friendだけが利用し、raw getterは公開しない。
 class RetainedTrustedCacheDirectory final {
     ValidatedCachePath path_;
-    int                descriptor_ = -1;
-    std::uintmax_t     device_ = 0;
-    std::uintmax_t     inode_ = 0;
+    int descriptor_ = -1;
+    std::uintmax_t device_ = 0;
+    std::uintmax_t inode_ = 0;
 
     RetainedTrustedCacheDirectory(
-            ValidatedCachePath path, int descriptor,
-            std::uintmax_t device, std::uintmax_t inode) noexcept;
+        ValidatedCachePath path, int descriptor,
+        std::uintmax_t device, std::uintmax_t inode) noexcept;
 
     friend RetainedTrustedCacheDirectory retain_trusted_cache_directory(
-            const ValidatedCachePath& path);
+        const ValidatedCachePath& path);
     friend class ArtifactMakepkgContext;
     friend struct PersistentCheckoutDirectoryAccess;
     friend ReviewedSourcePackageBaseLease
     acquire_reviewed_source_package_base_lease(
-            RetainedTrustedCacheDirectory directory);
+        RetainedTrustedCacheDirectory directory);
     friend class LocalSourceWorkspace;
     friend struct LocalSourceWorkspaceCleanupAccess;
     friend LocalSourceWorkspace materialize_local_source_workspace(
-            const LocalSourceRoot& source_root,
-            const ValidatedCacheRoot& cache_root);
+        const LocalSourceRoot& source_root,
+        const ValidatedCacheRoot& cache_root);
 
     // Invocation-owned build output may change the workspace root mode.
     // Re-establish the original named inode and private owner mode before the
@@ -282,13 +282,13 @@ class RetainedTrustedCacheDirectory final {
 
 public:
     RetainedTrustedCacheDirectory(
-            const RetainedTrustedCacheDirectory&) = delete;
+        const RetainedTrustedCacheDirectory&) = delete;
     RetainedTrustedCacheDirectory& operator=(
-            const RetainedTrustedCacheDirectory&) = delete;
+        const RetainedTrustedCacheDirectory&) = delete;
     RetainedTrustedCacheDirectory(
-            RetainedTrustedCacheDirectory&& other) noexcept;
+        RetainedTrustedCacheDirectory&& other) noexcept;
     RetainedTrustedCacheDirectory& operator=(
-            RetainedTrustedCacheDirectory&&) = delete;
+        RetainedTrustedCacheDirectory&&) = delete;
     ~RetainedTrustedCacheDirectory() noexcept;
 
     const ValidatedCachePath& path() const noexcept {
@@ -301,35 +301,35 @@ public:
 // Cache-only resolve/prepare後のtyped directory capabilityをconsumeして
 // adoptする唯一のbridge。environment、cwd、absolute pathを再解決しない。
 ValidatedCacheRoot adopt_trusted_cache_root(
-        const xdg_paths::CachePaths& paths,
-        xdg_directory_safety::PreparedDirectory directory);
+    const xdg_paths::CachePaths& paths,
+    xdg_directory_safety::PreparedDirectory directory);
 ValidatedCacheRoot require_unchanged_cache_root(
-        const ValidatedCacheRoot& root);
+    const ValidatedCacheRoot& root);
 
 ValidatedPrivateCacheRoot prepare_private_trusted_cache_root(
-        const ValidatedCacheRoot& root);
+    const ValidatedCacheRoot& root);
 
 #ifdef MOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS
 void require_private_cache_root_identity_for_test(
-        const ValidatedPrivateCacheRoot& root,
-        std::uintmax_t expected_effective_user);
+    const ValidatedPrivateCacheRoot& root,
+    std::uintmax_t expected_effective_user);
 #endif
 
 ValidatedCachePath require_trusted_cache_path(
-        const ValidatedCacheRoot& root, const std::filesystem::path& path,
-        CachePathRequirement requirement);
+    const ValidatedCacheRoot& root, const std::filesystem::path& path,
+    CachePathRequirement requirement);
 ValidatedCachePath revalidate_trusted_cache_path(
-        const ValidatedCachePath& path, CachePathRequirement requirement);
+    const ValidatedCachePath& path, CachePathRequirement requirement);
 
 RetainedTrustedCacheDirectory retain_trusted_cache_directory(
-        const ValidatedCachePath& path);
+    const ValidatedCachePath& path);
 
 // Clone rollbackはDirCleanupGuard constructionでretained descriptorを取得し、
 // そのguard lifetime中にidentityをpinできた0700 directoryだけを所有対象にする。
 // name creationからdescriptor取得までや、別々のretained intervalを跨ぐatomicな
 // ownership continuityはLinux syscall上保証しない。
 ValidatedCachePath create_trusted_cache_directory(
-        const ValidatedCacheRoot& root, const std::filesystem::path& path);
+    const ValidatedCacheRoot& root, const std::filesystem::path& path);
 
 void remove_trusted_cache_path(const ValidatedCachePath& path);
 
@@ -344,9 +344,9 @@ class PreparedCacheCleanup final {
     explicit PreparedCacheCleanup(std::unique_ptr<State> state) noexcept;
 
     friend PreparedCacheCleanup preflight_cache_cleanup(
-            const ValidatedCacheRoot& root);
+        const ValidatedCacheRoot& root);
     friend void remove_preflighted_cache_paths(
-            PreparedCacheCleanup cleanup);
+        PreparedCacheCleanup cleanup);
 
 public:
     PreparedCacheCleanup(const PreparedCacheCleanup&) = delete;
@@ -361,7 +361,7 @@ public:
 };
 
 PreparedCacheCleanup preflight_cache_cleanup(
-        const ValidatedCacheRoot& root);
+    const ValidatedCacheRoot& root);
 
 // Preflight時から保持したoriginal identityを再検証し、同じplanをconsumeする。
 void remove_preflighted_cache_paths(PreparedCacheCleanup cleanup);
@@ -369,11 +369,11 @@ void remove_preflighted_cache_paths(PreparedCacheCleanup cleanup);
 #ifdef MOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS
 using TrustedCacheRemovalTestHook = std::function<void(std::size_t depth)>;
 void set_trusted_cache_removal_test_hook(
-        TrustedCacheRemovalTestHook hook);
+    TrustedCacheRemovalTestHook hook);
 using TrustedCacheStagedDirectoryTestHook =
-        std::function<void(const std::filesystem::path& path)>;
+    std::function<void(const std::filesystem::path& path)>;
 void set_trusted_cache_staged_directory_test_hook(
-        TrustedCacheStagedDirectoryTestHook hook);
+    TrustedCacheStagedDirectoryTestHook hook);
 #endif
 
 // retained directory descriptorへfchdirし、caller cwdもdescriptorで復元する。
@@ -394,12 +394,12 @@ public:
 // failed cloneが所有するexact child inodeを、成功確定までrollback可能に保つ。
 class DirCleanupGuard final {
     ValidatedCachePath path_;
-    int                retained_descriptor_ = -1;
-    std::uintmax_t     retained_device_ = 0;
-    std::uintmax_t     retained_inode_ = 0;
-    std::uintmax_t     retained_owner_ = 0;
-    std::uintmax_t     retained_permissions_ = 0;
-    bool               committed_ = false;
+    int retained_descriptor_ = -1;
+    std::uintmax_t retained_device_ = 0;
+    std::uintmax_t retained_inode_ = 0;
+    std::uintmax_t retained_owner_ = 0;
+    std::uintmax_t retained_permissions_ = 0;
+    bool committed_ = false;
 
 public:
     explicit DirCleanupGuard(const ValidatedCachePath& path);
