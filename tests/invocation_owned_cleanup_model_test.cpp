@@ -12,6 +12,7 @@
 #include <vector>
 
 void run_invocation_owned_cleanup_adapter_tests();
+void run_makepkg_syncdeps_receipt_model_tests();
 void run_trusted_alpm_receipt_tests();
 
 // The focused target compiles the existing typed dependency requirement
@@ -834,6 +835,7 @@ int main() {
         test_structural_contradiction_is_invalid();
         test_precedence_and_reason_ordering();
         run_invocation_owned_cleanup_adapter_tests();
+        run_makepkg_syncdeps_receipt_model_tests();
         run_trusted_alpm_receipt_tests();
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';

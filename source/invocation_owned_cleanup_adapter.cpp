@@ -1,6 +1,7 @@
 #include "invocation_owned_cleanup_adapter.hpp"
 
 #include "build_plan_artifact_target_projection.hpp"
+#include "makepkg_syncdeps_receipt_model.hpp"
 #include "package_identifier.hpp"
 #include "source_package_identity_projection.hpp"
 
@@ -751,6 +752,41 @@ CleanupCausalOwnership project_cleanup_causal_ownership(
     // transaction may be unavailable/incomplete, and a complete receipt may
     // contain only an Upgrade for this package.
     return CleanupCausalOwnership::Unknown;
+}
+
+CleanupCausalOwnership
+project_makepkg_sync_dependency_causal_ownership(
+    const std::string& package_name,
+    CleanupBaselineObservation baseline,
+    const CleanupCurrentPackageEvidence& current_package,
+    const MakepkgSyncDependencySessionReceipt& session_receipt) noexcept {
+    if(!is_valid_package_name(package_name) ||
+       baseline != CleanupBaselineObservation::NewlyObserved ||
+       current_package.state != CleanupInstalledState::Present ||
+       current_package.verification !=
+           CleanupEvidenceVerification::Verified ||
+       !current_package.metadata.has_value() ||
+       current_package.metadata->name != package_name ||
+       !session_receipt.is_trusted_terminal() ||
+       session_receipt.adapter_coverage() !=
+           MakepkgSyncDependencyAdapterCoverage::Complete ||
+       session_receipt.process_binding() !=
+           MakepkgSyncDependencyProcessBinding::
+               InstalledLauncherAndExactLauncherMakepkgLifetime ||
+       !session_receipt.session_identity().has_value() ||
+       !is_valid_makepkg_sync_dependency_session_token(
+           session_receipt.session_identity()->session_token) ||
+       !session_receipt.owner().has_value() ||
+       session_receipt.owner().value() !=
+           InvocationDependencyTransactionOwner::MakepkgSyncDependencies ||
+       !session_receipt.transaction_count().has_value() ||
+       session_receipt.transaction_count().value() !=
+           session_receipt.transaction_observations().size() ||
+       session_receipt.transaction_count().value() > 2 ||
+       !session_receipt.contains_authoritative_install(package_name)) {
+        return CleanupCausalOwnership::Unknown;
+    }
+    return CleanupCausalOwnership::InvocationOwned;
 }
 
 CleanupPolicyProtection project_cleanup_policy_protection() noexcept {

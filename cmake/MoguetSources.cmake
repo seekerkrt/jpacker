@@ -56,6 +56,8 @@ set(MOGUET_PRODUCTION_SOURCES
     source/local_source_workspace.cpp
     source/localization.cpp
     source/logging.cpp
+    source/makepkg_syncdeps_pacman_contract.cpp
+    source/makepkg_syncdeps_receipt_model.cpp
     source/moguet.cpp
     source/operation_state_model.cpp
     source/package_base_artifact_install_executor.cpp

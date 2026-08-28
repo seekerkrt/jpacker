@@ -11,6 +11,8 @@
 #include <variant>
 #include <vector>
 
+class MakepkgSyncDependencySessionReceipt;
+
 enum class CleanupLifecycleBoundary {
     BeforeBuildCompletion,
     AfterWorkItem,
@@ -111,7 +113,7 @@ project_cleanup_current_package_evidence(
     const InstalledPackageStateSnapshotResult& current_snapshot,
     const std::string& package_name);
 
-// Current makepkg syncdeps and selected-repository-provider result types do
+// Legacy lifecycle and selected-repository-provider result status fields do
 // not contain package-level causal change authority. No combination of their
 // success/status fields is promoted to InvocationOwned.
 [[nodiscard]] CleanupCausalOwnership project_cleanup_causal_ownership(
@@ -127,6 +129,17 @@ project_cleanup_current_package_evidence(
     CleanupBaselineObservation baseline,
     const CleanupCurrentPackageEvidence& current_package,
     const InvocationDependencyTransactionLedger& transaction_ledger);
+
+// Makepkg syncdeps authority is route-specific: the complete validated
+// session receipt remains attached to coverage, process binding, identity,
+// and fixed owner checks. Raw ordered observations are not converted to the
+// generic cleanup ledger at this boundary.
+[[nodiscard]] CleanupCausalOwnership
+project_makepkg_sync_dependency_causal_ownership(
+    const std::string& package_name,
+    CleanupBaselineObservation baseline,
+    const CleanupCurrentPackageEvidence& current_package,
+    const MakepkgSyncDependencySessionReceipt& session_receipt) noexcept;
 
 // Slice 3.6 adds causal transport only; it still has no complete group/policy
 // inventory authority.

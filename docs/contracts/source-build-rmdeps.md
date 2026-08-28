@@ -8,9 +8,10 @@ current production behaviorとstaged targetは混同しない。Issue #404 Slice
 
 - Origin Issue: [#269](https://github.com/seekerkrt/moguet/issues/269)
 - Staged extension: [#404](https://github.com/seekerkrt/moguet/issues/404)
+- Makepkg syncdeps extension: [#484](https://github.com/seekerkrt/moguet/issues/484)
 - Related Issues: [#123](https://github.com/seekerkrt/moguet/issues/123)、[#152](https://github.com/seekerkrt/moguet/issues/152)、[#218](https://github.com/seekerkrt/moguet/issues/218)、[#242](https://github.com/seekerkrt/moguet/issues/242)、[#266](https://github.com/seekerkrt/moguet/issues/266)、[#267](https://github.com/seekerkrt/moguet/issues/267)、[#271](https://github.com/seekerkrt/moguet/issues/271)、[#350](https://github.com/seekerkrt/moguet/issues/350)
 - Related PRs: #298（#269 policy）、#241、#257〜#261（#242 separated lifecycle）
-- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。Slice 3でinstall-reason付きfull local snapshotとproduction未接続のmetadata / lifecycle adapterを追加し、current causal authority不足をNO-GOとして固定。Slice 3.5でtransaction token、owner、command outcome、machine receipt completeness、package operation、invocation ledgerをpure typed contractとして追加した。Slice 3.6でpackage-installed root helper、root-owned transaction state、transaction-local Install hook、one-shot machine receipt、selected-provider typed transportを追加し、Slice 3.5 ledgerへactual `Install` setをprojectできるproduction-capable pathを成立させた。Slice 3.7でmakepkg syncdepsのpublic instrumentation authorityを監査し、安全なroot-owned adapter案は独立security redesignが必要なためDEFER、Issue #404はRETURN-HOMEと判定した。public cleanup routeと他mutation ownerは未接続である。
+- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。Slice 3でinstall-reason付きfull local snapshotとproduction未接続のmetadata / lifecycle adapterを追加し、current causal authority不足をNO-GOとして固定。Slice 3.5でtransaction token、owner、command outcome、machine receipt completeness、package operation、invocation ledgerをpure typed contractとして追加した。Slice 3.6でpackage-installed root helper、root-owned transaction state、transaction-local Install hook、one-shot machine receipt、selected-provider typed transportを追加し、Slice 3.5 ledgerへactual `Install` setをprojectできるproduction-capable pathを成立させた。Slice 3.7でmakepkg syncdepsのpublic instrumentation authorityを監査し、安全なroot-owned adapter案は独立security redesignが必要なためDEFER、Issue #404はRETURN-HOMEと判定した。Issue #484 Slice 1でmakepkg専用session model、strict PACMAN argv grammar、custom `PACMAN` / `PACMAN_AUTH` policyをproduction未接続のstable boundaryとして追加し、C1〜C4をGOとした。public cleanup routeとprivileged adapter、他mutation ownerは未接続である。
 - Related upper decisions: [decision 1](../DECISIONS.md#decision-1)、[decision 2](../DECISIONS.md#decision-2)、[decision 4](../DECISIONS.md#decision-4)、[decision 5](../DECISIONS.md#decision-5)、[decision 6](../DECISIONS.md#decision-6)、[decision 7](../DECISIONS.md#decision-7)
 
 ## Contract本文（日本語normative source of truth）
@@ -338,6 +339,66 @@ Slice 3.5のpure ledgerと`InvocationDependencyTransactionOwner::MakepkgSyncDepe
 - overall causal authority: **PARTIAL**。makepkg syncdepsとtyped dependency artifactの`pacman -U`はUnknownのままである。
 - Slice 4 production cleanup readiness: **NO-GO**。causal authorityに加えてpolicy protection、route / correlation completeness、shared lifetime、mutation直前revalidationが未成立である。
 - Issue #404 continuation recommendation: **RETURN-HOME**。v2.5.0では成立済みのmodel / adapter / selected-provider trusted receipt foundationを保持し、public source-build `--rmdeps`はunsupported / fail-closedのままとする。makepkg syncdeps authority、残るcleanup candidate authority、preview / confirmation / mutation executorは最大3件のfollow-up候補へ分離し、Issue #404内で新しいsecurity subsystemを開始しない。
+
+### Issue #484 Slice 1 makepkg session stable boundary（production未接続）
+
+Issue #484 Slice 1は、privileged helper、root-owned state、pidfd、real pacman mutation、`ArtifactMakepkgContext` capability接続を実装しない。その前段として、Slice 2以降が満たすmakepkg専用session contractと、documented `PACMAN` boundaryで受理できるcurrent argv grammarをpure typed modelとして固定する。current default makepkg route、selected-provider Slice 3.6 protocol、public `--rmdeps` behaviorは変更しない。
+
+#### C1 — trusted zero / bypass
+
+session resultは次を区別し、empty transaction ledgerだけをtrusted zeroへ変換しない。
+
+- `Missing` / `Incomplete`。
+- adapter `Bypassed` / `Unsupported` / `Conflict`。coverage `Unknown`も独立して保持する。
+- `CompleteZero` / `CompleteOne` / `CompleteTwo`。
+- structurally malformedな`Invalid`。
+
+`CompleteZero`には、terminal `Complete` session、adapter coverage `Complete`、exact makepkg outcomeとnumeric exit code、positive process/lifetime binding、fixed makepkg owner、valid session identity、explicit transaction count `0`、empty ledgerのすべてを要求する。1件または2件でも同じterminal authorityと各transactionのexact Succeeded / Failed outcomeを要求し、declared countとledger件数を一致させる。3件目、count mismatch、missing / duplicate / out-of-order ordinal、duplicate token、session / transaction token mismatchは`Invalid`である。
+
+adapter coverageがincomplete、unknown、bypassed、unsupported、conflictingのsessionは、内部にcomplete-looking Install receiptがあってもpositive receipt authorityを公開しない。absence、bypass、unsupportedをzero transactionへflattenしない。
+
+session receiptはraw / factualなordered transaction observationを保持するが、generic cleanup ledgerを公開しない。package単位のpositive causal projectionはvalidated makepkg session receipt全体を受け取り、trusted terminal、complete coverage、session / process binding、fixed makepkg ownerを再確認するowner-specific boundaryだけが行う。
+
+#### C2 — session / process binding
+
+session identityは64文字lowercase hexのsession tokenとinvoking uidを保持し、ownerは`InvocationDependencyTransactionOwner::MakepkgSyncDependencies`へ固定する。session tokenはcorrelation dataであり、それ単独をbearer authorityとして扱わない。
+
+positive process bindingは、package-installed launcher identityとexact launcher / makepkg child lifetimeを一体で証明する`InstalledLauncherAndExactLauncherMakepkgLifetime`だけである。`PidOnly`、`TimestampOnly`、missing、incomplete、unknownはpositive authorityにならない。Slice 1はこのrequirementをtypedに固定するだけで、pidfd、root state、process handle自体はSlice 2へ残す。
+
+各transactionはsession token、1-based ordinal、独立transaction token、opaque dependency specification argv、command outcome、receiptを保持する。session factoryは全transaction ownerを`MakepkgSyncDependencies`に固定し、selected-provider ownerまたはmixed-owner ledgerを拒否する。selected-providerのowner constant、one-token state machine、protocol/APIは一般化しない。
+
+successful transactionのactual `Install` receiptとparent makepkg outcomeは別dimensionである。transaction 1がSucceeded + Complete Install、transaction 2がFailed、makepkgがFailedの場合も、transaction 1のfactual receipt、transaction 2のpositive proof不在、exact makepkg failureをすべて保持する。makepkg failureは先行するcausal factを消さず、causal factはbuild successまたはcleanup `Eligible`を意味しない。
+
+#### C3 — strict PACMAN argv grammar
+
+parserはPACMAN executableを除くargv vectorを入力とし、execution、shell、solver、PKGBUILD evaluation、dependency normalizationを行わない。current makepkg `-s` / `-sc` routeで受理する形は次だけである。
+
+```text
+-T <dependency-specification>...
+-Qi
+[--noconfirm] [--noprogressbar] [--color never] -S --asdeps <dependency-specification>...
+```
+
+dependency specificationはnon-emptyかつoption-shapedでない1 argv elementとしてlosslessに保持し、version、provider、SONAME等のsemanticsをMoguet側で解釈しない。safe optionのduplicate、missing / unexpected value、operation/order ambiguityはunsupportedである。
+
+少なくとも`--config`、`--hookdir`、`--root`、`--sysroot`、`--dbpath`、`--cachedir`、`--gpgdir`、`--logfile`、`-R*`、`-U*`、`--nodeps`、`--assume-installed`、`--dbonly`、`--noscriptlet`、unknown option、`-S --asdeps`以外のmutation operationをfail closedで拒否する。Slice 1 parserはreal pacmanを起動しない。
+
+host characterizationはreal `/usr/bin/makepkg -sc --noconfirm`とnormal-user fake PACMANを使い、runtime dependencyとbuild dependencyについてそれぞれ`-T`、`-S --asdeps`、`-T`再確認がorderedに発生し、buildinfo生成で最後に`-Qi`が発生するcurrent shapeを確認する。fake PACMANはtemporary user-owned log/stateだけを操作し、host package database、sudo、real pacman transactionへ到達しない。
+
+#### C4 — PACMAN / PACMAN_AUTH policy
+
+route policyは、`PACMAN`についてmissing、invocation-owned installed adapter、custom、conflict、unknownを区別し、`PACMAN_AUTH`についてmakepkg default、custom、conflict、unknownを区別する。observed valueはlosslessに保持する。同じinstalled adapter path文字列であってもcustom originならtrusted routeへ昇格しない。
+
+supported armはinvocation-owned installed adapterとmakepkg default authの組だけであり、custom / conflict / unknownを黙ってoverride、chain、default化しない。route policyのSupported自体もreceipt authorityではない。`PACMAN_AUTH`はprivilege prefixであり、session completion、adapter coverage、transaction-local Install receiptを証明しない。
+
+#### Slice 1 readiness
+
+- C1 trusted zero / bypass: **GO**。
+- C2 session / process binding contract: **GO**。actual process handleとroot stateは未実装。
+- C3 strict PACMAN grammar: **GO**。parse / classificationのみでmutationなし。
+- C4 custom PACMAN / PACMAN_AUTH policy: **GO**。
+- Slice 2 readiness: **GO**。root-owned multi-session state / installed provenanceへ進める。
+- public `--rmdeps` / cleanup preview / removal: **NO-GO**のまま。
 
 ### Slice 4 production cleanup readiness: NO-GO
 

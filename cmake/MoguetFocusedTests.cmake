@@ -83,6 +83,11 @@ foreach(_moguet_direct_focus IN ITEMS
 endforeach()
 
 moguet_add_focused_ctest_alias(
+    test-makepkg-syncdeps-receipt-model
+    TESTS cpp.invocation_owned_cleanup_model
+)
+
+moguet_add_focused_ctest_alias(
     test-localization
     TESTS localization.contract
     TARGETS moguet_test_catalogs

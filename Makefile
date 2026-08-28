@@ -58,6 +58,7 @@ CMAKE_FOCUSED_ALIASES := \
 	test-local-dependency-plan-projection \
 	test-local-source-workspace \
 	test-local-source-build \
+	test-makepkg-syncdeps-receipt-model \
 	test-user-config \
 	test-package-identifier \
 	test-source-package-identity \

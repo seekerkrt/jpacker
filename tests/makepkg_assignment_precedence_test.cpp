@@ -1,6 +1,7 @@
 #include "artifact_workspace.hpp"
 #include "local_source_metadata_evaluation.hpp"
 #include "local_source_root.hpp"
+#include "makepkg_syncdeps_pacman_contract.hpp"
 #include "process.hpp"
 #include "shell_words.hpp"
 #include "trusted_cache_test_support.hpp"
@@ -26,6 +27,10 @@ namespace fs = std::filesystem;
 
 constexpr std::string_view PACKAGE_NAME =
     "moguet-assignment-precedence";
+constexpr std::string_view RUNTIME_DEPENDENCY =
+    "moguet-runtime-dependency>=1";
+constexpr std::string_view BUILD_DEPENDENCY =
+    "moguet-build-dependency";
 constexpr std::string_view CONFIG_SELECTED = "CONFIG_SELECTED";
 constexpr std::string_view CFLAGS_VALUE = "ARGV_SENTINEL_CFLAGS";
 constexpr std::string_view CXXFLAGS_VALUE = "ARGV_SENTINEL_CXXFLAGS";
@@ -183,6 +188,123 @@ void write_private_file(
         fs::perm_options::replace);
 }
 
+void write_private_executable(
+    const fs::path& path, const std::string& contents) {
+    write_private_file(path, contents);
+    fs::permissions(
+        path, fs::perms::owner_all, fs::perm_options::replace);
+}
+
+std::string fake_pacman_script() {
+    return R"SCRIPT(#!/bin/sh
+set -eu
+: "${MOGUET_FAKE_PACMAN_LOG:?}"
+: "${MOGUET_FAKE_PACMAN_STATE:?}"
+{
+    printf '%s\n' BEGIN
+    for argument do
+        printf 'ARG\t%s\n' "$argument"
+    done
+    printf '%s\n' END
+} >>"$MOGUET_FAKE_PACMAN_LOG"
+
+operation=
+for argument do
+    case "$argument" in
+        -T|-S|-Qi)
+            operation=$argument
+            break
+            ;;
+    esac
+done
+
+case "$operation" in
+    -T)
+        after_operation=false
+        missing=false
+        for argument do
+            if [ "$after_operation" = true ]; then
+                if ! grep -Fqx -- "$argument" \
+                    "$MOGUET_FAKE_PACMAN_STATE"; then
+                    printf '%s\n' "$argument"
+                    missing=true
+                fi
+            elif [ "$argument" = -T ]; then
+                after_operation=true
+            fi
+        done
+        if [ "$missing" = true ]; then
+            exit 127
+        fi
+        exit 0
+        ;;
+    -S)
+        after_asdeps=false
+        for argument do
+            if [ "$after_asdeps" = true ]; then
+                printf '%s\n' "$argument" >>"$MOGUET_FAKE_PACMAN_STATE"
+            elif [ "$argument" = --asdeps ]; then
+                after_asdeps=true
+            fi
+        done
+        exit 0
+        ;;
+    -Qi)
+        exit 0
+        ;;
+    *)
+        exit 95
+        ;;
+esac
+)SCRIPT";
+}
+
+std::vector<std::vector<std::string>> read_fake_pacman_calls(
+    const fs::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if(!input) {
+        throw std::runtime_error(
+            "Failed to read fake PACMAN call log: " + path.string());
+    }
+
+    std::vector<std::vector<std::string>> calls;
+    std::vector<std::string> current;
+    bool in_call = false;
+    std::string line;
+    while(std::getline(input, line)) {
+        if(line == "BEGIN") {
+            if(in_call) {
+                throw std::runtime_error(
+                    "Nested BEGIN in fake PACMAN call log.");
+            }
+            current.clear();
+            in_call = true;
+            continue;
+        }
+        if(line == "END") {
+            if(!in_call) {
+                throw std::runtime_error(
+                    "END without BEGIN in fake PACMAN call log.");
+            }
+            calls.push_back(current);
+            in_call = false;
+            continue;
+        }
+        constexpr std::string_view argument_prefix = "ARG\t";
+        if(!in_call ||
+           line.compare(0, argument_prefix.size(), argument_prefix) != 0) {
+            throw std::runtime_error(
+                "Malformed fake PACMAN call log record.");
+        }
+        current.push_back(line.substr(argument_prefix.size()));
+    }
+    if(!input.eof() || in_call) {
+        throw std::runtime_error(
+            "Incomplete fake PACMAN call log.");
+    }
+    return calls;
+}
+
 std::string makepkg_config(
     const fs::path& config_pkgdest,
     const std::string& architecture) {
@@ -206,7 +328,8 @@ std::string makepkg_config(
            "PKGEXT='.pkg.tar'\n"
            "SRCEXT='.src.tar'\n"
            "PACKAGER='Moguet Test <moguet@example.invalid>'\n"
-           "PACMAN='/usr/bin/pacman'\n"
+           "PACMAN='/usr/bin/false'\n"
+           "PACMAN_AUTH=('/usr/bin/false')\n"
            "PKGDEST=" +
            shell_words::quote(config_pkgdest.string()) +
            "\n"
@@ -222,6 +345,8 @@ pkgver="${MOGUET_CONFIG_SELECTED:?temporary config was not selected}_${CFLAGS}_$
 pkgrel=1
 arch=('any')
 license=('custom')
+depends=('moguet-runtime-dependency>=1')
+makedepends=('moguet-build-dependency')
 
 package() {
     local observation_root="$pkgdir/usr/share/moguet-assignment-precedence"
@@ -246,7 +371,9 @@ std::string expected_version() {
 }
 
 SourceBuildEnvironment make_source_environment(
-    const fs::path& config_path, const std::string& special_value) {
+    const fs::path& config_path, const std::string& special_value,
+    const fs::path& fake_pacman, const fs::path& fake_pacman_log,
+    const fs::path& fake_pacman_state) {
     return SourceBuildEnvironment{{
         {"MAKEPKG_CONF", config_path.string()},
         {"CFLAGS", "first"},
@@ -257,6 +384,10 @@ SourceBuildEnvironment make_source_environment(
         {"MOGUET_PROBE", std::string(PROBE_VALUE)},
         {"MOGUET_EMPTY", ""},
         {"MOGUET_SPECIAL", special_value},
+        {"PACMAN", fake_pacman.string()},
+        {"PACMAN_AUTH", "/usr/bin/env"},
+        {"MOGUET_FAKE_PACMAN_LOG", fake_pacman_log.string()},
+        {"MOGUET_FAKE_PACMAN_STATE", fake_pacman_state.string()},
     }};
 }
 
@@ -280,6 +411,9 @@ void test_real_makepkg_assignment_precedence(
     const fs::path source_root_path = fixture_root / "local-source";
     const fs::path config_path = fixture_root / "makepkg.conf";
     const fs::path config_pkgdest = fixture_root / "config-pkgdest";
+    const fs::path fake_pacman = fixture_root / "fake-pacman";
+    const fs::path fake_pacman_log = fixture_root / "fake-pacman.log";
+    const fs::path fake_pacman_state = fixture_root / "fake-pacman.state";
     fs::create_directory(source_root_path);
     fs::create_directory(config_pkgdest);
     fs::permissions(
@@ -293,11 +427,14 @@ void test_real_makepkg_assignment_precedence(
         "spaces 'single' \"double\" literal $ dollar "
         "backslash\\ Unicode-日本語\nnewline=tail";
     const SourceBuildEnvironment source_environment =
-        make_source_environment(config_path, special_value);
+        make_source_environment(
+            config_path, special_value, fake_pacman, fake_pacman_log,
+            fake_pacman_state);
     const std::string architecture =
         resolve_local_source_effective_architecture(source_environment);
     write_private_file(
         config_path, makepkg_config(config_pkgdest, architecture));
+    write_private_executable(fake_pacman, fake_pacman_script());
     write_private_file(source_root_path / "PKGBUILD", pkgbuild());
 
     LocalSourceRoot source_root =
@@ -367,8 +504,13 @@ void test_real_makepkg_assignment_precedence(
         expected.path().parent_path() != config_pkgdest,
         "temporary config PKGDEST overrode the invocation-owned PKGDEST");
 
+    // Keep the call-shape characterization isolated from any earlier makepkg
+    // query. The fake PACMAN is a normal-user executable and never reaches
+    // the host package database.
+    write_private_file(fake_pacman_log, "");
+    write_private_file(fake_pacman_state, "");
     const int build_status = context.run_makepkg_build_only(
-        workspace, expected, ArtifactMakepkgBuildOptions{});
+        workspace, expected, ArtifactMakepkgBuildOptions{true, false, false});
     expect(build_status == 0, "real makepkg build-only failed");
     expect(
         fs::is_regular_file(expected.path()),
@@ -376,6 +518,40 @@ void test_real_makepkg_assignment_precedence(
     expect(
         fs::is_empty(config_pkgdest),
         "real makepkg wrote an artifact to the config-defined PKGDEST");
+
+    const std::vector<std::vector<std::string>> pacman_calls =
+        read_fake_pacman_calls(fake_pacman_log);
+    const std::vector<std::vector<std::string>> expected_pacman_calls{
+        {"-T", std::string(RUNTIME_DEPENDENCY)},
+        {"--noconfirm", "-S", "--asdeps",
+         std::string(RUNTIME_DEPENDENCY)},
+        {"-T", std::string(RUNTIME_DEPENDENCY)},
+        {"-T", std::string(BUILD_DEPENDENCY)},
+        {"--noconfirm", "-S", "--asdeps",
+         std::string(BUILD_DEPENDENCY)},
+        {"-T", std::string(BUILD_DEPENDENCY)},
+        {"-Qi"},
+    };
+    expect(
+        pacman_calls == expected_pacman_calls,
+        "real makepkg PACMAN call shape changed");
+
+    const std::vector<MakepkgSyncDependencyPacmanCallKind> expected_kinds{
+        MakepkgSyncDependencyPacmanCallKind::DependencyCheck,
+        MakepkgSyncDependencyPacmanCallKind::DependencyInstall,
+        MakepkgSyncDependencyPacmanCallKind::DependencyCheck,
+        MakepkgSyncDependencyPacmanCallKind::DependencyCheck,
+        MakepkgSyncDependencyPacmanCallKind::DependencyInstall,
+        MakepkgSyncDependencyPacmanCallKind::DependencyCheck,
+        MakepkgSyncDependencyPacmanCallKind::InstalledPackageQuery,
+    };
+    for(std::size_t index = 0; index < pacman_calls.size(); ++index) {
+        const MakepkgSyncDependencyPacmanCall parsed =
+            parse_makepkg_sync_dependency_pacman_call(pacman_calls[index]);
+        expect(
+            parsed.is_supported() && parsed.kind() == expected_kinds[index],
+            "real makepkg emitted a PACMAN call outside the strict grammar");
+    }
 
     constexpr std::string_view observation_root =
         "usr/share/moguet-assignment-precedence/";
