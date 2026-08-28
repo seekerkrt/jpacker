@@ -61,6 +61,10 @@ Moguetは、pacman、makepkg、AUR、gitの既存契約を尊重しながらArch
 - `make test-container-live`: actual provider / AUR / local F
 - `git diff --check`: docs-onlyを含む差分の基本確認
 
+C++の生成・編集後は、`docs/CODING_CONVENTIONS.md`のchanged-file workflowを正とし、通常のvalidation前に
+`scripts/format-changed-cpp.sh --write`、続けて`--check`を実行する。対象検出の失敗をrepository-wide
+formatへfallbackせず、untrackedまたは今回と無関係なC++を暗黙に整形しない。
+
 実行段階、approvalへ十分なevidence、再実行が必要な変更は`docs/VALIDATION.md`を正とする。
 CLI出力や終了codeを変えた場合は対象commandを直接確認する。pacman、makepkg、sudo、system package databaseへ影響する確認は通常testと同列に実行せず、対象と副作用を明示した依頼に基づいて行う。
 

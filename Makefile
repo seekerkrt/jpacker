@@ -270,6 +270,7 @@ export MOGUET_FRONTEND_USE_DEFAULT_COMPILE_OPTIONS
 	test-cmake-frontend-contract \
 	test-build-authority-closure \
 	test-validation-status \
+	test-format-changed-cpp \
 	test-markdown-links \
 	test-completion-schema \
 	generate-completions \
@@ -530,6 +531,13 @@ test-build-authority-closure: cmake-test-configure
 test-validation-status:
 	sh tests/test-validation-status.sh
 
+test-format-changed-cpp: \
+	scripts/format-changed-cpp.sh \
+	tests/test-format-changed-cpp.sh \
+	.clang-format
+	bash tests/test-format-changed-cpp.sh \
+		"$(abspath scripts/format-changed-cpp.sh)"
+
 test-markdown-links:
 	sh tests/test-markdown-links.sh \
 		$(abspath scripts/check-markdown-links.sh)
@@ -659,6 +667,7 @@ test-repository: \
 	test-cmake-frontend-contract \
 	test-build-authority-closure \
 	test-validation-status \
+	test-format-changed-cpp \
 	test-markdown-links \
 	test-public-documentation \
 	test-fixture-authority \
