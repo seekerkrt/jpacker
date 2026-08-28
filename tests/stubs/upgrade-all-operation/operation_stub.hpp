@@ -4,7 +4,9 @@
 #include "artifact_install_executor.hpp"
 #include "aur_rpc.hpp"
 #include "dependency_plan.hpp"
+#include "installed_package_relation_inventory.hpp"
 #include "package_metadata.hpp"
+#include "repository_query.hpp"
 #include "source_build.hpp"
 #include "source_install.hpp"
 #include "source_preference.hpp"
@@ -39,6 +41,9 @@ enum class EventKind {
     SourceExecution,
     RepositoryConfigurationResolution,
     ForeignInventoryQuery,
+    InstalledRelationInventoryQuery,
+    InstalledRuntimeDependencyInventoryQuery,
+    RepositoryCandidateQuery,
     AurInfoMany,
     AurInfoStrict,
     VersionCompare,
@@ -173,6 +178,13 @@ void set_repository_configuration_failure(PackageMetadataFailure failure);
 void set_foreign_inventory(ForeignPackageInventory inventory);
 void set_foreign_inventory_failure(PackageMetadataFailure failure);
 void set_after_foreign_inventory_hook(std::function<void()> hook);
+void set_installed_relation_inventory(
+        InstalledPackageRelationInventoryResult inventory);
+void set_installed_runtime_dependency_inventory(
+        InstalledPackageRuntimeDependencyMetadataInventoryResult inventory);
+void set_repository_candidate_result(
+        const std::string& package_name,
+        StrictRepositoryPackageQueryResult result);
 
 void enqueue_info_many_result(
         std::map<std::string, AurPackageInfo> result);
@@ -230,8 +242,11 @@ const std::vector<std::string>& system_commands();
 
 std::size_t repository_configuration_calls();
 std::size_t inventory_calls();
+std::size_t installed_relation_inventory_calls();
+std::size_t installed_runtime_dependency_inventory_calls();
 const std::vector<PacmanRepositoryConfiguration>&
 inventory_configuration_history();
+const std::vector<std::string>& repository_candidate_call_history();
 const std::vector<std::vector<std::string>>& info_many_call_history();
 const std::vector<std::string>& info_strict_call_history();
 const std::vector<std::string>& vercmp_call_history();
