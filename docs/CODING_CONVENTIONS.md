@@ -86,6 +86,17 @@ transaction、互換性、project stance等の設計判断は対応する正式d
 - `.editorconfig`は現在repository rootに存在しない。
 - CMakeのproject build contractは`-Wall -Wextra`を含む。新しいwarningを無視するcastやsuppressionを
   安易に追加しない。
+- C++実装を終えたら、通常のvalidationより前に次を順に実行する。
+
+      scripts/format-changed-cpp.sh --write
+      scripts/format-changed-cpp.sh --check
+
+  helperは`HEAD`に対するindex + working treeの現在差分から、trackedまたはstagedの`.cpp` / `.hpp`
+  だけをNUL-safeに選び、repositoryの`.clang-format`を`--style=file`で適用する。untracked C++は
+  暗黙に対象とせず、新規fileはtracked / stagedになってからhelperを使うか、untrackedの間は明示的に
+  `clang-format --style=file`を実行する。helperは`git add`を行わない。
+- changed-file検出が失敗した場合はそこで停止し、repository-wide formatへfallbackしない。
+  通常workflowでrepository全体や今回と無関係なC++へ`clang-format -i`を実行しない。
 - repository全体を整形する変更は、機能変更やformat authority変更と分けた明示的な作業にする。
   `.clang-format`の追加を既存sourceの一括format許可とは扱わない。
 
