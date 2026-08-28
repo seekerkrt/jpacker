@@ -802,6 +802,249 @@ UpgradeAllOperationResult make_system_failure_result() {
     return result;
 }
 
+struct CrossSourceVersionLockFixture {
+    std::string repository_name;
+    std::string repository_package_name;
+    std::string installed_repository_version;
+    std::string repository_candidate_version;
+    std::string installed_consumer_name;
+    std::string installed_consumer_version;
+    std::string installed_requirement;
+    std::string replacement_version;
+    std::string replacement_requirement;
+};
+
+CrossSourceVersionLockFixture virtualbox_version_lock_fixture() {
+    return CrossSourceVersionLockFixture{
+            "extra",
+            "virtualbox",
+            "7.2.14-1",
+            "7.2.16-1",
+            "virtualbox-ext-oracle",
+            "7.2.14-1",
+            "virtualbox=7.2.14",
+            "7.2.16-1",
+            "virtualbox=7.2.16"};
+}
+
+ConsumerDependencyRequirement fixture_consumer_requirement(
+        const std::string& specification) {
+    const DependencyRequirementParseResult parsed =
+            parse_dependency_requirement(specification);
+    if(parsed.failure() != nullptr || parsed.requirement() == nullptr) {
+        throw std::logic_error(
+                "Version-lock fixture dependency could not be parsed: " +
+                specification);
+    }
+    const auto* requirement =
+            std::get_if<ConsumerDependencyRequirement>(parsed.requirement());
+    if(requirement == nullptr) {
+        throw std::logic_error(
+                "Version-lock fixture dependency is not a package requirement: " +
+                specification);
+    }
+    return *requirement;
+}
+
+AurPackageConstraintMetadata make_fixture_aur_replacement(
+        const CrossSourceVersionLockFixture& fixture,
+        const std::string& version,
+        const std::string& requirement) {
+    return AurPackageConstraintMetadata{
+            fixture.installed_consumer_name,
+            fixture.installed_consumer_name,
+            ObservedVersion::available(
+                    ObservedVersionSource::AurExactPackage, version),
+            {fixture_consumer_requirement(requirement)},
+            {},
+            {},
+            {},
+            {}};
+}
+
+CrossSourceVersionLockAssessment make_possible_version_lock_assessment(
+        CrossSourceVersionLockStatus status,
+        const CrossSourceVersionLockFixture& fixture) {
+    std::optional<ConsumerDependencyRequirement> replacement_requirement;
+    std::optional<ConstraintEvaluation> replacement_evaluation;
+    AurReplacementCandidateQueryResult aur_replacement =
+            AurReplacementCandidateMetadataUnavailable{
+                    fixture.installed_consumer_name,
+                    fixture.installed_consumer_name,
+                    ObservedVersionUnknownReason::PartialSourceFailure};
+
+    switch(status) {
+    case CrossSourceVersionLockStatus::CompatibleReplacement:
+        replacement_requirement = fixture_consumer_requirement(
+                fixture.replacement_requirement);
+        replacement_evaluation = ConstraintEvaluation::satisfied();
+        aur_replacement = AurReplacementCandidateQuerySuccess{{
+                make_fixture_aur_replacement(
+                        fixture,
+                        fixture.replacement_version,
+                        fixture.replacement_requirement)}};
+        break;
+    case CrossSourceVersionLockStatus::IncompatibleReplacement: {
+        const std::string incompatible_requirement =
+                fixture.repository_package_name + "=7.2.15";
+        replacement_requirement = fixture_consumer_requirement(
+                incompatible_requirement);
+        replacement_evaluation = ConstraintEvaluation::unsatisfied();
+        aur_replacement = AurReplacementCandidateQuerySuccess{{
+                make_fixture_aur_replacement(
+                        fixture,
+                        fixture.replacement_version,
+                        incompatible_requirement)}};
+        break;
+    }
+    case CrossSourceVersionLockStatus::MissingReplacement:
+        aur_replacement = AurReplacementCandidateNotFound{
+                fixture.installed_consumer_name};
+        break;
+    case CrossSourceVersionLockStatus::Unknown:
+        break;
+    case CrossSourceVersionLockStatus::QueryFailure:
+        aur_replacement = AurReplacementCandidateQueryFailure{
+                {fixture.installed_consumer_name},
+                "fixture replacement query failure"};
+        break;
+    case CrossSourceVersionLockStatus::Ambiguous:
+        aur_replacement = AurReplacementCandidateQuerySuccess{{
+                make_fixture_aur_replacement(
+                        fixture,
+                        fixture.replacement_version,
+                        fixture.replacement_requirement),
+                make_fixture_aur_replacement(
+                        fixture,
+                        fixture.replacement_version + ".ambiguous",
+                        fixture.replacement_requirement)}};
+        break;
+    }
+
+    const ConsumerDependencyRequirement installed_requirement =
+            fixture_consumer_requirement(fixture.installed_requirement);
+    return CrossSourceVersionLockAssessment{
+            status,
+            CrossSourceVersionLockCandidateEvidence{
+                    RepositoryUpgradeCandidate{
+                            InstalledExactPackage{
+                                    fixture.repository_package_name,
+                                    ObservedVersion::available(
+                                            ObservedVersionSource::
+                                                    InstalledExactPackage,
+                                            fixture.installed_repository_version)},
+                            RepositoryPackagePresent{
+                                    fixture.repository_name,
+                                    0,
+                                    fixture.repository_package_name,
+                                    fixture.repository_package_name,
+                                    ObservedVersion::available(
+                                            ObservedVersionSource::
+                                                    RepositoryExactPackage,
+                                            fixture.repository_candidate_version),
+                                    std::vector<std::string>{
+                                            fixture.repository_name},
+                                    {}}},
+                    InstalledCrossSourceVersionLockConsumer{
+                            PackageRelationObservedPackage{
+                                    fixture.installed_consumer_name,
+                                    fixture.installed_consumer_name,
+                                    ObservedVersion::available(
+                                            ObservedVersionSource::
+                                                    InstalledExactPackage,
+                                            fixture.installed_consumer_version),
+                                    {},
+                                    PackageRelationInstalledDatabaseIdentity{
+                                            "/fixture/root",
+                                            "/fixture/database"},
+                                    PackageRelationObservationRole::Installed,
+                                    {}},
+                            installed_requirement},
+                    std::move(aur_replacement)},
+            ConstraintEvaluation::satisfied(),
+            ConstraintEvaluation::unsatisfied(),
+            std::move(replacement_requirement),
+            std::move(replacement_evaluation)};
+}
+
+UpgradeAllOperationResult make_no_possible_version_lock_result(
+        CrossSourceVersionLockObservationStatus observation_status) {
+    UpgradeAllOperationResult result = make_system_failure_result();
+    UpgradeAllCrossSourceVersionLockCorrelationResult correlation;
+    correlation.observation = CrossSourceVersionLockObservationResult{
+            observation_status, {}, {}};
+    result.cross_source_version_lock_correlation = std::move(correlation);
+    return result;
+}
+
+UpgradeAllOperationResult make_secondary_correlation_failure_result() {
+    UpgradeAllOperationResult result = make_system_failure_result();
+    UpgradeAllCrossSourceVersionLockCorrelationResult correlation;
+    correlation.failure = UpgradeAllCrossSourceVersionLockCorrelationFailure{
+            UpgradeAllCrossSourceVersionLockCorrelationFailureKind::
+                    ResourceExhaustion,
+            std::nullopt};
+    result.cross_source_version_lock_correlation = std::move(correlation);
+    return result;
+}
+
+UpgradeAllOperationResult make_possible_version_lock_result(
+        CrossSourceVersionLockStatus status,
+        CrossSourceVersionLockObservationStatus observation_status =
+                CrossSourceVersionLockObservationStatus::Complete) {
+    UpgradeAllOperationResult result = make_system_failure_result();
+    CrossSourceVersionLockAssessment assessment =
+            make_possible_version_lock_assessment(
+                    status, virtualbox_version_lock_fixture());
+    UpgradeAllCrossSourceVersionLockCorrelationResult correlation;
+    correlation.observation = CrossSourceVersionLockObservationResult{
+            observation_status, {assessment.evidence}, {}};
+    correlation.assessments.push_back(std::move(assessment));
+    correlation.possible_blocker_assessment_indices.push_back(0);
+    result.cross_source_version_lock_correlation = std::move(correlation);
+    return result;
+}
+
+UpgradeAllOperationResult make_multiple_possible_version_lock_result() {
+    UpgradeAllOperationResult result = make_system_failure_result();
+    CrossSourceVersionLockFixture second_fixture{
+            "core",
+            "example-api",
+            "1.4.0-1",
+            "1.5.0-1",
+            "example-addon",
+            "1.4.0-2",
+            "example-api=1.4.0",
+            "1.5.0-1",
+            "example-api=1.5.0"};
+    CrossSourceVersionLockAssessment first =
+            make_possible_version_lock_assessment(
+                    CrossSourceVersionLockStatus::CompatibleReplacement,
+                    virtualbox_version_lock_fixture());
+    CrossSourceVersionLockAssessment second =
+            make_possible_version_lock_assessment(
+                    CrossSourceVersionLockStatus::CompatibleReplacement,
+                    second_fixture);
+    UpgradeAllCrossSourceVersionLockCorrelationResult correlation;
+    correlation.observation = CrossSourceVersionLockObservationResult{
+            CrossSourceVersionLockObservationStatus::Complete,
+            {first.evidence, second.evidence},
+            {}};
+    correlation.assessments.push_back(std::move(first));
+    correlation.assessments.push_back(std::move(second));
+    correlation.possible_blocker_assessment_indices = {0, 1};
+    result.cross_source_version_lock_correlation = std::move(correlation);
+    return result;
+}
+
+UpgradeAllOperationResult make_invalid_version_lock_index_result() {
+    UpgradeAllOperationResult result = make_possible_version_lock_result(
+            CrossSourceVersionLockStatus::CompatibleReplacement);
+    result.cross_source_version_lock_correlation
+            ->possible_blocker_assessment_indices = {1};
+    return result;
+}
+
 UpgradeAllOperationResult make_source_failure_result(
         bool cleanup_failure,
         bool no_change_cleanup_failure = false) {
@@ -2113,6 +2356,56 @@ UpgradeAllOperationResult result_for_scenario(const std::string& scenario) {
     }
     if(scenario == "stopped-on-system-failure") {
         return make_system_failure_result();
+    }
+    if(scenario == "stopped-system-version-lock-complete-zero") {
+        return make_no_possible_version_lock_result(
+                CrossSourceVersionLockObservationStatus::Complete);
+    }
+    if(scenario == "stopped-system-version-lock-partial-zero") {
+        return make_no_possible_version_lock_result(
+                CrossSourceVersionLockObservationStatus::Partial);
+    }
+    if(scenario == "stopped-system-version-lock-failed-zero") {
+        return make_no_possible_version_lock_result(
+                CrossSourceVersionLockObservationStatus::Failed);
+    }
+    if(scenario == "stopped-system-version-lock-correlation-failure") {
+        return make_secondary_correlation_failure_result();
+    }
+    if(scenario == "stopped-system-version-lock-compatible") {
+        return make_possible_version_lock_result(
+                CrossSourceVersionLockStatus::CompatibleReplacement);
+    }
+    if(scenario == "stopped-system-version-lock-incompatible") {
+        return make_possible_version_lock_result(
+                CrossSourceVersionLockStatus::IncompatibleReplacement);
+    }
+    if(scenario == "stopped-system-version-lock-missing") {
+        return make_possible_version_lock_result(
+                CrossSourceVersionLockStatus::MissingReplacement);
+    }
+    if(scenario == "stopped-system-version-lock-unknown") {
+        return make_possible_version_lock_result(
+                CrossSourceVersionLockStatus::Unknown);
+    }
+    if(scenario == "stopped-system-version-lock-query-failure") {
+        return make_possible_version_lock_result(
+                CrossSourceVersionLockStatus::QueryFailure);
+    }
+    if(scenario == "stopped-system-version-lock-ambiguous") {
+        return make_possible_version_lock_result(
+                CrossSourceVersionLockStatus::Ambiguous);
+    }
+    if(scenario == "stopped-system-version-lock-partial-compatible") {
+        return make_possible_version_lock_result(
+                CrossSourceVersionLockStatus::CompatibleReplacement,
+                CrossSourceVersionLockObservationStatus::Partial);
+    }
+    if(scenario == "stopped-system-version-lock-multiple") {
+        return make_multiple_possible_version_lock_result();
+    }
+    if(scenario == "stopped-system-version-lock-invalid-index") {
+        return make_invalid_version_lock_index_result();
     }
     if(scenario == "stopped-on-source-failure") {
         return make_source_failure_result(false);

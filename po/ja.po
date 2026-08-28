@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.4.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-27 03:46+0900\n"
+"POT-Creation-Date: 2026-08-28 11:05+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -4216,6 +4216,78 @@ msgstr "    未選択成果物: {} {}"
 #, c++-format
 msgid "    reason [{}]: {}"
 msgstr "    理由 [{}]: {}"
+
+#, c++-format
+msgid "    observed {} replacement candidate: {} {}"
+msgstr "    観測した{}置換候補: {} {}"
+
+#, c++-format
+msgid "    replacement requirement: {}"
+msgstr "    置換候補の依存条件: {}"
+
+msgid "    replacement metadata: the direct runtime requirement matches the observed repository candidate"
+msgstr "    置換メタデータ: direct runtime依存条件は観測したリポジトリ候補で満たされます"
+
+msgid "    replacement metadata: the direct runtime requirement does not match the observed repository candidate"
+msgstr "    置換メタデータ: direct runtime依存条件は観測したリポジトリ候補と一致しません"
+
+#. TRANSLATORS: The placeholder is the service name
+#. "AUR".
+#, c++-format
+msgid "    observed {} replacement: a matching candidate was not found"
+msgstr "    観測した{}置換候補: 一致する候補は見つかりませんでした"
+
+msgid "    replacement metadata: compatibility could not be determined"
+msgstr "    置換メタデータ: 互換性を判断できませんでした"
+
+#. TRANSLATORS: The placeholder is the service name
+#. "AUR".
+#, c++-format
+msgid "    observed {} replacement: metadata could not be queried"
+msgstr "    観測した{}置換候補: メタデータを問い合わせできませんでした"
+
+#. TRANSLATORS: The placeholder is the service name
+#. "AUR".
+#, c++-format
+msgid "    observed {} replacement: evidence is ambiguous"
+msgstr "    観測した{}置換候補: 根拠が曖昧です"
+
+#, c++-format
+msgid "Possible repository/{} cross-source version-lock candidate: {}"
+msgid_plural "Possible repository/{} cross-source version-lock candidates: {}"
+msgstr[0] "repository/{}をまたぐversion-lock候補: {}件"
+
+#, c++-format
+msgid "  - repository package: {}"
+msgstr "  - リポジトリパッケージ: {}"
+
+#, c++-format
+msgid "    installed version: {}"
+msgstr "    インストール済みバージョン: {}"
+
+#, c++-format
+msgid "    observed repository candidate: {} {} (repository: {})"
+msgstr "    観測したリポジトリ候補: {} {}（リポジトリ: {}）"
+
+#, c++-format
+msgid "    installed foreign package: {} {}"
+msgstr "    インストール済みforeignパッケージ: {} {}"
+
+#, c++-format
+msgid "    installed requirement: {}"
+msgstr "    インストール済み依存条件: {}"
+
+msgid "  The supplemental candidate observation was incomplete."
+msgstr "  補助的な候補観測は不完全です。"
+
+msgid "The observed repository candidate is metadata evidence only; this correlation does not identify the cause of the system update failure."
+msgstr "観測したリポジトリ候補はメタデータ上の根拠に限られ、この相関はシステム更新の失敗原因を特定しません。"
+
+#. TRANSLATORS: The placeholders are the project name
+#. "Moguet" and service name "AUR".
+#, c++-format
+msgid "{} did not perform a coordinated repository/{} update; review the displayed versions and dependency constraints manually."
+msgstr "{}はrepository/{}をまたぐ協調更新を実行していません。表示されたバージョンと依存条件を手動で確認してください。"
 
 #, c++-format
 msgid "excluded from {} update: {}"
