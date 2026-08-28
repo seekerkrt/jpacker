@@ -118,6 +118,36 @@ assert_not_contains() {
     fi
 }
 
+assert_primary_system_failure_preserved() {
+    assert_exact_line "  operation outcome: Failed" "$stdout_file"
+    assert_exact_line "  - source: pacman" "$stdout_file"
+    assert_exact_line "    diagnostic: Execution failure" "$stdout_file"
+    assert_contains "fixture system upgrade failed" "$stderr_file"
+    assert_not_contains "Unexpected upgrade-all command failure" "$stderr_file"
+}
+
+assert_no_version_lock_output() {
+    assert_not_contains \
+        "Possible repository/AUR cross-source version-lock candidate" \
+        "$stdout_file"
+    assert_not_contains "observed repository candidate" "$stdout_file"
+    assert_not_contains "installed foreign package" "$stdout_file"
+}
+
+assert_version_lock_authority_safe() {
+    for forbidden in \
+        "confirmed blocker" \
+        "failure cause identified" \
+        "actual transaction target" \
+        "safe to update" \
+        "automatic recovery" \
+        "dependency safety guaranteed"
+    do
+        assert_not_contains "$forbidden" "$stdout_file"
+        assert_not_contains "$forbidden" "$stderr_file"
+    done
+}
+
 assert_not_exact_line() {
     unexpected=$1
     file=$2
@@ -730,6 +760,161 @@ assert_exact_line \
 assert_exact_line "  - source: pacman" "$stdout_file"
 assert_exact_line "    diagnostic: Execution failure" "$stdout_file"
 assert_contains "fixture system upgrade failed" "$stderr_file"
+assert_no_version_lock_output
+
+setup_case stopped-system-version-lock-complete-zero \
+    stopped-system-version-lock-complete-zero
+run_status 1 upgrade-all
+assert_primary_system_failure_preserved
+assert_no_version_lock_output
+
+setup_case stopped-system-version-lock-partial-zero \
+    stopped-system-version-lock-partial-zero
+run_status 1 upgrade-all
+assert_primary_system_failure_preserved
+assert_no_version_lock_output
+
+setup_case stopped-system-version-lock-failed-zero \
+    stopped-system-version-lock-failed-zero
+run_status 1 upgrade-all
+assert_primary_system_failure_preserved
+assert_no_version_lock_output
+
+setup_case stopped-system-version-lock-correlation-failure \
+    stopped-system-version-lock-correlation-failure
+run_status 1 upgrade-all
+assert_primary_system_failure_preserved
+assert_no_version_lock_output
+
+setup_case stopped-system-version-lock-compatible \
+    stopped-system-version-lock-compatible
+run_status 1 upgrade-all
+assert_primary_system_failure_preserved
+assert_exact_line \
+    "Possible repository/AUR cross-source version-lock candidate: 1" \
+    "$stdout_file"
+assert_line_before \
+    "  - source: pacman" \
+    "Possible repository/AUR cross-source version-lock candidate: 1" \
+    "$stdout_file"
+assert_exact_line "  - repository package: virtualbox" "$stdout_file"
+assert_exact_line "    installed version: 7.2.14-1" "$stdout_file"
+assert_exact_line \
+    "    observed repository candidate: virtualbox 7.2.16-1 (repository: extra)" \
+    "$stdout_file"
+assert_exact_line \
+    "    installed foreign package: virtualbox-ext-oracle 7.2.14-1" \
+    "$stdout_file"
+assert_exact_line \
+    "    installed requirement: virtualbox=7.2.14" "$stdout_file"
+assert_exact_line \
+    "    observed AUR replacement candidate: virtualbox-ext-oracle 7.2.16-1" \
+    "$stdout_file"
+assert_exact_line \
+    "    replacement requirement: virtualbox=7.2.16" "$stdout_file"
+assert_exact_line \
+    "    replacement metadata: the direct runtime requirement matches the observed repository candidate" \
+    "$stdout_file"
+assert_exact_line \
+    "The observed repository candidate is metadata evidence only; this correlation does not identify the cause of the system update failure." \
+    "$stdout_file"
+assert_exact_line \
+    "Moguet did not perform a coordinated repository/AUR update; review the displayed versions and dependency constraints manually." \
+    "$stdout_file"
+assert_not_contains "supplemental candidate observation was incomplete" \
+    "$stdout_file"
+assert_version_lock_authority_safe
+
+setup_case stopped-system-version-lock-incompatible \
+    stopped-system-version-lock-incompatible
+run_status 1 upgrade-all
+assert_primary_system_failure_preserved
+assert_exact_line \
+    "    replacement requirement: virtualbox=7.2.15" \
+    "$stdout_file"
+assert_exact_line \
+    "    replacement metadata: the direct runtime requirement does not match the observed repository candidate" \
+    "$stdout_file"
+assert_not_contains \
+    "replacement metadata: the direct runtime requirement matches" \
+    "$stdout_file"
+assert_version_lock_authority_safe
+
+setup_case stopped-system-version-lock-missing \
+    stopped-system-version-lock-missing
+run_status 1 upgrade-all
+assert_primary_system_failure_preserved
+assert_exact_line \
+    "    observed AUR replacement: a matching candidate was not found" \
+    "$stdout_file"
+assert_not_contains "metadata could not be queried" "$stdout_file"
+assert_version_lock_authority_safe
+
+setup_case stopped-system-version-lock-unknown \
+    stopped-system-version-lock-unknown
+run_status 1 upgrade-all
+assert_primary_system_failure_preserved
+assert_exact_line \
+    "    replacement metadata: compatibility could not be determined" \
+    "$stdout_file"
+assert_version_lock_authority_safe
+
+setup_case stopped-system-version-lock-query-failure \
+    stopped-system-version-lock-query-failure
+run_status 1 upgrade-all
+assert_primary_system_failure_preserved
+assert_exact_line \
+    "    observed AUR replacement: metadata could not be queried" \
+    "$stdout_file"
+assert_not_contains "a matching candidate was not found" "$stdout_file"
+assert_not_contains "fixture replacement query failure" "$stdout_file"
+assert_not_contains "fixture replacement query failure" "$stderr_file"
+assert_version_lock_authority_safe
+
+setup_case stopped-system-version-lock-ambiguous \
+    stopped-system-version-lock-ambiguous
+run_status 1 upgrade-all
+assert_primary_system_failure_preserved
+assert_exact_line \
+    "    observed AUR replacement: evidence is ambiguous" \
+    "$stdout_file"
+assert_not_contains "7.2.16-1.ambiguous" "$stdout_file"
+assert_version_lock_authority_safe
+
+setup_case stopped-system-version-lock-partial-compatible \
+    stopped-system-version-lock-partial-compatible
+run_status 1 upgrade-all
+assert_primary_system_failure_preserved
+assert_exact_line "  - repository package: virtualbox" "$stdout_file"
+assert_exact_line \
+    "  The supplemental candidate observation was incomplete." \
+    "$stdout_file"
+assert_version_lock_authority_safe
+
+setup_case stopped-system-version-lock-multiple \
+    stopped-system-version-lock-multiple
+run_status 1 upgrade-all
+assert_primary_system_failure_preserved
+assert_exact_line \
+    "Possible repository/AUR cross-source version-lock candidates: 2" \
+    "$stdout_file"
+assert_occurrence_count 2 "  - repository package:" "$stdout_file"
+assert_exact_line "  - repository package: virtualbox" "$stdout_file"
+assert_exact_line "  - repository package: example-api" "$stdout_file"
+assert_exact_line \
+    "    installed foreign package: example-addon 1.4.0-2" \
+    "$stdout_file"
+assert_occurrence_count 1 \
+    "Moguet did not perform a coordinated repository/AUR update" \
+    "$stdout_file"
+assert_version_lock_authority_safe
+
+setup_case stopped-system-version-lock-renderer-exception \
+    stopped-system-version-lock-invalid-index
+run_status 1 upgrade-all
+assert_primary_system_failure_preserved
+assert_no_version_lock_output
+assert_version_lock_authority_safe
 
 setup_case stopped-source stopped-on-source-failure
 run_status 1 upgrade-all
@@ -1354,6 +1539,45 @@ assert_exact_line "  パッケージ状態の観測: 未観測" "$stdout_file"
 assert_exact_line "    診断: 実行失敗" "$stdout_file"
 assert_contains "登録済みソースの更新を未試行" "$stdout_file"
 
+setup_case localized-version-lock-compatible \
+    stopped-system-version-lock-compatible
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    run_status 1 upgrade-all
+assert_exact_line "  操作結果: 失敗" "$stdout_file"
+assert_exact_line "  - ソース: pacman" "$stdout_file"
+assert_exact_line "    診断: 実行失敗" "$stdout_file"
+assert_exact_line \
+    "repository/AURをまたぐversion-lock候補: 1件" "$stdout_file"
+assert_exact_line "  - リポジトリパッケージ: virtualbox" "$stdout_file"
+assert_exact_line \
+    "    観測したリポジトリ候補: virtualbox 7.2.16-1（リポジトリ: extra）" \
+    "$stdout_file"
+assert_exact_line \
+    "    インストール済みforeignパッケージ: virtualbox-ext-oracle 7.2.14-1" \
+    "$stdout_file"
+assert_exact_line \
+    "    インストール済み依存条件: virtualbox=7.2.14" "$stdout_file"
+assert_exact_line \
+    "    観測したAUR置換候補: virtualbox-ext-oracle 7.2.16-1" \
+    "$stdout_file"
+assert_exact_line \
+    "    置換候補の依存条件: virtualbox=7.2.16" "$stdout_file"
+assert_exact_line \
+    "    置換メタデータ: direct runtime依存条件は観測したリポジトリ候補で満たされます" \
+    "$stdout_file"
+assert_exact_line \
+    "観測したリポジトリ候補はメタデータ上の根拠に限られ、この相関はシステム更新の失敗原因を特定しません。" \
+    "$stdout_file"
+assert_exact_line \
+    "Moguetはrepository/AURをまたぐ協調更新を実行していません。表示されたバージョンと依存条件を手動で確認してください。" \
+    "$stdout_file"
+assert_contains "fixture system upgrade failed" "$stderr_file"
+assert_not_contains "confirmed blocker" "$stdout_file"
+assert_not_contains "safe to update" "$stdout_file"
+
 setup_case localized-inconsistent inconsistent-result
 LOCPATH=$locale_root \
 LANG=en_US.UTF-8 \
@@ -1364,7 +1588,7 @@ assert_exact_line "  操作結果: 不整合" "$stdout_file"
 assert_exact_line "  パッケージ状態の観測: 未検証" "$stdout_file"
 assert_exact_line "    診断: 内部不整合" "$stdout_file"
 
-if [ "$case_count" -ne 233 ]; then
+if [ "$case_count" -ne 247 ]; then
     echo "upgrade-all command test scenario count drifted: $case_count" >&2
     exit 1
 fi
