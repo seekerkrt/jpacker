@@ -17,8 +17,8 @@ bool is_valid_package_name(const std::string& name) {
 void require_valid_package_name(const std::string& name) {
     if(!is_valid_package_name(name)) {
         throw std::runtime_error(
-                localization::format_translated_message(
-                        // TRANSLATORS: The placeholder is a package identity.
-                        "Invalid package name: {}", name));
+            localization::format_translated_message(
+                // TRANSLATORS: The placeholder is a package identity.
+                "Invalid package name: {}", name));
     }
 }

@@ -8,4 +8,4 @@
 // owner does not parse relation metadata, query package state, or decide
 // readiness.
 std::string package_relation_assessment_diagnostic_display(
-        const PackageRelationAssessment& assessment);
+    const PackageRelationAssessment& assessment);

@@ -28,10 +28,10 @@ std::string trim(std::string value) {
 
 std::string to_lower(std::string value) {
     std::transform(
-            value.begin(), value.end(), value.begin(),
-            [](unsigned char character) {
-                return static_cast<char>(std::tolower(character));
-            });
+        value.begin(), value.end(), value.begin(),
+        [](unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
     return value;
 }
 
@@ -45,22 +45,22 @@ std::string metadata_value(const std::optional<std::string>& value) {
 }
 
 std::string selected_provider_package_identity_conflict_diagnostic(
-        const ProvidedDependency& existing,
-        const ProvidedDependency& selected) {
+    const ProvidedDependency& existing,
+    const ProvidedDependency& selected) {
     return localization::format_translated_message(
-            "Selected providers use incompatible identities for package {}: {} and {}.",
-            selected.package_name,
-            provider_package_identity_display(existing),
-            provider_package_identity_display(selected));
+        "Selected providers use incompatible identities for package {}: {} and {}.",
+        selected.package_name,
+        provider_package_identity_display(existing),
+        provider_package_identity_display(selected));
 }
 
 void present_candidate_metadata(
-        std::ostream& output, std::size_t index,
-        const ProvidedDependency& candidate) {
+    std::ostream& output, std::size_t index,
+    const ProvidedDependency& candidate) {
     // NO_TRANSLATE: Provider candidate fields are fixed CLI metadata labels.
     output << index << ") ";
     if(const auto* repository =
-               std::get_if<RepositoryProviderOrigin>(&candidate.origin);
+           std::get_if<RepositoryProviderOrigin>(&candidate.origin);
        repository != nullptr) {
         output << "source=repository"
                << " package=" << candidate.package_name
@@ -78,14 +78,14 @@ void present_candidate_metadata(
 }
 
 void present_default_candidate(
-        std::ostream& output, std::size_t index,
-        const ProvidedDependency& candidate) {
+    std::ostream& output, std::size_t index,
+    const ProvidedDependency& candidate) {
     present_candidate_metadata(output, index, candidate);
     output << '\n';
 }
 
 std::optional<std::size_t> parse_candidate_number(
-        const std::string& input, std::size_t candidate_count) {
+    const std::string& input, std::size_t candidate_count) {
     std::size_t selected = 0;
     const char* first = input.data();
     const char* last = first + input.size();
@@ -104,52 +104,54 @@ ProviderCandidatePresenter make_default_provider_candidate_presenter() {
 }
 
 void present_provider_candidate_metadata(
-        std::ostream& output, std::size_t index,
-        const ProvidedDependency& candidate) {
+    std::ostream& output, std::size_t index,
+    const ProvidedDependency& candidate) {
     present_candidate_metadata(output, index, candidate);
 }
 
 ProviderSelectionConflict::ProviderSelectionConflict(
-        std::string dependency_name)
+    std::string dependency_name)
     : std::runtime_error(
-              localization::format_translated_message(
-                      "Previously selected provider is no longer a candidate for dependency: {}",
-                      dependency_name)),
-      dependency_name_(std::move(dependency_name)) {}
+          localization::format_translated_message(
+              "Previously selected provider is no longer a candidate for dependency: {}",
+              dependency_name)),
+      dependency_name_(std::move(dependency_name)) {
+}
 
 const std::string& ProviderSelectionConflict::dependency_name() const noexcept {
     return dependency_name_;
 }
 
 ProviderSelectionSession::ProviderSelectionSession(
-        std::istream& input, std::ostream& output, bool is_interactive)
-    : input_(&input), output_(&output), is_interactive_(is_interactive) {}
-
-std::optional<ProvidedDependency> ProviderSelectionSession::select_provider(
-        const std::string& dependency,
-        const std::vector<ProvidedDependency>& candidates) {
-    return select_provider(
-            dependency, candidates, make_default_provider_candidate_presenter());
+    std::istream& input, std::ostream& output, bool is_interactive)
+    : input_(&input), output_(&output), is_interactive_(is_interactive) {
 }
 
 std::optional<ProvidedDependency> ProviderSelectionSession::select_provider(
-        const std::string& dependency,
-        const std::vector<ProvidedDependency>& candidates,
-        const ProviderCandidatePresenter& present_candidate) {
+    const std::string& dependency,
+    const std::vector<ProvidedDependency>& candidates) {
+    return select_provider(
+        dependency, candidates, make_default_provider_candidate_presenter());
+}
+
+std::optional<ProvidedDependency> ProviderSelectionSession::select_provider(
+    const std::string& dependency,
+    const std::vector<ProvidedDependency>& candidates,
+    const ProviderCandidatePresenter& present_candidate) {
     const std::string dependency_name = dependency_package_name(dependency);
     if(dependency_name.empty()) {
         throw std::invalid_argument(
-                localization::translate_message(
-                        "Provider selection requires a non-empty dependency name."));
+            localization::translate_message(
+                "Provider selection requires a non-empty dependency name."));
     }
 
     auto existing = selections_.find(dependency_name);
     if(existing != selections_.end()) {
         auto current = std::find_if(
-                candidates.begin(), candidates.end(),
-                [&existing](const ProvidedDependency& candidate) {
-                    return same_provider_identity(candidate, existing->second);
-                });
+            candidates.begin(), candidates.end(),
+            [&existing](const ProvidedDependency& candidate) {
+                return same_provider_identity(candidate, existing->second);
+            });
         if(current == candidates.end()) {
             throw ProviderSelectionConflict(dependency_name);
         }
@@ -170,15 +172,15 @@ std::optional<ProvidedDependency> ProviderSelectionSession::select_provider(
     }
 
     const std::string choice_range =
-            "1-" + std::to_string(candidates.size());
+        "1-" + std::to_string(candidates.size());
     for(;;) {
         // TRANSLATORS: The placeholders are the numeric provider-choice range,
         // the literal Enter key, and the fixed q/quit/cancel response tokens.
         *output_ << ":: "
                  << localization::format_translated_message(
-                            "Select a provider from [{}], or press {} / enter "
-                            "{} to cancel:",
-                            choice_range, "Enter", "q/quit/cancel")
+                        "Select a provider from [{}], or press {} / enter "
+                        "{} to cancel:",
+                        choice_range, "Enter", "q/quit/cancel")
                  << " " << std::flush;
 
         std::string input;
@@ -195,31 +197,31 @@ std::optional<ProvidedDependency> ProviderSelectionSession::select_provider(
         }
 
         std::optional<std::size_t> selected =
-                parse_candidate_number(input, candidates.size());
+            parse_candidate_number(input, candidates.size());
         if(!selected.has_value()) {
             // TRANSLATORS: The placeholders are the numeric provider-choice
             // range, the literal Enter key, and the fixed q/quit/cancel
             // response tokens.
             *output_ << ":: "
                      << localization::format_translated_message(
-                                "Invalid choice. Enter a number from [{}], or "
-                                "press {} / enter {} to cancel.",
-                                choice_range, "Enter", "q/quit/cancel")
+                            "Invalid choice. Enter a number from [{}], or "
+                            "press {} / enter {} to cancel.",
+                            choice_range, "Enter", "q/quit/cancel")
                      << '\n';
             continue;
         }
 
         const ProvidedDependency& candidate = candidates[selected.value() - 1];
         auto conflict = std::find_if(
-                selections_.begin(), selections_.end(),
-                [&candidate](const auto& selection) {
-                    return has_incompatible_provider_package_identity(
-                            selection.second, candidate);
-                });
+            selections_.begin(), selections_.end(),
+            [&candidate](const auto& selection) {
+                return has_incompatible_provider_package_identity(
+                    selection.second, candidate);
+            });
         if(conflict != selections_.end()) {
             throw std::runtime_error(
-                    selected_provider_package_identity_conflict_diagnostic(
-                            conflict->second, candidate));
+                selected_provider_package_identity_conflict_diagnostic(
+                    conflict->second, candidate));
         }
         selections_.emplace(dependency_name, candidate);
         return candidate;
@@ -231,16 +233,16 @@ bool ProviderSelectionSession::is_interactive() const noexcept {
 }
 
 bool ProviderSelectionSession::was_cancelled(
-        const std::string& dependency) const {
+    const std::string& dependency) const {
     const std::string dependency_name = dependency_package_name(dependency);
     return !dependency_name.empty() &&
            cancelled_dependencies_.contains(dependency_name);
 }
 
 std::shared_ptr<ProviderSelectionSession> make_provider_selection_session(
-        bool no_confirm) {
+    bool no_confirm) {
     const bool is_interactive =
-            !no_confirm && isatty(STDIN_FILENO) != 0;
+        !no_confirm && isatty(STDIN_FILENO) != 0;
     return std::make_shared<ProviderSelectionSession>(
-            std::cin, std::cout, is_interactive);
+        std::cin, std::cout, is_interactive);
 }

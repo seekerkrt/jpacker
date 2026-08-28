@@ -54,28 +54,28 @@ enum class ParsedSourceVcsComponentOrder {
 };
 
 struct ParsedSourceSelector {
-    std::string                              raw_fragment;
-    std::string                              key;
-    std::string                              value;
+    std::string raw_fragment;
+    std::string key;
+    std::string value;
     std::optional<ParsedSourceSelectorRole> recognized_role;
 
     bool operator==(const ParsedSourceSelector&) const = default;
 };
 
 struct ParsedSourceQuery {
-    std::string                          raw_query;
+    std::string raw_query;
     std::optional<ParsedSourceQueryFlag> recognized_flag;
 
     bool operator==(const ParsedSourceQuery&) const = default;
 };
 
 struct ParsedSourceVcsSyntax {
-    std::string                         raw_identifier;
+    std::string raw_identifier;
     std::optional<ParsedSourceVcsKind> recognized_kind;
-    ParsedSourceVcsDeclarationKind     declaration_kind;
+    ParsedSourceVcsDeclarationKind declaration_kind;
     std::optional<ParsedSourceSelector> selector;
-    std::optional<ParsedSourceQuery>    query;
-    ParsedSourceVcsComponentOrder       component_order;
+    std::optional<ParsedSourceQuery> query;
+    ParsedSourceVcsComponentOrder component_order;
 
     bool operator==(const ParsedSourceVcsSyntax&) const = default;
 };
@@ -83,12 +83,12 @@ struct ParsedSourceVcsSyntax {
 // ParsedSourceEntry preserves syntax only. It does not validate transport
 // policy, confer trust, authorize network access, or imply tracking support.
 struct ParsedSourceEntry {
-    std::string                          raw_value;
-    std::optional<std::string>           destination_name;
-    std::string                          source_payload;
-    ParsedSourceEntryKind                kind;
-    std::string                          source_location;
-    std::optional<std::string>           transport_scheme;
+    std::string raw_value;
+    std::optional<std::string> destination_name;
+    std::string source_payload;
+    ParsedSourceEntryKind kind;
+    std::string source_location;
+    std::optional<std::string> transport_scheme;
     std::optional<ParsedSourceVcsSyntax> vcs;
 
     bool operator==(const ParsedSourceEntry&) const = default;
@@ -122,7 +122,7 @@ public:
     SourceEntryParseResult(SourceEntryParseResult&&) noexcept = default;
     SourceEntryParseResult& operator=(const SourceEntryParseResult&) = delete;
     SourceEntryParseResult& operator=(SourceEntryParseResult&&) noexcept =
-            delete;
+        delete;
     ~SourceEntryParseResult() = default;
 
     [[nodiscard]] bool is_success() const noexcept;
@@ -140,7 +140,7 @@ private:
 
 // Shared by the two Slice 3A pure parsers so byte validation stays identical.
 [[nodiscard]] SourceSyntaxTextStatus validate_source_syntax_text(
-        std::string_view value) noexcept;
+    std::string_view value) noexcept;
 
 [[nodiscard]] SourceEntryParseResult parse_source_entry(
-        std::string_view value);
+    std::string_view value);

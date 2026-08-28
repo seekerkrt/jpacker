@@ -31,8 +31,8 @@ enum class FilteredAurUpdateOperationIssueKind {
 // planner-local index、filtered index、BuildPlan indexを混ぜずに診断へ残す。
 struct FilteredAurUpdateOperationIssue {
     FilteredAurUpdateOperationIssueKind kind =
-            FilteredAurUpdateOperationIssueKind::
-                    FilteredTargetMappingInconsistent;
+        FilteredAurUpdateOperationIssueKind::
+            FilteredTargetMappingInconsistent;
     std::optional<std::size_t> original_query_plan_index;
     std::optional<std::size_t> planner_target_index;
     std::optional<std::size_t> selected_target_index;
@@ -56,7 +56,7 @@ struct FilteredAurUpdateTargetAdapterEntry {
     std::size_t original_query_plan_index = 0;
     AurUpdatePlanEntry update;
     FilteredAurUpdateTargetAdapterDisposition disposition =
-            FilteredAurUpdateTargetAdapterDisposition::NormalSkip;
+        FilteredAurUpdateTargetAdapterDisposition::NormalSkip;
     std::optional<std::size_t> planner_target_index;
     std::optional<std::size_t> filtered_update_plan_index;
 };
@@ -66,7 +66,7 @@ struct FilteredAurUpdateTargetAdapter {
     std::vector<UpgradeAllAurTarget> planner_targets;
     std::vector<std::size_t> planner_target_to_original_query_plan_index;
     std::vector<std::optional<std::size_t>>
-            original_query_plan_to_planner_target_index;
+        original_query_plan_to_planner_target_index;
 };
 
 // selected targetの各index体系を、identity照合済みの1 recordへ固定する。
@@ -113,17 +113,17 @@ class PreparedFilteredAurUpdateOperation final {
 
     friend PreparedFilteredAurUpdateOperation
     prepare_filtered_aur_update_operation(
-            AurUpdateQueryResult query_result,
-            std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
-            const AppConfig& config,
-            std::optional<ValidatedCacheRoot> cache_root);
+        AurUpdateQueryResult query_result,
+        std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
+        const AppConfig& config,
+        std::optional<ValidatedCacheRoot> cache_root);
     friend FilteredAurUpdateExecutionResult
     execute_prepared_filtered_aur_update_operation(
-            PreparedFilteredAurUpdateOperation prepared,
-            const AppConfig& config);
+        PreparedFilteredAurUpdateOperation prepared,
+        const AppConfig& config);
     friend void seed_filtered_aur_update_operation_cache(
-            PreparedFilteredAurUpdateOperation& prepared,
-            const ValidatedCacheRoot& cache_root);
+        PreparedFilteredAurUpdateOperation& prepared,
+        const ValidatedCacheRoot& cache_root);
     friend struct FilteredAurUpdateOperationMutableAccess;
 
     bool valid_ = true;
@@ -134,23 +134,23 @@ class PreparedFilteredAurUpdateOperation final {
     AurUpdatePlan filtered_update_plan;
     std::vector<std::size_t> filtered_to_original_query_plan_index;
     std::vector<std::optional<std::size_t>>
-            original_query_plan_to_filtered_index;
+        original_query_plan_to_filtered_index;
     std::vector<FilteredAurUpdateTargetCorrelation> target_correlations;
     AurUpdateExecutionPreflight preflight;
     std::vector<FilteredAurUpdateBuildUnitCorrelation>
-            build_unit_correlations;
+        build_unit_correlations;
     std::optional<AurUpdateSourceBuildPreparation> preparation;
     std::vector<FilteredAurUpdateOperationIssue> issues;
 
 public:
     PreparedFilteredAurUpdateOperation(
-            const PreparedFilteredAurUpdateOperation&) = delete;
+        const PreparedFilteredAurUpdateOperation&) = delete;
     PreparedFilteredAurUpdateOperation& operator=(
-            const PreparedFilteredAurUpdateOperation&) = delete;
+        const PreparedFilteredAurUpdateOperation&) = delete;
     PreparedFilteredAurUpdateOperation(
-            PreparedFilteredAurUpdateOperation&& other) noexcept;
+        PreparedFilteredAurUpdateOperation&& other) noexcept;
     PreparedFilteredAurUpdateOperation& operator=(
-            PreparedFilteredAurUpdateOperation&&) = delete;
+        PreparedFilteredAurUpdateOperation&&) = delete;
     ~PreparedFilteredAurUpdateOperation() noexcept = default;
 
     // prepared capabilityのowned snapshotは観測だけを許し、runnerへ渡す前に
@@ -159,11 +159,11 @@ public:
         return query_result;
     }
     const FilteredAurUpdateTargetAdapter& target_adapter_result()
-            const noexcept;
+        const noexcept;
     const UpgradeAllPlan& target_and_build_unit_plan() const noexcept;
     const AurUpdatePlan& filtered_plan() const noexcept;
     const std::vector<std::size_t>& filtered_to_original_indexes()
-            const noexcept;
+        const noexcept;
     const std::vector<std::optional<std::size_t>>&
     original_to_filtered_indexes() const noexcept;
     const std::vector<FilteredAurUpdateTargetCorrelation>&
@@ -178,7 +178,7 @@ public:
         return preparation;
     }
     const std::vector<FilteredAurUpdateOperationIssue>& operation_issues()
-            const noexcept;
+        const noexcept;
 
     bool is_valid() const noexcept;
     bool is_prepared() const noexcept;
@@ -193,11 +193,11 @@ struct FilteredAurUpdateExecutionResult {
     AurUpdatePlan filtered_update_plan;
     std::vector<std::size_t> filtered_to_original_query_plan_index;
     std::vector<std::optional<std::size_t>>
-            original_query_plan_to_filtered_index;
+        original_query_plan_to_filtered_index;
     std::vector<FilteredAurUpdateTargetCorrelation> target_correlations;
     AurUpdateExecutionPreflight preflight;
     std::vector<FilteredAurUpdateBuildUnitCorrelation>
-            build_unit_correlations;
+        build_unit_correlations;
     AurUpdateSourceBuildPreparation preparation;
     std::optional<AurUpdateSourceBuildExecutionResult> execution;
     AurUpdateOperationResult reduced_operation_result;
@@ -216,22 +216,22 @@ struct FilteredAurUpdateExecutionResult {
 };
 
 FilteredAurUpdateTargetAdapter adapt_aur_update_plan_for_upgrade_all(
-        const AurUpdatePlan& update_plan,
-        std::vector<FilteredAurUpdateOperationIssue>& issues);
+    const AurUpdatePlan& update_plan,
+    std::vector<FilteredAurUpdateOperationIssue>& issues);
 
 PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
-        AurUpdateQueryResult query_result,
-        std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
-        const AppConfig& config,
-        std::optional<ValidatedCacheRoot> cache_root = std::nullopt);
+    AurUpdateQueryResult query_result,
+    std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
+    const AppConfig& config,
+    std::optional<ValidatedCacheRoot> cache_root = std::nullopt);
 
 // A route aggregate that retained a cache authority can seed the already
 // resolved filtered invocation immediately before actual execution.
 void seed_filtered_aur_update_operation_cache(
-        PreparedFilteredAurUpdateOperation& prepared,
-        const ValidatedCacheRoot& cache_root);
+    PreparedFilteredAurUpdateOperation& prepared,
+    const ValidatedCacheRoot& cache_root);
 
 // aggregateをby-valueでconsumeし、nested invocation capabilityだけをrunnerへmoveする。
 FilteredAurUpdateExecutionResult execute_prepared_filtered_aur_update_operation(
-        PreparedFilteredAurUpdateOperation prepared,
-        const AppConfig& config);
+    PreparedFilteredAurUpdateOperation prepared,
+    const AppConfig& config);

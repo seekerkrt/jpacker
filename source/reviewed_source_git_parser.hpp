@@ -43,41 +43,41 @@ struct ReviewedSourceTreeInventory {
 };
 
 using ReviewedSourceCommitParseResult = std::variant<
-        SourceRevisionIdentity,
-        ReviewedSourceProjectionFailure>;
+    SourceRevisionIdentity,
+    ReviewedSourceProjectionFailure>;
 
 using ReviewedSourceTreeParseResult = std::variant<
-        ReviewedSourceTreeInventory,
-        ReviewedSourceProjectionFailure>;
+    ReviewedSourceTreeInventory,
+    ReviewedSourceProjectionFailure>;
 
 using ReviewedSourceResourcePreflightResult = std::variant<
-        std::monostate,
-        ReviewedSourceProjectionFailure>;
+    std::monostate,
+    ReviewedSourceProjectionFailure>;
 
 using ReviewedSourceChangeAssemblyResult = std::variant<
-        std::vector<ReviewedSourceFileChange>,
-        ReviewedSourceProjectionFailure>;
+    std::vector<ReviewedSourceFileChange>,
+    ReviewedSourceProjectionFailure>;
 
 [[nodiscard]] ReviewedSourceCommitParseResult
 parse_reviewed_source_commit_output(std::string_view output);
 
 [[nodiscard]] ReviewedSourceTreeParseResult
 parse_reviewed_source_tree_output(
-        std::string_view metadata_output,
-        std::string_view path_output,
-        GitObjectFormat object_format,
-        ReviewedSourceMachineStream stream);
+    std::string_view metadata_output,
+    std::string_view path_output,
+    GitObjectFormat object_format,
+    ReviewedSourceMachineStream stream);
 
 [[nodiscard]] ReviewedSourceResourcePreflightResult
 preflight_reviewed_source_projection_resources(
-        const ReviewedSourceTreeInventory& baseline,
-        const ReviewedSourceTreeInventory& target,
-        bool detect_renames);
+    const ReviewedSourceTreeInventory& baseline,
+    const ReviewedSourceTreeInventory& target,
+    bool detect_renames);
 
 [[nodiscard]] ReviewedSourceChangeAssemblyResult
 assemble_reviewed_source_changes(
-        const ReviewedSourceTreeInventory& baseline,
-        const ReviewedSourceTreeInventory& target,
-        std::string_view name_status_output,
-        std::string_view numstat_output,
-        bool detect_renames);
+    const ReviewedSourceTreeInventory& baseline,
+    const ReviewedSourceTreeInventory& target,
+    std::string_view name_status_output,
+    std::string_view numstat_output,
+    bool detect_renames);

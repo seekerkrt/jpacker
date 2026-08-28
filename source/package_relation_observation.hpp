@@ -22,7 +22,7 @@ struct PackageRelationInstalledDatabaseIdentity {
     std::filesystem::path database_path;
 
     bool operator==(const PackageRelationInstalledDatabaseIdentity&) const =
-            default;
+        default;
 };
 
 struct PackageRelationAurSourceIdentity {
@@ -34,18 +34,18 @@ struct PackageRelationAurSourceIdentity {
 
 struct PackageRelationLocalSourceIdentity {
     std::filesystem::path canonical_root;
-    std::uintmax_t        device;
-    std::uintmax_t        inode;
+    std::uintmax_t device;
+    std::uintmax_t inode;
 
     bool operator==(const PackageRelationLocalSourceIdentity&) const =
-            default;
+        default;
 };
 
 using PackageRelationSourceIdentity = std::variant<
-        PackageRelationInstalledDatabaseIdentity,
-        ConfiguredRepositoryIdentity,
-        PackageRelationAurSourceIdentity,
-        PackageRelationLocalSourceIdentity>;
+    PackageRelationInstalledDatabaseIdentity,
+    ConfiguredRepositoryIdentity,
+    PackageRelationAurSourceIdentity,
+    PackageRelationLocalSourceIdentity>;
 
 struct PackageRelationRootAttribution {
     std::size_t invocation_index;
@@ -56,7 +56,7 @@ struct PackageRelationRootAttribution {
 
 struct PackageRelationObservedCapability {
     ProviderCapability capability;
-    ObservedVersion    observed_version;
+    ObservedVersion observed_version;
 
     bool operator==(const PackageRelationObservedCapability&) const = default;
 };
@@ -77,7 +77,7 @@ struct PackageRelationObservedPackage {
 };
 
 struct PlannedPackageRelationObservation {
-    PackageRelationObservedPackage       package;
+    PackageRelationObservedPackage package;
     std::vector<DeclaredPackageRelation> declarations;
 
     bool operator==(const PlannedPackageRelationObservation&) const = default;
@@ -99,7 +99,7 @@ enum class PackageRelationObservationFailureKind {
 
 struct PackageRelationObservationFailure {
     PackageRelationObservationFailureKind kind;
-    PackageRelationObservationRole        role;
+    PackageRelationObservationRole role;
     std::optional<PackageRelationSourceIdentity> source;
     std::optional<std::string> package_name;
     std::string diagnostic;
@@ -116,7 +116,7 @@ struct PackageRelationSourceIdentityCoverage {
     bool provided_component_identity = false;
 
     bool operator==(const PackageRelationSourceIdentityCoverage&) const =
-            default;
+        default;
 };
 
 // required_sources records successful absence as well as presence. A complete
@@ -124,10 +124,10 @@ struct PackageRelationSourceIdentityCoverage {
 // has complete exact-package and provided-component identity coverage.
 struct PackageRelationObservationSet {
     PackageRelationObservationCompleteness completeness =
-            PackageRelationObservationCompleteness::Unavailable;
+        PackageRelationObservationCompleteness::Unavailable;
     std::vector<PackageRelationSourceIdentity> required_sources;
     std::vector<PackageRelationSourceIdentityCoverage>
-            source_identity_coverage;
+        source_identity_coverage;
     std::vector<PackageRelationObservedPackage> packages;
     std::vector<PackageRelationObservationFailure> failures;
 
@@ -164,12 +164,12 @@ enum class PackageRelationMatchInvalidReason {
 };
 
 struct PackageRelationProvidedCapabilityMatchEvidence {
-    std::size_t                     provided_capability_index;
+    std::size_t provided_capability_index;
     PackageRelationVersionMatchKind version_match;
 
     bool operator==(
-            const PackageRelationProvidedCapabilityMatchEvidence&) const =
-            default;
+        const PackageRelationProvidedCapabilityMatchEvidence&) const =
+        default;
 };
 
 struct PackageRelationMatchEvidence {
@@ -177,7 +177,7 @@ struct PackageRelationMatchEvidence {
     PackageRelationIdentityMatchKind identity_match;
     PackageRelationVersionMatchKind version_match;
     std::vector<PackageRelationProvidedCapabilityMatchEvidence>
-            provided_capability_evidence;
+        provided_capability_evidence;
     std::optional<PackageRelationMatchInvalidReason> invalid_reason;
 
     bool operator==(const PackageRelationMatchEvidence&) const = default;
@@ -187,7 +187,7 @@ struct PackageRelationMatchingEvidence {
     PackageRelationObservationCompleteness observation_completeness;
     std::vector<PackageRelationSourceIdentity> required_sources;
     std::vector<PackageRelationSourceIdentityCoverage>
-            source_identity_coverage;
+        source_identity_coverage;
     std::vector<PackageRelationMatchEvidence> package_evidence;
     std::vector<PackageRelationObservationFailure> observation_failures;
 
@@ -198,37 +198,37 @@ struct PackageRelationMatchingEvidence {
 // declaration target or version constraint.
 [[nodiscard]] std::optional<PackageRelationMatchInvalidReason>
 validate_package_relation_observation(
-        const PackageRelationObservedPackage& observed_package) noexcept;
+    const PackageRelationObservedPackage& observed_package) noexcept;
 
 PackageRelationMatchEvidence match_declared_package_relation(
-        const DeclaredPackageRelation& relation,
-        const PackageRelationObservedPackage& observed_package);
+    const DeclaredPackageRelation& relation,
+    const PackageRelationObservedPackage& observed_package);
 
 PackageRelationMatchingEvidence match_declared_package_relation(
-        const DeclaredPackageRelation& relation,
-        const PackageRelationObservationSet& observations);
+    const DeclaredPackageRelation& relation,
+    const PackageRelationObservationSet& observations);
 
 // Assessment needs the authoritative per-package result so multiple matching
 // targets are retained independently. The identity/version decision remains
 // owned by this observation module rather than being reconstructed downstream.
 [[nodiscard]] bool package_relation_match_is_confirmed(
-        const PackageRelationMatchEvidence& evidence) noexcept;
+    const PackageRelationMatchEvidence& evidence) noexcept;
 
 // This answers identity/version matching only. In particular, a matching
 // RepositoryCandidate is diagnostic input and is not an active conflict.
 [[nodiscard]] bool package_relation_has_confirmed_match(
-        const PackageRelationMatchingEvidence& evidence) noexcept;
+    const PackageRelationMatchingEvidence& evidence) noexcept;
 
 // Every required source must cover both identity channels. This is stricter
 // than query-local observation completeness.
 [[nodiscard]] bool package_relation_has_complete_identity_coverage(
-        const PackageRelationMatchingEvidence& evidence) noexcept;
+    const PackageRelationMatchingEvidence& evidence) noexcept;
 
 // A positive no-match proof requires complete source observation and only
 // authoritative identity misses or completed unsatisfied comparisons.
 [[nodiscard]] bool package_relation_confirms_no_match(
-        const PackageRelationMatchingEvidence& evidence) noexcept;
+    const PackageRelationMatchingEvidence& evidence) noexcept;
 
 void add_package_relation_root_attribution(
-        PackageRelationObservedPackage& package,
-        PackageRelationRootAttribution root);
+    PackageRelationObservedPackage& package,
+    PackageRelationRootAttribution root);

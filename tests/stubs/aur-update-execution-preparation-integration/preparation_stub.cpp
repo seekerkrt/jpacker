@@ -67,7 +67,8 @@ std::uintmax_t ValidatedCacheRoot::owner() const noexcept {
 }
 
 PackageMetadataError::PackageMetadataError(PackageMetadataFailure failure)
-    : std::runtime_error(failure.diagnostic), failure_(std::move(failure)) {}
+    : std::runtime_error(failure.diagnostic), failure_(std::move(failure)) {
+}
 
 const PackageMetadataFailure& PackageMetadataError::failure() const noexcept {
     return failure_;
@@ -85,34 +86,34 @@ void require_supported_separated_install_options(bool rm_deps) {
     ++g_state.separated_option_check_calls;
     if(rm_deps) {
         throw std::runtime_error(
-                "Separated build/install does not support --rmdeps.");
+            "Separated build/install does not support --rmdeps.");
     }
 }
 
 void require_unclaimed_artifact_pkgdest(
-        const SourceBuildEnvironment& environment) {
+    const SourceBuildEnvironment& environment) {
     ++g_state.artifact_pkgdest_check_calls;
     if(environment.defines("PKGDEST")) {
         throw std::runtime_error(
-                "Source environment PKGDEST conflicts with invocation-owned "
-                "artifact workspace.");
+            "Source environment PKGDEST conflicts with invocation-owned "
+            "artifact workspace.");
     }
     // getenv()はdefined-emptyでもnon-nullを返すproduction契約を再現する。
     if(std::getenv("PKGDEST") != nullptr) {
         throw std::runtime_error(
-                "Inherited PKGDEST conflicts with invocation-owned artifact workspace.");
+            "Inherited PKGDEST conflicts with invocation-owned artifact workspace.");
     }
 }
 
 std::shared_ptr<ReviewedSourceFatalStatePreflightSlot>
 preflight_reviewed_source_fatal_state_for_production(
-        const SourceBuildRequest&) {
+    const SourceBuildRequest&) {
     return nullptr;
 }
 
 void seed_production_source_build_cache(
-        PreparedProductionSourceBuildInvocation& invocation,
-        const ValidatedCacheRoot& cache_root) {
+    PreparedProductionSourceBuildInvocation& invocation,
+    const ValidatedCacheRoot& cache_root) {
     invocation.cache_root = cache_root;
     for(auto& work_item : invocation.work_items) {
         work_item.cache_root = cache_root;

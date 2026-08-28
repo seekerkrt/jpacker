@@ -16,19 +16,19 @@ namespace {
 
 struct IntegrationStubState {
     std::map<std::string, std::deque<CapturedCommandResult>> command_results;
-    std::vector<std::string>                                 captured_commands;
-    std::vector<std::string>                                 strict_info_calls;
-    std::vector<std::string>                                 strict_provider_search_calls;
-    std::size_t                                              forbidden_operation_count = 0;
+    std::vector<std::string> captured_commands;
+    std::vector<std::string> strict_info_calls;
+    std::vector<std::string> strict_provider_search_calls;
+    std::size_t forbidden_operation_count = 0;
 };
 
 IntegrationStubState g_state;
 
 AurPackageInfo package_info(
-        const std::string& name,
-        const std::vector<std::string>& dependencies = {},
-        const std::vector<std::string>& conflicts = {},
-        const std::vector<std::string>& replaces = {}) {
+    const std::string& name,
+    const std::vector<std::string>& dependencies = {},
+    const std::vector<std::string>& conflicts = {},
+    const std::vector<std::string>& replaces = {}) {
     AurPackageInfo info;
     info.Name = name;
     info.PackageBase = name;
@@ -43,8 +43,8 @@ AurPackageInfo package_info(
 [[noreturn]] void reject_forbidden_operation(const std::string& operation) {
     ++g_state.forbidden_operation_count;
     throw std::runtime_error(
-            "AUR update preflight integration invoked forbidden operation: " +
-            operation);
+        "AUR update preflight integration invoked forbidden operation: " +
+        operation);
 }
 
 } // namespace
@@ -57,7 +57,7 @@ void reset() {
 }
 
 void enqueue_captured_command_result(
-        const std::string& command, CapturedCommandResult result) {
+    const std::string& command, CapturedCommandResult result) {
     g_state.command_results[command].push_back(std::move(result));
 }
 
@@ -95,13 +95,13 @@ CapturedCommandResult capture_command_output_raw(const char* command) {
 
 CapturedCommandResult capture_command_output(const char* command) {
     reject_forbidden_operation(
-            "capture_command_output: " +
-            std::string(command == nullptr ? "" : command));
+        "capture_command_output: " +
+        std::string(command == nullptr ? "" : command));
 }
 
 std::string exec_command(const char* command) {
     reject_forbidden_operation(
-            "exec_command: " + std::string(command == nullptr ? "" : command));
+        "exec_command: " + std::string(command == nullptr ? "" : command));
 }
 
 int command_status(const std::string& command) {
@@ -121,25 +121,25 @@ std::vector<AurPackageInfo> AurClient::search(const std::string& query) {
 }
 
 std::vector<std::string> AurClient::search_names_by_provides(
-        const std::string& provided_name) {
+    const std::string& provided_name) {
     throw std::runtime_error(
-            "Unexpected legacy AUR provider search in integration test: " +
-            provided_name);
+        "Unexpected legacy AUR provider search in integration test: " +
+        provided_name);
 }
 
 std::vector<std::string> AurClient::search_names_by_provides_strict(
-        const std::string& provided_name) {
+    const std::string& provided_name) {
     g_state.strict_provider_search_calls.push_back(provided_name);
     return {};
 }
 
 std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     throw std::runtime_error(
-            "Unexpected legacy AUR info in integration test: " + package_name);
+        "Unexpected legacy AUR info in integration test: " + package_name);
 }
 
 std::optional<AurPackageInfo> AurClient::info_strict(
-        const std::string& package_name) {
+    const std::string& package_name) {
     g_state.strict_info_calls.push_back(package_name);
 
     if(package_name == "explicit-root" || package_name == "dependency-root" ||
@@ -151,7 +151,7 @@ std::optional<AurPackageInfo> AurClient::info_strict(
     }
     if(package_name == "repository-failure-child") {
         throw std::runtime_error(
-                "Repository metadata failure incorrectly fell back to AUR exact lookup.");
+            "Repository metadata failure incorrectly fell back to AUR exact lookup.");
     }
     if(package_name == "aur-failure-root") {
         return package_info(package_name, {"aur-failure-child"});
@@ -161,37 +161,42 @@ std::optional<AurPackageInfo> AurClient::info_strict(
     }
     if(package_name == "relation-installed-root") {
         return package_info(
-                package_name, {}, {"installed-conflict"});
+            package_name, {}, {"installed-conflict"});
     }
     if(package_name == "relation-no-match-root") {
         return package_info(
-                package_name, {}, {"absent-conflict"});
+            package_name, {}, {"absent-conflict"});
     }
     if(package_name == "relation-query-failure-root") {
         return package_info(
-                package_name, {}, {"unknown-conflict"});
+            package_name, {}, {"unknown-conflict"});
     }
 
     throw AurRpcResponseError(
-            "Unexpected strict AUR info in integration test: " + package_name);
+        "Unexpected strict AUR info in integration test: " + package_name);
 }
 
 std::map<std::string, AurPackageInfo> AurClient::info_many(
-        const std::vector<std::string>& package_names) {
+    const std::vector<std::string>& package_names) {
     throw std::runtime_error(
-            "Unexpected AUR multi-info in integration test for " +
-            std::to_string(package_names.size()) + " packages.");
+        "Unexpected AUR multi-info in integration test for " +
+        std::to_string(package_names.size()) + " packages.");
 }
 
-void Logger::set_diagnostics_to_stderr() {}
+void Logger::set_diagnostics_to_stderr() {
+}
 
-void Logger::init(const std::filesystem::path&) {}
+void Logger::init(const std::filesystem::path&) {
+}
 
-void Logger::info(const std::string&) {}
+void Logger::info(const std::string&) {
+}
 
-void Logger::warn(const std::string&) {}
+void Logger::warn(const std::string&) {
+}
 
-void Logger::error(const std::string&) {}
+void Logger::error(const std::string&) {
+}
 
 void Logger::raw_cmd(const std::string& command) {
     reject_forbidden_operation("Logger::raw_cmd: " + command);

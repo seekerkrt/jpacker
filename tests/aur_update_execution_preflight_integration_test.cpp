@@ -20,31 +20,31 @@ namespace fs = std::filesystem;
 namespace stub = aur_update_execution_preflight_integration_stub;
 
 constexpr const char* DATABASE_PATH_COMMAND =
-        "pacman-conf --verbose RootDir DBPath 2>/dev/null";
+    "pacman-conf --verbose RootDir DBPath 2>/dev/null";
 constexpr const char* REPOSITORY_LIST_COMMAND =
-        "pacman-conf --repo-list 2>/dev/null";
+    "pacman-conf --repo-list 2>/dev/null";
 
 void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
 }
 
 AurUpdatePlanEntry update_entry(
-        const std::string& package_name, InstalledPackageReason reason) {
+    const std::string& package_name, InstalledPackageReason reason) {
     return AurUpdatePlanEntry{
+        package_name,
+        "1.0-1",
+        reason,
+        AurUpdateRemotePackage{
             package_name,
-            "1.0-1",
-            reason,
-            AurUpdateRemotePackage{
-                    package_name,
-                    package_name,
-                    "2.0-1",
-                    AurVersionRelation::NewerThanInstalled},
-            AurUpdateClassification::UpdateAvailable};
+            package_name,
+            "2.0-1",
+            AurVersionRelation::NewerThanInstalled},
+        AurUpdateClassification::UpdateAvailable};
 }
 
 bool has_reason(
-        const AurUpdateExecutionTarget& target,
-        AurUpdateExecutionReason reason) {
+    const AurUpdateExecutionTarget& target,
+    AurUpdateExecutionReason reason) {
     for(const auto& issue : target.issues) {
         if(issue.reason == reason) return true;
     }
@@ -52,12 +52,12 @@ bool has_reason(
 }
 
 const AurUpdateExecutionIssue& relation_issue(
-        const AurUpdateExecutionTarget& target) {
+    const AurUpdateExecutionTarget& target) {
     const auto found = std::find_if(
-            target.issues.begin(), target.issues.end(),
-            [](const AurUpdateExecutionIssue& issue) {
-                return issue.relation_reason.has_value();
-            });
+        target.issues.begin(), target.issues.end(),
+        [](const AurUpdateExecutionIssue& issue) {
+            return issue.relation_reason.has_value();
+        });
     if(found == target.issues.end()) {
         throw std::runtime_error("Typed relation preflight issue is missing");
     }
@@ -113,8 +113,8 @@ private:
 
 void expect_no_forbidden_operations() {
     expect(
-            stub::forbidden_operation_count() == 0,
-            "Preflight integration crossed a forbidden process boundary");
+        stub::forbidden_operation_count() == 0,
+        "Preflight integration crossed a forbidden process boundary");
 }
 
 void test_simple_roots_and_combined_resolution() {
@@ -124,65 +124,65 @@ void test_simple_roots_and_combined_resolution() {
 
     stub::reset();
     AurUpdateExecutionPreflight explicit_preflight =
-            resolve_aur_update_execution_preflight(
-                    AurUpdatePlan{{update_entry(
-                            "explicit-root", InstalledPackageReason::Explicit)}});
+        resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{update_entry(
+                "explicit-root", InstalledPackageReason::Explicit)}});
     expect(
-            explicit_preflight.targets.size() == 1 &&
-                    explicit_preflight.targets.front().status ==
-                            AurUpdateExecutionTargetStatus::Executable,
-            "Explicit integration root was not executable");
+        explicit_preflight.targets.size() == 1 &&
+            explicit_preflight.targets.front().status ==
+                AurUpdateExecutionTargetStatus::Executable,
+        "Explicit integration root was not executable");
     expect(
-            explicit_preflight.targets.front().desired_install_reason ==
-                    DesiredInstallReason::Explicit,
-            "Explicit integration root lost its install reason");
+        explicit_preflight.targets.front().desired_install_reason ==
+            DesiredInstallReason::Explicit,
+        "Explicit integration root lost its install reason");
     expect(
-            stub::strict_info_calls() == std::vector<std::string>{"explicit-root"},
-            "Explicit integration root used an unexpected AUR query sequence");
+        stub::strict_info_calls() == std::vector<std::string>{"explicit-root"},
+        "Explicit integration root used an unexpected AUR query sequence");
     expect(stub::captured_commands().empty(), "Dependency-free root queried pacman metadata");
 
     stub::reset();
     AurUpdateExecutionPreflight dependency_preflight =
-            resolve_aur_update_execution_preflight(
-                    AurUpdatePlan{{update_entry(
-                            "dependency-root", InstalledPackageReason::Dependency)}});
+        resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{update_entry(
+                "dependency-root", InstalledPackageReason::Dependency)}});
     expect(
-            dependency_preflight.targets.front().desired_install_reason ==
-                    DesiredInstallReason::Dependency,
-            "Dependency integration root was promoted to Explicit");
+        dependency_preflight.targets.front().desired_install_reason ==
+            DesiredInstallReason::Dependency,
+        "Dependency integration root was promoted to Explicit");
 
     stub::reset();
     AurUpdateExecutionPreflight combined =
-            resolve_aur_update_execution_preflight(AurUpdatePlan{{
-                    update_entry("combined-root-a", InstalledPackageReason::Explicit),
-                    update_entry("combined-root-b", InstalledPackageReason::Dependency),
-            }});
+        resolve_aur_update_execution_preflight(AurUpdatePlan{{
+            update_entry("combined-root-a", InstalledPackageReason::Explicit),
+            update_entry("combined-root-b", InstalledPackageReason::Dependency),
+        }});
     expect(combined.build_plan.has_value(), "Combined integration plan is missing BuildPlan");
     expect(
-            combined.build_plan->root_targets ==
-                    std::vector<RootTargetIdentity>{
-                            {0, "combined-root-a"},
-                            {1, "combined-root-b"},
-                    },
-            "Combined integration root identity/order differs");
+        combined.build_plan->root_targets ==
+            std::vector<RootTargetIdentity>{
+                {0, "combined-root-a"},
+                {1, "combined-root-b"},
+            },
+        "Combined integration root identity/order differs");
     expect(
-            stub::strict_info_calls() ==
-                    std::vector<std::string>{"combined-root-a", "combined-root-b"},
-            "Combined integration plan did not resolve candidate roots as one ordered set");
+        stub::strict_info_calls() ==
+            std::vector<std::string>{"combined-root-a", "combined-root-b"},
+        "Combined integration plan did not resolve candidate roots as one ordered set");
     expect(can_execute(combined), "Combined integration plan could not execute");
 
     stub::reset();
     AurUpdatePlanEntry skipped = update_entry(
-            "skipped-root", InstalledPackageReason::Explicit);
+        "skipped-root", InstalledPackageReason::Explicit);
     skipped.classification = AurUpdateClassification::UpToDate;
     AurUpdateExecutionPreflight skip_only =
-            resolve_aur_update_execution_preflight(AurUpdatePlan{{skipped}});
+        resolve_aur_update_execution_preflight(AurUpdatePlan{{skipped}});
     expect(!can_execute(skip_only), "Skip-only integration plan could execute");
     expect(stub::strict_info_calls().empty(), "Skip-only integration plan invoked resolver");
     expect(stub::captured_commands().empty(), "Skip-only integration plan invoked process command");
     expect(
-            fixture.relative_paths() == paths_before,
-            "Executable or skip-only preflight created a filesystem path");
+        fixture.relative_paths() == paths_before,
+        "Executable or skip-only preflight created a filesystem path");
     expect_no_forbidden_operations();
 }
 
@@ -193,35 +193,35 @@ void test_repository_metadata_failure_is_fail_closed() {
 
     stub::reset();
     stub::enqueue_captured_command_result(
-            DATABASE_PATH_COMMAND,
-            CapturedCommandResult{"", 41});
+        DATABASE_PATH_COMMAND,
+        CapturedCommandResult{"", 41});
 
     AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(
-                    AurUpdatePlan{{update_entry(
-                            "repository-failure-root",
-                            InstalledPackageReason::Explicit)}});
+        resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{update_entry(
+                "repository-failure-root",
+                InstalledPackageReason::Explicit)}});
 
     expect(
-            preflight.targets.front().status ==
-                    AurUpdateExecutionTargetStatus::Incomplete,
-            "Repository metadata failure did not block integration preflight");
+        preflight.targets.front().status ==
+            AurUpdateExecutionTargetStatus::Incomplete,
+        "Repository metadata failure did not block integration preflight");
     expect(
-            has_reason(
-                    preflight.targets.front(),
-                    AurUpdateExecutionReason::RepositoryMetadataUnavailable),
-            "Repository metadata failure lost its typed preflight reason");
+        has_reason(
+            preflight.targets.front(),
+            AurUpdateExecutionReason::RepositoryMetadataUnavailable),
+        "Repository metadata failure lost its typed preflight reason");
     expect(
-            stub::strict_info_calls() ==
-                    std::vector<std::string>{"repository-failure-root"},
-            "Repository metadata failure fell back to AUR exact metadata");
+        stub::strict_info_calls() ==
+            std::vector<std::string>{"repository-failure-root"},
+        "Repository metadata failure fell back to AUR exact metadata");
     expect(stub::strict_provider_search_calls().empty(), "Repository failure fell back to AUR provider search");
     expect(
-            stub::captured_commands() == std::vector<std::string>{DATABASE_PATH_COMMAND},
-            "Repository configuration failure did not stop at its first failed command");
+        stub::captured_commands() == std::vector<std::string>{DATABASE_PATH_COMMAND},
+        "Repository configuration failure did not stop at its first failed command");
     expect(
-            fixture.relative_paths() == paths_before,
-            "Repository failure preflight created a filesystem path");
+        fixture.relative_paths() == paths_before,
+        "Repository failure preflight created a filesystem path");
     expect_no_forbidden_operations();
 }
 
@@ -235,39 +235,39 @@ void test_ordinary_aur_dependency_failure_is_owned_and_read_only() {
     std::ofstream(repository_database).close();
 
     stub::enqueue_captured_command_result(
-            DATABASE_PATH_COMMAND,
-            CapturedCommandResult{
-                    "RootDir = " + fixture.root().string() + "\nDBPath = " +
-                            database_path.string() + "\n",
-                    0});
+        DATABASE_PATH_COMMAND,
+        CapturedCommandResult{
+            "RootDir = " + fixture.root().string() + "\nDBPath = " +
+                database_path.string() + "\n",
+            0});
     stub::enqueue_captured_command_result(
-            REPOSITORY_LIST_COMMAND,
-            CapturedCommandResult{"core\n", 0});
+        REPOSITORY_LIST_COMMAND,
+        CapturedCommandResult{"core\n", 0});
     const std::vector<fs::path> paths_before = fixture.relative_paths();
     fixture.enter();
     AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(
-                    AurUpdatePlan{{update_entry(
-                            "aur-failure-root",
-                            InstalledPackageReason::Explicit)}});
+        resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{update_entry(
+                "aur-failure-root",
+                InstalledPackageReason::Explicit)}});
     const std::vector<fs::path> paths_after = fixture.relative_paths();
 
     expect(
-            preflight.targets.front().status ==
-                    AurUpdateExecutionTargetStatus::Incomplete,
-            "Ordinary AUR dependency failure did not block integration preflight");
+        preflight.targets.front().status ==
+            AurUpdateExecutionTargetStatus::Incomplete,
+        "Ordinary AUR dependency failure did not block integration preflight");
     expect(
-            has_reason(
-                    preflight.targets.front(),
-                    AurUpdateExecutionReason::AurDependencyMetadataUnavailable),
-            "Ordinary AUR dependency failure lost its typed reason");
+        has_reason(
+            preflight.targets.front(),
+            AurUpdateExecutionReason::AurDependencyMetadataUnavailable),
+        "Ordinary AUR dependency failure lost its typed reason");
     expect(paths_after == paths_before, "Preflight created a path outside the repository DB fixture");
     expect(
-            stub::captured_commands() == std::vector<std::string>{
-                    DATABASE_PATH_COMMAND,
-                    REPOSITORY_LIST_COMMAND,
-            },
-            "Strict repository read used an unexpected command sequence");
+        stub::captured_commands() == std::vector<std::string>{
+                                         DATABASE_PATH_COMMAND,
+                                         REPOSITORY_LIST_COMMAND,
+                                     },
+        "Strict repository read used an unexpected command sequence");
     expect_no_forbidden_operations();
 }
 
@@ -277,80 +277,79 @@ void test_relation_inventory_is_snapshotted_once_and_no_match_releases_guard() {
     const fs::path database_path = fixture.root() / "database";
 
     stub::reset();
-    package_metadata_test_stub::set_local_packages({
-            {"installed-conflict", "1", ALPM_PKG_REASON_EXPLICIT, {}}});
+    package_metadata_test_stub::set_local_packages({{"installed-conflict", "1", ALPM_PKG_REASON_EXPLICIT, {}}});
     stub::enqueue_captured_command_result(
-            DATABASE_PATH_COMMAND,
-            CapturedCommandResult{
-                    "RootDir = " + fixture.root().string() +
-                            "\nDBPath = " + database_path.string() + "\n",
-                    0});
+        DATABASE_PATH_COMMAND,
+        CapturedCommandResult{
+            "RootDir = " + fixture.root().string() +
+                "\nDBPath = " + database_path.string() + "\n",
+            0});
     const AurUpdateExecutionPreflight conflict =
-            resolve_aur_update_execution_preflight(
-                    AurUpdatePlan{{update_entry(
-                            "relation-installed-root",
-                            InstalledPackageReason::Explicit)}});
+        resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{update_entry(
+                "relation-installed-root",
+                InstalledPackageReason::Explicit)}});
     expect(
-            conflict.targets.front().status ==
-                            AurUpdateExecutionTargetStatus::Unsupported,
-            "Installed relation conflict did not stop production preflight");
+        conflict.targets.front().status ==
+            AurUpdateExecutionTargetStatus::Unsupported,
+        "Installed relation conflict did not stop production preflight");
     const AurUpdateExecutionIssue& conflict_issue =
-            relation_issue(conflict.targets.front());
+        relation_issue(conflict.targets.front());
     expect(
-            conflict_issue.relation_reason->assessment.kind ==
-                            PackageRelationAssessmentKind::
-                                    ConfirmedInstalledConflict &&
-                    conflict_issue.relation_reason->assessment
-                                    .attributed_package_evidence
-                                    ->observed_package.package_name ==
-                            "installed-conflict" &&
-                    package_metadata_test_stub::initialize_call_count() == 1 &&
-                    package_metadata_test_stub::local_database_call_count() ==
-                            1 &&
-                    package_metadata_test_stub::package_cache_call_count() ==
-                            1 &&
-                    package_metadata_test_stub::release_call_count() == 1 &&
-                    stub::captured_commands() ==
-                            std::vector<std::string>{DATABASE_PATH_COMMAND},
-            "Installed relation inventory was repeated or lost attribution");
+        conflict_issue.relation_reason->assessment.kind ==
+                PackageRelationAssessmentKind::
+                    ConfirmedInstalledConflict &&
+            conflict_issue.relation_reason->assessment
+                    .attributed_package_evidence
+                    ->observed_package.package_name ==
+                "installed-conflict" &&
+            package_metadata_test_stub::initialize_call_count() == 1 &&
+            package_metadata_test_stub::local_database_call_count() ==
+                1 &&
+            package_metadata_test_stub::package_cache_call_count() ==
+                1 &&
+            package_metadata_test_stub::release_call_count() == 1 &&
+            stub::captured_commands() ==
+                std::vector<std::string>{DATABASE_PATH_COMMAND},
+        "Installed relation inventory was repeated or lost attribution");
     expect(
+        conflict_issue.diagnostic.find(
+            "Installed conflict confirmed") != std::string::npos &&
             conflict_issue.diagnostic.find(
-                    "Installed conflict confirmed") != std::string::npos &&
-                    conflict_issue.diagnostic.find(
-                            "matched installed package installed-conflict") !=
-                            std::string::npos &&
-                    conflict_issue.diagnostic.find(
-                            "build/install is blocked before mutation") !=
-                            std::string::npos,
-            "Installed relation preflight diagnostic lost public attribution");
+                "matched installed package installed-conflict") !=
+                std::string::npos &&
+            conflict_issue.diagnostic.find(
+                "build/install is blocked before mutation") !=
+                std::string::npos,
+        "Installed relation preflight diagnostic lost public attribution");
     expect_no_forbidden_operations();
 
     stub::reset();
     package_metadata_test_stub::set_empty_package_cache();
     stub::enqueue_captured_command_result(
-            DATABASE_PATH_COMMAND,
-            CapturedCommandResult{
-                    "RootDir = " + fixture.root().string() +
-                            "\nDBPath = " + database_path.string() + "\n",
-                    0});
+        DATABASE_PATH_COMMAND,
+        CapturedCommandResult{
+            "RootDir = " + fixture.root().string() +
+                "\nDBPath = " + database_path.string() + "\n",
+            0});
     const AurUpdateExecutionPreflight no_match =
-            resolve_aur_update_execution_preflight(
-                    AurUpdatePlan{{update_entry(
-                            "relation-no-match-root",
-                            InstalledPackageReason::Explicit)}});
+        resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{update_entry(
+                "relation-no-match-root",
+                InstalledPackageReason::Explicit)}});
     expect(
-            no_match.targets.front().status ==
-                            AurUpdateExecutionTargetStatus::Executable &&
-                    no_match.build_plan.has_value() &&
-                    no_match.build_plan->relation_assessments.size() == 1 &&
-                    no_match.build_plan->relation_assessments.front().kind ==
-                            PackageRelationAssessmentKind::
-                                    ConfirmedNoMatchingCurrentOrPlannedTarget &&
-                    !has_reason(
-                            no_match.targets.front(),
-                            AurUpdateExecutionReason::
-                                    ConflictsOrReplacesUnresolved),
-            "Successful empty inventory did not release only the relation guard");
+        no_match.targets.front().status ==
+                AurUpdateExecutionTargetStatus::Executable &&
+            no_match.build_plan.has_value() &&
+            no_match.build_plan->relation_assessments.size() == 1 &&
+            no_match.build_plan->relation_assessments.front().kind ==
+                PackageRelationAssessmentKind::
+                    ConfirmedNoMatchingCurrentOrPlannedTarget &&
+            !has_reason(
+                no_match.targets.front(),
+                AurUpdateExecutionReason::
+                    ConflictsOrReplacesUnresolved),
+        "Successful empty inventory did not release only the relation guard");
     expect_no_forbidden_operations();
 }
 
@@ -359,27 +358,27 @@ void test_relation_inventory_failure_is_unknown_and_fail_closed() {
     fixture.enter();
     stub::reset();
     stub::enqueue_captured_command_result(
-            DATABASE_PATH_COMMAND,
-            CapturedCommandResult{"", 73});
+        DATABASE_PATH_COMMAND,
+        CapturedCommandResult{"", 73});
 
     const AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(
-                    AurUpdatePlan{{update_entry(
-                            "relation-query-failure-root",
-                            InstalledPackageReason::Explicit)}});
+        resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{update_entry(
+                "relation-query-failure-root",
+                InstalledPackageReason::Explicit)}});
     const AurUpdateExecutionIssue& issue =
-            relation_issue(preflight.targets.front());
+        relation_issue(preflight.targets.front());
     expect(
-            preflight.targets.front().status ==
-                            AurUpdateExecutionTargetStatus::Unsupported &&
-                    issue.relation_reason->assessment.kind ==
-                            PackageRelationAssessmentKind::Unknown &&
-                    issue.relation_reason->assessment
-                            .attributed_observation_failure.has_value() &&
-                    package_metadata_test_stub::initialize_call_count() == 0 &&
-                    stub::captured_commands() ==
-                            std::vector<std::string>{DATABASE_PATH_COMMAND},
-            "Installed inventory query failure became empty inventory or retried");
+        preflight.targets.front().status ==
+                AurUpdateExecutionTargetStatus::Unsupported &&
+            issue.relation_reason->assessment.kind ==
+                PackageRelationAssessmentKind::Unknown &&
+            issue.relation_reason->assessment
+                .attributed_observation_failure.has_value() &&
+            package_metadata_test_stub::initialize_call_count() == 0 &&
+            stub::captured_commands() ==
+                std::vector<std::string>{DATABASE_PATH_COMMAND},
+        "Installed inventory query failure became empty inventory or retried");
     expect_no_forbidden_operations();
 }
 

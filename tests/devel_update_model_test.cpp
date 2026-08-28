@@ -34,11 +34,11 @@ static_assert(!std::is_convertible_v<
               DevelUpdateAssessment>);
 
 using UnknownFactory =
-        DevelUpdateAssessment (*)(DevelUnknownReason);
+    DevelUpdateAssessment (*)(DevelUnknownReason);
 using RequiresCheckFactory =
-        DevelUpdateAssessment (*)(DevelRequiresCheckReason);
+    DevelUpdateAssessment (*)(DevelRequiresCheckReason);
 using UnsupportedFactory =
-        DevelUpdateAssessment (*)(DevelUnsupportedReason);
+    DevelUpdateAssessment (*)(DevelUnsupportedReason);
 
 static_assert(std::is_same_v<
               decltype(&DevelUpdateAssessment::unknown),
@@ -79,7 +79,7 @@ void require(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
 }
 
-template<typename Function>
+template <typename Function>
 void expect_invalid_argument(Function&& function) {
     try {
         std::forward<Function>(function)();
@@ -91,23 +91,23 @@ void expect_invalid_argument(Function&& function) {
 
 void test_all_assessment_states_are_distinct() {
     const std::array<DevelUpdateAssessment, 6> assessments = {
-            DevelUpdateAssessment::not_applicable(),
-            DevelUpdateAssessment::update_available(),
-            DevelUpdateAssessment::up_to_date(),
-            DevelUpdateAssessment::unknown(
-                    DevelUnknownReason::RemoteObservationFailed),
-            DevelUpdateAssessment::requires_check(
-                    DevelRequiresCheckReason::
-                            NoAuthoritativeBuildProvenance),
-            DevelUpdateAssessment::unsupported(
-                    DevelUnsupportedReason::UnsupportedVcs)};
+        DevelUpdateAssessment::not_applicable(),
+        DevelUpdateAssessment::update_available(),
+        DevelUpdateAssessment::up_to_date(),
+        DevelUpdateAssessment::unknown(
+            DevelUnknownReason::RemoteObservationFailed),
+        DevelUpdateAssessment::requires_check(
+            DevelRequiresCheckReason::
+                NoAuthoritativeBuildProvenance),
+        DevelUpdateAssessment::unsupported(
+            DevelUnsupportedReason::UnsupportedVcs)};
     const std::array<DevelUpdateAssessmentState, 6> expected_states = {
-            DevelUpdateAssessmentState::NotApplicable,
-            DevelUpdateAssessmentState::UpdateAvailable,
-            DevelUpdateAssessmentState::UpToDate,
-            DevelUpdateAssessmentState::Unknown,
-            DevelUpdateAssessmentState::RequiresCheck,
-            DevelUpdateAssessmentState::Unsupported};
+        DevelUpdateAssessmentState::NotApplicable,
+        DevelUpdateAssessmentState::UpdateAvailable,
+        DevelUpdateAssessmentState::UpToDate,
+        DevelUpdateAssessmentState::Unknown,
+        DevelUpdateAssessmentState::RequiresCheck,
+        DevelUpdateAssessmentState::Unsupported};
 
     for(std::size_t index = 0; index < assessments.size(); ++index) {
         require(assessments[index].state() == expected_states[index],
@@ -122,82 +122,82 @@ void test_all_assessment_states_are_distinct() {
 
 void test_success_states_have_no_reason() {
     for(const DevelUpdateAssessment& assessment : {
-                DevelUpdateAssessment::not_applicable(),
-                DevelUpdateAssessment::update_available(),
-                DevelUpdateAssessment::up_to_date()}) {
+            DevelUpdateAssessment::not_applicable(),
+            DevelUpdateAssessment::update_available(),
+            DevelUpdateAssessment::up_to_date()}) {
         require(assessment.unknown_reason() == nullptr &&
-                        assessment.requires_check_reason() == nullptr &&
-                        assessment.unsupported_reason() == nullptr,
+                    assessment.requires_check_reason() == nullptr &&
+                    assessment.unsupported_reason() == nullptr,
                 "Success assessment carried a non-success reason.");
     }
 }
 
 void test_all_unknown_reasons_are_typed_and_lossless() {
     const std::array reasons = {
-            DevelUnknownReason::RemoteObservationFailed,
-            DevelUnknownReason::RemoteObservationTimedOut,
-            DevelUnknownReason::RemoteRefNotFound,
-            DevelUnknownReason::RemoteResultMalformed,
-            DevelUnknownReason::RemoteResultAmbiguous};
+        DevelUnknownReason::RemoteObservationFailed,
+        DevelUnknownReason::RemoteObservationTimedOut,
+        DevelUnknownReason::RemoteRefNotFound,
+        DevelUnknownReason::RemoteResultMalformed,
+        DevelUnknownReason::RemoteResultAmbiguous};
 
     for(DevelUnknownReason reason : reasons) {
         const DevelUpdateAssessment assessment =
-                DevelUpdateAssessment::unknown(reason);
+            DevelUpdateAssessment::unknown(reason);
         require(assessment.state() == DevelUpdateAssessmentState::Unknown &&
-                        assessment.unknown_reason() != nullptr &&
-                        *assessment.unknown_reason() == reason &&
-                        assessment.requires_check_reason() == nullptr &&
-                        assessment.unsupported_reason() == nullptr,
+                    assessment.unknown_reason() != nullptr &&
+                    *assessment.unknown_reason() == reason &&
+                    assessment.requires_check_reason() == nullptr &&
+                    assessment.unsupported_reason() == nullptr,
                 "Unknown reason was flattened or entered another state.");
     }
 }
 
 void test_all_requires_check_reasons_are_typed_and_lossless() {
     const std::array reasons = {
-            DevelRequiresCheckReason::SuffixCandidateOnly,
-            DevelRequiresCheckReason::NoAuthoritativeBuildProvenance,
-            DevelRequiresCheckReason::InstalledArtifactDrift,
-            DevelRequiresCheckReason::AurRecipeAdvanced,
-            DevelRequiresCheckReason::SourceMetadataMissing,
-            DevelRequiresCheckReason::SourceMetadataMalformed,
-            DevelRequiresCheckReason::SourceIdentityChanged,
-            DevelRequiresCheckReason::TransportRequiresCheck,
-            DevelRequiresCheckReason::SelectorRequiresCheck,
-            DevelRequiresCheckReason::MultipleFloatingSources,
-            DevelRequiresCheckReason::ArchitectureSpecificSourceUnresolved,
-            DevelRequiresCheckReason::ProvenanceMissing,
-            DevelRequiresCheckReason::ProvenanceInvalid,
-            DevelRequiresCheckReason::ProvenanceCorrupted,
-            DevelRequiresCheckReason::ProvenanceFutureSchema,
-            DevelRequiresCheckReason::BuildSourceProofUnavailable};
+        DevelRequiresCheckReason::SuffixCandidateOnly,
+        DevelRequiresCheckReason::NoAuthoritativeBuildProvenance,
+        DevelRequiresCheckReason::InstalledArtifactDrift,
+        DevelRequiresCheckReason::AurRecipeAdvanced,
+        DevelRequiresCheckReason::SourceMetadataMissing,
+        DevelRequiresCheckReason::SourceMetadataMalformed,
+        DevelRequiresCheckReason::SourceIdentityChanged,
+        DevelRequiresCheckReason::TransportRequiresCheck,
+        DevelRequiresCheckReason::SelectorRequiresCheck,
+        DevelRequiresCheckReason::MultipleFloatingSources,
+        DevelRequiresCheckReason::ArchitectureSpecificSourceUnresolved,
+        DevelRequiresCheckReason::ProvenanceMissing,
+        DevelRequiresCheckReason::ProvenanceInvalid,
+        DevelRequiresCheckReason::ProvenanceCorrupted,
+        DevelRequiresCheckReason::ProvenanceFutureSchema,
+        DevelRequiresCheckReason::BuildSourceProofUnavailable};
 
     for(DevelRequiresCheckReason reason : reasons) {
         const DevelUpdateAssessment assessment =
-                DevelUpdateAssessment::requires_check(reason);
+            DevelUpdateAssessment::requires_check(reason);
         require(assessment.state() ==
-                                DevelUpdateAssessmentState::RequiresCheck &&
-                        assessment.requires_check_reason() != nullptr &&
-                        *assessment.requires_check_reason() == reason &&
-                        assessment.unknown_reason() == nullptr &&
-                        assessment.unsupported_reason() == nullptr,
+                        DevelUpdateAssessmentState::RequiresCheck &&
+                    assessment.requires_check_reason() != nullptr &&
+                    *assessment.requires_check_reason() == reason &&
+                    assessment.unknown_reason() == nullptr &&
+                    assessment.unsupported_reason() == nullptr,
                 "Check-required reason was flattened or entered another state.");
     }
 }
 
 void test_all_unsupported_reasons_are_typed_and_lossless() {
     const std::array reasons = {
-            DevelUnsupportedReason::UnsupportedVcs,
-            DevelUnsupportedReason::UnsupportedSourceForm};
+        DevelUnsupportedReason::UnsupportedVcs,
+        DevelUnsupportedReason::UnsupportedSourceForm};
 
     for(DevelUnsupportedReason reason : reasons) {
         const DevelUpdateAssessment assessment =
-                DevelUpdateAssessment::unsupported(reason);
+            DevelUpdateAssessment::unsupported(reason);
         require(assessment.state() ==
-                                DevelUpdateAssessmentState::Unsupported &&
-                        assessment.unsupported_reason() != nullptr &&
-                        *assessment.unsupported_reason() == reason &&
-                        assessment.unknown_reason() == nullptr &&
-                        assessment.requires_check_reason() == nullptr,
+                        DevelUpdateAssessmentState::Unsupported &&
+                    assessment.unsupported_reason() != nullptr &&
+                    *assessment.unsupported_reason() == reason &&
+                    assessment.unknown_reason() == nullptr &&
+                    assessment.requires_check_reason() == nullptr,
                 "Unsupported reason was flattened or entered another state.");
     }
 }
@@ -205,15 +205,15 @@ void test_all_unsupported_reasons_are_typed_and_lossless() {
 void test_invalid_reason_values_are_rejected() {
     expect_invalid_argument([] {
         static_cast<void>(DevelUpdateAssessment::unknown(
-                static_cast<DevelUnknownReason>(-1)));
+            static_cast<DevelUnknownReason>(-1)));
     });
     expect_invalid_argument([] {
         static_cast<void>(DevelUpdateAssessment::requires_check(
-                static_cast<DevelRequiresCheckReason>(-1)));
+            static_cast<DevelRequiresCheckReason>(-1)));
     });
     expect_invalid_argument([] {
         static_cast<void>(DevelUpdateAssessment::unsupported(
-                static_cast<DevelUnsupportedReason>(-1)));
+            static_cast<DevelUnsupportedReason>(-1)));
     });
 }
 

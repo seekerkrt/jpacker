@@ -42,7 +42,7 @@ enum class LoggerDiagnosticLevel {
 
 struct LoggerDiagnosticEvent {
     LoggerDiagnosticLevel level = LoggerDiagnosticLevel::Info;
-    std::string           message;
+    std::string message;
 };
 
 // Synchronous route preparation can retain diagnostics without touching the
@@ -52,13 +52,13 @@ class ScopedLoggerDiagnosticCapture final {
 public:
     ScopedLoggerDiagnosticCapture();
     ScopedLoggerDiagnosticCapture(
-            const ScopedLoggerDiagnosticCapture&) = delete;
+        const ScopedLoggerDiagnosticCapture&) = delete;
     ScopedLoggerDiagnosticCapture& operator=(
-            const ScopedLoggerDiagnosticCapture&) = delete;
+        const ScopedLoggerDiagnosticCapture&) = delete;
     ScopedLoggerDiagnosticCapture(
-            ScopedLoggerDiagnosticCapture&&) = delete;
+        ScopedLoggerDiagnosticCapture&&) = delete;
     ScopedLoggerDiagnosticCapture& operator=(
-            ScopedLoggerDiagnosticCapture&&) = delete;
+        ScopedLoggerDiagnosticCapture&&) = delete;
     ~ScopedLoggerDiagnosticCapture() noexcept;
 
     void stop() noexcept;
@@ -77,35 +77,35 @@ private:
 // CLI 表示と log file 出力をまとめる薄い logger。
 class Logger {
     static bool capture_diagnostic(
-            LoggerDiagnosticLevel level, const std::string& message);
+        LoggerDiagnosticLevel level, const std::string& message);
     static void write_log_record(
-            std::string_view level, const std::string& message);
+        std::string_view level, const std::string& message);
     static void adopt_state_log_backend(
-            std::unique_ptr<logging_detail::StateLogBackend> backend,
-            const std::string& initial_info_message);
+        std::unique_ptr<logging_detail::StateLogBackend> backend,
+        const std::string& initial_info_message);
     static void write_noexcept_warning_fallback() noexcept;
 
 public:
     static void set_diagnostics_to_stderr();
     static void init(const std::filesystem::path& path);
     static void init(
-            xdg_state_log::PreparedLogFile&& log_file,
-            const std::string& initial_info_message);
+        xdg_state_log::PreparedLogFile&& log_file,
+        const std::string& initial_info_message);
     static void shutdown();
     static void info(const std::string& msg);
     static void warn(const std::string& msg);
     // Cleanup destructor専用。factoryはnoexcept boundary内で同期評価する。
     // Call siteはpath/errorを参照captureし、事前にmessageを構築しない。
     template <typename MessageFactory>
-    requires requires(MessageFactory&& make_message) {
-        {
-            std::forward<MessageFactory>(make_message)()
-        } -> std::convertible_to<std::string>;
-    }
+        requires requires(MessageFactory&& make_message) {
+            {
+                std::forward<MessageFactory>(make_message)()
+            } -> std::convertible_to<std::string>;
+        }
     static void warn_noexcept(MessageFactory&& make_message) noexcept {
         try {
             std::string message(
-                    std::forward<MessageFactory>(make_message)());
+                std::forward<MessageFactory>(make_message)());
             warn(message);
         } catch(...) {
             write_noexcept_warning_fallback();

@@ -25,20 +25,20 @@ struct NumstatRecord {
 };
 
 ReviewedSourceProjectionFailure malformed(
-        ReviewedSourceMachineStream stream, std::size_t record_index) {
+    ReviewedSourceMachineStream stream, std::size_t record_index) {
     return ReviewedSourceProjectionFailure{
-            ReviewedSourceProjectionFailureReason::MalformedMachineOutput,
-            stream, record_index};
+        ReviewedSourceProjectionFailureReason::MalformedMachineOutput,
+        stream, record_index};
 }
 
 ReviewedSourceProjectionFailure inconsistent(std::size_t record_index) {
     return ReviewedSourceProjectionFailure{
-            ReviewedSourceProjectionFailureReason::InconsistentMachineOutput,
-            ReviewedSourceMachineStream::CrossStream, record_index};
+        ReviewedSourceProjectionFailureReason::InconsistentMachineOutput,
+        ReviewedSourceMachineStream::CrossStream, record_index};
 }
 
 std::optional<std::string_view> take_nul_field(
-        std::string_view output, std::size_t& offset) {
+    std::string_view output, std::size_t& offset) {
     if(offset >= output.size()) return std::nullopt;
     const std::size_t end = output.find('\0', offset);
     if(end == std::string_view::npos) return std::nullopt;
@@ -47,11 +47,11 @@ std::optional<std::string_view> take_nul_field(
     return field;
 }
 
-template<typename Integer>
+template <typename Integer>
 bool parse_unsigned_decimal(std::string_view value, Integer& result) {
     if(value.empty()) return false;
     const auto [end, error] = std::from_chars(
-            value.data(), value.data() + value.size(), result);
+        value.data(), value.data() + value.size(), result);
     return error == std::errc{} && end == value.data() + value.size();
 }
 
@@ -64,15 +64,15 @@ std::optional<ReviewedSourceFileMode> parse_mode(std::string_view value) {
 }
 
 bool object_type_matches_mode(
-        std::string_view object_type, ReviewedSourceFileMode mode) {
+    std::string_view object_type, ReviewedSourceFileMode mode) {
     return mode == ReviewedSourceFileMode::Gitlink
-            ? object_type == "commit"
-            : object_type == "blob";
+               ? object_type == "commit"
+               : object_type == "blob";
 }
 
 using InventoryMap = std::map<
-        std::string,
-        const ReviewedSourceFileVersion*>;
+    std::string,
+    const ReviewedSourceFileVersion*>;
 
 InventoryMap inventory_map(const ReviewedSourceTreeInventory& inventory) {
     InventoryMap result;
@@ -89,23 +89,23 @@ parse_name_status(std::string_view output, bool detect_renames) {
     while(offset < output.size()) {
         const std::size_t record_index = records.size();
         const std::optional<std::string_view> status =
-                take_nul_field(output, offset);
+            take_nul_field(output, offset);
         if(!status.has_value() || status->empty()) {
             return malformed(
-                    ReviewedSourceMachineStream::NameStatus, record_index);
+                ReviewedSourceMachineStream::NameStatus, record_index);
         }
 
         StatusRecord record;
         if(status->front() == 'R') {
             if(!detect_renames || status->size() < 2) {
                 return malformed(
-                        ReviewedSourceMachineStream::NameStatus, record_index);
+                    ReviewedSourceMachineStream::NameStatus, record_index);
             }
             unsigned int score = 0;
             if(!parse_unsigned_decimal(status->substr(1), score) ||
                score < 50 || score > 100) {
                 return malformed(
-                        ReviewedSourceMachineStream::NameStatus, record_index);
+                    ReviewedSourceMachineStream::NameStatus, record_index);
             }
             const auto old_path = take_nul_field(output, offset);
             const auto new_path = take_nul_field(output, offset);
@@ -113,7 +113,7 @@ parse_name_status(std::string_view output, bool detect_renames) {
                !new_path.has_value() || new_path->empty() ||
                *old_path == *new_path) {
                 return malformed(
-                        ReviewedSourceMachineStream::NameStatus, record_index);
+                    ReviewedSourceMachineStream::NameStatus, record_index);
             }
             record.code = 'R';
             record.similarity = static_cast<std::uint8_t>(score);
@@ -124,12 +124,12 @@ parse_name_status(std::string_view output, bool detect_renames) {
                (*status != "A" && *status != "M" && *status != "D" &&
                 *status != "T")) {
                 return malformed(
-                        ReviewedSourceMachineStream::NameStatus, record_index);
+                    ReviewedSourceMachineStream::NameStatus, record_index);
             }
             const auto path = take_nul_field(output, offset);
             if(!path.has_value() || path->empty()) {
                 return malformed(
-                        ReviewedSourceMachineStream::NameStatus, record_index);
+                    ReviewedSourceMachineStream::NameStatus, record_index);
             }
             record.code = status->front();
             record.old_path = std::string(*path);
@@ -156,7 +156,7 @@ parse_numstat(std::string_view output) {
         }
         const std::string_view added = output.substr(offset, first_tab - offset);
         const std::string_view deleted = output.substr(
-                first_tab + 1, second_tab - first_tab - 1);
+            first_tab + 1, second_tab - first_tab - 1);
         offset = second_tab + 1;
 
         ReviewedSourceContentChange content;
@@ -169,7 +169,7 @@ parse_numstat(std::string_view output) {
                !parse_unsigned_decimal(added, added_lines) ||
                !parse_unsigned_decimal(deleted, deleted_lines)) {
                 return malformed(
-                        ReviewedSourceMachineStream::Numstat, record_index);
+                    ReviewedSourceMachineStream::Numstat, record_index);
             }
             content = ReviewedSourceTextChange{added_lines, deleted_lines};
         }
@@ -184,7 +184,7 @@ parse_numstat(std::string_view output) {
                !new_path.has_value() || new_path->empty() ||
                *old_path == *new_path) {
                 return malformed(
-                        ReviewedSourceMachineStream::Numstat, record_index);
+                    ReviewedSourceMachineStream::Numstat, record_index);
             }
             record.old_path = std::string(*old_path);
             record.new_path = std::string(*new_path);
@@ -192,7 +192,7 @@ parse_numstat(std::string_view output) {
             const auto path = take_nul_field(output, offset);
             if(!path.has_value() || path->empty()) {
                 return malformed(
-                        ReviewedSourceMachineStream::Numstat, record_index);
+                    ReviewedSourceMachineStream::Numstat, record_index);
             }
             record.old_path = std::string(*path);
             record.new_path = std::string(*path);
@@ -203,32 +203,32 @@ parse_numstat(std::string_view output) {
 }
 
 const ReviewedSourceFileVersion* find_entry(
-        const InventoryMap& inventory, const std::string& path) {
+    const InventoryMap& inventory, const std::string& path) {
     const auto found = inventory.find(path);
     return found == inventory.end() ? nullptr : found->second;
 }
 
 bool add_blob_size(
-        const ReviewedSourceFileVersion& entry,
-        std::uintmax_t& aggregate,
-        ReviewedSourceProjectionFailure& failure) {
+    const ReviewedSourceFileVersion& entry,
+    std::uintmax_t& aggregate,
+    ReviewedSourceProjectionFailure& failure) {
     if(!entry.blob_size().has_value()) return true;
     const std::uintmax_t size = *entry.blob_size();
     if(size > REVIEWED_SOURCE_SINGLE_BLOB_LIMIT) {
         failure = ReviewedSourceProjectionFailure{
-                ReviewedSourceProjectionFailureReason::
-                        SingleBlobSizeLimitExceeded,
-                ReviewedSourceMachineStream::ResourcePreflight,
-                0, size, REVIEWED_SOURCE_SINGLE_BLOB_LIMIT};
+            ReviewedSourceProjectionFailureReason::
+                SingleBlobSizeLimitExceeded,
+            ReviewedSourceMachineStream::ResourcePreflight,
+            0, size, REVIEWED_SOURCE_SINGLE_BLOB_LIMIT};
         return false;
     }
     if(size > REVIEWED_SOURCE_AGGREGATE_BLOB_LIMIT - aggregate) {
         failure = ReviewedSourceProjectionFailure{
-                ReviewedSourceProjectionFailureReason::
-                        AggregateBlobSizeLimitExceeded,
-                ReviewedSourceMachineStream::ResourcePreflight,
-                0, REVIEWED_SOURCE_AGGREGATE_BLOB_LIMIT + 1,
-                REVIEWED_SOURCE_AGGREGATE_BLOB_LIMIT};
+            ReviewedSourceProjectionFailureReason::
+                AggregateBlobSizeLimitExceeded,
+            ReviewedSourceMachineStream::ResourcePreflight,
+            0, REVIEWED_SOURCE_AGGREGATE_BLOB_LIMIT + 1,
+            REVIEWED_SOURCE_AGGREGATE_BLOB_LIMIT};
         return false;
     }
     aggregate += size;
@@ -238,7 +238,7 @@ bool add_blob_size(
 } // namespace
 
 ReviewedSourceCommitParseResult parse_reviewed_source_commit_output(
-        std::string_view output) {
+    std::string_view output) {
     const bool valid_size = output.size() == 41 || output.size() == 65;
     if(!valid_size || output.back() != '\n') {
         return malformed(ReviewedSourceMachineStream::CommitResolution, 0);
@@ -252,10 +252,10 @@ ReviewedSourceCommitParseResult parse_reviewed_source_commit_output(
 }
 
 ReviewedSourceTreeParseResult parse_reviewed_source_tree_output(
-        std::string_view metadata_output,
-        std::string_view path_output,
-        GitObjectFormat object_format,
-        ReviewedSourceMachineStream stream) {
+    std::string_view metadata_output,
+    std::string_view path_output,
+    GitObjectFormat object_format,
+    ReviewedSourceMachineStream stream) {
     ReviewedSourceTreeInventory inventory;
     std::set<std::string> paths;
     std::size_t metadata_offset = 0;
@@ -263,13 +263,13 @@ ReviewedSourceTreeParseResult parse_reviewed_source_tree_output(
     while(metadata_offset < metadata_output.size()) {
         const std::size_t record_index = inventory.entries.size();
         const auto mode_field = take_nul_field(
-                metadata_output, metadata_offset);
+            metadata_output, metadata_offset);
         const auto type_field = take_nul_field(
-                metadata_output, metadata_offset);
+            metadata_output, metadata_offset);
         const auto object_field = take_nul_field(
-                metadata_output, metadata_offset);
+            metadata_output, metadata_offset);
         const auto size_field = take_nul_field(
-                metadata_output, metadata_offset);
+            metadata_output, metadata_offset);
         const auto path_field = take_nul_field(path_output, path_offset);
         if(!mode_field.has_value() || !type_field.has_value() ||
            !object_field.has_value() || !size_field.has_value() ||
@@ -296,17 +296,17 @@ ReviewedSourceTreeParseResult parse_reviewed_source_tree_output(
 
         try {
             ReviewedSourceObjectId object_id =
-                    ReviewedSourceObjectId::make(std::string(*object_field));
+                ReviewedSourceObjectId::make(std::string(*object_field));
             if(object_id.format() != object_format) {
                 return malformed(stream, record_index);
             }
             ReviewedSourcePath path =
-                    ReviewedSourcePath::make(std::string(*path_field));
+                ReviewedSourcePath::make(std::string(*path_field));
             if(!paths.insert(path.raw_bytes()).second) {
                 return malformed(stream, record_index);
             }
             inventory.entries.push_back(ReviewedSourceFileVersion::make(
-                    std::move(path), *mode, std::move(object_id), blob_size));
+                std::move(path), *mode, std::move(object_id), blob_size));
         } catch(const std::invalid_argument&) {
             return malformed(stream, record_index);
         }
@@ -319,9 +319,9 @@ ReviewedSourceTreeParseResult parse_reviewed_source_tree_output(
 
 ReviewedSourceResourcePreflightResult
 preflight_reviewed_source_projection_resources(
-        const ReviewedSourceTreeInventory& baseline,
-        const ReviewedSourceTreeInventory& target,
-        bool detect_renames) {
+    const ReviewedSourceTreeInventory& baseline,
+    const ReviewedSourceTreeInventory& target,
+    bool detect_renames) {
     const InventoryMap old_entries = inventory_map(baseline);
     const InventoryMap new_entries = inventory_map(target);
     std::size_t rename_candidates = 0;
@@ -330,7 +330,7 @@ preflight_reviewed_source_projection_resources(
 
     for(const auto& [path, old_entry] : old_entries) {
         const ReviewedSourceFileVersion* new_entry =
-                find_entry(new_entries, path);
+            find_entry(new_entries, path);
         if(new_entry == nullptr) {
             ++rename_candidates;
             if(!add_blob_size(*old_entry, aggregate_size, failure)) return failure;
@@ -351,21 +351,21 @@ preflight_reviewed_source_projection_resources(
     if(detect_renames &&
        rename_candidates > REVIEWED_SOURCE_RENAME_CANDIDATE_LIMIT) {
         return ReviewedSourceProjectionFailure{
-                ReviewedSourceProjectionFailureReason::
-                        RenameCandidateLimitExceeded,
-                ReviewedSourceMachineStream::ResourcePreflight,
-                0, rename_candidates,
-                REVIEWED_SOURCE_RENAME_CANDIDATE_LIMIT};
+            ReviewedSourceProjectionFailureReason::
+                RenameCandidateLimitExceeded,
+            ReviewedSourceMachineStream::ResourcePreflight,
+            0, rename_candidates,
+            REVIEWED_SOURCE_RENAME_CANDIDATE_LIMIT};
     }
     return std::monostate{};
 }
 
 ReviewedSourceChangeAssemblyResult assemble_reviewed_source_changes(
-        const ReviewedSourceTreeInventory& baseline,
-        const ReviewedSourceTreeInventory& target,
-        std::string_view name_status_output,
-        std::string_view numstat_output,
-        bool detect_renames) {
+    const ReviewedSourceTreeInventory& baseline,
+    const ReviewedSourceTreeInventory& target,
+    std::string_view name_status_output,
+    std::string_view numstat_output,
+    bool detect_renames) {
     auto parsed_status = parse_name_status(name_status_output, detect_renames);
     if(std::holds_alternative<ReviewedSourceProjectionFailure>(parsed_status)) {
         return std::get<ReviewedSourceProjectionFailure>(parsed_status);
@@ -394,76 +394,76 @@ ReviewedSourceChangeAssemblyResult assemble_reviewed_source_changes(
         }
 
         const ReviewedSourceFileVersion* old_entry =
-                find_entry(old_entries, status.old_path);
+            find_entry(old_entries, status.old_path);
         const ReviewedSourceFileVersion* new_entry =
-                find_entry(new_entries, status.new_path);
+            find_entry(new_entries, status.new_path);
         switch(status.code) {
-        case 'A':
-            if(old_entry != nullptr || new_entry == nullptr ||
-               !consumed_new.insert(status.new_path).second) {
-                return inconsistent(i);
-            }
-            changes.push_back(ReviewedSourceAdded{
+            case 'A':
+                if(old_entry != nullptr || new_entry == nullptr ||
+                   !consumed_new.insert(status.new_path).second) {
+                    return inconsistent(i);
+                }
+                changes.push_back(ReviewedSourceAdded{
                     *new_entry, numstat.content});
-            break;
-        case 'D':
-            if(old_entry == nullptr || new_entry != nullptr ||
-               !consumed_old.insert(status.old_path).second) {
-                return inconsistent(i);
-            }
-            changes.push_back(ReviewedSourceDeleted{
+                break;
+            case 'D':
+                if(old_entry == nullptr || new_entry != nullptr ||
+                   !consumed_old.insert(status.old_path).second) {
+                    return inconsistent(i);
+                }
+                changes.push_back(ReviewedSourceDeleted{
                     *old_entry, numstat.content});
-            break;
-        case 'M':
-            if(old_entry == nullptr || new_entry == nullptr ||
-               *old_entry == *new_entry ||
-               reviewed_source_file_type(old_entry->mode()) !=
+                break;
+            case 'M':
+                if(old_entry == nullptr || new_entry == nullptr ||
+                   *old_entry == *new_entry ||
+                   reviewed_source_file_type(old_entry->mode()) !=
                        reviewed_source_file_type(new_entry->mode()) ||
-               !consumed_old.insert(status.old_path).second ||
-               !consumed_new.insert(status.new_path).second) {
-                return inconsistent(i);
-            }
-            changes.push_back(ReviewedSourceModified{
+                   !consumed_old.insert(status.old_path).second ||
+                   !consumed_new.insert(status.new_path).second) {
+                    return inconsistent(i);
+                }
+                changes.push_back(ReviewedSourceModified{
                     *old_entry, *new_entry, numstat.content});
-            break;
-        case 'T':
-            if(old_entry == nullptr || new_entry == nullptr ||
-               reviewed_source_file_type(old_entry->mode()) ==
+                break;
+            case 'T':
+                if(old_entry == nullptr || new_entry == nullptr ||
+                   reviewed_source_file_type(old_entry->mode()) ==
                        reviewed_source_file_type(new_entry->mode()) ||
-               !consumed_old.insert(status.old_path).second ||
-               !consumed_new.insert(status.new_path).second) {
-                return inconsistent(i);
-            }
-            changes.push_back(ReviewedSourceTypeChanged{
+                   !consumed_old.insert(status.old_path).second ||
+                   !consumed_new.insert(status.new_path).second) {
+                    return inconsistent(i);
+                }
+                changes.push_back(ReviewedSourceTypeChanged{
                     *old_entry, *new_entry, numstat.content});
-            break;
-        case 'R':
-            if(!status.similarity.has_value() || old_entry == nullptr ||
-               new_entry == nullptr ||
-               find_entry(new_entries, status.old_path) != nullptr ||
-               find_entry(old_entries, status.new_path) != nullptr ||
-               !consumed_old.insert(status.old_path).second ||
-               !consumed_new.insert(status.new_path).second) {
-                return inconsistent(i);
-            }
-            changes.push_back(ReviewedSourceRenamed{
+                break;
+            case 'R':
+                if(!status.similarity.has_value() || old_entry == nullptr ||
+                   new_entry == nullptr ||
+                   find_entry(new_entries, status.old_path) != nullptr ||
+                   find_entry(old_entries, status.new_path) != nullptr ||
+                   !consumed_old.insert(status.old_path).second ||
+                   !consumed_new.insert(status.new_path).second) {
+                    return inconsistent(i);
+                }
+                changes.push_back(ReviewedSourceRenamed{
                     *old_entry, *new_entry, *status.similarity,
                     numstat.content});
-            break;
-        default:
-            return inconsistent(i);
+                break;
+            default:
+                return inconsistent(i);
         }
     }
 
     for(const auto& [path, old_entry] : old_entries) {
         const ReviewedSourceFileVersion* new_entry =
-                find_entry(new_entries, path);
+            find_entry(new_entries, path);
         const bool changed = new_entry == nullptr || *old_entry != *new_entry;
         if(changed != consumed_old.contains(path)) return inconsistent(changes.size());
     }
     for(const auto& [path, new_entry] : new_entries) {
         const ReviewedSourceFileVersion* old_entry =
-                find_entry(old_entries, path);
+            find_entry(old_entries, path);
         const bool changed = old_entry == nullptr || *old_entry != *new_entry;
         if(changed != consumed_new.contains(path)) return inconsistent(changes.size());
     }

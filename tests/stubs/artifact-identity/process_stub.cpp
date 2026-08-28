@@ -38,7 +38,7 @@ void set_capture_hook(void (*hook)()) {
 }
 
 void set_captured_command_results(
-        std::vector<CapturedCommandResult> results) {
+    std::vector<CapturedCommandResult> results) {
     std::vector<CapturedCommandStep> steps;
     steps.reserve(results.size());
     for(CapturedCommandResult& result : results) {
@@ -48,7 +48,7 @@ void set_captured_command_results(
 }
 
 void set_captured_command_steps(
-        std::vector<CapturedCommandStep> steps) {
+    std::vector<CapturedCommandStep> steps) {
     g_steps = std::move(steps);
     g_uses_ordered_steps = true;
 }
@@ -78,11 +78,11 @@ CapturedCommandResult capture_command_output_raw(const char* command) {
     }
     if(call_index >= g_steps.size()) {
         throw std::runtime_error(
-                "Unexpected extra capture_command_output_raw call in artifact identity test.");
+            "Unexpected extra capture_command_output_raw call in artifact identity test.");
     }
 
     const artifact_identity_test_stub::CapturedCommandStep& step =
-            g_steps[call_index];
+        g_steps[call_index];
     if(step.before_hook != nullptr) step.before_hook();
     CapturedCommandResult result = step.result;
     if(step.after_hook != nullptr) step.after_hook();
@@ -96,8 +96,8 @@ int run_command(const std::string&) {
 }
 
 int run_command_with_parent_independent_lifetime_guard(
-        const std::string& command,
-        int,
-        const std::string&) {
+    const std::string& command,
+    int,
+    const std::string&) {
     return run_command(command);
 }

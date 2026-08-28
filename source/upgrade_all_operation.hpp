@@ -81,8 +81,8 @@ enum class UpgradeAllExplicitSourceAdapterIssueKind {
 
 struct UpgradeAllExplicitSourceAdapterIssue {
     UpgradeAllExplicitSourceAdapterIssueKind kind =
-            UpgradeAllExplicitSourceAdapterIssueKind::
-                    AdapterCorrelationInconsistent;
+        UpgradeAllExplicitSourceAdapterIssueKind::
+            AdapterCorrelationInconsistent;
     std::optional<std::size_t> adapter_index;
     std::optional<std::size_t> original_preference_index;
     std::optional<std::string> preference_package_name;
@@ -112,7 +112,7 @@ struct UpgradeAllExplicitSourceIdentityAdapter {
 
 UpgradeAllExplicitSourceIdentityAdapter
 adapt_prepared_source_identities_for_upgrade_all(
-        const SystemSourceUpgradePreparedSnapshot& source_snapshot);
+    const SystemSourceUpgradePreparedSnapshot& source_snapshot);
 
 enum class UpgradeAllOperationWarningKind {
     RegisteredSourcePreference,
@@ -121,7 +121,7 @@ enum class UpgradeAllOperationWarningKind {
 
 struct UpgradeAllOperationWarning {
     UpgradeAllOperationWarningKind kind =
-            UpgradeAllOperationWarningKind::RegisteredSourcePreference;
+        UpgradeAllOperationWarningKind::RegisteredSourcePreference;
     UpgradeAllOperationPhase phase = UpgradeAllOperationPhase::Preparation;
     std::optional<std::size_t> original_preference_index;
     std::optional<std::string> package_name;
@@ -149,7 +149,7 @@ enum class UpgradeAllOperationIssueKind {
 
 struct UpgradeAllOperationIssue {
     UpgradeAllOperationIssueKind kind =
-            UpgradeAllOperationIssueKind::UnknownFailure;
+        UpgradeAllOperationIssueKind::UnknownFailure;
     UpgradeAllOperationPhase phase = UpgradeAllOperationPhase::Preparation;
     std::optional<std::size_t> adapter_index;
     std::optional<std::size_t> original_preference_index;
@@ -158,9 +158,9 @@ struct UpgradeAllOperationIssue {
     std::optional<std::string> package_name;
     std::optional<PackageMetadataFailure> package_metadata_failure;
     std::optional<xdg_paths::ResolutionFailure>
-            cache_resolution_failure;
+        cache_resolution_failure;
     std::optional<xdg_directory_safety::PreparationFailure>
-            cache_preparation_failure;
+        cache_preparation_failure;
     std::optional<TrustedCacheFailure> trusted_cache_failure;
     std::string diagnostic;
 };
@@ -183,17 +183,17 @@ struct UpgradeAllOperationPreparedSnapshot {
 class UpgradeAllOperationProjectionAuthority final {
 public:
     UpgradeAllOperationProjectionAuthority(
-            const UpgradeAllOperationProjectionAuthority&) = delete;
+        const UpgradeAllOperationProjectionAuthority&) = delete;
     UpgradeAllOperationProjectionAuthority& operator=(
-            const UpgradeAllOperationProjectionAuthority&) = delete;
+        const UpgradeAllOperationProjectionAuthority&) = delete;
     UpgradeAllOperationProjectionAuthority(
-            UpgradeAllOperationProjectionAuthority&&) noexcept = default;
+        UpgradeAllOperationProjectionAuthority&&) noexcept = default;
     UpgradeAllOperationProjectionAuthority& operator=(
-            UpgradeAllOperationProjectionAuthority&&) noexcept = default;
+        UpgradeAllOperationProjectionAuthority&&) noexcept = default;
     ~UpgradeAllOperationProjectionAuthority() = default;
 
     [[nodiscard]] const UpgradeAllOperationPreparedSnapshot& snapshot()
-            const noexcept {
+        const noexcept {
         return snapshot_.get();
     }
     [[nodiscard]] const SystemSourceUpgradeProjectionAuthority&
@@ -203,13 +203,14 @@ public:
 
 private:
     UpgradeAllOperationProjectionAuthority(
-            const UpgradeAllOperationPreparedSnapshot& snapshot,
-            const SystemSourceUpgradeProjectionAuthority& system_source)
-        : snapshot_(snapshot), system_source_(system_source) {}
+        const UpgradeAllOperationPreparedSnapshot& snapshot,
+        const SystemSourceUpgradeProjectionAuthority& system_source)
+        : snapshot_(snapshot), system_source_(system_source) {
+    }
 
     std::reference_wrapper<const UpgradeAllOperationPreparedSnapshot> snapshot_;
     std::reference_wrapper<const SystemSourceUpgradeProjectionAuthority>
-            system_source_;
+        system_source_;
 
     friend class PreparedUpgradeAllOperation;
     friend struct UnifiedPlanProjectionTestAccess;
@@ -217,7 +218,7 @@ private:
 
 struct UpgradeAllForeignInventoryPhaseResult {
     UpgradeAllForeignInventoryPhaseStatus status =
-            UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
+        UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
     std::optional<UpgradeAllNotAttemptedReason> not_attempted_reason;
     std::optional<PacmanRepositoryConfiguration> repository_configuration;
     ForeignPackageInventory inventory;
@@ -227,7 +228,7 @@ struct UpgradeAllForeignInventoryPhaseResult {
 
 struct UpgradeAllAurPhaseResult {
     UpgradeAllAurPhaseStatus status =
-            UpgradeAllAurPhaseStatus::NotAttempted;
+        UpgradeAllAurPhaseStatus::NotAttempted;
     std::optional<UpgradeAllNotAttemptedReason> not_attempted_reason;
     std::optional<FilteredAurUpdateExecutionResult> operation_result;
     std::optional<std::string> diagnostic;
@@ -255,8 +256,8 @@ enum class UpgradeAllCrossSourceVersionLockCorrelationFailureKind {
 
 struct UpgradeAllCrossSourceVersionLockCorrelationFailure {
     UpgradeAllCrossSourceVersionLockCorrelationFailureKind kind =
-            UpgradeAllCrossSourceVersionLockCorrelationFailureKind::
-                    UnknownException;
+        UpgradeAllCrossSourceVersionLockCorrelationFailureKind::
+            UnknownException;
     std::optional<std::string> diagnostic;
 };
 
@@ -273,19 +274,19 @@ struct UpgradeAllCrossSourceVersionLockCorrelationResult {
 
 struct UpgradeAllOperationResult {
     UpgradeAllOperationStatus status =
-            UpgradeAllOperationStatus::InconsistentResult;
+        UpgradeAllOperationStatus::InconsistentResult;
     UpgradeAllOperationPhase stopped_phase =
-            UpgradeAllOperationPhase::Preparation;
+        UpgradeAllOperationPhase::Preparation;
     UpgradeAllOperationPreparedSnapshot prepared_snapshot;
     SystemSourceUpgradeResult system_source;
     UpgradeAllForeignInventoryPhaseResult foreign_inventory;
     UpgradeAllAurPhaseResult aur;
     std::vector<UpgradeAllDuplicateExcludedAurTarget>
-            duplicate_excluded_aur_targets;
+        duplicate_excluded_aur_targets;
     std::vector<UpgradeAllExternallySatisfiedAurBuildUnit>
-            externally_satisfied_aur_build_units;
+        externally_satisfied_aur_build_units;
     std::optional<UpgradeAllCrossSourceVersionLockCorrelationResult>
-            cross_source_version_lock_correlation;
+        cross_source_version_lock_correlation;
     std::vector<UpgradeAllOperationWarning> warnings;
     std::vector<UpgradeAllOperationIssue> issues;
     std::vector<UpgradeAllOperationDiagnostic> diagnostics;
@@ -309,26 +310,26 @@ class PreparedUpgradeAllOperation final {
 
     friend struct UpgradeAllOperationPreparationAccess;
     friend UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
-            PreparedUpgradeAllOperation prepared,
-            const AppConfig& config);
+        PreparedUpgradeAllOperation prepared,
+        const AppConfig& config);
 
     std::unique_ptr<Impl> impl_;
     std::optional<UpgradeAllOperationProjectionAuthority>
-            projection_authority_;
+        projection_authority_;
 
 public:
     PreparedUpgradeAllOperation(const PreparedUpgradeAllOperation&) = delete;
     PreparedUpgradeAllOperation& operator=(
-            const PreparedUpgradeAllOperation&) = delete;
+        const PreparedUpgradeAllOperation&) = delete;
     PreparedUpgradeAllOperation(PreparedUpgradeAllOperation&&) noexcept;
     PreparedUpgradeAllOperation& operator=(PreparedUpgradeAllOperation&&) =
-            delete;
+        delete;
     ~PreparedUpgradeAllOperation() noexcept;
 
     bool is_valid() const noexcept;
     const UpgradeAllOperationPreparedSnapshot* snapshot() const noexcept;
     const UpgradeAllOperationProjectionAuthority* projection_authority()
-            const noexcept;
+        const noexcept;
 
 #ifdef MOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS
     void make_source_snapshot_inconsistent_for_test();
@@ -336,8 +337,8 @@ public:
     void make_nested_system_source_correlation_inconsistent_for_test();
 #ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
     void set_nested_system_source_unexpected_exception_for_test(
-            SystemSourceUpgradeUnexpectedExceptionPoint point,
-            bool unknown_exception = false);
+        SystemSourceUpgradeUnexpectedExceptionPoint point,
+        bool unknown_exception = false);
 #endif
 #endif
 };
@@ -351,9 +352,9 @@ class PreparedUpgradeAllAurPreflight final {
     void prepare_foreign_inventory_stage();
     void prepare_aur_query_stage();
     void prepare_filtered_operation_stage(
-            const UpgradeAllOperationPreparedSnapshot& prepared,
-            const AppConfig& config,
-            std::optional<ValidatedCacheRoot> cache_root);
+        const UpgradeAllOperationPreparedSnapshot& prepared,
+        const AppConfig& config,
+        std::optional<ValidatedCacheRoot> cache_root);
 
     UpgradeAllForeignInventoryPhaseResult foreign_inventory_;
     std::optional<AurUpdateQueryResult> aur_query_result_;
@@ -364,21 +365,21 @@ class PreparedUpgradeAllAurPreflight final {
 
     friend PreparedUpgradeAllAurPreflight
     prepare_upgrade_all_aur_preflight(
-            const UpgradeAllOperationPreparedSnapshot& prepared,
-            const AppConfig& config);
+        const UpgradeAllOperationPreparedSnapshot& prepared,
+        const AppConfig& config);
     friend UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
-            PreparedUpgradeAllOperation prepared,
-            const AppConfig& config);
+        PreparedUpgradeAllOperation prepared,
+        const AppConfig& config);
 
 public:
     PreparedUpgradeAllAurPreflight(
-            const PreparedUpgradeAllAurPreflight&) = delete;
+        const PreparedUpgradeAllAurPreflight&) = delete;
     PreparedUpgradeAllAurPreflight& operator=(
-            const PreparedUpgradeAllAurPreflight&) = delete;
+        const PreparedUpgradeAllAurPreflight&) = delete;
     PreparedUpgradeAllAurPreflight(
-            PreparedUpgradeAllAurPreflight&&) noexcept = default;
+        PreparedUpgradeAllAurPreflight&&) noexcept = default;
     PreparedUpgradeAllAurPreflight& operator=(
-            PreparedUpgradeAllAurPreflight&&) = delete;
+        PreparedUpgradeAllAurPreflight&&) = delete;
     ~PreparedUpgradeAllAurPreflight() noexcept = default;
 
     [[nodiscard]] bool has_filtered_operation() const noexcept {
@@ -392,50 +393,50 @@ public:
         return foreign_inventory_;
     }
     [[nodiscard]] const AurUpdateQueryResult* aur_query_result()
-            const noexcept {
+        const noexcept {
         if(filtered_operation_.has_value()) {
             return &filtered_operation_->original_query_result();
         }
         return aur_query_result_.has_value()
-                ? &aur_query_result_.value()
-                : nullptr;
+                   ? &aur_query_result_.value()
+                   : nullptr;
     }
     [[nodiscard]] const AurUpdateExecutionPreflight* aur_preflight()
-            const noexcept {
+        const noexcept {
         return filtered_operation_.has_value()
-                ? &filtered_operation_->execution_preflight()
-                : nullptr;
+                   ? &filtered_operation_->execution_preflight()
+                   : nullptr;
     }
     [[nodiscard]] const PreparedFilteredAurUpdateOperation*
     filtered_operation() const noexcept {
         return filtered_operation_.has_value()
-                ? &filtered_operation_.value()
-                : nullptr;
+                   ? &filtered_operation_.value()
+                   : nullptr;
     }
     [[nodiscard]] const std::vector<UpgradeAllOperationIssue>& issues()
-            const noexcept {
+        const noexcept {
         return issues_;
     }
     [[nodiscard]] const std::optional<std::string>& diagnostic()
-            const noexcept {
+        const noexcept {
         return diagnostic_;
     }
 };
 
 // blocked resultとexecutable capabilityを同時に返さないsum type。
 using UpgradeAllOperationPreparation = std::variant<
-        PreparedUpgradeAllOperation,
-        UpgradeAllOperationResult>;
+    PreparedUpgradeAllOperation,
+    UpgradeAllOperationResult>;
 
 UpgradeAllOperationPreparation prepare_upgrade_all_operation(
-        const AppConfig& config);
+    const AppConfig& config);
 
 PreparedUpgradeAllAurPreflight prepare_upgrade_all_aur_preflight(
-        const UpgradeAllOperationPreparedSnapshot& prepared,
-        const AppConfig& config);
+    const UpgradeAllOperationPreparedSnapshot& prepared,
+    const AppConfig& config);
 
 // by-value consumeによりouterとnested capabilityを最初のsystem mutation前に
 // invalid化し、replayをtyped resultへ変換する。
 UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
-        PreparedUpgradeAllOperation prepared,
-        const AppConfig& config);
+    PreparedUpgradeAllOperation prepared,
+    const AppConfig& config);

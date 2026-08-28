@@ -27,12 +27,12 @@ void expect(bool condition, const std::string& message) {
 }
 
 void expect_path(
-        const fs::path& actual, const fs::path& expected,
-        const std::string& context) {
+    const fs::path& actual, const fs::path& expected,
+    const std::string& context) {
     if(actual != expected) {
         throw std::runtime_error(
-                context + ": expected [" + expected.string() +
-                "], actual [" + actual.string() + "]");
+            context + ": expected [" + expected.string() +
+            "], actual [" + actual.string() + "]");
     }
 }
 
@@ -40,34 +40,34 @@ struct PathMetadata {
     std::uintmax_t device;
     std::uintmax_t inode;
     std::uintmax_t owner;
-    mode_t         permissions;
+    mode_t permissions;
 };
 
 PathMetadata path_metadata(const fs::path& path) {
-    struct stat status {};
+    struct stat status{};
     if(lstat(path.c_str(), &status) != 0) {
         throw std::runtime_error(
-                "Failed to inspect test path: " + path.string());
+            "Failed to inspect test path: " + path.string());
     }
     return PathMetadata{
-            static_cast<std::uintmax_t>(status.st_dev),
-            static_cast<std::uintmax_t>(status.st_ino),
-            static_cast<std::uintmax_t>(status.st_uid),
-            static_cast<mode_t>(status.st_mode & 07777)};
+        static_cast<std::uintmax_t>(status.st_dev),
+        static_cast<std::uintmax_t>(status.st_ino),
+        static_cast<std::uintmax_t>(status.st_uid),
+        static_cast<mode_t>(status.st_mode & 07777)};
 }
 
 void set_mode(const fs::path& path, mode_t mode) {
     if(chmod(path.c_str(), mode) != 0) {
         throw std::runtime_error(
-                "Failed to set test directory mode: " + path.string());
+            "Failed to set test directory mode: " + path.string());
     }
 }
 
 void create_test_directory(
-        const fs::path& path, mode_t mode = PRIVATE_DIRECTORY_MODE) {
+    const fs::path& path, mode_t mode = PRIVATE_DIRECTORY_MODE) {
     if(!fs::create_directory(path)) {
         throw std::runtime_error(
-                "Failed to create test directory: " + path.string());
+            "Failed to create test directory: " + path.string());
     }
     set_mode(path, mode);
 }
@@ -76,34 +76,34 @@ void create_file(const fs::path& path, const std::string& contents = "sentinel")
     std::ofstream file(path, std::ios::binary);
     if(!file) {
         throw std::runtime_error(
-                "Failed to create test file: " + path.string());
+            "Failed to create test file: " + path.string());
     }
     file << contents;
 }
 
 void expect_metadata_unchanged(
-        const PathMetadata& before, const PathMetadata& after,
-        const std::string& context) {
+    const PathMetadata& before, const PathMetadata& after,
+    const std::string& context) {
     expect(before.device == after.device, context + ": device changed.");
     expect(before.inode == after.inode, context + ": inode changed.");
     expect(before.owner == after.owner, context + ": owner changed.");
     expect(
-            before.permissions == after.permissions,
-            context + ": permissions changed.");
+        before.permissions == after.permissions,
+        context + ": permissions changed.");
 }
 
 void expect_private_directory(const fs::path& path, const std::string& context) {
     const PathMetadata metadata = path_metadata(path);
     expect(fs::is_directory(path), context + ": path is not a directory.");
     expect(
-            metadata.owner == static_cast<std::uintmax_t>(geteuid()),
-            context + ": owner is not the process effective UID.");
+        metadata.owner == static_cast<std::uintmax_t>(geteuid()),
+        context + ": owner is not the process effective UID.");
     expect(
-            metadata.permissions == PRIVATE_DIRECTORY_MODE,
-            context + ": new directory mode is not 0700.");
+        metadata.permissions == PRIVATE_DIRECTORY_MODE,
+        context + ": new directory mode is not 0700.");
     expect(
-            (metadata.permissions & 0022) == 0,
-            context + ": new directory is group/other writable.");
+        (metadata.permissions & 0022) == 0,
+        context + ": new directory is group/other writable.");
 }
 
 class TemporaryDirectory final {
@@ -112,16 +112,16 @@ class TemporaryDirectory final {
 public:
     TemporaryDirectory() {
         const std::string template_text =
-                (fs::temp_directory_path() /
-                 "moguet-xdg-directory-safety-test-XXXXXX")
-                        .string();
+            (fs::temp_directory_path() /
+             "moguet-xdg-directory-safety-test-XXXXXX")
+                .string();
         std::vector<char> path_template(
-                template_text.begin(), template_text.end());
+            template_text.begin(), template_text.end());
         path_template.push_back('\0');
         char* created_path = mkdtemp(path_template.data());
         if(created_path == nullptr) {
             throw std::runtime_error(
-                    "Failed to create XDG directory safety test root.");
+                "Failed to create XDG directory safety test root.");
         }
         path_ = created_path;
     }
@@ -156,7 +156,7 @@ public:
 
 class ScopedPathMode final {
     fs::path path_;
-    mode_t   previous_;
+    mode_t previous_;
 
 public:
     ScopedPathMode(const fs::path& path, mode_t mode)
@@ -173,33 +173,33 @@ public:
 };
 
 class ScopedEnvironmentVariable final {
-    std::string                name_;
+    std::string name_;
     std::optional<std::string> previous_value_;
 
 public:
     ScopedEnvironmentVariable(
-            std::string name, const std::optional<std::string>& value)
+        std::string name, const std::optional<std::string>& value)
         : name_(std::move(name)) {
         const char* previous = std::getenv(name_.c_str());
         if(previous != nullptr) previous_value_ = previous;
 
         const int result = value.has_value()
-                                   ? setenv(name_.c_str(), value->c_str(), 1)
-                                   : unsetenv(name_.c_str());
+                               ? setenv(name_.c_str(), value->c_str(), 1)
+                               : unsetenv(name_.c_str());
         if(result != 0) {
             throw std::runtime_error(
-                    "Failed to set test environment variable: " + name_);
+                "Failed to set test environment variable: " + name_);
         }
     }
 
     ScopedEnvironmentVariable(const ScopedEnvironmentVariable&) = delete;
     ScopedEnvironmentVariable& operator=(
-            const ScopedEnvironmentVariable&) = delete;
+        const ScopedEnvironmentVariable&) = delete;
 
     ~ScopedEnvironmentVariable() noexcept {
         if(previous_value_.has_value()) {
             static_cast<void>(setenv(
-                    name_.c_str(), previous_value_->c_str(), 1));
+                name_.c_str(), previous_value_->c_str(), 1));
         } else {
             static_cast<void>(unsetenv(name_.c_str()));
         }
@@ -226,10 +226,10 @@ public:
 
 xdg_paths::ResolvedPaths resolve_explicit(const fs::path& root) {
     return xdg_paths::resolve(xdg_paths::EnvironmentSnapshot{
-            .xdg_config_home = (root / "config").string(),
-            .xdg_state_home = (root / "state").string(),
-            .xdg_cache_home = (root / "cache").string(),
-            .home = std::nullopt,
+        .xdg_config_home = (root / "config").string(),
+        .xdg_state_home = (root / "state").string(),
+        .xdg_cache_home = (root / "cache").string(),
+        .home = std::nullopt,
     });
 }
 
@@ -241,106 +241,105 @@ void create_explicit_anchors(const fs::path& root) {
 
 xdg_paths::ResolvedPaths resolve_home_fallback(const fs::path& home) {
     return xdg_paths::resolve(xdg_paths::EnvironmentSnapshot{
-            .xdg_config_home = std::nullopt,
-            .xdg_state_home = std::nullopt,
-            .xdg_cache_home = std::nullopt,
-            .home = home.string(),
+        .xdg_config_home = std::nullopt,
+        .xdg_state_home = std::nullopt,
+        .xdg_cache_home = std::nullopt,
+        .home = home.string(),
     });
 }
 
 xdg_paths::SourcePreferencePaths resolve_source_preference_explicit(
-        const fs::path& config_home) {
+    const fs::path& config_home) {
     return xdg_paths::resolve_source_preference(
-            xdg_paths::EnvironmentSnapshot{
-                    .xdg_config_home = config_home.string(),
-                    .xdg_state_home = std::nullopt,
-                    .xdg_cache_home = std::nullopt,
-                    .home = std::nullopt,
-            });
+        xdg_paths::EnvironmentSnapshot{
+            .xdg_config_home = config_home.string(),
+            .xdg_state_home = std::nullopt,
+            .xdg_cache_home = std::nullopt,
+            .home = std::nullopt,
+        });
 }
 
 xdg_paths::SourcePreferencePaths resolve_source_preference_fallback(
-        const fs::path& home) {
+    const fs::path& home) {
     return xdg_paths::resolve_source_preference(
-            xdg_paths::EnvironmentSnapshot{
-                    .xdg_config_home = std::nullopt,
-                    .xdg_state_home = std::nullopt,
-                    .xdg_cache_home = std::nullopt,
-                    .home = home.string(),
-            });
+        xdg_paths::EnvironmentSnapshot{
+            .xdg_config_home = std::nullopt,
+            .xdg_state_home = std::nullopt,
+            .xdg_cache_home = std::nullopt,
+            .home = home.string(),
+        });
 }
 
 xdg_paths::ReviewedSourceStatePaths resolve_reviewed_source_state_explicit(
-        const fs::path& state_home) {
+    const fs::path& state_home) {
     return xdg_paths::resolve_reviewed_source_state(
-            xdg_paths::EnvironmentSnapshot{
-                    .xdg_config_home = std::nullopt,
-                    .xdg_state_home = state_home.string(),
-                    .xdg_cache_home = std::nullopt,
-                    .home = std::nullopt,
-            });
+        xdg_paths::EnvironmentSnapshot{
+            .xdg_config_home = std::nullopt,
+            .xdg_state_home = state_home.string(),
+            .xdg_cache_home = std::nullopt,
+            .home = std::nullopt,
+        });
 }
 
 xdg_paths::ReviewedSourceStatePaths resolve_reviewed_source_state_fallback(
-        const fs::path& home) {
+    const fs::path& home) {
     return xdg_paths::resolve_reviewed_source_state(
-            xdg_paths::EnvironmentSnapshot{
-                    .xdg_config_home = std::nullopt,
-                    .xdg_state_home = std::nullopt,
-                    .xdg_cache_home = std::nullopt,
-                    .home = home.string(),
-            });
+        xdg_paths::EnvironmentSnapshot{
+            .xdg_config_home = std::nullopt,
+            .xdg_state_home = std::nullopt,
+            .xdg_cache_home = std::nullopt,
+            .home = home.string(),
+        });
 }
 
 template <typename Callable>
 safety::PreparationFailure expect_preparation_error(
-        Callable callable, xdg_paths::DirectoryKind expected_kind,
-        safety::PreparationErrorCode expected_code,
-        std::optional<safety::PreparationStage> expected_stage = std::nullopt,
-        std::optional<std::size_t> expected_component_index = std::nullopt,
-        const std::string& forbidden_diagnostic_fragment = "") {
+    Callable callable, xdg_paths::DirectoryKind expected_kind,
+    safety::PreparationErrorCode expected_code,
+    std::optional<safety::PreparationStage> expected_stage = std::nullopt,
+    std::optional<std::size_t> expected_component_index = std::nullopt,
+    const std::string& forbidden_diagnostic_fragment = "") {
     try {
         static_cast<void>(callable());
     } catch(const safety::PreparationError& error) {
         const safety::PreparationFailure failure = error.failure();
         expect(
-                failure.directory_kind == expected_kind,
-                "Unexpected directory kind in preparation failure.");
+            failure.directory_kind == expected_kind,
+            "Unexpected directory kind in preparation failure.");
         expect(
-                failure.code == expected_code,
-                "Unexpected directory preparation error code.");
+            failure.code == expected_code,
+            "Unexpected directory preparation error code.");
         if(expected_stage.has_value()) {
             expect(
-                    failure.stage == expected_stage.value(),
-                    "Unexpected directory preparation stage.");
+                failure.stage == expected_stage.value(),
+                "Unexpected directory preparation stage.");
         }
         if(expected_component_index.has_value()) {
             expect(
-                    failure.component_index == expected_component_index,
-                    "Unexpected directory preparation component index.");
+                failure.component_index == expected_component_index,
+                "Unexpected directory preparation component index.");
         }
         if(!forbidden_diagnostic_fragment.empty()) {
             expect(
-                    std::string(error.what()).find(
-                            forbidden_diagnostic_fragment) ==
-                            std::string::npos,
-                    "Directory diagnostic exposed an authority path.");
+                std::string(error.what()).find(forbidden_diagnostic_fragment) ==
+                    std::string::npos,
+                "Directory diagnostic exposed an authority path.");
         }
         return failure;
     } catch(const std::exception& error) {
         throw std::runtime_error(
-                "Unexpected directory preparation exception category: " +
-                std::string(error.what()));
+            "Unexpected directory preparation exception category: " +
+            std::string(error.what()));
     }
     throw std::runtime_error("Expected directory preparation failure.");
 }
 
 safety::DirectorySafetyTestOverrides injected_failure(
-        safety::DirectorySafetyTestFailurePoint failure_point,
-        std::size_t component_index, int error_number) {
+    safety::DirectorySafetyTestFailurePoint failure_point,
+    std::size_t component_index, int error_number) {
     safety::DirectorySafetyTestOverrides overrides;
     overrides.injected_failure = safety::DirectorySafetyInjectedFailure{
-            failure_point, component_index, error_number};
+        failure_point, component_index, error_number};
     return overrides;
 }
 
@@ -348,56 +347,56 @@ void test_explicit_preparation_is_lazy_private_and_kind_safe() {
     TemporaryDirectory temporary_directory;
     create_explicit_anchors(temporary_directory.path());
     const xdg_paths::ResolvedPaths paths =
-            resolve_explicit(temporary_directory.path());
+        resolve_explicit(temporary_directory.path());
 
     expect(
-            !fs::exists(paths.config.directory),
-            "Resolver or startup created the explicit config directory.");
+        !fs::exists(paths.config.directory),
+        "Resolver or startup created the explicit config directory.");
     expect(
-            !fs::exists(paths.state.directory),
-            "Resolver or startup created the explicit state directory.");
+        !fs::exists(paths.state.directory),
+        "Resolver or startup created the explicit state directory.");
     expect(
-            !fs::exists(paths.cache.directory),
-            "Resolver or startup created the explicit cache directory.");
+        !fs::exists(paths.cache.directory),
+        "Resolver or startup created the explicit cache directory.");
 
     ScopedUmask permissive_umask(0000);
     safety::PreparedDirectory config =
-            safety::prepare_directory(paths.config);
+        safety::prepare_directory(paths.config);
     expect(
-            config.directory_kind() == xdg_paths::DirectoryKind::Config,
-            "Config preparation returned the wrong directory kind.");
+        config.directory_kind() == xdg_paths::DirectoryKind::Config,
+        "Config preparation returned the wrong directory kind.");
     expect_path(config.path(), paths.config.directory, "Prepared config path");
     expect(config.created_component_count() == 1, "Config creation count mismatch.");
     expect_private_directory(paths.config.directory, "Explicit config directory");
     expect(
-            config.owner() == static_cast<std::uintmax_t>(geteuid()),
-            "Prepared config owner does not match effective UID.");
+        config.owner() == static_cast<std::uintmax_t>(geteuid()),
+        "Prepared config owner does not match effective UID.");
     expect(
-            config.permissions() == PRIVATE_DIRECTORY_MODE,
-            "Prepared config permissions are not 0700.");
+        config.permissions() == PRIVATE_DIRECTORY_MODE,
+        "Prepared config permissions are not 0700.");
     expect(
-            !fs::exists(paths.config.config_file),
-            "Directory preparation created the config file.");
+        !fs::exists(paths.config.config_file),
+        "Directory preparation created the config file.");
     expect(
-            !fs::exists(paths.state.directory) &&
-                    !fs::exists(paths.cache.directory),
-            "Config preparation created a different directory kind.");
+        !fs::exists(paths.state.directory) &&
+            !fs::exists(paths.cache.directory),
+        "Config preparation created a different directory kind.");
 
     safety::PreparedDirectory state = safety::prepare_directory(paths.state);
     safety::PreparedDirectory cache = safety::prepare_directory(paths.cache);
     expect(
-            state.directory_kind() == xdg_paths::DirectoryKind::State,
-            "State preparation returned the wrong directory kind.");
+        state.directory_kind() == xdg_paths::DirectoryKind::State,
+        "State preparation returned the wrong directory kind.");
     expect(
-            cache.directory_kind() == xdg_paths::DirectoryKind::Cache,
-            "Cache preparation returned the wrong directory kind.");
+        cache.directory_kind() == xdg_paths::DirectoryKind::Cache,
+        "Cache preparation returned the wrong directory kind.");
     expect_path(state.path(), paths.state.directory, "Prepared state path");
     expect_path(cache.path(), paths.cache.directory, "Prepared cache path");
     expect_private_directory(paths.state.directory, "Explicit state directory");
     expect_private_directory(paths.cache.directory, "Explicit cache directory");
     expect(
-            !fs::exists(paths.state.default_log_file),
-            "Directory preparation created the default log file.");
+        !fs::exists(paths.state.default_log_file),
+        "Directory preparation created the default log file.");
     config.require_unchanged_identity();
     state.require_unchanged_identity();
     cache.require_unchanged_identity();
@@ -414,7 +413,7 @@ void test_home_fallback_creates_only_resolver_owned_components() {
     expect(!fs::exists(home / ".cache"), "Resolver created .cache.");
 
     safety::PreparedDirectory config =
-            safety::prepare_directory(paths.config);
+        safety::prepare_directory(paths.config);
     safety::PreparedDirectory state = safety::prepare_directory(paths.state);
     safety::PreparedDirectory cache = safety::prepare_directory(paths.cache);
 
@@ -435,38 +434,38 @@ void test_source_preference_explicit_preparation_and_existing_open() {
     const fs::path config_home = temporary_directory.path() / "config";
     create_test_directory(config_home);
     const xdg_paths::SourcePreferencePaths paths =
-            resolve_source_preference_explicit(config_home);
+        resolve_source_preference_explicit(config_home);
 
     expect(
-            !fs::exists(paths.directory.parent_path()),
-            "Source preference resolver created the application directory.");
+        !fs::exists(paths.directory.parent_path()),
+        "Source preference resolver created the application directory.");
     ScopedUmask permissive_umask(0000);
     safety::PreparedDirectory prepared =
-            safety::prepare_directory(paths);
+        safety::prepare_directory(paths);
     expect(
-            prepared.directory_kind() == xdg_paths::DirectoryKind::Config,
-            "Source preference preparation returned the wrong directory kind.");
+        prepared.directory_kind() == xdg_paths::DirectoryKind::Config,
+        "Source preference preparation returned the wrong directory kind.");
     expect_path(
-            prepared.path(), paths.directory,
-            "Prepared source preference directory");
+        prepared.path(), paths.directory,
+        "Prepared source preference directory");
     expect(
-            prepared.created_component_count() == 2,
-            "Explicit source preference creation count mismatch.");
+        prepared.created_component_count() == 2,
+        "Explicit source preference creation count mismatch.");
     expect_private_directory(
-            paths.directory.parent_path(),
-            "Explicit source preference application directory");
+        paths.directory.parent_path(),
+        "Explicit source preference application directory");
     expect_private_directory(
-            paths.directory,
-            "Explicit source preference directory");
+        paths.directory,
+        "Explicit source preference directory");
 
     std::optional<safety::PreparedDirectory> opened =
-            safety::open_existing_directory(paths);
+        safety::open_existing_directory(paths);
     expect(
-            opened.has_value(),
-            "Existing source preference directory was reported absent.");
+        opened.has_value(),
+        "Existing source preference directory was reported absent.");
     expect(
-            opened->created_component_count() == 0,
-            "Read-only source preference open reported created components.");
+        opened->created_component_count() == 0,
+        "Read-only source preference open reported created components.");
     opened->require_unchanged_identity();
     prepared.require_unchanged_identity();
 }
@@ -476,29 +475,29 @@ void test_source_preference_home_fallback_is_lazy() {
     const fs::path home = temporary_directory.path() / "home";
     create_test_directory(home);
     const xdg_paths::SourcePreferencePaths paths =
-            resolve_source_preference_fallback(home);
+        resolve_source_preference_fallback(home);
 
     std::optional<safety::PreparedDirectory> missing =
-            safety::open_existing_directory(paths);
+        safety::open_existing_directory(paths);
     expect(
-            !missing.has_value(),
-            "Missing source preference directory was reported present.");
+        !missing.has_value(),
+        "Missing source preference directory was reported present.");
     expect(
-            !fs::exists(home / ".config"),
-            "Read-only source preference open created HOME config state.");
+        !fs::exists(home / ".config"),
+        "Read-only source preference open created HOME config state.");
 
     safety::PreparedDirectory prepared =
-            safety::prepare_directory(paths);
+        safety::prepare_directory(paths);
     expect(
-            prepared.created_component_count() == 3,
-            "HOME source preference creation count mismatch.");
+        prepared.created_component_count() == 3,
+        "HOME source preference creation count mismatch.");
     expect_private_directory(home / ".config", "Source preference HOME .config");
     expect_private_directory(
-            paths.directory.parent_path(),
-            "Source preference HOME application directory");
+        paths.directory.parent_path(),
+        "Source preference HOME application directory");
     expect_private_directory(
-            paths.directory,
-            "Source preference HOME directory");
+        paths.directory,
+        "Source preference HOME directory");
 }
 
 void test_reviewed_source_state_explicit_preparation_and_existing_open() {
@@ -506,37 +505,37 @@ void test_reviewed_source_state_explicit_preparation_and_existing_open() {
     const fs::path state_home = temporary_directory.path() / "state";
     create_test_directory(state_home);
     const xdg_paths::ReviewedSourceStatePaths paths =
-            resolve_reviewed_source_state_explicit(state_home);
+        resolve_reviewed_source_state_explicit(state_home);
 
     expect(
-            !fs::exists(state_home / "moguet"),
-            "Reviewed-source resolver created the application directory.");
+        !fs::exists(state_home / "moguet"),
+        "Reviewed-source resolver created the application directory.");
     ScopedUmask permissive_umask(0000);
     safety::PreparedDirectory prepared = safety::prepare_directory(paths);
     expect(
-            prepared.directory_kind() == xdg_paths::DirectoryKind::State,
-            "Reviewed-source preparation returned the wrong directory kind.");
+        prepared.directory_kind() == xdg_paths::DirectoryKind::State,
+        "Reviewed-source preparation returned the wrong directory kind.");
     expect_path(
-            prepared.path(), paths.directory,
-            "Prepared reviewed-source directory");
+        prepared.path(), paths.directory,
+        "Prepared reviewed-source directory");
     expect(
-            prepared.created_component_count() == 3,
-            "Explicit reviewed-source creation count mismatch.");
+        prepared.created_component_count() == 3,
+        "Explicit reviewed-source creation count mismatch.");
     expect_private_directory(
-            state_home / "moguet", "Reviewed-source application directory");
+        state_home / "moguet", "Reviewed-source application directory");
     expect_private_directory(
-            state_home / "moguet" / "reviewed-sources",
-            "Reviewed-source parent directory");
+        state_home / "moguet" / "reviewed-sources",
+        "Reviewed-source parent directory");
     expect_private_directory(paths.directory, "Reviewed-source AUR directory");
 
     std::optional<safety::PreparedDirectory> opened =
-            safety::open_existing_directory(paths);
+        safety::open_existing_directory(paths);
     expect(
-            opened.has_value(),
-            "Existing reviewed-source directory was reported absent.");
+        opened.has_value(),
+        "Existing reviewed-source directory was reported absent.");
     expect(
-            opened->created_component_count() == 0,
-            "Read-only reviewed-source open reported created components.");
+        opened->created_component_count() == 0,
+        "Read-only reviewed-source open reported created components.");
 }
 
 void test_reviewed_source_state_read_only_open_is_lazy() {
@@ -544,28 +543,28 @@ void test_reviewed_source_state_read_only_open_is_lazy() {
     const fs::path home = temporary_directory.path() / "home";
     create_test_directory(home);
     const xdg_paths::ReviewedSourceStatePaths paths =
-            resolve_reviewed_source_state_fallback(home);
+        resolve_reviewed_source_state_fallback(home);
 
     std::optional<safety::PreparedDirectory> missing =
-            safety::open_existing_directory(paths);
+        safety::open_existing_directory(paths);
     expect(
-            !missing.has_value(),
-            "Missing reviewed-source directory was reported present.");
+        !missing.has_value(),
+        "Missing reviewed-source directory was reported present.");
     expect(
-            !fs::exists(home / ".local"),
-            "Read-only reviewed-source open created HOME state.");
+        !fs::exists(home / ".local"),
+        "Read-only reviewed-source open created HOME state.");
 
     const fs::path state_home = temporary_directory.path() / "state";
     create_test_directory(state_home);
     const xdg_paths::ReviewedSourceStatePaths explicit_paths =
-            resolve_reviewed_source_state_explicit(state_home);
+        resolve_reviewed_source_state_explicit(state_home);
     create_test_directory(state_home / "moguet");
     expect(
-            !safety::open_existing_directory(explicit_paths).has_value(),
-            "Partial reviewed-source tree was treated as present.");
+        !safety::open_existing_directory(explicit_paths).has_value(),
+        "Partial reviewed-source tree was treated as present.");
     expect(
-            !fs::exists(state_home / "moguet" / "reviewed-sources"),
-            "Read-only open completed a partial reviewed-source tree.");
+        !fs::exists(state_home / "moguet" / "reviewed-sources"),
+        "Read-only open completed a partial reviewed-source tree.");
 }
 
 void test_source_preference_read_only_open_does_not_complete_partial_tree() {
@@ -573,32 +572,32 @@ void test_source_preference_read_only_open_does_not_complete_partial_tree() {
     const fs::path config_home = temporary_directory.path() / "config";
     create_test_directory(config_home);
     const xdg_paths::SourcePreferencePaths paths =
-            resolve_source_preference_explicit(config_home);
+        resolve_source_preference_explicit(config_home);
 
     std::optional<safety::PreparedDirectory> missing_application =
-            safety::open_existing_directory(paths);
+        safety::open_existing_directory(paths);
     expect(
-            !missing_application.has_value(),
-            "Missing source preference application directory was reported present.");
+        !missing_application.has_value(),
+        "Missing source preference application directory was reported present.");
     expect(
-            !fs::exists(paths.directory.parent_path()),
-            "Read-only open created a missing application directory.");
+        !fs::exists(paths.directory.parent_path()),
+        "Read-only open created a missing application directory.");
 
     create_test_directory(paths.directory.parent_path(), 0755);
     const PathMetadata application_before =
-            path_metadata(paths.directory.parent_path());
+        path_metadata(paths.directory.parent_path());
     std::optional<safety::PreparedDirectory> missing_store =
-            safety::open_existing_directory(paths);
+        safety::open_existing_directory(paths);
     expect(
-            !missing_store.has_value(),
-            "Missing source preference store was reported present.");
+        !missing_store.has_value(),
+        "Missing source preference store was reported present.");
     expect(
-            !fs::exists(paths.directory),
-            "Read-only open created a missing source preference store.");
+        !fs::exists(paths.directory),
+        "Read-only open created a missing source preference store.");
     expect_metadata_unchanged(
-            application_before,
-            path_metadata(paths.directory.parent_path()),
-            "Read-only source preference application directory");
+        application_before,
+        path_metadata(paths.directory.parent_path()),
+        "Read-only source preference application directory");
 }
 
 void test_source_preference_missing_component_is_reinspected_before_absent() {
@@ -606,38 +605,38 @@ void test_source_preference_missing_component_is_reinspected_before_absent() {
     const fs::path config_home = temporary_directory.path() / "config";
     create_test_directory(config_home);
     const xdg_paths::SourcePreferencePaths paths =
-            resolve_source_preference_explicit(config_home);
+        resolve_source_preference_explicit(config_home);
     bool missing_component_reappeared = false;
 
     safety::DirectorySafetyTestOverrides overrides;
     overrides.event_hook =
-            [&missing_component_reappeared](
-                    safety::DirectorySafetyTestEvent event,
-                    xdg_paths::DirectoryKind directory_kind,
-                    std::size_t component_index, const fs::path& path) {
-                if(missing_component_reappeared ||
-                   event != safety::DirectorySafetyTestEvent::BeforeAbsentLineageRevalidation ||
-                   directory_kind != xdg_paths::DirectoryKind::Config ||
-                   component_index != 0) {
-                    return;
-                }
-                create_test_directory(path);
-                create_test_directory(path / "source-build.d");
-                missing_component_reappeared = true;
-            };
+        [&missing_component_reappeared](
+            safety::DirectorySafetyTestEvent event,
+            xdg_paths::DirectoryKind directory_kind,
+            std::size_t component_index, const fs::path& path) {
+            if(missing_component_reappeared ||
+               event != safety::DirectorySafetyTestEvent::BeforeAbsentLineageRevalidation ||
+               directory_kind != xdg_paths::DirectoryKind::Config ||
+               component_index != 0) {
+                return;
+            }
+            create_test_directory(path);
+            create_test_directory(path / "source-build.d");
+            missing_component_reappeared = true;
+        };
 
     std::optional<safety::PreparedDirectory> opened =
-            safety::open_existing_directory_for_test(paths, overrides);
+        safety::open_existing_directory_for_test(paths, overrides);
     expect(
-            missing_component_reappeared,
-            "Missing-component reappearance hook did not run.");
+        missing_component_reappeared,
+        "Missing-component reappearance hook did not run.");
     expect(
-            opened.has_value(),
-            "A source preference store that reappeared before the absence "
-            "proof was reported absent.");
+        opened.has_value(),
+        "A source preference store that reappeared before the absence "
+        "proof was reported absent.");
     expect(
-            opened->created_component_count() == 0,
-            "Read-only reinspection reported created components.");
+        opened->created_component_count() == 0,
+        "Read-only reinspection reported created components.");
     opened->require_unchanged_identity();
 }
 
@@ -646,47 +645,47 @@ void test_source_preference_absence_revalidation_detects_lineage_replacement() {
     const fs::path config_home = temporary_directory.path() / "config";
     create_test_directory(config_home);
     const xdg_paths::SourcePreferencePaths paths =
-            resolve_source_preference_explicit(config_home);
+        resolve_source_preference_explicit(config_home);
     create_test_directory(paths.directory.parent_path());
     const fs::path displaced_application =
-            config_home / "displaced-moguet";
+        config_home / "displaced-moguet";
     bool lineage_replaced = false;
 
     safety::DirectorySafetyTestOverrides overrides;
     overrides.event_hook =
-            [&lineage_replaced, &displaced_application](
-                    safety::DirectorySafetyTestEvent event,
-                    xdg_paths::DirectoryKind directory_kind,
-                    std::size_t component_index, const fs::path& path) {
-                if(lineage_replaced ||
-                   event != safety::DirectorySafetyTestEvent::BeforeAbsentLineageRevalidation ||
-                   directory_kind != xdg_paths::DirectoryKind::Config ||
-                   component_index != 1) {
-                    return;
-                }
-                fs::rename(path.parent_path(), displaced_application);
-                create_test_directory(path.parent_path());
-                create_test_directory(path);
-                lineage_replaced = true;
-            };
+        [&lineage_replaced, &displaced_application](
+            safety::DirectorySafetyTestEvent event,
+            xdg_paths::DirectoryKind directory_kind,
+            std::size_t component_index, const fs::path& path) {
+            if(lineage_replaced ||
+               event != safety::DirectorySafetyTestEvent::BeforeAbsentLineageRevalidation ||
+               directory_kind != xdg_paths::DirectoryKind::Config ||
+               component_index != 1) {
+                return;
+            }
+            fs::rename(path.parent_path(), displaced_application);
+            create_test_directory(path.parent_path());
+            create_test_directory(path);
+            lineage_replaced = true;
+        };
 
     expect_preparation_error(
-            [&paths, &overrides]() {
-                return safety::open_existing_directory_for_test(
-                        paths, overrides);
-            },
-            xdg_paths::DirectoryKind::Config,
-            safety::PreparationErrorCode::ConcurrentReplacement,
-            safety::PreparationStage::DirectoryRevalidation);
+        [&paths, &overrides]() {
+            return safety::open_existing_directory_for_test(
+                paths, overrides);
+        },
+        xdg_paths::DirectoryKind::Config,
+        safety::PreparationErrorCode::ConcurrentReplacement,
+        safety::PreparationStage::DirectoryRevalidation);
     expect(
-            lineage_replaced,
-            "Absence-lineage replacement hook did not run.");
+        lineage_replaced,
+        "Absence-lineage replacement hook did not run.");
     expect(
-            fs::is_directory(displaced_application),
-            "Absence revalidation modified the displaced application directory.");
+        fs::is_directory(displaced_application),
+        "Absence revalidation modified the displaced application directory.");
     expect(
-            fs::is_directory(paths.directory),
-            "Absence revalidation modified the replacement source preference store.");
+        fs::is_directory(paths.directory),
+        "Absence revalidation modified the replacement source preference store.");
 }
 
 void test_source_preference_requires_private_final_directory() {
@@ -694,30 +693,30 @@ void test_source_preference_requires_private_final_directory() {
     const fs::path config_home = temporary_directory.path() / "config";
     create_test_directory(config_home, 0755);
     const xdg_paths::SourcePreferencePaths paths =
-            resolve_source_preference_explicit(config_home);
+        resolve_source_preference_explicit(config_home);
     create_test_directory(paths.directory.parent_path(), 0755);
     create_test_directory(paths.directory, 0755);
 
     expect_preparation_error(
-            [&paths]() {
-                return safety::open_existing_directory(paths);
-            },
-            xdg_paths::DirectoryKind::Config,
-            safety::PreparationErrorCode::UnsafePermissions,
-            safety::PreparationStage::ComponentValidation, 1);
+        [&paths]() {
+            return safety::open_existing_directory(paths);
+        },
+        xdg_paths::DirectoryKind::Config,
+        safety::PreparationErrorCode::UnsafePermissions,
+        safety::PreparationStage::ComponentValidation, 1);
     expect(
-            path_metadata(paths.directory.parent_path()).permissions == 0755,
-            "Safe existing source preference ancestor was modified.");
+        path_metadata(paths.directory.parent_path()).permissions == 0755,
+        "Safe existing source preference ancestor was modified.");
 
     set_mode(paths.directory, PRIVATE_DIRECTORY_MODE);
     std::optional<safety::PreparedDirectory> opened =
-            safety::open_existing_directory(paths);
+        safety::open_existing_directory(paths);
     expect(
-            opened.has_value(),
-            "Private source preference directory was not accepted.");
+        opened.has_value(),
+        "Private source preference directory was not accepted.");
     expect(
-            opened->permissions() == PRIVATE_DIRECTORY_MODE,
-            "Source preference capability did not retain mode 0700.");
+        opened->permissions() == PRIVATE_DIRECTORY_MODE,
+        "Source preference capability did not retain mode 0700.");
 }
 
 void test_source_preference_final_type_is_rejected() {
@@ -726,36 +725,36 @@ void test_source_preference_final_type_is_rejected() {
         const fs::path config_home = temporary_directory.path() / "config";
         create_test_directory(config_home);
         const xdg_paths::SourcePreferencePaths paths =
-                resolve_source_preference_explicit(config_home);
+            resolve_source_preference_explicit(config_home);
         create_test_directory(paths.directory.parent_path());
         const fs::path outside = temporary_directory.path() / "outside";
         create_test_directory(outside);
         fs::create_symlink(outside, paths.directory);
 
         expect_preparation_error(
-                [&paths]() {
-                    return safety::open_existing_directory(paths);
-                },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::Symlink,
-                safety::PreparationStage::ComponentValidation, 1);
+            [&paths]() {
+                return safety::open_existing_directory(paths);
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::Symlink,
+            safety::PreparationStage::ComponentValidation, 1);
     }
     {
         TemporaryDirectory temporary_directory;
         const fs::path config_home = temporary_directory.path() / "config";
         create_test_directory(config_home);
         const xdg_paths::SourcePreferencePaths paths =
-                resolve_source_preference_explicit(config_home);
+            resolve_source_preference_explicit(config_home);
         create_test_directory(paths.directory.parent_path());
         create_file(paths.directory);
 
         expect_preparation_error(
-                [&paths]() {
-                    return safety::open_existing_directory(paths);
-                },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::NotDirectory,
-                safety::PreparationStage::ComponentValidation, 1);
+            [&paths]() {
+                return safety::open_existing_directory(paths);
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::NotDirectory,
+            safety::PreparationStage::ComponentValidation, 1);
     }
 }
 
@@ -763,18 +762,18 @@ void test_source_preference_missing_explicit_anchor_is_hard_error() {
     TemporaryDirectory temporary_directory;
     const fs::path config_home = temporary_directory.path() / "missing-config";
     const xdg_paths::SourcePreferencePaths paths =
-            resolve_source_preference_explicit(config_home);
+        resolve_source_preference_explicit(config_home);
 
     expect_preparation_error(
-            [&paths]() {
-                return safety::open_existing_directory(paths);
-            },
-            xdg_paths::DirectoryKind::Config,
-            safety::PreparationErrorCode::MissingAnchor,
-            safety::PreparationStage::AnchorTraversal);
+        [&paths]() {
+            return safety::open_existing_directory(paths);
+        },
+        xdg_paths::DirectoryKind::Config,
+        safety::PreparationErrorCode::MissingAnchor,
+        safety::PreparationStage::AnchorTraversal);
     expect(
-            !fs::exists(config_home),
-            "Read-only source preference open created an explicit anchor.");
+        !fs::exists(config_home),
+        "Read-only source preference open created an explicit anchor.");
 }
 
 void test_source_preference_retained_mode_and_identity_are_revalidated() {
@@ -782,19 +781,19 @@ void test_source_preference_retained_mode_and_identity_are_revalidated() {
     const fs::path config_home = temporary_directory.path() / "config";
     create_test_directory(config_home);
     const xdg_paths::SourcePreferencePaths paths =
-            resolve_source_preference_explicit(config_home);
+        resolve_source_preference_explicit(config_home);
     safety::PreparedDirectory prepared =
-            safety::prepare_directory(paths);
+        safety::prepare_directory(paths);
 
     set_mode(paths.directory, 0755);
     expect_preparation_error(
-            [&prepared]() {
-                prepared.require_unchanged_identity();
-                return 0;
-            },
-            xdg_paths::DirectoryKind::Config,
-            safety::PreparationErrorCode::UnsafePermissions,
-            safety::PreparationStage::DirectoryRevalidation);
+        [&prepared]() {
+            prepared.require_unchanged_identity();
+            return 0;
+        },
+        xdg_paths::DirectoryKind::Config,
+        safety::PreparationErrorCode::UnsafePermissions,
+        safety::PreparationStage::DirectoryRevalidation);
 }
 
 void test_source_preference_nested_replacement_is_detected() {
@@ -802,68 +801,68 @@ void test_source_preference_nested_replacement_is_detected() {
     const fs::path config_home = temporary_directory.path() / "config";
     create_test_directory(config_home);
     const xdg_paths::SourcePreferencePaths paths =
-            resolve_source_preference_explicit(config_home);
+        resolve_source_preference_explicit(config_home);
     safety::PreparedDirectory prepared =
-            safety::prepare_directory(paths);
+        safety::prepare_directory(paths);
     static_cast<void>(prepared);
     const fs::path displaced =
-            paths.directory.parent_path() / "displaced-source-build.d";
+        paths.directory.parent_path() / "displaced-source-build.d";
     bool replacement_performed = false;
 
     safety::DirectorySafetyTestOverrides overrides;
     overrides.event_hook =
-            [&replacement_performed, &displaced](
-                    safety::DirectorySafetyTestEvent event,
-                    xdg_paths::DirectoryKind directory_kind,
-                    std::size_t component_index, const fs::path& path) {
-                if(replacement_performed ||
-                   event != safety::DirectorySafetyTestEvent::AfterManagedMetadata ||
-                   directory_kind != xdg_paths::DirectoryKind::Config ||
-                   component_index != 1) {
-                    return;
-                }
-                fs::rename(path, displaced);
-                create_test_directory(path);
-                replacement_performed = true;
-            };
+        [&replacement_performed, &displaced](
+            safety::DirectorySafetyTestEvent event,
+            xdg_paths::DirectoryKind directory_kind,
+            std::size_t component_index, const fs::path& path) {
+            if(replacement_performed ||
+               event != safety::DirectorySafetyTestEvent::AfterManagedMetadata ||
+               directory_kind != xdg_paths::DirectoryKind::Config ||
+               component_index != 1) {
+                return;
+            }
+            fs::rename(path, displaced);
+            create_test_directory(path);
+            replacement_performed = true;
+        };
 
     expect_preparation_error(
-            [&paths, &overrides]() {
-                return safety::open_existing_directory_for_test(
-                        paths, overrides);
-            },
-            xdg_paths::DirectoryKind::Config,
-            safety::PreparationErrorCode::ConcurrentReplacement,
-            safety::PreparationStage::ComponentValidation, 1);
+        [&paths, &overrides]() {
+            return safety::open_existing_directory_for_test(
+                paths, overrides);
+        },
+        xdg_paths::DirectoryKind::Config,
+        safety::PreparationErrorCode::ConcurrentReplacement,
+        safety::PreparationStage::ComponentValidation, 1);
     expect(
-            replacement_performed,
-            "Nested source preference replacement hook did not run.");
+        replacement_performed,
+        "Nested source preference replacement hook did not run.");
 }
 
 void test_execute_only_non_managed_ancestor_is_traversable() {
     TemporaryDirectory temporary_directory;
     const fs::path traversal_parent =
-            temporary_directory.path() / "execute-only-parent";
+        temporary_directory.path() / "execute-only-parent";
     const fs::path explicit_anchor = traversal_parent / "config";
     create_test_directory(traversal_parent);
     create_test_directory(explicit_anchor);
     const xdg_paths::ResolvedPaths paths = xdg_paths::resolve(
-            xdg_paths::EnvironmentSnapshot{
-                    .xdg_config_home = explicit_anchor.string(),
-                    .xdg_state_home = explicit_anchor.string(),
-                    .xdg_cache_home = explicit_anchor.string(),
-                    .home = std::nullopt,
-            });
+        xdg_paths::EnvironmentSnapshot{
+            .xdg_config_home = explicit_anchor.string(),
+            .xdg_state_home = explicit_anchor.string(),
+            .xdg_cache_home = explicit_anchor.string(),
+            .home = std::nullopt,
+        });
 
     ScopedPathMode execute_only(traversal_parent, 0100);
     safety::PreparedDirectory prepared =
-            safety::prepare_directory(paths.config);
+        safety::prepare_directory(paths.config);
     expect_path(
-            prepared.path(), explicit_anchor / "moguet",
-            "Execute-only ancestor preparation path");
+        prepared.path(), explicit_anchor / "moguet",
+        "Execute-only ancestor preparation path");
     expect_private_directory(
-            paths.config.directory,
-            "Directory below execute-only non-managed ancestor");
+        paths.config.directory,
+        "Directory below execute-only non-managed ancestor");
     prepared.require_unchanged_identity();
 }
 
@@ -871,7 +870,7 @@ void test_existing_safe_directory_is_unchanged_and_idempotent() {
     TemporaryDirectory temporary_directory;
     create_explicit_anchors(temporary_directory.path());
     const xdg_paths::ResolvedPaths paths =
-            resolve_explicit(temporary_directory.path());
+        resolve_explicit(temporary_directory.path());
     create_test_directory(paths.config.directory, 0755);
     create_file(paths.config.directory / "keep", "unchanged");
     const PathMetadata before = path_metadata(paths.config.directory);
@@ -895,20 +894,20 @@ void expect_unsafe_mode_rejected_without_repair(mode_t unsafe_mode) {
     TemporaryDirectory temporary_directory;
     create_explicit_anchors(temporary_directory.path());
     const xdg_paths::ResolvedPaths paths =
-            resolve_explicit(temporary_directory.path());
+        resolve_explicit(temporary_directory.path());
     create_test_directory(paths.config.directory, unsafe_mode);
     const PathMetadata before = path_metadata(paths.config.directory);
 
     expect_preparation_error(
-            [&paths]() { return safety::prepare_directory(paths.config); },
-            xdg_paths::DirectoryKind::Config,
-            safety::PreparationErrorCode::UnsafePermissions,
-            safety::PreparationStage::ComponentValidation, 0);
+        [&paths]() { return safety::prepare_directory(paths.config); },
+        xdg_paths::DirectoryKind::Config,
+        safety::PreparationErrorCode::UnsafePermissions,
+        safety::PreparationStage::ComponentValidation, 0);
     const PathMetadata after = path_metadata(paths.config.directory);
     expect_metadata_unchanged(before, after, "Unsafe existing directory");
     expect(
-            after.permissions == unsafe_mode,
-            "Unsafe existing directory permissions were repaired.");
+        after.permissions == unsafe_mode,
+        "Unsafe existing directory permissions were repaired.");
 }
 
 void test_unsafe_permissions_are_rejected_without_chmod() {
@@ -921,46 +920,46 @@ void test_final_symlink_forms_are_rejected() {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         const fs::path outside = temporary_directory.path() / "outside";
         create_test_directory(outside);
         fs::create_symlink(outside, paths.config.directory);
         expect_preparation_error(
-                [&paths]() { return safety::prepare_directory(paths.config); },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::Symlink,
-                safety::PreparationStage::ComponentValidation, 0);
+            [&paths]() { return safety::prepare_directory(paths.config); },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::Symlink,
+            safety::PreparationStage::ComponentValidation, 0);
     }
     {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         fs::create_symlink(
-                temporary_directory.path() / "missing-target",
-                paths.config.directory);
+            temporary_directory.path() / "missing-target",
+            paths.config.directory);
         expect_preparation_error(
-                [&paths]() { return safety::prepare_directory(paths.config); },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::Symlink,
-                safety::PreparationStage::ComponentValidation, 0);
+            [&paths]() { return safety::prepare_directory(paths.config); },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::Symlink,
+            safety::PreparationStage::ComponentValidation, 0);
     }
     {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         const fs::path outside = temporary_directory.path() / "outside";
         const fs::path second_link =
-                paths.config.creation_boundary.existing_anchor / "second-link";
+            paths.config.creation_boundary.existing_anchor / "second-link";
         create_test_directory(outside);
         fs::create_symlink(outside, second_link);
         fs::create_symlink("second-link", paths.config.directory);
         expect_preparation_error(
-                [&paths]() { return safety::prepare_directory(paths.config); },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::Symlink,
-                safety::PreparationStage::ComponentValidation, 0);
+            [&paths]() { return safety::prepare_directory(paths.config); },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::Symlink,
+            safety::PreparationStage::ComponentValidation, 0);
     }
 }
 
@@ -975,13 +974,13 @@ void test_intermediate_and_anchor_symlinks_are_rejected_without_traversal() {
         fs::create_symlink(outside, home / ".local");
 
         expect_preparation_error(
-                [&paths]() { return safety::prepare_directory(paths.state); },
-                xdg_paths::DirectoryKind::State,
-                safety::PreparationErrorCode::Symlink,
-                safety::PreparationStage::ComponentValidation, 0);
+            [&paths]() { return safety::prepare_directory(paths.state); },
+            xdg_paths::DirectoryKind::State,
+            safety::PreparationErrorCode::Symlink,
+            safety::PreparationStage::ComponentValidation, 0);
         expect(
-                !fs::exists(outside / "state"),
-                "Preparation followed an intermediate symlink.");
+            !fs::exists(outside / "state"),
+            "Preparation followed an intermediate symlink.");
     }
     {
         TemporaryDirectory temporary_directory;
@@ -991,22 +990,22 @@ void test_intermediate_and_anchor_symlinks_are_rejected_without_traversal() {
         create_test_directory(real_parent / "config");
         fs::create_symlink(real_parent, linked_parent);
         const xdg_paths::ResolvedPaths paths = xdg_paths::resolve(
-                xdg_paths::EnvironmentSnapshot{
-                        .xdg_config_home =
-                                (linked_parent / "config").string(),
-                        .xdg_state_home = (real_parent / "config").string(),
-                        .xdg_cache_home = (real_parent / "config").string(),
-                        .home = std::nullopt,
-                });
+            xdg_paths::EnvironmentSnapshot{
+                .xdg_config_home =
+                    (linked_parent / "config").string(),
+                .xdg_state_home = (real_parent / "config").string(),
+                .xdg_cache_home = (real_parent / "config").string(),
+                .home = std::nullopt,
+            });
 
         expect_preparation_error(
-                [&paths]() { return safety::prepare_directory(paths.config); },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::Symlink,
-                safety::PreparationStage::AnchorTraversal);
+            [&paths]() { return safety::prepare_directory(paths.config); },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::Symlink,
+            safety::PreparationStage::AnchorTraversal);
         expect(
-                !fs::exists(real_parent / "config" / "moguet"),
-                "Preparation traversed a symlink inside the anchor path.");
+            !fs::exists(real_parent / "config" / "moguet"),
+            "Preparation traversed a symlink inside the anchor path.");
     }
 }
 
@@ -1015,13 +1014,13 @@ void test_non_directory_components_are_rejected() {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         create_file(paths.config.directory);
         expect_preparation_error(
-                [&paths]() { return safety::prepare_directory(paths.config); },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::NotDirectory,
-                safety::PreparationStage::ComponentValidation, 0);
+            [&paths]() { return safety::prepare_directory(paths.config); },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::NotDirectory,
+            safety::PreparationStage::ComponentValidation, 0);
         expect(fs::is_regular_file(paths.config.directory), "Final file was replaced.");
     }
     {
@@ -1031,14 +1030,14 @@ void test_non_directory_components_are_rejected() {
         const xdg_paths::ResolvedPaths paths = resolve_home_fallback(home);
         create_file(home / ".local");
         expect_preparation_error(
-                [&paths]() { return safety::prepare_directory(paths.state); },
-                xdg_paths::DirectoryKind::State,
-                safety::PreparationErrorCode::NotDirectory,
-                safety::PreparationStage::ComponentValidation, 0);
+            [&paths]() { return safety::prepare_directory(paths.state); },
+            xdg_paths::DirectoryKind::State,
+            safety::PreparationErrorCode::NotDirectory,
+            safety::PreparationStage::ComponentValidation, 0);
         expect(fs::is_regular_file(home / ".local"), "Intermediate file was replaced.");
         expect(
-                !fs::exists(paths.state.directory),
-                "Preparation created below an intermediate non-directory.");
+            !fs::exists(paths.state.directory),
+            "Preparation created below an intermediate non-directory.");
     }
 }
 
@@ -1047,66 +1046,66 @@ void test_ownership_and_effective_uid_policy() {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         safety::DirectorySafetyTestOverrides overrides;
         const std::uintmax_t effective_user =
-                static_cast<std::uintmax_t>(geteuid());
+            static_cast<std::uintmax_t>(geteuid());
         overrides.observed_owner = effective_user == 0 ? 1 : 0;
         expect_preparation_error(
-                [&paths, &overrides]() {
-                    return safety::prepare_directory_for_test(
-                            paths.config, overrides);
-                },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::OwnershipMismatch,
-                safety::PreparationStage::AnchorValidation);
+            [&paths, &overrides]() {
+                return safety::prepare_directory_for_test(
+                    paths.config, overrides);
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::OwnershipMismatch,
+            safety::PreparationStage::AnchorValidation);
         expect(
-                !fs::exists(paths.config.directory),
-                "Ownership failure created the application directory.");
+            !fs::exists(paths.config.directory),
+            "Ownership failure created the application directory.");
     }
     {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         ScopedEnvironmentVariable sudo_user(
-                "SUDO_USER", std::optional<std::string>{"untrusted-caller"});
+            "SUDO_USER", std::optional<std::string>{"untrusted-caller"});
         safety::PreparedDirectory config =
-                safety::prepare_directory(paths.config);
+            safety::prepare_directory(paths.config);
         expect(
-                config.owner() == static_cast<std::uintmax_t>(geteuid()),
-                "SUDO_USER changed the directory owner authority.");
+            config.owner() == static_cast<std::uintmax_t>(geteuid()),
+            "SUDO_USER changed the directory owner authority.");
     }
     {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         create_test_directory(paths.config.directory);
         ScopedEnvironmentVariable sudo_user(
-                "SUDO_USER", std::optional<std::string>{"ordinary-user"});
+            "SUDO_USER", std::optional<std::string>{"ordinary-user"});
 
         safety::DirectorySafetyTestOverrides mismatch;
         mismatch.effective_user = 0;
         mismatch.observed_owner = 1;
         expect_preparation_error(
-                [&paths, &mismatch]() {
-                    return safety::prepare_directory_for_test(
-                            paths.config, mismatch);
-                },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::OwnershipMismatch);
+            [&paths, &mismatch]() {
+                return safety::prepare_directory_for_test(
+                    paths.config, mismatch);
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::OwnershipMismatch);
 
         safety::DirectorySafetyTestOverrides root_identity;
         root_identity.effective_user = 0;
         root_identity.observed_owner = 0;
         safety::PreparedDirectory prepared =
-                safety::prepare_directory_for_test(
-                        paths.config, root_identity);
+            safety::prepare_directory_for_test(
+                paths.config, root_identity);
         expect(prepared.owner() == 0, "UID 0 was not treated as its own authority.");
         expect(
-                prepared.created_component_count() == 0,
-                "Root-equivalent validation recreated an existing directory.");
+            prepared.created_component_count() == 0,
+            "Root-equivalent validation recreated an existing directory.");
     }
 }
 
@@ -1119,65 +1118,65 @@ void test_validation_failure_stops_before_unsafe_descendants() {
     const PathMetadata before = path_metadata(home / ".local");
 
     expect_preparation_error(
-            [&paths]() { return safety::prepare_directory(paths.state); },
-            xdg_paths::DirectoryKind::State,
-            safety::PreparationErrorCode::UnsafePermissions,
-            safety::PreparationStage::ComponentValidation, 0);
+        [&paths]() { return safety::prepare_directory(paths.state); },
+        xdg_paths::DirectoryKind::State,
+        safety::PreparationErrorCode::UnsafePermissions,
+        safety::PreparationStage::ComponentValidation, 0);
     expect_metadata_unchanged(
-            before, path_metadata(home / ".local"),
-            "Unsafe intermediate directory");
+        before, path_metadata(home / ".local"),
+        "Unsafe intermediate directory");
     expect(
-            !fs::exists(home / ".local" / "state"),
-            "Preparation continued below an unsafe component.");
+        !fs::exists(home / ".local" / "state"),
+        "Preparation continued below an unsafe component.");
 }
 
 void test_missing_anchor_and_invalid_boundary_fail_before_mutation() {
     {
         TemporaryDirectory temporary_directory;
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         expect_preparation_error(
-                [&paths]() { return safety::prepare_directory(paths.config); },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::MissingAnchor,
-                safety::PreparationStage::AnchorTraversal);
+            [&paths]() { return safety::prepare_directory(paths.config); },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::MissingAnchor,
+            safety::PreparationStage::AnchorTraversal);
         expect(
-                !fs::exists(paths.config.creation_boundary.existing_anchor),
-                "Missing explicit anchor was created.");
+            !fs::exists(paths.config.creation_boundary.existing_anchor),
+            "Missing explicit anchor was created.");
     }
     {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         xdg_paths::ConfigPaths invalid = paths.config;
         invalid.creation_boundary.existing_anchor = "/";
         const std::string authority_path = paths.config.directory.string();
         expect_preparation_error(
-                [&invalid]() { return safety::prepare_directory(invalid); },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::InvalidCreationBoundary,
-                safety::PreparationStage::BoundaryValidation, std::nullopt,
-                authority_path);
+            [&invalid]() { return safety::prepare_directory(invalid); },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::InvalidCreationBoundary,
+            safety::PreparationStage::BoundaryValidation, std::nullopt,
+            authority_path);
         expect(
-                !fs::exists(paths.config.directory),
-                "Invalid creation boundary mutated the filesystem.");
+            !fs::exists(paths.config.directory),
+            "Invalid creation boundary mutated the filesystem.");
     }
     {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         xdg_paths::ConfigPaths invalid = paths.config;
         invalid.config_file = paths.cache.directory / "config.toml";
         expect_preparation_error(
-                [&invalid]() { return safety::prepare_directory(invalid); },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::InvalidCreationBoundary,
-                safety::PreparationStage::BoundaryValidation);
+            [&invalid]() { return safety::prepare_directory(invalid); },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::InvalidCreationBoundary,
+            safety::PreparationStage::BoundaryValidation);
         expect(
-                !fs::exists(paths.config.directory),
-                "Mismatched typed derived path mutated the filesystem.");
+            !fs::exists(paths.config.directory),
+            "Mismatched typed derived path mutated the filesystem.");
     }
 }
 
@@ -1186,18 +1185,18 @@ void test_injected_syscall_failures_are_classified() {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         safety::DirectorySafetyTestOverrides overrides = injected_failure(
-                safety::DirectorySafetyTestFailurePoint::ManagedMetadata,
-                0, EIO);
+            safety::DirectorySafetyTestFailurePoint::ManagedMetadata,
+            0, EIO);
         const safety::PreparationFailure failure = expect_preparation_error(
-                [&paths, &overrides]() {
-                    return safety::prepare_directory_for_test(
-                            paths.config, overrides);
-                },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::MetadataFailure,
-                safety::PreparationStage::ComponentInspection, 0);
+            [&paths, &overrides]() {
+                return safety::prepare_directory_for_test(
+                    paths.config, overrides);
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::MetadataFailure,
+            safety::PreparationStage::ComponentInspection, 0);
         expect(failure.system_error.has_value(), "Metadata failure lost errno.");
         expect(!fs::exists(paths.config.directory), "Metadata failure created a directory.");
     }
@@ -1205,57 +1204,57 @@ void test_injected_syscall_failures_are_classified() {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         safety::DirectorySafetyTestOverrides overrides = injected_failure(
-                safety::DirectorySafetyTestFailurePoint::ManagedMetadata,
-                0, EACCES);
+            safety::DirectorySafetyTestFailurePoint::ManagedMetadata,
+            0, EACCES);
         expect_preparation_error(
-                [&paths, &overrides]() {
-                    return safety::prepare_directory_for_test(
-                            paths.config, overrides);
-                },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::PermissionDenied,
-                safety::PreparationStage::ComponentInspection, 0);
+            [&paths, &overrides]() {
+                return safety::prepare_directory_for_test(
+                    paths.config, overrides);
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::PermissionDenied,
+            safety::PreparationStage::ComponentInspection, 0);
         expect(!fs::exists(paths.config.directory), "Permission failure created a directory.");
     }
     {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         safety::DirectorySafetyTestOverrides overrides = injected_failure(
-                safety::DirectorySafetyTestFailurePoint::ComponentCreation,
-                0, EIO);
+            safety::DirectorySafetyTestFailurePoint::ComponentCreation,
+            0, EIO);
         expect_preparation_error(
-                [&paths, &overrides]() {
-                    return safety::prepare_directory_for_test(
-                            paths.config, overrides);
-                },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::CreationFailed,
-                safety::PreparationStage::ComponentCreation, 0);
+            [&paths, &overrides]() {
+                return safety::prepare_directory_for_test(
+                    paths.config, overrides);
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::CreationFailed,
+            safety::PreparationStage::ComponentCreation, 0);
         expect(!fs::exists(paths.config.directory), "Creation failure created a directory.");
     }
     {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         safety::DirectorySafetyTestOverrides overrides = injected_failure(
-                safety::DirectorySafetyTestFailurePoint::DescriptorMetadata,
-                0, EIO);
+            safety::DirectorySafetyTestFailurePoint::DescriptorMetadata,
+            0, EIO);
         expect_preparation_error(
-                [&paths, &overrides]() {
-                    return safety::prepare_directory_for_test(
-                            paths.config, overrides);
-                },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::MetadataFailure,
-                safety::PreparationStage::ComponentValidation, 0);
+            [&paths, &overrides]() {
+                return safety::prepare_directory_for_test(
+                    paths.config, overrides);
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::MetadataFailure,
+            safety::PreparationStage::ComponentValidation, 0);
         expect_private_directory(
-                paths.config.directory,
-                "Safely created directory retained after descriptor failure");
+            paths.config.directory,
+            "Safely created directory retained after descriptor failure");
     }
 }
 
@@ -1263,37 +1262,37 @@ void test_concurrent_replacement_is_detected() {
     TemporaryDirectory temporary_directory;
     create_explicit_anchors(temporary_directory.path());
     const xdg_paths::ResolvedPaths paths =
-            resolve_explicit(temporary_directory.path());
+        resolve_explicit(temporary_directory.path());
     create_test_directory(paths.config.directory);
     const fs::path displaced =
-            paths.config.creation_boundary.existing_anchor / "displaced-moguet";
+        paths.config.creation_boundary.existing_anchor / "displaced-moguet";
     bool replacement_performed = false;
 
     safety::DirectorySafetyTestOverrides overrides;
     overrides.event_hook =
-            [&replacement_performed, &displaced](
-                    safety::DirectorySafetyTestEvent event,
-                    xdg_paths::DirectoryKind directory_kind,
-                    std::size_t component_index, const fs::path& path) {
-                if(replacement_performed ||
-                   event != safety::DirectorySafetyTestEvent::AfterManagedMetadata ||
-                   directory_kind != xdg_paths::DirectoryKind::Config ||
-                   component_index != 0) {
-                    return;
-                }
-                fs::rename(path, displaced);
-                create_test_directory(path);
-                replacement_performed = true;
-            };
+        [&replacement_performed, &displaced](
+            safety::DirectorySafetyTestEvent event,
+            xdg_paths::DirectoryKind directory_kind,
+            std::size_t component_index, const fs::path& path) {
+            if(replacement_performed ||
+               event != safety::DirectorySafetyTestEvent::AfterManagedMetadata ||
+               directory_kind != xdg_paths::DirectoryKind::Config ||
+               component_index != 0) {
+                return;
+            }
+            fs::rename(path, displaced);
+            create_test_directory(path);
+            replacement_performed = true;
+        };
 
     expect_preparation_error(
-            [&paths, &overrides]() {
-                return safety::prepare_directory_for_test(
-                        paths.config, overrides);
-            },
-            xdg_paths::DirectoryKind::Config,
-            safety::PreparationErrorCode::ConcurrentReplacement,
-            safety::PreparationStage::ComponentValidation, 0);
+        [&paths, &overrides]() {
+            return safety::prepare_directory_for_test(
+                paths.config, overrides);
+        },
+        xdg_paths::DirectoryKind::Config,
+        safety::PreparationErrorCode::ConcurrentReplacement,
+        safety::PreparationStage::ComponentValidation, 0);
     expect(replacement_performed, "Concurrent replacement hook did not run.");
     expect(fs::is_directory(displaced), "Original directory was not retained by the fixture.");
 }
@@ -1303,34 +1302,34 @@ void test_security_ancestor_mode_changes_are_revalidated() {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         const fs::path anchor =
-                paths.config.creation_boundary.existing_anchor;
+            paths.config.creation_boundary.existing_anchor;
         bool anchor_changed = false;
         safety::DirectorySafetyTestOverrides overrides;
         overrides.event_hook =
-                [&anchor, &anchor_changed](
-                        safety::DirectorySafetyTestEvent event,
-                        xdg_paths::DirectoryKind directory_kind,
-                        std::size_t component_index, const fs::path&) {
-                    if(anchor_changed ||
-                       event != safety::DirectorySafetyTestEvent::AfterManagedMetadata ||
-                       directory_kind != xdg_paths::DirectoryKind::Config ||
-                       component_index != 0) {
-                        return;
-                    }
-                    set_mode(anchor, 0777);
-                    anchor_changed = true;
-                };
+            [&anchor, &anchor_changed](
+                safety::DirectorySafetyTestEvent event,
+                xdg_paths::DirectoryKind directory_kind,
+                std::size_t component_index, const fs::path&) {
+                if(anchor_changed ||
+                   event != safety::DirectorySafetyTestEvent::AfterManagedMetadata ||
+                   directory_kind != xdg_paths::DirectoryKind::Config ||
+                   component_index != 0) {
+                    return;
+                }
+                set_mode(anchor, 0777);
+                anchor_changed = true;
+            };
 
         expect_preparation_error(
-                [&paths, &overrides]() {
-                    return safety::prepare_directory_for_test(
-                            paths.config, overrides);
-                },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::UnsafePermissions,
-                safety::PreparationStage::DirectoryRevalidation);
+            [&paths, &overrides]() {
+                return safety::prepare_directory_for_test(
+                    paths.config, overrides);
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::UnsafePermissions,
+            safety::PreparationStage::DirectoryRevalidation);
         expect(anchor_changed, "Anchor mode-change hook did not run.");
     }
     {
@@ -1341,31 +1340,31 @@ void test_security_ancestor_mode_changes_are_revalidated() {
         bool intermediate_changed = false;
         safety::DirectorySafetyTestOverrides overrides;
         overrides.event_hook =
-                [&home, &intermediate_changed](
-                        safety::DirectorySafetyTestEvent event,
-                        xdg_paths::DirectoryKind directory_kind,
-                        std::size_t component_index, const fs::path&) {
-                    if(intermediate_changed ||
-                       event != safety::DirectorySafetyTestEvent::AfterManagedMetadata ||
-                       directory_kind != xdg_paths::DirectoryKind::State ||
-                       component_index != 1) {
-                        return;
-                    }
-                    set_mode(home / ".local", 0777);
-                    intermediate_changed = true;
-                };
+            [&home, &intermediate_changed](
+                safety::DirectorySafetyTestEvent event,
+                xdg_paths::DirectoryKind directory_kind,
+                std::size_t component_index, const fs::path&) {
+                if(intermediate_changed ||
+                   event != safety::DirectorySafetyTestEvent::AfterManagedMetadata ||
+                   directory_kind != xdg_paths::DirectoryKind::State ||
+                   component_index != 1) {
+                    return;
+                }
+                set_mode(home / ".local", 0777);
+                intermediate_changed = true;
+            };
 
         expect_preparation_error(
-                [&paths, &overrides]() {
-                    return safety::prepare_directory_for_test(
-                            paths.state, overrides);
-                },
-                xdg_paths::DirectoryKind::State,
-                safety::PreparationErrorCode::UnsafePermissions,
-                safety::PreparationStage::DirectoryRevalidation);
+            [&paths, &overrides]() {
+                return safety::prepare_directory_for_test(
+                    paths.state, overrides);
+            },
+            xdg_paths::DirectoryKind::State,
+            safety::PreparationErrorCode::UnsafePermissions,
+            safety::PreparationStage::DirectoryRevalidation);
         expect(
-                intermediate_changed,
-                "Fallback intermediate mode-change hook did not run.");
+            intermediate_changed,
+            "Fallback intermediate mode-change hook did not run.");
     }
 }
 
@@ -1375,71 +1374,71 @@ void test_safe_partial_creation_is_retained() {
     create_test_directory(home);
     const xdg_paths::ResolvedPaths paths = resolve_home_fallback(home);
     safety::DirectorySafetyTestOverrides overrides = injected_failure(
-            safety::DirectorySafetyTestFailurePoint::ComponentCreation,
-            2, EIO);
+        safety::DirectorySafetyTestFailurePoint::ComponentCreation,
+        2, EIO);
 
     expect_preparation_error(
-            [&paths, &overrides]() {
-                return safety::prepare_directory_for_test(
-                        paths.state, overrides);
-            },
-            xdg_paths::DirectoryKind::State,
-            safety::PreparationErrorCode::CreationFailed,
-            safety::PreparationStage::ComponentCreation, 2);
+        [&paths, &overrides]() {
+            return safety::prepare_directory_for_test(
+                paths.state, overrides);
+        },
+        xdg_paths::DirectoryKind::State,
+        safety::PreparationErrorCode::CreationFailed,
+        safety::PreparationStage::ComponentCreation, 2);
     expect_private_directory(home / ".local", "Partial .local directory");
     expect_private_directory(home / ".local" / "state", "Partial state directory");
     expect(
-            !fs::exists(paths.state.directory),
-            "Failed final component unexpectedly exists.");
+        !fs::exists(paths.state.directory),
+        "Failed final component unexpectedly exists.");
 }
 
 void test_creation_precondition_rejects_before_mutation() {
     TemporaryDirectory temporary_directory;
     create_explicit_anchors(temporary_directory.path());
     const xdg_paths::ResolvedPaths paths =
-            resolve_explicit(temporary_directory.path());
+        resolve_explicit(temporary_directory.path());
 
     const auto require_rejected_without_creation =
-            [](const auto& directory_paths,
-               const std::string& context) {
-                const PathMetadata expected_parent = path_metadata(
-                        directory_paths.creation_boundary.existing_anchor);
-                bool callback_ran = false;
-                bool sentinel_observed = false;
-                try {
-                    static_cast<void>(safety::prepare_directory(
-                            directory_paths,
-                            [&](const safety::DirectoryIdentity& identity) {
-                                callback_ran = true;
-                                expect(
-                                        identity.device ==
-                                                        expected_parent.device &&
-                                                identity.inode ==
-                                                        expected_parent.inode,
-                                        context +
-                                                ": callback did not receive the retained parent identity.");
-                                throw std::runtime_error(
-                                        "creation-precondition-rejected");
-                            }));
-                } catch(const std::runtime_error& error) {
-                    sentinel_observed =
-                            std::string(error.what()) ==
-                            "creation-precondition-rejected";
-                }
-                expect(callback_ran, context + ": callback did not run.");
-                expect(
-                        sentinel_observed,
-                        context + ": callback exception was not preserved.");
-                expect(
-                        !fs::exists(directory_paths.directory),
-                        context +
-                                ": managed directory was created before rejection.");
-            };
+        [](const auto& directory_paths,
+           const std::string& context) {
+            const PathMetadata expected_parent = path_metadata(
+                directory_paths.creation_boundary.existing_anchor);
+            bool callback_ran = false;
+            bool sentinel_observed = false;
+            try {
+                static_cast<void>(safety::prepare_directory(
+                    directory_paths,
+                    [&](const safety::DirectoryIdentity& identity) {
+                        callback_ran = true;
+                        expect(
+                            identity.device ==
+                                    expected_parent.device &&
+                                identity.inode ==
+                                    expected_parent.inode,
+                            context +
+                                ": callback did not receive the retained parent identity.");
+                        throw std::runtime_error(
+                            "creation-precondition-rejected");
+                    }));
+            } catch(const std::runtime_error& error) {
+                sentinel_observed =
+                    std::string(error.what()) ==
+                    "creation-precondition-rejected";
+            }
+            expect(callback_ran, context + ": callback did not run.");
+            expect(
+                sentinel_observed,
+                context + ": callback exception was not preserved.");
+            expect(
+                !fs::exists(directory_paths.directory),
+                context +
+                    ": managed directory was created before rejection.");
+        };
 
     require_rejected_without_creation(
-            paths.state, "State creation precondition");
+        paths.state, "State creation precondition");
     require_rejected_without_creation(
-            paths.cache, "Cache creation precondition");
+        paths.cache, "Cache creation precondition");
 }
 
 void test_trailing_separators_preserve_creation_authority() {
@@ -1451,68 +1450,68 @@ void test_trailing_separators_preserve_creation_authority() {
     create_explicit_anchors(explicit_root);
 
     const xdg_paths::ResolvedPaths explicit_paths = xdg_paths::resolve(
-            xdg_paths::EnvironmentSnapshot{
-                    .xdg_config_home =
-                            (explicit_root / "config").string() + "///",
-                    .xdg_state_home =
-                            (explicit_root / "state").string() + "///",
-                    .xdg_cache_home =
-                            (explicit_root / "cache").string() + "///",
-                    .home = std::nullopt,
-            });
+        xdg_paths::EnvironmentSnapshot{
+            .xdg_config_home =
+                (explicit_root / "config").string() + "///",
+            .xdg_state_home =
+                (explicit_root / "state").string() + "///",
+            .xdg_cache_home =
+                (explicit_root / "cache").string() + "///",
+            .home = std::nullopt,
+        });
     expect_path(
-            explicit_paths.config.creation_boundary.base_directory,
-            explicit_root / "config",
-            "Trailing-separator explicit config base");
+        explicit_paths.config.creation_boundary.base_directory,
+        explicit_root / "config",
+        "Trailing-separator explicit config base");
     expect_path(
-            explicit_paths.config.creation_boundary.existing_anchor,
-            explicit_root / "config",
-            "Trailing-separator explicit config anchor");
+        explicit_paths.config.creation_boundary.existing_anchor,
+        explicit_root / "config",
+        "Trailing-separator explicit config anchor");
     expect(
-            explicit_paths.config.creation_boundary.creatable_components ==
-                    std::vector<std::string>{"moguet"},
-            "Trailing-separator explicit boundary retained an empty component.");
+        explicit_paths.config.creation_boundary.creatable_components ==
+            std::vector<std::string>{"moguet"},
+        "Trailing-separator explicit boundary retained an empty component.");
     safety::PreparedDirectory explicit_config =
-            safety::prepare_directory(explicit_paths.config);
+        safety::prepare_directory(explicit_paths.config);
     safety::PreparedDirectory explicit_state =
-            safety::prepare_directory(explicit_paths.state);
+        safety::prepare_directory(explicit_paths.state);
     safety::PreparedDirectory explicit_cache =
-            safety::prepare_directory(explicit_paths.cache);
+        safety::prepare_directory(explicit_paths.cache);
     expect(
-            explicit_config.created_component_count() == 1 &&
-                    explicit_state.created_component_count() == 1 &&
-                    explicit_cache.created_component_count() == 1,
-            "Trailing-separator explicit paths did not prepare cleanly.");
+        explicit_config.created_component_count() == 1 &&
+            explicit_state.created_component_count() == 1 &&
+            explicit_cache.created_component_count() == 1,
+        "Trailing-separator explicit paths did not prepare cleanly.");
 
     const xdg_paths::ResolvedPaths fallback_paths = xdg_paths::resolve(
-            xdg_paths::EnvironmentSnapshot{
-                    .xdg_config_home = std::nullopt,
-                    .xdg_state_home = std::nullopt,
-                    .xdg_cache_home = std::nullopt,
-                    .home = home.string() + "///",
-            });
+        xdg_paths::EnvironmentSnapshot{
+            .xdg_config_home = std::nullopt,
+            .xdg_state_home = std::nullopt,
+            .xdg_cache_home = std::nullopt,
+            .home = home.string() + "///",
+        });
     expect_path(
-            fallback_paths.state.creation_boundary.existing_anchor, home,
-            "Trailing-separator HOME anchor");
+        fallback_paths.state.creation_boundary.existing_anchor, home,
+        "Trailing-separator HOME anchor");
     expect_path(
-            fallback_paths.state.creation_boundary.base_directory,
-            home / ".local" / "state",
-            "Trailing-separator HOME state base");
+        fallback_paths.state.creation_boundary.base_directory,
+        home / ".local" / "state",
+        "Trailing-separator HOME state base");
     expect(
-            fallback_paths.state.creation_boundary.creatable_components ==
-                    std::vector<std::string>{".local", "state", "moguet"},
-            "Trailing-separator HOME boundary retained an empty component.");
+        fallback_paths.state.creation_boundary.creatable_components ==
+            std::vector<std::string>{".local", "state", "moguet"},
+        "Trailing-separator HOME boundary retained an empty component.");
     safety::PreparedDirectory fallback_config =
-            safety::prepare_directory(fallback_paths.config);
+        safety::prepare_directory(fallback_paths.config);
     safety::PreparedDirectory fallback_state =
-            safety::prepare_directory(fallback_paths.state);
+        safety::prepare_directory(fallback_paths.state);
     safety::PreparedDirectory fallback_cache =
-            safety::prepare_directory(fallback_paths.cache);
+        safety::prepare_directory(fallback_paths.cache);
     expect(
-            fallback_config.created_component_count() == 2 &&
-                    fallback_state.created_component_count() == 3 &&
-                    fallback_cache.created_component_count() == 2,
-            "Trailing-separator HOME paths did not prepare cleanly.");
+        fallback_config.created_component_count() == 2 &&
+            fallback_state.created_component_count() == 3 &&
+            fallback_cache.created_component_count() == 2,
+        "Trailing-separator HOME paths did not prepare cleanly.");
 }
 
 void test_preparation_does_not_reread_environment_or_cwd() {
@@ -1528,53 +1527,53 @@ void test_preparation_does_not_reread_environment_or_cwd() {
     const xdg_paths::ResolvedPaths paths = resolve_explicit(resolved_root);
 
     ScopedEnvironmentVariable config_home(
-            "XDG_CONFIG_HOME",
-            std::optional<std::string>{
-                    (environment_root / "config").string()});
+        "XDG_CONFIG_HOME",
+        std::optional<std::string>{
+            (environment_root / "config").string()});
     ScopedEnvironmentVariable state_home(
-            "XDG_STATE_HOME",
-            std::optional<std::string>{
-                    (environment_root / "state").string()});
+        "XDG_STATE_HOME",
+        std::optional<std::string>{
+            (environment_root / "state").string()});
     ScopedEnvironmentVariable cache_home(
-            "XDG_CACHE_HOME",
-            std::optional<std::string>{
-                    (environment_root / "cache").string()});
+        "XDG_CACHE_HOME",
+        std::optional<std::string>{
+            (environment_root / "cache").string()});
     ScopedEnvironmentVariable home(
-            "HOME", std::optional<std::string>{environment_root.string()});
+        "HOME", std::optional<std::string>{environment_root.string()});
     ScopedCurrentDirectory changed_cwd(working_directory);
 
     safety::PreparedDirectory prepared =
-            safety::prepare_directory(paths.config);
+        safety::prepare_directory(paths.config);
     expect_path(prepared.path(), paths.config.directory, "Snapshot-owned preparation path");
     expect(fs::is_directory(paths.config.directory), "Resolved directory was not created.");
     expect(
-            !fs::exists(environment_root / "config" / "moguet"),
-            "Preparation reread XDG_CONFIG_HOME.");
+        !fs::exists(environment_root / "config" / "moguet"),
+        "Preparation reread XDG_CONFIG_HOME.");
     expect(
-            !fs::exists(working_directory / "moguet"),
-            "Preparation resolved a path from current working directory.");
+        !fs::exists(working_directory / "moguet"),
+        "Preparation resolved a path from current working directory.");
 }
 
 void test_retained_descriptor_detects_later_replacement() {
     TemporaryDirectory temporary_directory;
     create_explicit_anchors(temporary_directory.path());
     const xdg_paths::ResolvedPaths paths =
-            resolve_explicit(temporary_directory.path());
+        resolve_explicit(temporary_directory.path());
     safety::PreparedDirectory prepared =
-            safety::prepare_directory(paths.config);
+        safety::prepare_directory(paths.config);
     const fs::path displaced =
-            paths.config.creation_boundary.existing_anchor / "original-moguet";
+        paths.config.creation_boundary.existing_anchor / "original-moguet";
     fs::rename(paths.config.directory, displaced);
     create_test_directory(paths.config.directory);
 
     expect_preparation_error(
-            [&prepared]() {
-                prepared.require_unchanged_identity();
-                return 0;
-            },
-            xdg_paths::DirectoryKind::Config,
-            safety::PreparationErrorCode::ConcurrentReplacement,
-            safety::PreparationStage::DirectoryRevalidation);
+        [&prepared]() {
+            prepared.require_unchanged_identity();
+            return 0;
+        },
+        xdg_paths::DirectoryKind::Config,
+        safety::PreparationErrorCode::ConcurrentReplacement,
+        safety::PreparationStage::DirectoryRevalidation);
 }
 
 void test_retained_lineage_detects_anchor_and_ancestor_replacement() {
@@ -1582,62 +1581,62 @@ void test_retained_lineage_detects_anchor_and_ancestor_replacement() {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         safety::PreparedDirectory prepared =
-                safety::prepare_directory(paths.cache);
+            safety::prepare_directory(paths.cache);
         const fs::path moved_anchor =
-                temporary_directory.path() / "moved-cache-anchor";
+            temporary_directory.path() / "moved-cache-anchor";
         fs::rename(paths.cache.creation_boundary.existing_anchor, moved_anchor);
         create_test_directory(
-                paths.cache.creation_boundary.existing_anchor);
+            paths.cache.creation_boundary.existing_anchor);
         create_test_directory(paths.cache.directory);
 
         expect_preparation_error(
-                [&prepared]() {
-                    prepared.require_unchanged_identity();
-                    return 0;
-                },
-                xdg_paths::DirectoryKind::Cache,
-                safety::PreparationErrorCode::ConcurrentReplacement,
-                safety::PreparationStage::DirectoryRevalidation,
-                std::nullopt,
-                paths.cache.creation_boundary.existing_anchor.string());
+            [&prepared]() {
+                prepared.require_unchanged_identity();
+                return 0;
+            },
+            xdg_paths::DirectoryKind::Cache,
+            safety::PreparationErrorCode::ConcurrentReplacement,
+            safety::PreparationStage::DirectoryRevalidation,
+            std::nullopt,
+            paths.cache.creation_boundary.existing_anchor.string());
         expect(
-                fs::is_directory(moved_anchor / "moguet"),
-                "Revalidation changed the original cache root after its "
-                "anchor moved.");
+            fs::is_directory(moved_anchor / "moguet"),
+            "Revalidation changed the original cache root after its "
+            "anchor moved.");
     }
 
     {
         TemporaryDirectory temporary_directory;
         const fs::path authority_parent =
-                temporary_directory.path() / "authority-parent";
+            temporary_directory.path() / "authority-parent";
         create_test_directory(authority_parent);
         create_explicit_anchors(authority_parent);
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(authority_parent);
+            resolve_explicit(authority_parent);
         safety::PreparedDirectory prepared =
-                safety::prepare_directory(paths.cache);
+            safety::prepare_directory(paths.cache);
         const fs::path moved_parent =
-                temporary_directory.path() / "moved-authority-parent";
+            temporary_directory.path() / "moved-authority-parent";
         fs::rename(authority_parent, moved_parent);
         create_test_directory(authority_parent);
         create_explicit_anchors(authority_parent);
         create_test_directory(paths.cache.directory);
 
         expect_preparation_error(
-                [&prepared]() {
-                    prepared.require_unchanged_identity();
-                    return 0;
-                },
-                xdg_paths::DirectoryKind::Cache,
-                safety::PreparationErrorCode::ConcurrentReplacement,
-                safety::PreparationStage::DirectoryRevalidation,
-                std::nullopt, authority_parent.string());
+            [&prepared]() {
+                prepared.require_unchanged_identity();
+                return 0;
+            },
+            xdg_paths::DirectoryKind::Cache,
+            safety::PreparationErrorCode::ConcurrentReplacement,
+            safety::PreparationStage::DirectoryRevalidation,
+            std::nullopt, authority_parent.string());
         expect(
-                fs::is_directory(moved_parent / "cache" / "moguet"),
-                "Revalidation followed an application root whose ancestor "
-                "moved outside its authoritative lineage.");
+            fs::is_directory(moved_parent / "cache" / "moguet"),
+            "Revalidation followed an application root whose ancestor "
+            "moved outside its authoritative lineage.");
     }
 }
 
@@ -1646,37 +1645,37 @@ void test_retained_directory_rejects_later_security_changes() {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         safety::PreparedDirectory prepared =
-                safety::prepare_directory(paths.config);
+            safety::prepare_directory(paths.config);
         set_mode(paths.config.directory, 0777);
 
         expect_preparation_error(
-                [&prepared]() {
-                    prepared.require_unchanged_identity();
-                    return 0;
-                },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::UnsafePermissions,
-                safety::PreparationStage::DirectoryRevalidation);
+            [&prepared]() {
+                prepared.require_unchanged_identity();
+                return 0;
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::UnsafePermissions,
+            safety::PreparationStage::DirectoryRevalidation);
     }
     {
         TemporaryDirectory temporary_directory;
         create_explicit_anchors(temporary_directory.path());
         const xdg_paths::ResolvedPaths paths =
-                resolve_explicit(temporary_directory.path());
+            resolve_explicit(temporary_directory.path());
         safety::PreparedDirectory prepared =
-                safety::prepare_directory(paths.config);
+            safety::prepare_directory(paths.config);
         set_mode(paths.config.creation_boundary.existing_anchor, 0777);
 
         expect_preparation_error(
-                [&prepared]() {
-                    prepared.require_unchanged_identity();
-                    return 0;
-                },
-                xdg_paths::DirectoryKind::Config,
-                safety::PreparationErrorCode::UnsafePermissions,
-                safety::PreparationStage::DirectoryRevalidation);
+            [&prepared]() {
+                prepared.require_unchanged_identity();
+                return 0;
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::UnsafePermissions,
+            safety::PreparationStage::DirectoryRevalidation);
     }
 }
 
@@ -1691,102 +1690,102 @@ void run_case(const std::string& name, Callable callable) {
 int main() {
     try {
         run_case(
-                "explicit lazy private kind-safe preparation",
-                test_explicit_preparation_is_lazy_private_and_kind_safe);
+            "explicit lazy private kind-safe preparation",
+            test_explicit_preparation_is_lazy_private_and_kind_safe);
         run_case(
-                "HOME fallback creation boundary",
-                test_home_fallback_creates_only_resolver_owned_components);
+            "HOME fallback creation boundary",
+            test_home_fallback_creates_only_resolver_owned_components);
         run_case(
-                "source preference explicit preparation and open",
-                test_source_preference_explicit_preparation_and_existing_open);
+            "source preference explicit preparation and open",
+            test_source_preference_explicit_preparation_and_existing_open);
         run_case(
-                "reviewed-source explicit preparation and open",
-                test_reviewed_source_state_explicit_preparation_and_existing_open);
+            "reviewed-source explicit preparation and open",
+            test_reviewed_source_state_explicit_preparation_and_existing_open);
         run_case(
-                "reviewed-source read-only open is lazy",
-                test_reviewed_source_state_read_only_open_is_lazy);
+            "reviewed-source read-only open is lazy",
+            test_reviewed_source_state_read_only_open_is_lazy);
         run_case(
-                "source preference HOME fallback is lazy",
-                test_source_preference_home_fallback_is_lazy);
+            "source preference HOME fallback is lazy",
+            test_source_preference_home_fallback_is_lazy);
         run_case(
-                "source preference read-only open stays non-creating",
-                test_source_preference_read_only_open_does_not_complete_partial_tree);
+            "source preference read-only open stays non-creating",
+            test_source_preference_read_only_open_does_not_complete_partial_tree);
         run_case(
-                "source preference missing component is reinspected",
-                test_source_preference_missing_component_is_reinspected_before_absent);
+            "source preference missing component is reinspected",
+            test_source_preference_missing_component_is_reinspected_before_absent);
         run_case(
-                "source preference absence lineage replacement detected",
-                test_source_preference_absence_revalidation_detects_lineage_replacement);
+            "source preference absence lineage replacement detected",
+            test_source_preference_absence_revalidation_detects_lineage_replacement);
         run_case(
-                "source preference final directory is private",
-                test_source_preference_requires_private_final_directory);
+            "source preference final directory is private",
+            test_source_preference_requires_private_final_directory);
         run_case(
-                "source preference final type rejected",
-                test_source_preference_final_type_is_rejected);
+            "source preference final type rejected",
+            test_source_preference_final_type_is_rejected);
         run_case(
-                "source preference explicit anchor required",
-                test_source_preference_missing_explicit_anchor_is_hard_error);
+            "source preference explicit anchor required",
+            test_source_preference_missing_explicit_anchor_is_hard_error);
         run_case(
-                "source preference retained mode revalidated",
-                test_source_preference_retained_mode_and_identity_are_revalidated);
+            "source preference retained mode revalidated",
+            test_source_preference_retained_mode_and_identity_are_revalidated);
         run_case(
-                "source preference nested replacement detected",
-                test_source_preference_nested_replacement_is_detected);
+            "source preference nested replacement detected",
+            test_source_preference_nested_replacement_is_detected);
         run_case(
-                "execute-only non-managed ancestor traversal",
-                test_execute_only_non_managed_ancestor_is_traversable);
+            "execute-only non-managed ancestor traversal",
+            test_execute_only_non_managed_ancestor_is_traversable);
         run_case(
-                "existing safe directory unchanged and idempotent",
-                test_existing_safe_directory_is_unchanged_and_idempotent);
+            "existing safe directory unchanged and idempotent",
+            test_existing_safe_directory_is_unchanged_and_idempotent);
         run_case(
-                "unsafe permissions rejected without chmod",
-                test_unsafe_permissions_are_rejected_without_chmod);
+            "unsafe permissions rejected without chmod",
+            test_unsafe_permissions_are_rejected_without_chmod);
         run_case("final symlink forms rejected", test_final_symlink_forms_are_rejected);
         run_case(
-                "intermediate and anchor symlinks rejected",
-                test_intermediate_and_anchor_symlinks_are_rejected_without_traversal);
+            "intermediate and anchor symlinks rejected",
+            test_intermediate_and_anchor_symlinks_are_rejected_without_traversal);
         run_case(
-                "non-directory components rejected",
-                test_non_directory_components_are_rejected);
+            "non-directory components rejected",
+            test_non_directory_components_are_rejected);
         run_case(
-                "effective UID ownership policy",
-                test_ownership_and_effective_uid_policy);
+            "effective UID ownership policy",
+            test_ownership_and_effective_uid_policy);
         run_case(
-                "unsafe descendants not traversed",
-                test_validation_failure_stops_before_unsafe_descendants);
+            "unsafe descendants not traversed",
+            test_validation_failure_stops_before_unsafe_descendants);
         run_case(
-                "missing and invalid boundaries fail before mutation",
-                test_missing_anchor_and_invalid_boundary_fail_before_mutation);
+            "missing and invalid boundaries fail before mutation",
+            test_missing_anchor_and_invalid_boundary_fail_before_mutation);
         run_case(
-                "injected syscall failures classified",
-                test_injected_syscall_failures_are_classified);
+            "injected syscall failures classified",
+            test_injected_syscall_failures_are_classified);
         run_case(
-                "concurrent replacement detected",
-                test_concurrent_replacement_is_detected);
+            "concurrent replacement detected",
+            test_concurrent_replacement_is_detected);
         run_case(
-                "security ancestor mode changes revalidated",
-                test_security_ancestor_mode_changes_are_revalidated);
+            "security ancestor mode changes revalidated",
+            test_security_ancestor_mode_changes_are_revalidated);
         run_case(
-                "safe partial creation retained",
-                test_safe_partial_creation_is_retained);
+            "safe partial creation retained",
+            test_safe_partial_creation_is_retained);
         run_case(
-                "creation precondition rejects before mutation",
-                test_creation_precondition_rejects_before_mutation);
+            "creation precondition rejects before mutation",
+            test_creation_precondition_rejects_before_mutation);
         run_case(
-                "trailing separators preserve creation authority",
-                test_trailing_separators_preserve_creation_authority);
+            "trailing separators preserve creation authority",
+            test_trailing_separators_preserve_creation_authority);
         run_case(
-                "environment and cwd are not reread",
-                test_preparation_does_not_reread_environment_or_cwd);
+            "environment and cwd are not reread",
+            test_preparation_does_not_reread_environment_or_cwd);
         run_case(
-                "retained descriptor detects replacement",
-                test_retained_descriptor_detects_later_replacement);
+            "retained descriptor detects replacement",
+            test_retained_descriptor_detects_later_replacement);
         run_case(
-                "retained lineage detects anchor and ancestor replacement",
-                test_retained_lineage_detects_anchor_and_ancestor_replacement);
+            "retained lineage detects anchor and ancestor replacement",
+            test_retained_lineage_detects_anchor_and_ancestor_replacement);
         run_case(
-                "retained directory rejects security changes",
-                test_retained_directory_rejects_later_security_changes);
+            "retained directory rejects security changes",
+            test_retained_directory_rejects_later_security_changes);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

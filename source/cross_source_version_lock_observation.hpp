@@ -38,7 +38,7 @@ struct CrossSourceVersionLockObservationIssue {
 // proves neither installed AUR provenance nor a pacman transaction blocker.
 struct CrossSourceVersionLockObservationResult {
     CrossSourceVersionLockObservationStatus status =
-            CrossSourceVersionLockObservationStatus::Failed;
+        CrossSourceVersionLockObservationStatus::Failed;
     std::vector<CrossSourceVersionLockCandidateEvidence> candidates;
     std::vector<CrossSourceVersionLockObservationIssue> issues;
 };

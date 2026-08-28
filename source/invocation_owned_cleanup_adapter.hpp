@@ -23,47 +23,45 @@ enum class CleanupLifecycleBoundary {
 // output or invent package-level transaction ownership.
 class CleanupInvocationLifecycleEvidence final {
 public:
-    [[nodiscard]] static CleanupInvocationLifecycleEvidence unknown()
-            noexcept;
+    [[nodiscard]] static CleanupInvocationLifecycleEvidence unknown() noexcept;
     [[nodiscard]] static CleanupInvocationLifecycleEvidence
     before_build_completion(
-            const PreparedProductionSourceBuildInvocation& invocation)
-            noexcept;
+        const PreparedProductionSourceBuildInvocation& invocation) noexcept;
     [[nodiscard]] static CleanupInvocationLifecycleEvidence after_work_item(
-            const PreparedProductionSourceBuildInvocation& invocation,
-            const ProductionSourceBuildInvocationResult& result,
-            std::size_t completed_work_item_index) noexcept;
+        const PreparedProductionSourceBuildInvocation& invocation,
+        const ProductionSourceBuildInvocationResult& result,
+        std::size_t completed_work_item_index) noexcept;
     [[nodiscard]] static CleanupInvocationLifecycleEvidence
     after_successful_invocation(
-            const PreparedProductionSourceBuildInvocation& invocation,
-            const ProductionSourceBuildInvocationResult& result) noexcept;
+        const PreparedProductionSourceBuildInvocation& invocation,
+        const ProductionSourceBuildInvocationResult& result) noexcept;
 
     [[nodiscard]] CleanupLifecycleBoundary boundary() const noexcept;
     [[nodiscard]] const PreparedProductionSourceBuildInvocation* invocation()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const ProductionSourceBuildInvocationResult* result()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const std::optional<std::size_t>&
     completed_work_item_index() const noexcept;
 
 private:
     CleanupInvocationLifecycleEvidence(
-            CleanupLifecycleBoundary boundary,
-            std::optional<std::reference_wrapper<
-                    const PreparedProductionSourceBuildInvocation>>
-                    invocation,
-            std::optional<std::reference_wrapper<
-                    const ProductionSourceBuildInvocationResult>>
-                    result,
-            std::optional<std::size_t> completed_work_item_index) noexcept;
+        CleanupLifecycleBoundary boundary,
+        std::optional<std::reference_wrapper<
+            const PreparedProductionSourceBuildInvocation>>
+            invocation,
+        std::optional<std::reference_wrapper<
+            const ProductionSourceBuildInvocationResult>>
+            result,
+        std::optional<std::size_t> completed_work_item_index) noexcept;
 
     CleanupLifecycleBoundary boundary_;
     std::optional<std::reference_wrapper<
-            const PreparedProductionSourceBuildInvocation>>
-            invocation_;
+        const PreparedProductionSourceBuildInvocation>>
+        invocation_;
     std::optional<std::reference_wrapper<
-            const ProductionSourceBuildInvocationResult>>
-            result_;
+        const ProductionSourceBuildInvocationResult>>
+        result_;
     std::optional<std::size_t> completed_work_item_index_;
 };
 
@@ -85,13 +83,13 @@ enum class CleanupLifecycleProjectionIssueKind {
 
 struct CleanupLifecycleProjectionIssue {
     CleanupLifecycleProjectionIssueKind kind;
-    std::optional<std::size_t>           build_plan_edge_index;
-    std::optional<std::string>           package_name;
+    std::optional<std::size_t> build_plan_edge_index;
+    std::optional<std::string> package_name;
     std::optional<PackageMetadataFailure> metadata_failure;
 };
 
 struct InvocationOwnedCleanupCandidateProjectionSuccess {
-    InvocationOwnedCleanupCandidate              candidate;
+    InvocationOwnedCleanupCandidate candidate;
     std::vector<CleanupLifecycleProjectionIssue> issues;
 };
 
@@ -100,35 +98,35 @@ struct InvocationOwnedCleanupCandidateProjectionFailure {
 };
 
 using InvocationOwnedCleanupCandidateProjectionResult = std::variant<
-        InvocationOwnedCleanupCandidateProjectionSuccess,
-        InvocationOwnedCleanupCandidateProjectionFailure>;
+    InvocationOwnedCleanupCandidateProjectionSuccess,
+    InvocationOwnedCleanupCandidateProjectionFailure>;
 
 [[nodiscard]] CleanupBaselineObservation
 project_cleanup_baseline_observation(
-        const InstalledPackageStateSnapshotResult& baseline_snapshot,
-        const std::string& package_name) noexcept;
+    const InstalledPackageStateSnapshotResult& baseline_snapshot,
+    const std::string& package_name) noexcept;
 
 [[nodiscard]] CleanupCurrentPackageEvidence
 project_cleanup_current_package_evidence(
-        const InstalledPackageStateSnapshotResult& current_snapshot,
-        const std::string& package_name);
+    const InstalledPackageStateSnapshotResult& current_snapshot,
+    const std::string& package_name);
 
 // Current makepkg syncdeps and selected-repository-provider result types do
 // not contain package-level causal change authority. No combination of their
 // success/status fields is promoted to InvocationOwned.
 [[nodiscard]] CleanupCausalOwnership project_cleanup_causal_ownership(
-        const CleanupInvocationLifecycleEvidence& lifecycle,
-        const std::vector<SelectedRepositoryProviderTransactionResult>&
-                provider_transactions) noexcept;
+    const CleanupInvocationLifecycleEvidence& lifecycle,
+    const std::vector<SelectedRepositoryProviderTransactionResult>&
+        provider_transactions) noexcept;
 
 // InvocationOwned requires a complete receipt for the exact transaction and
 // an actual Install record for this package. Omission, Upgrade, command
 // success alone, or malformed ledger data remains Unknown.
 [[nodiscard]] CleanupCausalOwnership project_cleanup_causal_ownership(
-        const std::string& package_name,
-        CleanupBaselineObservation baseline,
-        const CleanupCurrentPackageEvidence& current_package,
-        const InvocationDependencyTransactionLedger& transaction_ledger);
+    const std::string& package_name,
+    CleanupBaselineObservation baseline,
+    const CleanupCurrentPackageEvidence& current_package,
+    const InvocationDependencyTransactionLedger& transaction_ledger);
 
 // Slice 3.6 adds causal transport only; it still has no complete group/policy
 // inventory authority.
@@ -141,11 +139,11 @@ project_cleanup_policy_protection() noexcept;
 // Repository/AUR/Local identity.
 [[nodiscard]] InvocationOwnedCleanupCandidateProjectionResult
 project_invocation_owned_cleanup_candidate(
-        const InstalledPackageStateSnapshotResult& baseline_snapshot,
-        const InstalledPackageStateSnapshotResult& current_snapshot,
-        const BuildPlan& plan,
-        const ResolvedDependencyCandidate& candidate_authority,
-        const CleanupInvocationLifecycleEvidence& lifecycle,
-        const std::vector<SelectedRepositoryProviderTransactionResult>&
-                provider_transactions = {},
-        const InvocationDependencyTransactionLedger& transaction_ledger = {});
+    const InstalledPackageStateSnapshotResult& baseline_snapshot,
+    const InstalledPackageStateSnapshotResult& current_snapshot,
+    const BuildPlan& plan,
+    const ResolvedDependencyCandidate& candidate_authority,
+    const CleanupInvocationLifecycleEvidence& lifecycle,
+    const std::vector<SelectedRepositoryProviderTransactionResult>&
+        provider_transactions = {},
+    const InvocationDependencyTransactionLedger& transaction_ledger = {});

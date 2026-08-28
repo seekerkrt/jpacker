@@ -37,9 +37,9 @@ enum class ResolutionErrorCode {
 };
 
 struct ResolutionFailure {
-    DirectoryKind        directory_kind;
+    DirectoryKind directory_kind;
     EnvironmentVariable environment_variable;
-    ResolutionErrorCode  code;
+    ResolutionErrorCode code;
 };
 
 class ResolutionError final : public std::runtime_error {
@@ -64,9 +64,9 @@ struct EnvironmentSnapshot {
 // Directory safety capabilityがenvironmentやpath suffixを再解決せずに使う、
 // resolver-ownedの作成境界。existing_anchor自体は作成対象に含めない。
 struct DirectoryCreationBoundary {
-    DirectorySource         source = DirectorySource::ExplicitXdg;
-    std::filesystem::path   base_directory;
-    std::filesystem::path   existing_anchor;
+    DirectorySource source = DirectorySource::ExplicitXdg;
+    std::filesystem::path base_directory;
+    std::filesystem::path existing_anchor;
     std::vector<std::string> creatable_components;
 };
 
@@ -101,8 +101,8 @@ struct CachePaths {
 
 struct ResolvedPaths {
     ConfigPaths config;
-    StatePaths  state;
-    CachePaths  cache;
+    StatePaths state;
+    CachePaths cache;
 };
 
 // Pure resolver。filesystemの参照・作成やcurrent working directory補正を行わない。
@@ -115,7 +115,7 @@ ConfigPaths resolve_config(const EnvironmentSnapshot& environment);
 // Source-build preference consumerがconfig authorityだけから
 // moguet/source-build.dを解決するpure resolver。
 SourcePreferencePaths resolve_source_preference(
-        const EnvironmentSnapshot& environment);
+    const EnvironmentSnapshot& environment);
 
 // State log consumerが無関係なconfig/cache environmentをauthorityへ
 // 取り込まず、state pathだけを解決するpure resolver。
@@ -138,7 +138,7 @@ SourcePreferencePaths resolve_source_preference_process_environment();
 // Reviewed-source store consumerが無関係なconfig/cache environmentを
 // authorityへ取り込まず、state pathだけを解決するpure resolver。
 ReviewedSourceStatePaths resolve_reviewed_source_state(
-        const EnvironmentSnapshot& environment);
+    const EnvironmentSnapshot& environment);
 
 // Default state log専用adapter。XDG_STATE_HOME / HOMEだけをsnapshot化する。
 StatePaths resolve_state_process_environment();

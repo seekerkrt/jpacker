@@ -18,31 +18,31 @@ public:
 class TrustedAlpmReceiptStateStore final {
 public:
     [[nodiscard]] static TrustedAlpmReceiptStateStore open_below_runtime_parent(
-            int runtime_parent_fd, uid_t expected_owner);
+        int runtime_parent_fd, uid_t expected_owner);
 
     TrustedAlpmReceiptStateStore(const TrustedAlpmReceiptStateStore&) = delete;
     TrustedAlpmReceiptStateStore(TrustedAlpmReceiptStateStore&&) noexcept;
     TrustedAlpmReceiptStateStore& operator=(
-            const TrustedAlpmReceiptStateStore&) = delete;
+        const TrustedAlpmReceiptStateStore&) = delete;
     TrustedAlpmReceiptStateStore& operator=(
-            TrustedAlpmReceiptStateStore&&) noexcept;
+        TrustedAlpmReceiptStateStore&&) noexcept;
     ~TrustedAlpmReceiptStateStore();
 
     void prepare(
-            const std::string& transaction_token,
-            const std::vector<std::string>& requested_package_names);
+        const std::string& transaction_token,
+        const std::vector<std::string>& requested_package_names);
     void record(
-            const std::string& transaction_token,
-            int needs_targets_input_fd);
+        const std::string& transaction_token,
+        int needs_targets_input_fd);
     [[nodiscard]] std::string consume(
-            const std::string& transaction_token);
+        const std::string& transaction_token);
     void abort(const std::string& transaction_token);
 
 private:
     struct Implementation;
 
     explicit TrustedAlpmReceiptStateStore(
-            std::unique_ptr<Implementation> implementation) noexcept;
+        std::unique_ptr<Implementation> implementation) noexcept;
 
     std::unique_ptr<Implementation> implementation_;
 };

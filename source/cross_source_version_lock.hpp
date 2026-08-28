@@ -12,7 +12,7 @@
 // This is repository-metadata evidence only. It does not represent the target
 // selected by pacman/libalpm for a system-upgrade transaction.
 struct RepositoryUpgradeCandidate {
-    InstalledExactPackage     installed_package;
+    InstalledExactPackage installed_package;
     RepositoryPackagePresent repository_candidate;
 };
 
@@ -21,7 +21,7 @@ struct RepositoryUpgradeCandidate {
 // AUR replacement query evidence below.
 struct InstalledCrossSourceVersionLockConsumer {
     PackageRelationObservedPackage package;
-    ConsumerDependencyRequirement  requirement;
+    ConsumerDependencyRequirement requirement;
 };
 
 struct AurReplacementCandidateQuerySuccess {
@@ -33,26 +33,26 @@ struct AurReplacementCandidateNotFound {
 };
 
 struct AurReplacementCandidateMetadataUnavailable {
-    std::string                        package_name;
-    std::optional<std::string>         package_base;
-    ObservedVersionUnknownReason       reason;
+    std::string package_name;
+    std::optional<std::string> package_base;
+    ObservedVersionUnknownReason reason;
 };
 
 struct AurReplacementCandidateQueryFailure {
     std::vector<std::string> package_names;
-    std::string              diagnostic;
+    std::string diagnostic;
 };
 
 using AurReplacementCandidateQueryResult = std::variant<
-        AurReplacementCandidateQuerySuccess,
-        AurReplacementCandidateNotFound,
-        AurReplacementCandidateMetadataUnavailable,
-        AurReplacementCandidateQueryFailure>;
+    AurReplacementCandidateQuerySuccess,
+    AurReplacementCandidateNotFound,
+    AurReplacementCandidateMetadataUnavailable,
+    AurReplacementCandidateQueryFailure>;
 
 struct CrossSourceVersionLockCandidateEvidence {
-    RepositoryUpgradeCandidate                 repository_upgrade;
-    InstalledCrossSourceVersionLockConsumer    installed_consumer;
-    AurReplacementCandidateQueryResult         aur_replacement;
+    RepositoryUpgradeCandidate repository_upgrade;
+    InstalledCrossSourceVersionLockConsumer installed_consumer;
+    AurReplacementCandidateQueryResult aur_replacement;
 };
 
 enum class CrossSourceVersionLockStatus {
@@ -71,12 +71,12 @@ struct CrossSourceVersionLockAssessment {
     CrossSourceVersionLockStatus status;
     CrossSourceVersionLockCandidateEvidence evidence;
     std::optional<ConstraintEvaluation>
-            installed_requirement_against_installed_version;
+        installed_requirement_against_installed_version;
     std::optional<ConstraintEvaluation>
-            installed_requirement_against_repository_candidate;
+        installed_requirement_against_repository_candidate;
     std::optional<ConsumerDependencyRequirement> replacement_requirement;
     std::optional<ConstraintEvaluation>
-            replacement_requirement_against_repository_candidate;
+        replacement_requirement_against_repository_candidate;
 };
 
 // Performs no filesystem, network, process, package-database, or transaction
@@ -84,4 +84,4 @@ struct CrossSourceVersionLockAssessment {
 // assessment; evidence that cannot be correlated directly fails closed.
 [[nodiscard]] CrossSourceVersionLockAssessment
 assess_cross_source_version_lock_candidate(
-        const CrossSourceVersionLockCandidateEvidence& evidence);
+    const CrossSourceVersionLockCandidateEvidence& evidence);

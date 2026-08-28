@@ -24,9 +24,9 @@ void expect(bool condition, const std::string& message) {
 
 void test_raw_capture_preserves_boundary_whitespace() {
     const std::string expected =
-            "\nRootDir = /\nDBPath = /var/lib/pacman/\n\n";
+        "\nRootDir = /\nDBPath = /var/lib/pacman/\n\n";
     CapturedCommandResult result = capture_command_output_raw(
-            "printf '\\nRootDir = /\\nDBPath = /var/lib/pacman/\\n\\n'");
+        "printf '\\nRootDir = /\\nDBPath = /var/lib/pacman/\\n\\n'");
 
     expect(result.exit_code == 0, "raw capture command failed");
     expect(result.output == expected, "raw capture changed boundary whitespace");
@@ -48,72 +48,72 @@ void run_pacman_metadata_smoke_test() {
     expect(metadata.name == "pacman", "pacman metadata returned a different package name");
     expect(!metadata.version.empty(), "pacman metadata returned an empty version");
     expect(
-            metadata.reason == InstalledPackageReason::Explicit ||
-                    metadata.reason == InstalledPackageReason::Dependency ||
-                    metadata.reason == InstalledPackageReason::Unknown,
-            "pacman metadata returned an unknown public install reason");
+        metadata.reason == InstalledPackageReason::Explicit ||
+            metadata.reason == InstalledPackageReason::Dependency ||
+            metadata.reason == InstalledPackageReason::Unknown,
+        "pacman metadata returned an unknown public install reason");
 
     InstalledPackageStateSnapshotResult snapshot_result =
-            session.snapshot_installed_package_states();
+        session.snapshot_installed_package_states();
     if(const auto* failure =
-               std::get_if<PackageMetadataFailure>(&snapshot_result)) {
+           std::get_if<PackageMetadataFailure>(&snapshot_result)) {
         throw std::runtime_error(
-                "installed package state snapshot failed: " +
-                failure->diagnostic);
+            "installed package state snapshot failed: " +
+            failure->diagnostic);
     }
     const InstalledPackageStateSnapshot& snapshot =
-            std::get<InstalledPackageStateSnapshot>(snapshot_result);
+        std::get<InstalledPackageStateSnapshot>(snapshot_result);
     const auto pacman = snapshot.find("pacman");
     expect(
-            pacman != snapshot.end(),
-            "installed package state snapshot omitted pacman");
+        pacman != snapshot.end(),
+        "installed package state snapshot omitted pacman");
     expect(
-            pacman->second.name == metadata.name &&
-                    pacman->second.version == metadata.version &&
-                    pacman->second.reason == metadata.reason,
-            "installed package state snapshot differs from exact metadata");
+        pacman->second.name == metadata.name &&
+            pacman->second.version == metadata.version &&
+            pacman->second.reason == metadata.reason,
+        "installed package state snapshot differs from exact metadata");
 }
 
 void run_repository_metadata_smoke_test() {
     PacmanRepositoryConfiguration configuration =
-            resolve_pacman_repository_configuration();
+        resolve_pacman_repository_configuration();
     expect(
-            !configuration.repository_names.empty(),
-            "pacman configuration did not return any repositories");
+        !configuration.repository_names.empty(),
+        "pacman configuration did not return any repositories");
 
     RepositoryPackageMetadataSession session =
-            RepositoryPackageMetadataSession::open(configuration);
+        RepositoryPackageMetadataSession::open(configuration);
     RepositoryPackageQueryResult pacman_result = session.query_repository_package(
-            RepositoryPackageLookup{"pacman", std::nullopt});
+        RepositoryPackageLookup{"pacman", std::nullopt});
     if(const auto* failure = std::get_if<PackageMetadataFailure>(&pacman_result)) {
         throw std::runtime_error(
-                "repository pacman metadata query failed: " + failure->diagnostic);
+            "repository pacman metadata query failed: " + failure->diagnostic);
     }
     if(std::holds_alternative<PackageNotFound>(pacman_result)) {
         throw std::runtime_error("repository pacman package was not found");
     }
 
     const RepositoryPackageMetadata& metadata =
-            std::get<RepositoryPackageMetadata>(pacman_result);
+        std::get<RepositoryPackageMetadata>(pacman_result);
     expect(metadata.package_name == "pacman", "repository query returned a different package");
     expect(
-            std::find(
-                    configuration.repository_names.begin(),
-                    configuration.repository_names.end(),
-                    metadata.repository_name) != configuration.repository_names.end(),
-            "repository query returned an unconfigured repository");
+        std::find(
+            configuration.repository_names.begin(),
+            configuration.repository_names.end(),
+            metadata.repository_name) != configuration.repository_names.end(),
+        "repository query returned an unconfigured repository");
 
     RepositoryPackageQueryResult missing_result = session.query_repository_package(
-            RepositoryPackageLookup{
-                    "moguet-issue-125-package-that-does-not-exist",
-                    std::nullopt});
+        RepositoryPackageLookup{
+            "moguet-issue-125-package-that-does-not-exist",
+            std::nullopt});
     if(const auto* failure = std::get_if<PackageMetadataFailure>(&missing_result)) {
         throw std::runtime_error(
-                "missing repository package query failed: " + failure->diagnostic);
+            "missing repository package query failed: " + failure->diagnostic);
     }
     expect(
-            std::holds_alternative<PackageNotFound>(missing_result),
-            "missing repository package was not reported as not found");
+        std::holds_alternative<PackageNotFound>(missing_result),
+        "missing repository package was not reported as not found");
 }
 
 struct PacmanForeignPackage {
@@ -123,19 +123,19 @@ struct PacmanForeignPackage {
 
 std::vector<PacmanForeignPackage> query_pacman_foreign_packages() {
     CapturedCommandResult result =
-            capture_command_output_raw("pacman -Qm 2>/dev/null");
+        capture_command_output_raw("pacman -Qm 2>/dev/null");
     // pacman reports a valid query with no foreign package matches as exit 1
     // and empty output. The corresponding libalpm inventory is an empty vector.
     const bool is_empty_inventory = result.exit_code == 1 && result.output.empty();
     if(result.exit_code != 0 && !is_empty_inventory) {
         throw std::runtime_error(
-                "pacman -Qm failed with exit code " +
-                std::to_string(result.exit_code));
+            "pacman -Qm failed with exit code " +
+            std::to_string(result.exit_code));
     }
 
     std::vector<PacmanForeignPackage> packages;
-    std::stringstream                 output_stream(result.output);
-    std::string                       line;
+    std::stringstream output_stream(result.output);
+    std::string line;
     while(std::getline(output_stream, line)) {
         if(line.empty()) {
             throw std::runtime_error("pacman -Qm returned an empty output line");
@@ -143,7 +143,7 @@ std::vector<PacmanForeignPackage> query_pacman_foreign_packages() {
 
         std::stringstream line_stream(line);
         PacmanForeignPackage package;
-        std::string          unexpected_field;
+        std::string unexpected_field;
         if(!(line_stream >> package.name >> package.version) ||
            (line_stream >> unexpected_field)) {
             throw std::runtime_error("pacman -Qm returned a malformed output line");
@@ -155,28 +155,28 @@ std::vector<PacmanForeignPackage> query_pacman_foreign_packages() {
 
 void run_foreign_package_inventory_compatibility_test() {
     std::vector<PacmanForeignPackage> pacman_packages =
-            query_pacman_foreign_packages();
+        query_pacman_foreign_packages();
     PacmanRepositoryConfiguration configuration =
-            resolve_pacman_repository_configuration();
+        resolve_pacman_repository_configuration();
     ForeignPackageInventoryResult result =
-            query_foreign_package_inventory(configuration);
+        query_foreign_package_inventory(configuration);
     if(const auto* failure = std::get_if<PackageMetadataFailure>(&result)) {
         throw std::runtime_error(
-                "foreign package inventory failed: " + failure->diagnostic);
+            "foreign package inventory failed: " + failure->diagnostic);
     }
 
     const ForeignPackageInventory& inventory =
-            std::get<ForeignPackageInventory>(result);
+        std::get<ForeignPackageInventory>(result);
     expect(
-            inventory.size() == pacman_packages.size(),
-            "foreign package inventory count differs from pacman -Qm");
+        inventory.size() == pacman_packages.size(),
+        "foreign package inventory count differs from pacman -Qm");
     for(std::size_t index = 0; index < inventory.size(); ++index) {
         expect(
-                inventory[index].name == pacman_packages[index].name,
-                "foreign package inventory name/order differs from pacman -Qm");
+            inventory[index].name == pacman_packages[index].name,
+            "foreign package inventory name/order differs from pacman -Qm");
         expect(
-                inventory[index].version == pacman_packages[index].version,
-                "foreign package inventory version differs from pacman -Qm");
+            inventory[index].version == pacman_packages[index].version,
+            "foreign package inventory version differs from pacman -Qm");
     }
 }
 

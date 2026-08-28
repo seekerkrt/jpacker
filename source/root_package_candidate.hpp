@@ -31,15 +31,15 @@ struct AurRootPackageIdentity {
 };
 
 using RootPackageIdentity =
-        std::variant<RepositoryRootPackageIdentity, AurRootPackageIdentity>;
+    std::variant<RepositoryRootPackageIdentity, AurRootPackageIdentity>;
 
 RootPackageSourceKind root_package_source_kind(
-        const RootPackageIdentity& identity) noexcept;
+    const RootPackageIdentity& identity) noexcept;
 const std::string& root_package_name(
-        const RootPackageIdentity& identity) noexcept;
+    const RootPackageIdentity& identity) noexcept;
 bool same_root_package_identity(
-        const RootPackageIdentity& lhs,
-        const RootPackageIdentity& rhs) noexcept;
+    const RootPackageIdentity& lhs,
+    const RootPackageIdentity& rhs) noexcept;
 
 struct RootPackageCandidatePresentation {
     std::optional<std::string> version;
@@ -59,17 +59,17 @@ enum class RootPackageCandidateValidationIssueKind {
 // raw valueはtyped adapterの診断用に保持するが、このmodelでは表示しない。
 struct RootPackageCandidateValidationIssue {
     RootPackageCandidateValidationIssueKind kind;
-    std::string                             value;
+    std::string value;
 
     bool operator==(const RootPackageCandidateValidationIssue&) const = default;
 };
 
 struct RootPackageCandidateValidationFailure {
-    RootPackageSourceKind                         source_kind;
+    RootPackageSourceKind source_kind;
     std::vector<RootPackageCandidateValidationIssue> issues;
 
     bool operator==(const RootPackageCandidateValidationFailure&) const =
-            default;
+        default;
 };
 
 class RootPackageCandidateValidationResult;
@@ -89,92 +89,92 @@ public:
     [[nodiscard]] const RootPackageIdentity& identity() const noexcept;
     [[nodiscard]] const std::string& package_name() const noexcept;
     [[nodiscard]] const RootPackageCandidatePresentation& presentation()
-            const noexcept;
+        const noexcept;
 
     bool operator==(const RootPackageCandidate&) const = default;
 
 private:
     RootPackageCandidate(
-            RootPackageIdentity identity,
-            RootPackageCandidatePresentation presentation) noexcept;
+        RootPackageIdentity identity,
+        RootPackageCandidatePresentation presentation) noexcept;
 
-    RootPackageIdentity              identity_;
-    RootPackageTargetRole            target_role_ =
-            RootPackageTargetRole::Root;
+    RootPackageIdentity identity_;
+    RootPackageTargetRole target_role_ =
+        RootPackageTargetRole::Root;
     RootPackageCandidatePresentation presentation_;
 
     friend RootPackageCandidateValidationResult
     make_repository_root_package_candidate(
-            std::string repository_name, std::string package_name,
-            std::optional<std::string> version,
-            std::optional<std::string> description);
+        std::string repository_name, std::string package_name,
+        std::optional<std::string> version,
+        std::optional<std::string> description);
     friend RootPackageCandidateValidationResult
     make_aur_root_package_candidate(
-            std::string package_name, std::string package_base,
-            std::optional<std::string> version,
-            std::optional<std::string> description);
+        std::string package_name, std::string package_base,
+        std::optional<std::string> version,
+        std::optional<std::string> description);
     friend RootPackageCandidatePairResult assess_root_package_candidate_pair(
-            const RootPackageCandidate& lhs,
-            const RootPackageCandidate& rhs);
+        const RootPackageCandidate& lhs,
+        const RootPackageCandidate& rhs);
 };
 
 class RootPackageCandidateValidationResult final {
 public:
     RootPackageCandidateValidationResult() = delete;
     RootPackageCandidateValidationResult(
-            const RootPackageCandidateValidationResult&) = default;
+        const RootPackageCandidateValidationResult&) = default;
     RootPackageCandidateValidationResult(
-            RootPackageCandidateValidationResult&&) noexcept = default;
+        RootPackageCandidateValidationResult&&) noexcept = default;
     RootPackageCandidateValidationResult& operator=(
-            const RootPackageCandidateValidationResult&) = delete;
+        const RootPackageCandidateValidationResult&) = delete;
     RootPackageCandidateValidationResult& operator=(
-            RootPackageCandidateValidationResult&&) noexcept = delete;
+        RootPackageCandidateValidationResult&&) noexcept = delete;
     ~RootPackageCandidateValidationResult() = default;
 
     [[nodiscard]] bool is_valid() const noexcept;
     [[nodiscard]] const RootPackageCandidate* candidate() const noexcept;
     [[nodiscard]] const RootPackageCandidateValidationFailure* failure()
-            const noexcept;
+        const noexcept;
 
 private:
     explicit RootPackageCandidateValidationResult(
-            RootPackageCandidate candidate) noexcept;
+        RootPackageCandidate candidate) noexcept;
     explicit RootPackageCandidateValidationResult(
-            RootPackageCandidateValidationFailure failure) noexcept;
+        RootPackageCandidateValidationFailure failure) noexcept;
 
     std::variant<RootPackageCandidate,
                  RootPackageCandidateValidationFailure>
-            outcome_;
+        outcome_;
 
     friend RootPackageCandidateValidationResult
     make_repository_root_package_candidate(
-            std::string repository_name, std::string package_name,
-            std::optional<std::string> version,
-            std::optional<std::string> description);
+        std::string repository_name, std::string package_name,
+        std::optional<std::string> version,
+        std::optional<std::string> description);
     friend RootPackageCandidateValidationResult
     make_aur_root_package_candidate(
-            std::string package_name, std::string package_base,
-            std::optional<std::string> version,
-            std::optional<std::string> description);
+        std::string package_name, std::string package_base,
+        std::optional<std::string> version,
+        std::optional<std::string> description);
 };
 
 RootPackageCandidateValidationResult make_repository_root_package_candidate(
-        std::string repository_name, std::string package_name,
-        std::optional<std::string> version = std::nullopt,
-        std::optional<std::string> description = std::nullopt);
+    std::string repository_name, std::string package_name,
+    std::optional<std::string> version = std::nullopt,
+    std::optional<std::string> description = std::nullopt);
 RootPackageCandidateValidationResult make_aur_root_package_candidate(
-        std::string package_name, std::string package_base,
-        std::optional<std::string> version = std::nullopt,
-        std::optional<std::string> description = std::nullopt);
+    std::string package_name, std::string package_base,
+    std::optional<std::string> version = std::nullopt,
+    std::optional<std::string> description = std::nullopt);
 
 class SelectedRootPackageTarget final {
 public:
     SelectedRootPackageTarget(const SelectedRootPackageTarget&) = default;
     SelectedRootPackageTarget(SelectedRootPackageTarget&&) noexcept = default;
     SelectedRootPackageTarget& operator=(
-            const SelectedRootPackageTarget&) = default;
+        const SelectedRootPackageTarget&) = default;
     SelectedRootPackageTarget& operator=(
-            SelectedRootPackageTarget&&) noexcept = default;
+        SelectedRootPackageTarget&&) noexcept = default;
     ~SelectedRootPackageTarget() = default;
 
     [[nodiscard]] RootPackageSourceKind source_kind() const noexcept;
@@ -186,17 +186,17 @@ public:
 
 private:
     explicit SelectedRootPackageTarget(
-            RootPackageIdentity identity) noexcept;
+        RootPackageIdentity identity) noexcept;
 
-    RootPackageIdentity   identity_;
+    RootPackageIdentity identity_;
     RootPackageTargetRole target_role_ = RootPackageTargetRole::Root;
 
     friend SelectedRootPackageTarget select_root_package_target(
-            const RootPackageCandidate& candidate);
+        const RootPackageCandidate& candidate);
 };
 
 SelectedRootPackageTarget select_root_package_target(
-        const RootPackageCandidate& candidate);
+    const RootPackageCandidate& candidate);
 
 struct DistinctRootPackageCandidates {
     bool operator==(const DistinctRootPackageCandidates&) const = default;
@@ -223,18 +223,18 @@ enum class RootPackageCandidateMetadataField {
 };
 
 struct ConflictingRootPackageCandidateMetadata {
-    RootPackageIdentity                 identity;
-    RootPackageCandidateMetadataField   field;
-    std::string                         first_value;
-    std::string                         second_value;
+    RootPackageIdentity identity;
+    RootPackageCandidateMetadataField field;
+    std::string first_value;
+    std::string second_value;
 
     bool operator==(
-            const ConflictingRootPackageCandidateMetadata&) const = default;
+        const ConflictingRootPackageCandidateMetadata&) const = default;
 };
 
 using RootPackageCandidatePairIssue =
-        std::variant<InconsistentAurRootPackageBase,
-                     ConflictingRootPackageCandidateMetadata>;
+    std::variant<InconsistentAurRootPackageBase,
+                 ConflictingRootPackageCandidateMetadata>;
 
 struct InvalidRootPackageCandidatePair {
     std::vector<RootPackageCandidatePairIssue> issues;
@@ -246,43 +246,43 @@ class RootPackageCandidatePairResult final {
 public:
     RootPackageCandidatePairResult() = delete;
     RootPackageCandidatePairResult(
-            const RootPackageCandidatePairResult&) = default;
+        const RootPackageCandidatePairResult&) = default;
     RootPackageCandidatePairResult(
-            RootPackageCandidatePairResult&&) noexcept = default;
+        RootPackageCandidatePairResult&&) noexcept = default;
     RootPackageCandidatePairResult& operator=(
-            const RootPackageCandidatePairResult&) = delete;
+        const RootPackageCandidatePairResult&) = delete;
     RootPackageCandidatePairResult& operator=(
-            RootPackageCandidatePairResult&&) noexcept = delete;
+        RootPackageCandidatePairResult&&) noexcept = delete;
     ~RootPackageCandidatePairResult() = default;
 
     [[nodiscard]] bool is_distinct() const noexcept;
     [[nodiscard]] bool is_duplicate() const noexcept;
     [[nodiscard]] bool is_invalid() const noexcept;
     [[nodiscard]] const DistinctRootPackageCandidates* distinct()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const DuplicateRootPackageCandidate* duplicate()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const InvalidRootPackageCandidatePair* invalid()
-            const noexcept;
+        const noexcept;
 
 private:
     explicit RootPackageCandidatePairResult(
-            DistinctRootPackageCandidates distinct) noexcept;
+        DistinctRootPackageCandidates distinct) noexcept;
     explicit RootPackageCandidatePairResult(
-            DuplicateRootPackageCandidate duplicate) noexcept;
+        DuplicateRootPackageCandidate duplicate) noexcept;
     explicit RootPackageCandidatePairResult(
-            InvalidRootPackageCandidatePair invalid) noexcept;
+        InvalidRootPackageCandidatePair invalid) noexcept;
 
     std::variant<DistinctRootPackageCandidates,
                  DuplicateRootPackageCandidate,
                  InvalidRootPackageCandidatePair>
-            outcome_;
+        outcome_;
 
     friend RootPackageCandidatePairResult assess_root_package_candidate_pair(
-            const RootPackageCandidate& lhs,
-            const RootPackageCandidate& rhs);
+        const RootPackageCandidate& lhs,
+        const RootPackageCandidate& rhs);
 };
 
 RootPackageCandidatePairResult assess_root_package_candidate_pair(
-        const RootPackageCandidate& lhs,
-        const RootPackageCandidate& rhs);
+    const RootPackageCandidate& lhs,
+    const RootPackageCandidate& rhs);

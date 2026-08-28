@@ -27,16 +27,16 @@ enum class SourceEnvironmentEmptyValuePolicy {
 
 // cmd_build / cmd_add_src / preference file readが共有する既存assignment syntax。
 bool split_env_assignment(
-        const std::string& assignment, std::string& key, std::string& value);
+    const std::string& assignment, std::string& key, std::string& value);
 
 // Empty policy適用後のordered assignmentを、shell textではない1 argv word
 // (`KEY=value`)ずつへmaterializeする。orderとduplicateは保持する。
 std::vector<std::string> materialize_source_build_environment_assignment_words(
-        const SourceBuildEnvironment& environment,
-        SourceEnvironmentEmptyValuePolicy empty_value_policy);
+    const SourceBuildEnvironment& environment,
+    SourceEnvironmentEmptyValuePolicy empty_value_policy);
 
 // makepkg command environmentとuser-facing表示が共有するserializer。
 // 末尾spaceも既存表示契約に含む。
 std::string serialize_source_build_environment(
-        const SourceBuildEnvironment& environment,
-        SourceEnvironmentEmptyValuePolicy empty_value_policy);
+    const SourceBuildEnvironment& environment,
+    SourceEnvironmentEmptyValuePolicy empty_value_policy);

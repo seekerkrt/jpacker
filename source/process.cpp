@@ -26,12 +26,12 @@ extern char** environ;
 namespace {
 
 struct CommandSignalState {
-    struct sigaction original_sigint {};
-    struct sigaction original_sigquit {};
-    sigset_t         original_mask {};
-    bool             sigint_changed = false;
-    bool             sigquit_changed = false;
-    bool             mask_changed = false;
+    struct sigaction original_sigint{};
+    struct sigaction original_sigquit{};
+    sigset_t original_mask{};
+    bool sigint_changed = false;
+    bool sigquit_changed = false;
+    bool mask_changed = false;
 };
 
 enum class SignalRestoreTarget {
@@ -54,133 +54,133 @@ enum class CommandSignalContext {
 };
 
 std::string signal_restore_failure_message(
-        SignalRestoreTarget target, SignalRestoreContext context,
-        int error_number) {
+    SignalRestoreTarget target, SignalRestoreContext context,
+    int error_number) {
     const std::string_view error = std::strerror(error_number);
     switch(context) {
-    case SignalRestoreContext::CommandSetupRollback:
-        switch(target) {
-        case SignalRestoreTarget::SigintDisposition:
-            return localization::format_translated_message(
-                    "Failed to restore the {} disposition during command setup rollback: {}",
-                    "SIGINT", error);
-        case SignalRestoreTarget::SigquitDisposition:
-            return localization::format_translated_message(
-                    "Failed to restore the {} disposition during command setup rollback: {}",
-                    "SIGQUIT", error);
-        case SignalRestoreTarget::SignalMask:
-            return localization::format_translated_message(
-                    "Failed to restore the signal mask during command setup rollback: {}",
-                    error);
-        }
-        break;
-    case SignalRestoreContext::ExplicitProcessForkFailure:
-        switch(target) {
-        case SignalRestoreTarget::SigintDisposition:
-            return localization::format_translated_message(
-                    "Failed to restore the {} disposition after an explicit-process fork failure: {}",
-                    "SIGINT", error);
-        case SignalRestoreTarget::SigquitDisposition:
-            return localization::format_translated_message(
-                    "Failed to restore the {} disposition after an explicit-process fork failure: {}",
-                    "SIGQUIT", error);
-        case SignalRestoreTarget::SignalMask:
-            return localization::format_translated_message(
-                    "Failed to restore the signal mask after an explicit-process fork failure: {}",
-                    error);
-        }
-        break;
-    case SignalRestoreContext::ExplicitProcessWait:
-        switch(target) {
-        case SignalRestoreTarget::SigintDisposition:
-            return localization::format_translated_message(
-                    "Failed to restore the {} disposition after waiting for an explicit process: {}",
-                    "SIGINT", error);
-        case SignalRestoreTarget::SigquitDisposition:
-            return localization::format_translated_message(
-                    "Failed to restore the {} disposition after waiting for an explicit process: {}",
-                    "SIGQUIT", error);
-        case SignalRestoreTarget::SignalMask:
-            return localization::format_translated_message(
-                    "Failed to restore the signal mask after waiting for an explicit process: {}",
-                    error);
-        }
-        break;
-    case SignalRestoreContext::StdinFdCommandForkFailure:
-        switch(target) {
-        case SignalRestoreTarget::SigintDisposition:
-            return localization::format_translated_message(
-                    "Failed to restore the {} disposition after a {}-file-descriptor command fork failure: {}",
-                    "SIGINT", "stdin", error);
-        case SignalRestoreTarget::SigquitDisposition:
-            return localization::format_translated_message(
-                    "Failed to restore the {} disposition after a {}-file-descriptor command fork failure: {}",
-                    "SIGQUIT", "stdin", error);
-        case SignalRestoreTarget::SignalMask:
-            return localization::format_translated_message(
-                    "Failed to restore the signal mask after a {}-file-descriptor command fork failure: {}",
-                    "stdin", error);
-        }
-        break;
-    case SignalRestoreContext::StdinFdCommandWait:
-        switch(target) {
-        case SignalRestoreTarget::SigintDisposition:
-            return localization::format_translated_message(
-                    "Failed to restore the {} disposition after waiting for a {}-file-descriptor command: {}",
-                    "SIGINT", "stdin", error);
-        case SignalRestoreTarget::SigquitDisposition:
-            return localization::format_translated_message(
-                    "Failed to restore the {} disposition after waiting for a {}-file-descriptor command: {}",
-                    "SIGQUIT", "stdin", error);
-        case SignalRestoreTarget::SignalMask:
-            return localization::format_translated_message(
-                    "Failed to restore the signal mask after waiting for a {}-file-descriptor command: {}",
-                    "stdin", error);
-        }
-        break;
+        case SignalRestoreContext::CommandSetupRollback:
+            switch(target) {
+                case SignalRestoreTarget::SigintDisposition:
+                    return localization::format_translated_message(
+                        "Failed to restore the {} disposition during command setup rollback: {}",
+                        "SIGINT", error);
+                case SignalRestoreTarget::SigquitDisposition:
+                    return localization::format_translated_message(
+                        "Failed to restore the {} disposition during command setup rollback: {}",
+                        "SIGQUIT", error);
+                case SignalRestoreTarget::SignalMask:
+                    return localization::format_translated_message(
+                        "Failed to restore the signal mask during command setup rollback: {}",
+                        error);
+            }
+            break;
+        case SignalRestoreContext::ExplicitProcessForkFailure:
+            switch(target) {
+                case SignalRestoreTarget::SigintDisposition:
+                    return localization::format_translated_message(
+                        "Failed to restore the {} disposition after an explicit-process fork failure: {}",
+                        "SIGINT", error);
+                case SignalRestoreTarget::SigquitDisposition:
+                    return localization::format_translated_message(
+                        "Failed to restore the {} disposition after an explicit-process fork failure: {}",
+                        "SIGQUIT", error);
+                case SignalRestoreTarget::SignalMask:
+                    return localization::format_translated_message(
+                        "Failed to restore the signal mask after an explicit-process fork failure: {}",
+                        error);
+            }
+            break;
+        case SignalRestoreContext::ExplicitProcessWait:
+            switch(target) {
+                case SignalRestoreTarget::SigintDisposition:
+                    return localization::format_translated_message(
+                        "Failed to restore the {} disposition after waiting for an explicit process: {}",
+                        "SIGINT", error);
+                case SignalRestoreTarget::SigquitDisposition:
+                    return localization::format_translated_message(
+                        "Failed to restore the {} disposition after waiting for an explicit process: {}",
+                        "SIGQUIT", error);
+                case SignalRestoreTarget::SignalMask:
+                    return localization::format_translated_message(
+                        "Failed to restore the signal mask after waiting for an explicit process: {}",
+                        error);
+            }
+            break;
+        case SignalRestoreContext::StdinFdCommandForkFailure:
+            switch(target) {
+                case SignalRestoreTarget::SigintDisposition:
+                    return localization::format_translated_message(
+                        "Failed to restore the {} disposition after a {}-file-descriptor command fork failure: {}",
+                        "SIGINT", "stdin", error);
+                case SignalRestoreTarget::SigquitDisposition:
+                    return localization::format_translated_message(
+                        "Failed to restore the {} disposition after a {}-file-descriptor command fork failure: {}",
+                        "SIGQUIT", "stdin", error);
+                case SignalRestoreTarget::SignalMask:
+                    return localization::format_translated_message(
+                        "Failed to restore the signal mask after a {}-file-descriptor command fork failure: {}",
+                        "stdin", error);
+            }
+            break;
+        case SignalRestoreContext::StdinFdCommandWait:
+            switch(target) {
+                case SignalRestoreTarget::SigintDisposition:
+                    return localization::format_translated_message(
+                        "Failed to restore the {} disposition after waiting for a {}-file-descriptor command: {}",
+                        "SIGINT", "stdin", error);
+                case SignalRestoreTarget::SigquitDisposition:
+                    return localization::format_translated_message(
+                        "Failed to restore the {} disposition after waiting for a {}-file-descriptor command: {}",
+                        "SIGQUIT", "stdin", error);
+                case SignalRestoreTarget::SignalMask:
+                    return localization::format_translated_message(
+                        "Failed to restore the signal mask after waiting for a {}-file-descriptor command: {}",
+                        "stdin", error);
+            }
+            break;
     }
     return localization::translate_message(
-            "Failed to restore an unknown process signal state.");
+        "Failed to restore an unknown process signal state.");
 }
 
 void log_signal_setup_error(
-        CommandSignalContext context, std::string_view action,
-        int error_number) {
+    CommandSignalContext context, std::string_view action,
+    int error_number) {
     const std::string_view error = std::strerror(error_number);
     if(context == CommandSignalContext::ExplicitProcess) {
         if(action == "SIGINT") {
             Logger::error(localization::format_translated_message(
-                    "Failed to ignore {} while waiting for an explicit process: {}",
-                    action, error));
+                "Failed to ignore {} while waiting for an explicit process: {}",
+                action, error));
         } else if(action == "SIGQUIT") {
             Logger::error(localization::format_translated_message(
-                    "Failed to ignore {} while waiting for an explicit process: {}",
-                    action, error));
+                "Failed to ignore {} while waiting for an explicit process: {}",
+                action, error));
         } else {
             Logger::error(localization::format_translated_message(
-                    "Failed to block {} while waiting for an explicit process: {}",
-                    action, error));
+                "Failed to block {} while waiting for an explicit process: {}",
+                action, error));
         }
         return;
     }
     if(action == "SIGINT") {
         Logger::error(localization::format_translated_message(
-                "Failed to ignore {} while waiting for a {}-file-descriptor command: {}",
-                action, "stdin", error));
+            "Failed to ignore {} while waiting for a {}-file-descriptor command: {}",
+            action, "stdin", error));
     } else if(action == "SIGQUIT") {
         Logger::error(localization::format_translated_message(
-                "Failed to ignore {} while waiting for a {}-file-descriptor command: {}",
-                action, "stdin", error));
+            "Failed to ignore {} while waiting for a {}-file-descriptor command: {}",
+            action, "stdin", error));
     } else {
         Logger::error(localization::format_translated_message(
-                "Failed to block {} while waiting for a {}-file-descriptor command: {}",
-                action, "stdin", error));
+            "Failed to block {} while waiting for a {}-file-descriptor command: {}",
+            action, "stdin", error));
     }
 }
 
 bool restore_parent_signal_state(
-        const CommandSignalState& state,
-        SignalRestoreContext context) {
+    const CommandSignalState& state,
+    SignalRestoreContext context) {
     int sigint_restore_error = 0;
     int sigquit_restore_error = 0;
     int mask_restore_error = 0;
@@ -197,32 +197,32 @@ bool restore_parent_signal_state(
     // 復元処理をすべて試した後でloggingし、先の失敗で後続の復元を飛ばさない。
     if(sigint_restore_error != 0) {
         Logger::error(signal_restore_failure_message(
-                SignalRestoreTarget::SigintDisposition, context,
-                sigint_restore_error));
+            SignalRestoreTarget::SigintDisposition, context,
+            sigint_restore_error));
     }
     if(sigquit_restore_error != 0) {
         Logger::error(signal_restore_failure_message(
-                SignalRestoreTarget::SigquitDisposition, context,
-                sigquit_restore_error));
+            SignalRestoreTarget::SigquitDisposition, context,
+            sigquit_restore_error));
     }
     if(mask_restore_error != 0) {
         Logger::error(signal_restore_failure_message(
-                SignalRestoreTarget::SignalMask, context,
-                mask_restore_error));
+            SignalRestoreTarget::SignalMask, context,
+            mask_restore_error));
     }
     return sigint_restore_error == 0 && sigquit_restore_error == 0 && mask_restore_error == 0;
 }
 
 bool setup_command_signal_state(
-        CommandSignalState& state,
-        CommandSignalContext command_context) {
-    struct sigaction ignore_action {};
+    CommandSignalState& state,
+    CommandSignalContext command_context) {
+    struct sigaction ignore_action{};
     ignore_action.sa_handler = SIG_IGN;
     if(sigemptyset(&ignore_action.sa_mask) == -1) {
         int setup_error = errno;
         Logger::error(localization::format_translated_message(
-                "Failed to initialize the ignored signal disposition: {}",
-                std::string_view(std::strerror(setup_error))));
+            "Failed to initialize the ignored signal disposition: {}",
+            std::string_view(std::strerror(setup_error))));
         return false;
     }
 
@@ -230,8 +230,8 @@ bool setup_command_signal_state(
     if(sigemptyset(&sigchld_mask) == -1 || sigaddset(&sigchld_mask, SIGCHLD) == -1) {
         int setup_error = errno;
         Logger::error(localization::format_translated_message(
-                "Failed to initialize the {} mask: {}", "SIGCHLD",
-                std::string_view(std::strerror(setup_error))));
+            "Failed to initialize the {} mask: {}", "SIGCHLD",
+            std::string_view(std::strerror(setup_error))));
         return false;
     }
 
@@ -245,7 +245,7 @@ bool setup_command_signal_state(
     if(sigaction(SIGQUIT, &ignore_action, &state.original_sigquit) == -1) {
         int setup_error = errno;
         restore_parent_signal_state(
-                state, SignalRestoreContext::CommandSetupRollback);
+            state, SignalRestoreContext::CommandSetupRollback);
         log_signal_setup_error(command_context, "SIGQUIT", setup_error);
         return false;
     }
@@ -254,7 +254,7 @@ bool setup_command_signal_state(
     if(sigprocmask(SIG_BLOCK, &sigchld_mask, &state.original_mask) == -1) {
         int setup_error = errno;
         restore_parent_signal_state(
-                state, SignalRestoreContext::CommandSetupRollback);
+            state, SignalRestoreContext::CommandSetupRollback);
         log_signal_setup_error(command_context, "SIGCHLD", setup_error);
         return false;
     }
@@ -270,23 +270,23 @@ std::string trim_captured_output(const std::string& str) {
 }
 
 CapturedCommandResult capture_command_output_impl(
-        const char* cmd,
-        bool trim_output) {
+    const char* cmd,
+    bool trim_output) {
     std::array<char, 128> buffer;
-    std::string           result;
+    std::string result;
     std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen(cmd, "r"), pclose);
     if(!pipe) return CapturedCommandResult{};
     // POLICY(#242): strict machine-output parserへNULも含む全byteを渡し、
     // C-string appendによる途中切り捨てを起こさない。
     while(true) {
         std::size_t bytes_read =
-                std::fread(buffer.data(), 1, buffer.size(), pipe.get());
+            std::fread(buffer.data(), 1, buffer.size(), pipe.get());
         result.append(buffer.data(), bytes_read);
         if(bytes_read == 0) break;
     }
     bool read_failed = ferror(pipe.get()) != 0;
-    int  status = pclose(pipe.release());
-    int  exit_code = 127;
+    int status = pclose(pipe.release());
+    int exit_code = 127;
     if(status != -1) {
         if(WIFEXITED(status))
             exit_code = WEXITSTATUS(status);
@@ -297,8 +297,8 @@ CapturedCommandResult capture_command_output_impl(
     }
     if(read_failed) exit_code = 1;
     return CapturedCommandResult{
-            trim_output ? trim_captured_output(result) : std::move(result),
-            exit_code};
+        trim_output ? trim_captured_output(result) : std::move(result),
+        exit_code};
 }
 
 int decode_process_status(int status) noexcept {
@@ -312,19 +312,19 @@ bool has_embedded_nul(const std::string& value) noexcept {
 }
 
 [[noreturn]] void exec_explicit_process_child(
-        const ExplicitProcessInvocation& invocation,
-        std::vector<char*>& argument_vector,
-        std::vector<char*>& environment_vector,
-        const int output_pipe[2],
-        bool capture_standard_output,
-        bool suppress_standard_output,
-        bool suppress_standard_error,
-        const CommandSignalState& signal_state,
-        std::optional<int> inherited_lifetime_guard_fd = std::nullopt) {
+    const ExplicitProcessInvocation& invocation,
+    std::vector<char*>& argument_vector,
+    std::vector<char*>& environment_vector,
+    const int output_pipe[2],
+    bool capture_standard_output,
+    bool suppress_standard_output,
+    bool suppress_standard_error,
+    const CommandSignalState& signal_state,
+    std::optional<int> inherited_lifetime_guard_fd = std::nullopt) {
     if(sigaction(SIGINT, &signal_state.original_sigint, nullptr) == -1 ||
        sigaction(SIGQUIT, &signal_state.original_sigquit, nullptr) == -1 ||
        sigprocmask(
-               SIG_SETMASK, &signal_state.original_mask, nullptr) == -1) {
+           SIG_SETMASK, &signal_state.original_mask, nullptr) == -1) {
         _exit(127);
     }
 
@@ -340,8 +340,8 @@ bool has_embedded_nul(const std::string& value) noexcept {
             const int descriptor_flags = fcntl(STDIN_FILENO, F_GETFD);
             if(descriptor_flags == -1 ||
                fcntl(
-                       STDIN_FILENO, F_SETFD,
-                       descriptor_flags & ~FD_CLOEXEC) == -1) {
+                   STDIN_FILENO, F_SETFD,
+                   descriptor_flags & ~FD_CLOEXEC) == -1) {
                 _exit(127);
             }
         } else if(dup2(source_fd, STDIN_FILENO) == -1) {
@@ -383,20 +383,20 @@ bool has_embedded_nul(const std::string& value) noexcept {
         const int descriptor_flags = fcntl(guard_descriptor, F_GETFD);
         if(descriptor_flags == -1 ||
            fcntl(
-                   guard_descriptor, F_SETFD,
-                   descriptor_flags & ~FD_CLOEXEC) == -1) {
+               guard_descriptor, F_SETFD,
+               descriptor_flags & ~FD_CLOEXEC) == -1) {
             _exit(127);
         }
     }
 
     execve(
-            invocation.executable.c_str(), argument_vector.data(),
-            environment_vector.data());
+        invocation.executable.c_str(), argument_vector.data(),
+        environment_vector.data());
     _exit(127);
 }
 
 bool close_descriptor_range(
-        unsigned int first, unsigned int last) noexcept {
+    unsigned int first, unsigned int last) noexcept {
     if(first > last) return true;
 #ifdef SYS_close_range
     long result;
@@ -415,31 +415,31 @@ bool close_supervisor_descriptors_except(int preserved_descriptor) noexcept {
     if(preserved_descriptor < 3) return false;
     if(preserved_descriptor > 3 &&
        !close_descriptor_range(
-               3U, static_cast<unsigned int>(preserved_descriptor - 1))) {
+           3U, static_cast<unsigned int>(preserved_descriptor - 1))) {
         return false;
     }
     if(preserved_descriptor < INT_MAX &&
        !close_descriptor_range(
-               static_cast<unsigned int>(preserved_descriptor + 1),
-               UINT_MAX)) {
+           static_cast<unsigned int>(preserved_descriptor + 1),
+           UINT_MAX)) {
         return false;
     }
     return true;
 }
 
 [[noreturn]] void supervise_explicit_process_lifetime(
-        const ExplicitProcessInvocation& invocation,
-        std::vector<char*>& argument_vector,
-        std::vector<char*>& environment_vector,
-        bool suppress_standard_output,
-        bool suppress_standard_error,
-        const CommandSignalState& signal_state) {
+    const ExplicitProcessInvocation& invocation,
+    std::vector<char*>& argument_vector,
+    std::vector<char*>& environment_vector,
+    bool suppress_standard_output,
+    bool suppress_standard_error,
+    const CommandSignalState& signal_state) {
     const int guard_descriptor =
-            *invocation.parent_independent_lifetime_guard_fd;
+        *invocation.parent_independent_lifetime_guard_fd;
     int supervisor_guard;
     do {
         supervisor_guard =
-                fcntl(guard_descriptor, F_DUPFD_CLOEXEC, 3);
+            fcntl(guard_descriptor, F_DUPFD_CLOEXEC, 3);
     } while(supervisor_guard == -1 && errno == EINTR);
     if(supervisor_guard == -1 ||
        !close_supervisor_descriptors_except(supervisor_guard) ||
@@ -452,9 +452,9 @@ bool close_supervisor_descriptors_except(int preserved_descriptor) noexcept {
     if(mutator_pid == 0) {
         const int no_output_pipe[2] = {-1, -1};
         exec_explicit_process_child(
-                invocation, argument_vector, environment_vector,
-                no_output_pipe, false, suppress_standard_output,
-                suppress_standard_error, signal_state, supervisor_guard);
+            invocation, argument_vector, environment_vector,
+            no_output_pipe, false, suppress_standard_output,
+            suppress_standard_error, signal_state, supervisor_guard);
     }
 
     // The supervisor and actual mutator tree retain the same open-file-
@@ -482,10 +482,10 @@ bool close_supervisor_descriptors_except(int preserved_descriptor) noexcept {
 }
 
 CapturedCommandResult execute_explicit_process(
-        const ExplicitProcessInvocation& invocation,
-        bool capture_standard_output,
-        bool suppress_standard_output,
-        bool suppress_standard_error) {
+    const ExplicitProcessInvocation& invocation,
+    bool capture_standard_output,
+    bool suppress_standard_output,
+    bool suppress_standard_error) {
     if(invocation.executable.empty() ||
        has_embedded_nul(invocation.executable)) {
         return CapturedCommandResult{};
@@ -502,7 +502,7 @@ CapturedCommandResult execute_explicit_process(
     }
     if(invocation.parent_independent_lifetime_guard_fd.has_value()) {
         const int guard_descriptor =
-                *invocation.parent_independent_lifetime_guard_fd;
+            *invocation.parent_independent_lifetime_guard_fd;
         if(capture_standard_output ||
            invocation.working_directory_fd.has_value() ||
            invocation.standard_input_fd.has_value() ||
@@ -515,7 +515,7 @@ CapturedCommandResult execute_explicit_process(
     std::vector<char*> argument_vector;
     argument_vector.reserve(invocation.arguments.size() + 2);
     argument_vector.push_back(
-            const_cast<char*>(invocation.executable.c_str()));
+        const_cast<char*>(invocation.executable.c_str()));
     for(const std::string& argument : invocation.arguments) {
         argument_vector.push_back(const_cast<char*>(argument.c_str()));
     }
@@ -535,7 +535,7 @@ CapturedCommandResult execute_explicit_process(
 
     CommandSignalState signal_state;
     if(!setup_command_signal_state(
-               signal_state, CommandSignalContext::ExplicitProcess)) {
+           signal_state, CommandSignalContext::ExplicitProcess)) {
         if(output_pipe[0] >= 0) static_cast<void>(close(output_pipe[0]));
         if(output_pipe[1] >= 0) static_cast<void>(close(output_pipe[1]));
         return CapturedCommandResult{};
@@ -546,22 +546,22 @@ CapturedCommandResult execute_explicit_process(
         if(output_pipe[0] >= 0) static_cast<void>(close(output_pipe[0]));
         if(output_pipe[1] >= 0) static_cast<void>(close(output_pipe[1]));
         restore_parent_signal_state(
-                signal_state,
-                SignalRestoreContext::ExplicitProcessForkFailure);
+            signal_state,
+            SignalRestoreContext::ExplicitProcessForkFailure);
         return CapturedCommandResult{};
     }
     if(child_pid == 0) {
         if(invocation.parent_independent_lifetime_guard_fd.has_value()) {
             supervise_explicit_process_lifetime(
-                    invocation, argument_vector, environment_vector,
-                    suppress_standard_output, suppress_standard_error,
-                    signal_state);
-        }
-        exec_explicit_process_child(
                 invocation, argument_vector, environment_vector,
-                output_pipe, capture_standard_output,
                 suppress_standard_output, suppress_standard_error,
                 signal_state);
+        }
+        exec_explicit_process_child(
+            invocation, argument_vector, environment_vector,
+            output_pipe, capture_standard_output,
+            suppress_standard_output, suppress_standard_error,
+            signal_state);
     }
 
     if(output_pipe[1] >= 0) static_cast<void>(close(output_pipe[1]));
@@ -573,16 +573,16 @@ CapturedCommandResult execute_explicit_process(
         std::array<char, 4096> buffer;
         while(true) {
             const ssize_t bytes_read =
-                    read(output_pipe[0], buffer.data(), buffer.size());
+                read(output_pipe[0], buffer.data(), buffer.size());
             if(bytes_read > 0) {
                 const std::size_t chunk_size =
-                        static_cast<std::size_t>(bytes_read);
+                    static_cast<std::size_t>(bytes_read);
                 std::size_t stored_size = chunk_size;
                 if(invocation.stdout_capture_limit.has_value()) {
                     const std::size_t limit =
-                            *invocation.stdout_capture_limit;
+                        *invocation.stdout_capture_limit;
                     const std::size_t remaining =
-                            output.size() < limit ? limit - output.size() : 0;
+                        output.size() < limit ? limit - output.size() : 0;
                     stored_size = std::min(chunk_size, remaining);
                     if(stored_size < chunk_size) {
                         stdout_capture_limit_exceeded = true;
@@ -613,16 +613,16 @@ CapturedCommandResult execute_explicit_process(
         wait_result = waitpid(child_pid, &status, 0);
     } while(wait_result == -1 && errno == EINTR);
     const bool signal_state_restored = restore_parent_signal_state(
-            signal_state, SignalRestoreContext::ExplicitProcessWait);
+        signal_state, SignalRestoreContext::ExplicitProcessWait);
     if(pending_exception) std::rethrow_exception(pending_exception);
     if(wait_result == -1 || !signal_state_restored) {
         return CapturedCommandResult{
-                std::move(output), 127, stdout_capture_limit_exceeded};
+            std::move(output), 127, stdout_capture_limit_exceeded};
     }
     return CapturedCommandResult{
-            std::move(output),
-            read_failed ? 1 : decode_process_status(status),
-            stdout_capture_limit_exceeded};
+        std::move(output),
+        read_failed ? 1 : decode_process_status(status),
+        stdout_capture_limit_exceeded};
 }
 
 } // namespace
@@ -636,20 +636,20 @@ CapturedCommandResult capture_command_output_raw(const char* cmd) {
 }
 
 CapturedCommandResult capture_explicit_process_output_raw(
-        const ExplicitProcessInvocation& invocation,
-        bool suppress_standard_error) {
+    const ExplicitProcessInvocation& invocation,
+    bool suppress_standard_error) {
     return execute_explicit_process(
-            invocation, true, false, suppress_standard_error);
+        invocation, true, false, suppress_standard_error);
 }
 
 int run_explicit_process(
-        const ExplicitProcessInvocation& invocation,
-        bool suppress_standard_output,
-        bool suppress_standard_error) {
+    const ExplicitProcessInvocation& invocation,
+    bool suppress_standard_output,
+    bool suppress_standard_error) {
     return execute_explicit_process(
-                   invocation, false, suppress_standard_output,
-                   suppress_standard_error)
-            .exit_code;
+               invocation, false, suppress_standard_output,
+               suppress_standard_error)
+        .exit_code;
 }
 
 std::string exec_command(const char* cmd) {
@@ -670,9 +670,9 @@ int run_command(const std::string& cmd) {
 }
 
 int run_command_with_parent_independent_lifetime_guard(
-        const std::string& command,
-        int lifetime_guard_fd,
-        const std::string& display_command) {
+    const std::string& command,
+    int lifetime_guard_fd,
+    const std::string& display_command) {
     Logger::raw_cmd(display_command.empty() ? command : display_command);
     std::vector<std::string> environment;
     for(char** current = ::environ;
@@ -684,7 +684,7 @@ int run_command_with_parent_independent_lifetime_guard(
     invocation.arguments = {"-c", command};
     invocation.environment = std::move(environment);
     invocation.parent_independent_lifetime_guard_fd =
-            lifetime_guard_fd;
+        lifetime_guard_fd;
     return run_explicit_process(invocation);
 }
 
@@ -695,15 +695,15 @@ int run_command_with_stdin_fd(const std::string& command, int source_fd) {
     // POLICY: std::system()と同様、親はSIGINT/SIGQUITを無視し、SIGCHLDをblockしたままchildをreapする。
     CommandSignalState signal_state;
     if(!setup_command_signal_state(
-               signal_state, CommandSignalContext::StdinFdCommand)) {
+           signal_state, CommandSignalContext::StdinFdCommand)) {
         return 127;
     }
 
     pid_t child_pid = fork();
     if(child_pid == -1) {
         restore_parent_signal_state(
-                signal_state,
-                SignalRestoreContext::StdinFdCommandForkFailure);
+            signal_state,
+            SignalRestoreContext::StdinFdCommandForkFailure);
         return 127;
     }
     if(child_pid == 0) {
@@ -730,14 +730,14 @@ int run_command_with_stdin_fd(const std::string& command, int source_fd) {
         _exit(127);
     }
 
-    int   status = 0;
+    int status = 0;
     pid_t wait_result;
     do {
         wait_result = waitpid(child_pid, &status, 0);
     } while(wait_result == -1 && errno == EINTR);
 
     bool signal_state_restored = restore_parent_signal_state(
-            signal_state, SignalRestoreContext::StdinFdCommandWait);
+        signal_state, SignalRestoreContext::StdinFdCommandWait);
     if(wait_result == -1 || !signal_state_restored) return 127;
     if(WIFEXITED(status)) return WEXITSTATUS(status);
     if(WIFSIGNALED(status)) return 128 + WTERMSIG(status);

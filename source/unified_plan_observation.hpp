@@ -54,22 +54,23 @@ class PreparedUpgradeAllAurPreflight;
 // borrow itself must not be detached from the observation by value. Keeping
 // std::reference_wrapper private also prevents nested variant/member copies
 // from silently recreating an independently-lived reference-bearing leaf.
-template<typename T>
+template <typename T>
 class UnifiedPlanBorrowedAuthorityReference final {
 public:
     explicit UnifiedPlanBorrowedAuthorityReference(const T& authority) noexcept
-        : authority_(authority) {}
+        : authority_(authority) {
+    }
     UnifiedPlanBorrowedAuthorityReference(T&&) = delete;
     UnifiedPlanBorrowedAuthorityReference(const T&&) = delete;
 
     UnifiedPlanBorrowedAuthorityReference(
-            const UnifiedPlanBorrowedAuthorityReference&) = delete;
+        const UnifiedPlanBorrowedAuthorityReference&) = delete;
     UnifiedPlanBorrowedAuthorityReference& operator=(
-            const UnifiedPlanBorrowedAuthorityReference&) = delete;
+        const UnifiedPlanBorrowedAuthorityReference&) = delete;
     UnifiedPlanBorrowedAuthorityReference(
-            UnifiedPlanBorrowedAuthorityReference&&) noexcept = default;
+        UnifiedPlanBorrowedAuthorityReference&&) noexcept = default;
     UnifiedPlanBorrowedAuthorityReference& operator=(
-            UnifiedPlanBorrowedAuthorityReference&&) noexcept = default;
+        UnifiedPlanBorrowedAuthorityReference&&) noexcept = default;
     ~UnifiedPlanBorrowedAuthorityReference() = default;
 
     [[nodiscard]] const T& get() const noexcept {
@@ -107,7 +108,7 @@ enum class UnifiedPlanRootRouteKind {
 // LocalSourceRootのdescriptor capabilityをcopyせず、既に観測済みのstable
 // filesystem identityだけをsource-aware identityとして保持する。
 struct LocalSourceRootObservationIdentity {
-    std::filesystem::path         canonical_path;
+    std::filesystem::path canonical_path;
     LocalSourceDirectoryIdentity directory_identity;
 
     bool operator==(const LocalSourceRootObservationIdentity&) const = default;
@@ -125,22 +126,22 @@ struct RepositorySourceBuildRootIdentity {
 };
 
 using UnifiedPlanRootIdentity = std::variant<
-        RepositoryRootPackageIdentity,
-        RepositorySourceBuildRootIdentity,
-        AurRootPackageIdentity,
-        LocalSourceRootObservationIdentity>;
+    RepositoryRootPackageIdentity,
+    RepositorySourceBuildRootIdentity,
+    AurRootPackageIdentity,
+    LocalSourceRootObservationIdentity>;
 
 class UnifiedPlanRootReference final {
 public:
     UnifiedPlanRootReference(
-            RootTargetIdentity invocation_correlation,
-            UnifiedPlanRootIdentity source_identity,
-            UnifiedPlanRootRouteKind route_kind);
+        RootTargetIdentity invocation_correlation,
+        UnifiedPlanRootIdentity source_identity,
+        UnifiedPlanRootRouteKind route_kind);
 
     [[nodiscard]] const RootTargetIdentity& invocation_correlation()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const UnifiedPlanRootIdentity& source_identity()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] UnifiedPlanRootSourceKind source_kind() const noexcept;
     [[nodiscard]] UnifiedPlanRootRouteKind route_kind() const noexcept;
     [[nodiscard]] bool has_complete_identity() const noexcept;
@@ -148,9 +149,9 @@ public:
     bool operator==(const UnifiedPlanRootReference&) const = default;
 
 private:
-    RootTargetIdentity         invocation_correlation_;
-    UnifiedPlanRootIdentity    source_identity_;
-    UnifiedPlanRootRouteKind   route_kind_;
+    RootTargetIdentity invocation_correlation_;
+    UnifiedPlanRootIdentity source_identity_;
+    UnifiedPlanRootRouteKind route_kind_;
 };
 
 // The referenced authority must outlive the observation. No BuildPlan content
@@ -158,38 +159,37 @@ private:
 class UnifiedPlanDependencyAuthorityReference final {
 public:
     UnifiedPlanDependencyAuthorityReference(
-            const UnifiedPlanDependencyAuthorityReference&) = delete;
+        const UnifiedPlanDependencyAuthorityReference&) = delete;
     UnifiedPlanDependencyAuthorityReference& operator=(
-            const UnifiedPlanDependencyAuthorityReference&) = delete;
+        const UnifiedPlanDependencyAuthorityReference&) = delete;
     UnifiedPlanDependencyAuthorityReference(
-            UnifiedPlanDependencyAuthorityReference&&) noexcept = default;
+        UnifiedPlanDependencyAuthorityReference&&) noexcept = default;
     UnifiedPlanDependencyAuthorityReference& operator=(
-            UnifiedPlanDependencyAuthorityReference&&) noexcept = default;
+        UnifiedPlanDependencyAuthorityReference&&) noexcept = default;
     ~UnifiedPlanDependencyAuthorityReference() = default;
 
     [[nodiscard]] static UnifiedPlanDependencyAuthorityReference
     from_build_plan(const BuildPlan& plan) noexcept;
     static UnifiedPlanDependencyAuthorityReference from_build_plan(
-            BuildPlan&&) = delete;
+        BuildPlan&&) = delete;
     static UnifiedPlanDependencyAuthorityReference from_build_plan(
-            const BuildPlan&&) = delete;
+        const BuildPlan&&) = delete;
     [[nodiscard]] static UnifiedPlanDependencyAuthorityReference
     from_local_build_plan(const LocalBuildPlan& plan) noexcept;
     static UnifiedPlanDependencyAuthorityReference from_local_build_plan(
-            LocalBuildPlan&&) = delete;
+        LocalBuildPlan&&) = delete;
     static UnifiedPlanDependencyAuthorityReference from_local_build_plan(
-            const LocalBuildPlan&&) = delete;
+        const LocalBuildPlan&&) = delete;
 
     [[nodiscard]] const BuildPlan* build_plan() const noexcept;
     [[nodiscard]] const LocalBuildPlan* local_build_plan() const noexcept;
 
 private:
     using Authority = std::variant<
-            std::reference_wrapper<const BuildPlan>,
-            std::reference_wrapper<const LocalBuildPlan>>;
+        std::reference_wrapper<const BuildPlan>,
+        std::reference_wrapper<const LocalBuildPlan>>;
 
-    explicit UnifiedPlanDependencyAuthorityReference(Authority authority)
-        noexcept;
+    explicit UnifiedPlanDependencyAuthorityReference(Authority authority) noexcept;
 
     Authority authority_;
 };
@@ -197,17 +197,17 @@ private:
 class AurPackageBaseBuildUnitReference final {
 public:
     AurPackageBaseBuildUnitReference(
-            std::reference_wrapper<const BuildPlan> authority,
-            std::size_t build_plan_order_index) noexcept;
+        std::reference_wrapper<const BuildPlan> authority,
+        std::size_t build_plan_order_index) noexcept;
 
     AurPackageBaseBuildUnitReference(
-            const AurPackageBaseBuildUnitReference&) = delete;
+        const AurPackageBaseBuildUnitReference&) = delete;
     AurPackageBaseBuildUnitReference& operator=(
-            const AurPackageBaseBuildUnitReference&) = delete;
+        const AurPackageBaseBuildUnitReference&) = delete;
     AurPackageBaseBuildUnitReference(
-            AurPackageBaseBuildUnitReference&&) noexcept = default;
+        AurPackageBaseBuildUnitReference&&) noexcept = default;
     AurPackageBaseBuildUnitReference& operator=(
-            AurPackageBaseBuildUnitReference&&) noexcept = default;
+        AurPackageBaseBuildUnitReference&&) noexcept = default;
     ~AurPackageBaseBuildUnitReference() = default;
 
     [[nodiscard]] const BuildPlan& authority() const noexcept;
@@ -217,32 +217,32 @@ public:
 
 private:
     std::reference_wrapper<const BuildPlan> authority_;
-    std::size_t                            build_plan_order_index_;
+    std::size_t build_plan_order_index_;
 };
 
 class LocalSourceBuildUnitReference final {
 public:
     LocalSourceBuildUnitReference(
-            LocalSourceRootObservationIdentity source_root,
-            std::reference_wrapper<const LocalPackageMetadata> metadata);
+        LocalSourceRootObservationIdentity source_root,
+        std::reference_wrapper<const LocalPackageMetadata> metadata);
 
     LocalSourceBuildUnitReference(const LocalSourceBuildUnitReference&) =
-            delete;
+        delete;
     LocalSourceBuildUnitReference& operator=(
-            const LocalSourceBuildUnitReference&) = delete;
+        const LocalSourceBuildUnitReference&) = delete;
     LocalSourceBuildUnitReference(
-            LocalSourceBuildUnitReference&&) noexcept = default;
+        LocalSourceBuildUnitReference&&) noexcept = default;
     LocalSourceBuildUnitReference& operator=(
-            LocalSourceBuildUnitReference&&) noexcept = default;
+        LocalSourceBuildUnitReference&&) noexcept = default;
     ~LocalSourceBuildUnitReference() = default;
 
     [[nodiscard]] const LocalSourceRootObservationIdentity& source_root()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const LocalPackageMetadata& metadata() const noexcept;
     [[nodiscard]] bool has_complete_identity() const noexcept;
 
 private:
-    LocalSourceRootObservationIdentity                source_root_;
+    LocalSourceRootObservationIdentity source_root_;
     std::reference_wrapper<const LocalPackageMetadata> metadata_;
 };
 
@@ -251,25 +251,25 @@ private:
 class PreparedRemoteSourceBuildUnitReference final {
 public:
     PreparedRemoteSourceBuildUnitReference(
-            std::reference_wrapper<const ResolvedSourceBuildIdentity>
-                    source,
-            std::reference_wrapper<const ProductionSourceBuildWorkItem>
-                    work_item) noexcept;
+        std::reference_wrapper<const ResolvedSourceBuildIdentity>
+            source,
+        std::reference_wrapper<const ProductionSourceBuildWorkItem>
+            work_item) noexcept;
 
     PreparedRemoteSourceBuildUnitReference(
-            const PreparedRemoteSourceBuildUnitReference&) = delete;
+        const PreparedRemoteSourceBuildUnitReference&) = delete;
     PreparedRemoteSourceBuildUnitReference& operator=(
-            const PreparedRemoteSourceBuildUnitReference&) = delete;
+        const PreparedRemoteSourceBuildUnitReference&) = delete;
     PreparedRemoteSourceBuildUnitReference(
-            PreparedRemoteSourceBuildUnitReference&&) noexcept = default;
+        PreparedRemoteSourceBuildUnitReference&&) noexcept = default;
     PreparedRemoteSourceBuildUnitReference& operator=(
-            PreparedRemoteSourceBuildUnitReference&&) noexcept = default;
+        PreparedRemoteSourceBuildUnitReference&&) noexcept = default;
     ~PreparedRemoteSourceBuildUnitReference() = default;
 
     [[nodiscard]] const ResolvedSourceBuildIdentity& source()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const ProductionSourceBuildWorkItem& work_item()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const std::vector<RequiredPackageArtifactTarget>&
     required_targets() const noexcept;
     [[nodiscard]] bool has_complete_identity() const noexcept;
@@ -284,46 +284,48 @@ private:
 class PreparedSystemSourceBuildUnitReference final {
 public:
     PreparedSystemSourceBuildUnitReference(
-            std::reference_wrapper<
-                    const RegisteredSourcePreferenceSnapshot> source,
-            std::reference_wrapper<const std::string>
-                    requested_package_name,
-            std::reference_wrapper<const std::string>
-                    checkout_package_base,
-            RequiredTargetProvenance required_target_provenance,
-            ArtifactLifecycleIntent artifact_lifecycle_intent,
-            bool uses_system_update_baseline,
-            std::reference_wrapper<const std::vector<
-                    RequiredPackageArtifactTarget>> required_targets) noexcept;
+        std::reference_wrapper<
+            const RegisteredSourcePreferenceSnapshot>
+            source,
+        std::reference_wrapper<const std::string>
+            requested_package_name,
+        std::reference_wrapper<const std::string>
+            checkout_package_base,
+        RequiredTargetProvenance required_target_provenance,
+        ArtifactLifecycleIntent artifact_lifecycle_intent,
+        bool uses_system_update_baseline,
+        std::reference_wrapper<const std::vector<
+            RequiredPackageArtifactTarget>>
+            required_targets) noexcept;
 
     PreparedSystemSourceBuildUnitReference(
-            const PreparedSystemSourceBuildUnitReference&) = delete;
+        const PreparedSystemSourceBuildUnitReference&) = delete;
     PreparedSystemSourceBuildUnitReference& operator=(
-            const PreparedSystemSourceBuildUnitReference&) = delete;
+        const PreparedSystemSourceBuildUnitReference&) = delete;
     PreparedSystemSourceBuildUnitReference(
-            PreparedSystemSourceBuildUnitReference&&) noexcept = default;
+        PreparedSystemSourceBuildUnitReference&&) noexcept = default;
     PreparedSystemSourceBuildUnitReference& operator=(
-            PreparedSystemSourceBuildUnitReference&&) noexcept = default;
+        PreparedSystemSourceBuildUnitReference&&) noexcept = default;
     ~PreparedSystemSourceBuildUnitReference() = default;
 
     [[nodiscard]] const RegisteredSourcePreferenceSnapshot& source()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const std::vector<RequiredPackageArtifactTarget>&
     required_targets() const noexcept;
     [[nodiscard]] const std::string& requested_package_name() const noexcept;
     [[nodiscard]] const std::string& checkout_package_base() const noexcept;
     [[nodiscard]] RequiredTargetProvenance required_target_provenance()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] ArtifactLifecycleIntent artifact_lifecycle_intent()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] bool uses_system_update_baseline() const noexcept;
     [[nodiscard]] bool has_complete_identity() const noexcept;
 
 private:
     std::reference_wrapper<const RegisteredSourcePreferenceSnapshot> source_;
     std::reference_wrapper<
-            const std::vector<RequiredPackageArtifactTarget>>
-            required_targets_;
+        const std::vector<RequiredPackageArtifactTarget>>
+        required_targets_;
     std::reference_wrapper<const std::string> requested_package_name_;
     std::reference_wrapper<const std::string> checkout_package_base_;
     RequiredTargetProvenance required_target_provenance_;
@@ -332,93 +334,93 @@ private:
 };
 
 using UnifiedPlanBuildUnitReference = std::variant<
-        AurPackageBaseBuildUnitReference,
-        LocalSourceBuildUnitReference,
-        PreparedRemoteSourceBuildUnitReference,
-        PreparedSystemSourceBuildUnitReference>;
+    AurPackageBaseBuildUnitReference,
+    LocalSourceBuildUnitReference,
+    PreparedRemoteSourceBuildUnitReference,
+    PreparedSystemSourceBuildUnitReference>;
 
 using UnifiedPlanRootMetadataAuthorityReference = std::variant<
-        UnifiedPlanBorrowedAuthorityReference<RootPackageSearchCandidate>,
-        UnifiedPlanBorrowedAuthorityReference<AurUpdatePlanEntry>,
-        UnifiedPlanBorrowedAuthorityReference<LocalPackageMetadata>,
-        UnifiedPlanBorrowedAuthorityReference<ResolvedSourceBuildIdentity>,
-        UnifiedPlanBorrowedAuthorityReference<RepositoryPackagePresent>,
-        UnifiedPlanBorrowedAuthorityReference<RepositoryPackageNotFound>,
-        UnifiedPlanBorrowedAuthorityReference<
-                RegisteredSourcePreferenceSnapshot>>;
+    UnifiedPlanBorrowedAuthorityReference<RootPackageSearchCandidate>,
+    UnifiedPlanBorrowedAuthorityReference<AurUpdatePlanEntry>,
+    UnifiedPlanBorrowedAuthorityReference<LocalPackageMetadata>,
+    UnifiedPlanBorrowedAuthorityReference<ResolvedSourceBuildIdentity>,
+    UnifiedPlanBorrowedAuthorityReference<RepositoryPackagePresent>,
+    UnifiedPlanBorrowedAuthorityReference<RepositoryPackageNotFound>,
+    UnifiedPlanBorrowedAuthorityReference<
+        RegisteredSourcePreferenceSnapshot>>;
 
 class UnifiedPlanConfiguredRepositoryOrderReference final {
 public:
     explicit UnifiedPlanConfiguredRepositoryOrderReference(
-            std::reference_wrapper<const std::vector<std::string>>
-                    configured_order) noexcept;
+        std::reference_wrapper<const std::vector<std::string>>
+            configured_order) noexcept;
 
     UnifiedPlanConfiguredRepositoryOrderReference(
-            const UnifiedPlanConfiguredRepositoryOrderReference&) = delete;
+        const UnifiedPlanConfiguredRepositoryOrderReference&) = delete;
     UnifiedPlanConfiguredRepositoryOrderReference& operator=(
-            const UnifiedPlanConfiguredRepositoryOrderReference&) = delete;
+        const UnifiedPlanConfiguredRepositoryOrderReference&) = delete;
     UnifiedPlanConfiguredRepositoryOrderReference(
-            UnifiedPlanConfiguredRepositoryOrderReference&&) noexcept =
-            default;
+        UnifiedPlanConfiguredRepositoryOrderReference&&) noexcept =
+        default;
     UnifiedPlanConfiguredRepositoryOrderReference& operator=(
-            UnifiedPlanConfiguredRepositoryOrderReference&&) noexcept =
-            default;
+        UnifiedPlanConfiguredRepositoryOrderReference&&) noexcept =
+        default;
     ~UnifiedPlanConfiguredRepositoryOrderReference() = default;
 
     [[nodiscard]] const std::vector<std::string>& configured_order()
-            const noexcept;
+        const noexcept;
 
 private:
     std::reference_wrapper<const std::vector<std::string>> configured_order_;
 };
 
 using UnifiedPlanRoutePreflightAuthorityReference = std::variant<
-        UnifiedPlanBorrowedAuthorityReference<RootPackageRoutingProjection>,
-        UnifiedPlanBorrowedAuthorityReference<LocalSourceRoot>,
-        UnifiedPlanBorrowedAuthorityReference<
-                LocalSourceBuildProjectionAuthority>,
-        UnifiedPlanBorrowedAuthorityReference<LocalBuildPlan>,
-        UnifiedPlanBorrowedAuthorityReference<FetchPreparation>,
-        UnifiedPlanBorrowedAuthorityReference<PreparedSyncInstall>,
-        UnifiedPlanBorrowedAuthorityReference<
-                SyncInstallPreparationFailure>,
-        UnifiedPlanBorrowedAuthorityReference<PreparedRemoteSourceBuild>,
-        UnifiedPlanBorrowedAuthorityReference<RemoteSourceBuildPlanFailure>,
-        UnifiedPlanBorrowedAuthorityReference<AurUpdateExecutionPreflight>,
-        UnifiedPlanBorrowedAuthorityReference<
-                AurUpdateSourceBuildPreparation>,
-        UnifiedPlanBorrowedAuthorityReference<
-                PreparedFilteredAurUpdateOperation>,
-        UnifiedPlanBorrowedAuthorityReference<
-                PreparedUpgradeAllAurPreflight>,
-        UnifiedPlanBorrowedAuthorityReference<
-                SystemSourceUpgradeProjectionAuthority>,
-        UnifiedPlanBorrowedAuthorityReference<SystemSourceUpgradeResult>,
-        UnifiedPlanBorrowedAuthorityReference<
-                UpgradeAllOperationProjectionAuthority>,
-        UnifiedPlanBorrowedAuthorityReference<UpgradeAllOperationResult>>;
+    UnifiedPlanBorrowedAuthorityReference<RootPackageRoutingProjection>,
+    UnifiedPlanBorrowedAuthorityReference<LocalSourceRoot>,
+    UnifiedPlanBorrowedAuthorityReference<
+        LocalSourceBuildProjectionAuthority>,
+    UnifiedPlanBorrowedAuthorityReference<LocalBuildPlan>,
+    UnifiedPlanBorrowedAuthorityReference<FetchPreparation>,
+    UnifiedPlanBorrowedAuthorityReference<PreparedSyncInstall>,
+    UnifiedPlanBorrowedAuthorityReference<
+        SyncInstallPreparationFailure>,
+    UnifiedPlanBorrowedAuthorityReference<PreparedRemoteSourceBuild>,
+    UnifiedPlanBorrowedAuthorityReference<RemoteSourceBuildPlanFailure>,
+    UnifiedPlanBorrowedAuthorityReference<AurUpdateExecutionPreflight>,
+    UnifiedPlanBorrowedAuthorityReference<
+        AurUpdateSourceBuildPreparation>,
+    UnifiedPlanBorrowedAuthorityReference<
+        PreparedFilteredAurUpdateOperation>,
+    UnifiedPlanBorrowedAuthorityReference<
+        PreparedUpgradeAllAurPreflight>,
+    UnifiedPlanBorrowedAuthorityReference<
+        SystemSourceUpgradeProjectionAuthority>,
+    UnifiedPlanBorrowedAuthorityReference<SystemSourceUpgradeResult>,
+    UnifiedPlanBorrowedAuthorityReference<
+        UpgradeAllOperationProjectionAuthority>,
+    UnifiedPlanBorrowedAuthorityReference<UpgradeAllOperationResult>>;
 
 // Pre-build required targetだけを表す。ProducedPackageArtifactやartifact path、
 // produced versionへ変換するAPIは持たない。
 class RequiredArtifactTargetReference final {
 public:
     RequiredArtifactTargetReference(
-            UnifiedPlanBuildUnitReference build_unit,
-            std::reference_wrapper<const RequiredPackageArtifactTarget>
-                    target);
+        UnifiedPlanBuildUnitReference build_unit,
+        std::reference_wrapper<const RequiredPackageArtifactTarget>
+            target);
 
     RequiredArtifactTargetReference(const RequiredArtifactTargetReference&) =
-            delete;
+        delete;
     RequiredArtifactTargetReference& operator=(
-            const RequiredArtifactTargetReference&) = delete;
+        const RequiredArtifactTargetReference&) = delete;
     RequiredArtifactTargetReference(
-            RequiredArtifactTargetReference&&) noexcept = default;
+        RequiredArtifactTargetReference&&) noexcept = default;
     RequiredArtifactTargetReference& operator=(
-            RequiredArtifactTargetReference&&) noexcept = default;
+        RequiredArtifactTargetReference&&) noexcept = default;
     ~RequiredArtifactTargetReference() = default;
 
     [[nodiscard]] const UnifiedPlanBuildUnitReference& build_unit()
-            const noexcept;
+        const noexcept;
     // Return the small identity value, never a reference into projection-owned
     // artifact storage.
     [[nodiscard]] RequiredPackageArtifactTarget target() const;
@@ -426,7 +428,7 @@ public:
 
 private:
     UnifiedPlanBuildUnitReference
-            build_unit_;
+        build_unit_;
     std::reference_wrapper<const RequiredPackageArtifactTarget> target_;
 };
 
@@ -449,27 +451,27 @@ struct RepositoryProviderInstallIntent {
 struct RepositorySystemUpgradeIntent {};
 
 using RepositoryInstallIntentTarget = std::variant<
-        RepositoryRootInstallIntent,
-        RepositoryDependencyInstallIntent,
-        RepositoryProviderInstallIntent,
-        RepositorySystemUpgradeIntent>;
+    RepositoryRootInstallIntent,
+    RepositoryDependencyInstallIntent,
+    RepositoryProviderInstallIntent,
+    RepositorySystemUpgradeIntent>;
 
 // This is an ordered target/options observation, not pacman argv or a prepared
 // transaction capability.
 struct RepositoryPackageTransactionIntent {
     RepositoryPackageTransactionIntent() = default;
     RepositoryPackageTransactionIntent(
-            const RepositoryPackageTransactionIntent&) = delete;
+        const RepositoryPackageTransactionIntent&) = delete;
     RepositoryPackageTransactionIntent& operator=(
-            const RepositoryPackageTransactionIntent&) = delete;
+        const RepositoryPackageTransactionIntent&) = delete;
     RepositoryPackageTransactionIntent(
-            RepositoryPackageTransactionIntent&&) noexcept = default;
+        RepositoryPackageTransactionIntent&&) noexcept = default;
     RepositoryPackageTransactionIntent& operator=(
-            RepositoryPackageTransactionIntent&&) noexcept = default;
+        RepositoryPackageTransactionIntent&&) noexcept = default;
     ~RepositoryPackageTransactionIntent() = default;
 
     std::vector<RepositoryInstallIntentTarget> targets;
-    RepositoryTransactionPolicyView            policy;
+    RepositoryTransactionPolicyView policy;
 };
 
 struct SourceRootArtifactInstallIntent {
@@ -481,30 +483,30 @@ struct SourceDependencyArtifactInstallIntent {
 };
 
 using SourceArtifactInstallIntentTarget = std::variant<
-        SourceRootArtifactInstallIntent,
-        SourceDependencyArtifactInstallIntent>;
+    SourceRootArtifactInstallIntent,
+    SourceDependencyArtifactInstallIntent>;
 
 // Required targets identify the future install boundary. No package file path
 // or post-build install-reason plan exists at this stage.
 struct SourceBuiltArtifactInstallBoundaryIntent {
     SourceBuiltArtifactInstallBoundaryIntent() = default;
     SourceBuiltArtifactInstallBoundaryIntent(
-            const SourceBuiltArtifactInstallBoundaryIntent&) = delete;
+        const SourceBuiltArtifactInstallBoundaryIntent&) = delete;
     SourceBuiltArtifactInstallBoundaryIntent& operator=(
-            const SourceBuiltArtifactInstallBoundaryIntent&) = delete;
+        const SourceBuiltArtifactInstallBoundaryIntent&) = delete;
     SourceBuiltArtifactInstallBoundaryIntent(
-            SourceBuiltArtifactInstallBoundaryIntent&&) noexcept = default;
+        SourceBuiltArtifactInstallBoundaryIntent&&) noexcept = default;
     SourceBuiltArtifactInstallBoundaryIntent& operator=(
-            SourceBuiltArtifactInstallBoundaryIntent&&) noexcept = default;
+        SourceBuiltArtifactInstallBoundaryIntent&&) noexcept = default;
     ~SourceBuiltArtifactInstallBoundaryIntent() = default;
 
     std::vector<SourceArtifactInstallIntentTarget> targets;
-    bool                                           needed = false;
+    bool needed = false;
 };
 
 using UnifiedPlanTransactionIntent = std::variant<
-        RepositoryPackageTransactionIntent,
-        SourceBuiltArtifactInstallBoundaryIntent>;
+    RepositoryPackageTransactionIntent,
+    SourceBuiltArtifactInstallBoundaryIntent>;
 
 // This ordering is observation vocabulary only. It does not replace any
 // route-specific execution phase enum.
@@ -522,17 +524,17 @@ enum class UnifiedPlanObservationPhase {
 };
 
 inline constexpr std::array<UnifiedPlanObservationPhase, 10>
-        UNIFIED_PLAN_OBSERVATION_PHASE_ORDER = {
-                UnifiedPlanObservationPhase::RequestDiscovery,
-                UnifiedPlanObservationPhase::MetadataDiscovery,
-                UnifiedPlanObservationPhase::ProviderDecision,
-                UnifiedPlanObservationPhase::ExecutionProjection,
-                UnifiedPlanObservationPhase::RepositoryTransaction,
-                UnifiedPlanObservationPhase::SourceRetrieval,
-                UnifiedPlanObservationPhase::SourceBuild,
-                UnifiedPlanObservationPhase::ArtifactValidation,
-                UnifiedPlanObservationPhase::SourceArtifactInstall,
-                UnifiedPlanObservationPhase::CleanupReduction};
+    UNIFIED_PLAN_OBSERVATION_PHASE_ORDER = {
+        UnifiedPlanObservationPhase::RequestDiscovery,
+        UnifiedPlanObservationPhase::MetadataDiscovery,
+        UnifiedPlanObservationPhase::ProviderDecision,
+        UnifiedPlanObservationPhase::ExecutionProjection,
+        UnifiedPlanObservationPhase::RepositoryTransaction,
+        UnifiedPlanObservationPhase::SourceRetrieval,
+        UnifiedPlanObservationPhase::SourceBuild,
+        UnifiedPlanObservationPhase::ArtifactValidation,
+        UnifiedPlanObservationPhase::SourceArtifactInstall,
+        UnifiedPlanObservationPhase::CleanupReduction};
 
 enum class UnifiedPlanAuthorityOwner {
     Moguet,
@@ -544,12 +546,12 @@ enum class UnifiedPlanAuthorityOwner {
 };
 
 using ExistingRoutePhaseReference = std::variant<
-        SystemSourceUpgradePhase,
-        UpgradeAllOperationPhase>;
+    SystemSourceUpgradePhase,
+    UpgradeAllOperationPhase>;
 
 struct UnifiedPlanPhaseReference {
-    UnifiedPlanObservationPhase              observation_phase;
-    UnifiedPlanAuthorityOwner                owner;
+    UnifiedPlanObservationPhase observation_phase;
+    UnifiedPlanAuthorityOwner owner;
     std::optional<ExistingRoutePhaseReference> existing_route_phase;
 };
 
@@ -565,18 +567,18 @@ struct AmbiguousUnifiedPlanBlocker {
 
 struct UnsupportedUnifiedPlanBlocker {
     UnifiedPlanBorrowedAuthorityReference<
-            MixedPackageBaseInstallReasonUnsupported>
-            detail;
+        MixedPackageBaseInstallReasonUnsupported>
+        detail;
 };
 
 using SourceFailureUnifiedPlanBlockerDetail = std::variant<
-        UnifiedPlanBorrowedAuthorityReference<BuildPlanResolutionFailure>,
-        UnifiedPlanBorrowedAuthorityReference<IncompleteProviderCandidateSet>,
-        UnifiedPlanBorrowedAuthorityReference<
-                RepositoryExactPackageSourceFailure>,
-        UnifiedPlanBorrowedAuthorityReference<RepositoryProviderSourceFailure>,
-        UnifiedPlanBorrowedAuthorityReference<LocalSourceRootFailure>,
-        UnifiedPlanBorrowedAuthorityReference<AurUpdateQueryFailure>>;
+    UnifiedPlanBorrowedAuthorityReference<BuildPlanResolutionFailure>,
+    UnifiedPlanBorrowedAuthorityReference<IncompleteProviderCandidateSet>,
+    UnifiedPlanBorrowedAuthorityReference<
+        RepositoryExactPackageSourceFailure>,
+    UnifiedPlanBorrowedAuthorityReference<RepositoryProviderSourceFailure>,
+    UnifiedPlanBorrowedAuthorityReference<LocalSourceRootFailure>,
+    UnifiedPlanBorrowedAuthorityReference<AurUpdateQueryFailure>>;
 
 struct SourceFailureUnifiedPlanBlocker {
     SourceFailureUnifiedPlanBlockerDetail detail;
@@ -605,13 +607,13 @@ struct LocalSourceMetadataEvaluationUnifiedPlanBlocker {
 
 struct RootPackagePreparationUnifiedPlanBlocker {
     UnifiedPlanBorrowedAuthorityReference<
-            RootPackageInstallPreparationFailure>
-            detail;
+        RootPackageInstallPreparationFailure>
+        detail;
 };
 
 struct SyncInstallPreparationUnifiedPlanBlocker {
     UnifiedPlanBorrowedAuthorityReference<SyncInstallPreparationFailure>
-            detail;
+        detail;
 };
 
 struct BuildPlanArtifactProjectionUnifiedPlanBlocker {
@@ -626,41 +628,41 @@ enum class BuildPlanStateUnifiedPlanBlockerKind {
 
 struct BuildPlanStateUnifiedPlanBlocker {
     UnifiedPlanBorrowedAuthorityReference<BuildPlan> authority;
-    BuildPlanStateUnifiedPlanBlockerKind     kind;
-    std::size_t                              authority_index;
+    BuildPlanStateUnifiedPlanBlockerKind kind;
+    std::size_t authority_index;
 };
 
 using RoutePreflightUnifiedPlanBlockerDetail = std::variant<
-        UnifiedPlanBorrowedAuthorityReference<AurUpdateExecutionIssue>,
-        UnifiedPlanBorrowedAuthorityReference<AurUpdatePreparationIssue>,
-        UnifiedPlanBorrowedAuthorityReference<SystemSourceUpgradeIssue>,
-        UnifiedPlanBorrowedAuthorityReference<UpgradeAllOperationIssue>>;
+    UnifiedPlanBorrowedAuthorityReference<AurUpdateExecutionIssue>,
+    UnifiedPlanBorrowedAuthorityReference<AurUpdatePreparationIssue>,
+    UnifiedPlanBorrowedAuthorityReference<SystemSourceUpgradeIssue>,
+    UnifiedPlanBorrowedAuthorityReference<UpgradeAllOperationIssue>>;
 
 struct RoutePreflightUnifiedPlanBlocker {
     RoutePreflightUnifiedPlanBlockerDetail detail;
 };
 
 using UnifiedPlanBlocker = std::variant<
-        UnknownUnifiedPlanBlocker,
-        AmbiguousUnifiedPlanBlocker,
-        UnsupportedUnifiedPlanBlocker,
-        SourceFailureUnifiedPlanBlocker,
-        ConstraintFailureUnifiedPlanBlocker,
-        MetadataRiskUnifiedPlanBlocker,
-        LocalDependencyPlanUnifiedPlanBlocker,
-        LocalSourceMetadataEvaluationUnifiedPlanBlocker,
-        RootPackagePreparationUnifiedPlanBlocker,
-        SyncInstallPreparationUnifiedPlanBlocker,
-        BuildPlanArtifactProjectionUnifiedPlanBlocker,
-        BuildPlanStateUnifiedPlanBlocker,
-        RoutePreflightUnifiedPlanBlocker>;
+    UnknownUnifiedPlanBlocker,
+    AmbiguousUnifiedPlanBlocker,
+    UnsupportedUnifiedPlanBlocker,
+    SourceFailureUnifiedPlanBlocker,
+    ConstraintFailureUnifiedPlanBlocker,
+    MetadataRiskUnifiedPlanBlocker,
+    LocalDependencyPlanUnifiedPlanBlocker,
+    LocalSourceMetadataEvaluationUnifiedPlanBlocker,
+    RootPackagePreparationUnifiedPlanBlocker,
+    SyncInstallPreparationUnifiedPlanBlocker,
+    BuildPlanArtifactProjectionUnifiedPlanBlocker,
+    BuildPlanStateUnifiedPlanBlocker,
+    RoutePreflightUnifiedPlanBlocker>;
 
 struct UnifiedPlanObservationInput {
     UnifiedPlanObservationStatus status =
-            UnifiedPlanObservationStatus::Blocked;
+        UnifiedPlanObservationStatus::Blocked;
     std::vector<UnifiedPlanRootReference> roots;
     std::vector<UnifiedPlanDependencyAuthorityReference>
-            dependency_authorities;
+        dependency_authorities;
     std::vector<UnifiedPlanBuildUnitReference> build_units;
     std::vector<RequiredArtifactTargetReference> required_artifacts;
     std::vector<UnifiedPlanTransactionIntent> transaction_intents;
@@ -668,9 +670,9 @@ struct UnifiedPlanObservationInput {
     std::vector<UnifiedPlanBlocker> blockers;
     std::vector<UnifiedPlanRootMetadataAuthorityReference> root_metadata;
     std::optional<UnifiedPlanConfiguredRepositoryOrderReference>
-            configured_repository_order;
+        configured_repository_order;
     std::vector<UnifiedPlanRoutePreflightAuthorityReference>
-            route_preflight_authorities;
+        route_preflight_authorities;
 };
 
 enum class UnifiedPlanObservationInvariantIssueKind {
@@ -695,8 +697,8 @@ enum class UnifiedPlanObservationInvariantIssueKind {
 
 struct UnifiedPlanObservationInvariantIssue {
     UnifiedPlanObservationInvariantIssueKind kind;
-    std::optional<std::size_t>                primary_index;
-    std::optional<std::size_t>                secondary_index;
+    std::optional<std::size_t> primary_index;
+    std::optional<std::size_t> secondary_index;
 };
 
 struct InvalidUnifiedPlanObservation {
@@ -711,21 +713,21 @@ public:
     UnifiedPlanObservation(UnifiedPlanObservation&&) noexcept = default;
     UnifiedPlanObservation& operator=(const UnifiedPlanObservation&) = delete;
     UnifiedPlanObservation& operator=(UnifiedPlanObservation&&) noexcept =
-            default;
+        default;
     ~UnifiedPlanObservation() = default;
 
     [[nodiscard]] UnifiedPlanObservationStatus status() const noexcept;
     [[nodiscard]] const std::vector<UnifiedPlanRootReference>& roots()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const std::vector<
-            UnifiedPlanRootMetadataAuthorityReference>&
+        UnifiedPlanRootMetadataAuthorityReference>&
     root_metadata() const noexcept;
     [[nodiscard]] const UnifiedPlanConfiguredRepositoryOrderReference*
     configured_repository_order() const noexcept;
     [[nodiscard]] const std::vector<UnifiedPlanDependencyAuthorityReference>&
     dependency_authorities() const noexcept;
     [[nodiscard]] const std::vector<
-            UnifiedPlanRoutePreflightAuthorityReference>&
+        UnifiedPlanRoutePreflightAuthorityReference>&
     route_preflight_authorities() const noexcept;
     [[nodiscard]] const std::vector<UnifiedPlanBuildUnitReference>&
     build_units() const noexcept;
@@ -734,9 +736,9 @@ public:
     [[nodiscard]] const std::vector<UnifiedPlanTransactionIntent>&
     transaction_intents() const noexcept;
     [[nodiscard]] const std::vector<UnifiedPlanPhaseReference>& phases()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const std::vector<UnifiedPlanBlocker>& blockers()
-            const noexcept;
+        const noexcept;
 
 private:
     explicit UnifiedPlanObservation(UnifiedPlanObservationInput input);
@@ -744,39 +746,39 @@ private:
     UnifiedPlanObservationInput input_;
 
     friend UnifiedPlanObservationResult make_unified_plan_observation(
-            UnifiedPlanObservationInput input);
+        UnifiedPlanObservationInput input);
 };
 
 class UnifiedPlanObservationResult final {
 public:
     UnifiedPlanObservationResult() = delete;
     UnifiedPlanObservationResult(const UnifiedPlanObservationResult&) =
-            delete;
+        delete;
     UnifiedPlanObservationResult(UnifiedPlanObservationResult&&) noexcept =
-            default;
+        default;
     UnifiedPlanObservationResult& operator=(
-            const UnifiedPlanObservationResult&) = delete;
+        const UnifiedPlanObservationResult&) = delete;
     UnifiedPlanObservationResult& operator=(
-            UnifiedPlanObservationResult&&) noexcept = delete;
+        UnifiedPlanObservationResult&&) noexcept = delete;
     ~UnifiedPlanObservationResult() = default;
 
     [[nodiscard]] bool is_valid() const noexcept;
     [[nodiscard]] const UnifiedPlanObservation* observation() const noexcept;
     [[nodiscard]] const InvalidUnifiedPlanObservation* failure()
-            const noexcept;
+        const noexcept;
 
 private:
     explicit UnifiedPlanObservationResult(
-            UnifiedPlanObservation observation);
+        UnifiedPlanObservation observation);
     explicit UnifiedPlanObservationResult(
-            InvalidUnifiedPlanObservation failure);
+        InvalidUnifiedPlanObservation failure);
 
     std::variant<UnifiedPlanObservation, InvalidUnifiedPlanObservation>
-            outcome_;
+        outcome_;
 
     friend UnifiedPlanObservationResult make_unified_plan_observation(
-            UnifiedPlanObservationInput input);
+        UnifiedPlanObservationInput input);
 };
 
 UnifiedPlanObservationResult make_unified_plan_observation(
-        UnifiedPlanObservationInput input);
+    UnifiedPlanObservationInput input);

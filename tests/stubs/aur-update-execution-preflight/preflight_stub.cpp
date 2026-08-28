@@ -7,7 +7,7 @@ namespace {
 
 struct PreflightStubState {
     aur_update_execution_preflight_test_stub::ResolverHandler resolver_handler;
-    std::vector<std::vector<std::string>>                      resolver_calls;
+    std::vector<std::vector<std::string>> resolver_calls;
     std::vector<bool> resolver_selection_callback_presence;
 };
 
@@ -40,20 +40,20 @@ const std::vector<bool>& resolver_selection_callback_presence() {
 } // namespace aur_update_execution_preflight_test_stub
 
 BuildPlan resolve_build_plan_for_preflight(
-        const std::vector<std::string>& targets) {
+    const std::vector<std::string>& targets) {
     return resolve_build_plan_for_preflight(
-            targets, ProviderSelectionCallback{});
+        targets, ProviderSelectionCallback{});
 }
 
 BuildPlan resolve_build_plan_for_preflight(
-        const std::vector<std::string>& targets,
-        const ProviderSelectionCallback& select_provider) {
+    const std::vector<std::string>& targets,
+    const ProviderSelectionCallback& select_provider) {
     g_state.resolver_calls.push_back(targets);
     g_state.resolver_selection_callback_presence.push_back(
-            static_cast<bool>(select_provider));
+        static_cast<bool>(select_provider));
     if(!g_state.resolver_handler) {
         throw std::logic_error(
-                "Unexpected AUR update execution preflight resolver call.");
+            "Unexpected AUR update execution preflight resolver call.");
     }
     return g_state.resolver_handler(targets);
 }

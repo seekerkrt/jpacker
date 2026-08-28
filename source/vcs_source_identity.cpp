@@ -14,8 +14,8 @@ bool is_continuation_byte(unsigned char byte) noexcept {
 }
 
 bool decode_utf8_code_point(
-        std::string_view value, std::size_t offset,
-        std::uint32_t& code_point, std::size_t& length) noexcept {
+    std::string_view value, std::size_t offset,
+    std::uint32_t& code_point, std::size_t& length) noexcept {
     const auto byte_at = [&value](std::size_t index) {
         return static_cast<unsigned char>(value[index]);
     };
@@ -31,8 +31,8 @@ bool decode_utf8_code_point(
         const unsigned char second = byte_at(offset + 1);
         if(!is_continuation_byte(second)) return false;
         code_point =
-                (static_cast<std::uint32_t>(first & 0x1f) << 6) |
-                static_cast<std::uint32_t>(second & 0x3f);
+            (static_cast<std::uint32_t>(first & 0x1f) << 6) |
+            static_cast<std::uint32_t>(second & 0x3f);
         length = 2;
         return true;
     }
@@ -41,15 +41,15 @@ bool decode_utf8_code_point(
         const unsigned char second = byte_at(offset + 1);
         const unsigned char third = byte_at(offset + 2);
         const bool valid_second =
-                first == 0xe0 ? second >= 0xa0 && second <= 0xbf
-                              : first == 0xed
-                                      ? second >= 0x80 && second <= 0x9f
-                                      : is_continuation_byte(second);
+            first == 0xe0 ? second >= 0xa0 && second <= 0xbf
+            : first == 0xed
+                ? second >= 0x80 && second <= 0x9f
+                : is_continuation_byte(second);
         if(!valid_second || !is_continuation_byte(third)) return false;
         code_point =
-                (static_cast<std::uint32_t>(first & 0x0f) << 12) |
-                (static_cast<std::uint32_t>(second & 0x3f) << 6) |
-                static_cast<std::uint32_t>(third & 0x3f);
+            (static_cast<std::uint32_t>(first & 0x0f) << 12) |
+            (static_cast<std::uint32_t>(second & 0x3f) << 6) |
+            static_cast<std::uint32_t>(third & 0x3f);
         length = 3;
         return true;
     }
@@ -59,19 +59,19 @@ bool decode_utf8_code_point(
         const unsigned char third = byte_at(offset + 2);
         const unsigned char fourth = byte_at(offset + 3);
         const bool valid_second =
-                first == 0xf0 ? second >= 0x90 && second <= 0xbf
-                              : first == 0xf4
-                                      ? second >= 0x80 && second <= 0x8f
-                                      : is_continuation_byte(second);
+            first == 0xf0 ? second >= 0x90 && second <= 0xbf
+            : first == 0xf4
+                ? second >= 0x80 && second <= 0x8f
+                : is_continuation_byte(second);
         if(!valid_second || !is_continuation_byte(third) ||
            !is_continuation_byte(fourth)) {
             return false;
         }
         code_point =
-                (static_cast<std::uint32_t>(first & 0x07) << 18) |
-                (static_cast<std::uint32_t>(second & 0x3f) << 12) |
-                (static_cast<std::uint32_t>(third & 0x3f) << 6) |
-                static_cast<std::uint32_t>(fourth & 0x3f);
+            (static_cast<std::uint32_t>(first & 0x07) << 18) |
+            (static_cast<std::uint32_t>(second & 0x3f) << 12) |
+            (static_cast<std::uint32_t>(third & 0x3f) << 6) |
+            static_cast<std::uint32_t>(fourth & 0x3f);
         length = 4;
         return true;
     }
@@ -103,15 +103,15 @@ bool is_valid_nonempty_text(std::string_view value) noexcept {
 bool contains_ascii_whitespace(std::string_view value) noexcept {
     return std::any_of(value.begin(), value.end(), [](char character) {
         switch(character) {
-        case ' ':
-        case '\t':
-        case '\n':
-        case '\r':
-        case '\f':
-        case '\v':
-            return true;
-        default:
-            return false;
+            case ' ':
+            case '\t':
+            case '\n':
+            case '\r':
+            case '\f':
+            case '\v':
+                return true;
+            default:
+                return false;
         }
     });
 }
@@ -123,80 +123,81 @@ bool is_valid_token(std::string_view value) noexcept {
 
 void require_vcs_kind(VcsKind kind) {
     switch(kind) {
-    case VcsKind::Git:
-    case VcsKind::Svn:
-    case VcsKind::Hg:
-    case VcsKind::Bzr:
-    case VcsKind::Cvs:
-    case VcsKind::Darcs:
-        return;
+        case VcsKind::Git:
+        case VcsKind::Svn:
+        case VcsKind::Hg:
+        case VcsKind::Bzr:
+        case VcsKind::Cvs:
+        case VcsKind::Darcs:
+            return;
     }
     throw std::invalid_argument("VCS kind is invalid.");
 }
 
 void require_selector_value(
-        const std::string& value, std::string_view selector_name) {
+    const std::string& value, std::string_view selector_name) {
     if(!is_valid_nonempty_text(value)) {
         throw std::invalid_argument(
-                std::string(selector_name) +
-                " must be nonempty single-line UTF-8.");
+            std::string(selector_name) +
+            " must be nonempty single-line UTF-8.");
     }
 }
 
 } // namespace
 
 VcsSelector::VcsSelector(
-        VcsSelectorKind kind,
-        VcsSelectorTrackingBehavior tracking_behavior,
-        std::optional<std::string> value) noexcept
+    VcsSelectorKind kind,
+    VcsSelectorTrackingBehavior tracking_behavior,
+    std::optional<std::string> value) noexcept
     : kind_(kind), tracking_behavior_(tracking_behavior),
-      value_(std::move(value)) {}
+      value_(std::move(value)) {
+}
 
 VcsSelector VcsSelector::default_head() noexcept {
     return VcsSelector(
-            VcsSelectorKind::DefaultHead,
-            VcsSelectorTrackingBehavior::Floating,
-            std::nullopt);
+        VcsSelectorKind::DefaultHead,
+        VcsSelectorTrackingBehavior::Floating,
+        std::nullopt);
 }
 
 VcsSelector VcsSelector::branch(std::string branch_name) {
     require_selector_value(branch_name, "VCS branch selector");
     return VcsSelector(
-            VcsSelectorKind::Branch,
-            VcsSelectorTrackingBehavior::Floating,
-            std::move(branch_name));
+        VcsSelectorKind::Branch,
+        VcsSelectorTrackingBehavior::Floating,
+        std::move(branch_name));
 }
 
 VcsSelector VcsSelector::fixed_revision(std::string revision) {
     require_selector_value(revision, "Fixed VCS revision selector");
     return VcsSelector(
-            VcsSelectorKind::FixedRevision,
-            VcsSelectorTrackingBehavior::Fixed,
-            std::move(revision));
+        VcsSelectorKind::FixedRevision,
+        VcsSelectorTrackingBehavior::Fixed,
+        std::move(revision));
 }
 
 VcsSelector VcsSelector::tag(std::string tag_name) {
     require_selector_value(tag_name, "VCS tag selector");
     return VcsSelector(
-            VcsSelectorKind::Tag,
-            VcsSelectorTrackingBehavior::Fixed,
-            std::move(tag_name));
+        VcsSelectorKind::Tag,
+        VcsSelectorTrackingBehavior::Fixed,
+        std::move(tag_name));
 }
 
 VcsSelector VcsSelector::unsupported(std::string selector) {
     require_selector_value(selector, "Unsupported VCS selector");
     return VcsSelector(
-            VcsSelectorKind::Unsupported,
-            VcsSelectorTrackingBehavior::Indeterminate,
-            std::move(selector));
+        VcsSelectorKind::Unsupported,
+        VcsSelectorTrackingBehavior::Indeterminate,
+        std::move(selector));
 }
 
 VcsSelector VcsSelector::unrecognized(std::string selector) {
     require_selector_value(selector, "Unrecognized VCS selector");
     return VcsSelector(
-            VcsSelectorKind::Unrecognized,
-            VcsSelectorTrackingBehavior::Indeterminate,
-            std::move(selector));
+        VcsSelectorKind::Unrecognized,
+        VcsSelectorTrackingBehavior::Indeterminate,
+        std::move(selector));
 }
 
 VcsSelectorKind VcsSelector::kind() const noexcept {
@@ -212,33 +213,34 @@ const std::string* VcsSelector::value() const noexcept {
 }
 
 VcsSourceIdentity::VcsSourceIdentity(
-        VcsKind kind,
-        std::string source_location,
-        VcsSelector selector,
-        std::optional<std::string> architecture) noexcept
+    VcsKind kind,
+    std::string source_location,
+    VcsSelector selector,
+    std::optional<std::string> architecture) noexcept
     : kind_(kind), source_location_(std::move(source_location)),
       selector_(std::move(selector)),
-      architecture_(std::move(architecture)) {}
+      architecture_(std::move(architecture)) {
+}
 
 VcsSourceIdentity VcsSourceIdentity::make(
-        VcsKind kind,
-        std::string source_location,
-        VcsSelector selector,
-        std::optional<std::string> architecture) {
+    VcsKind kind,
+    std::string source_location,
+    VcsSelector selector,
+    std::optional<std::string> architecture) {
     require_vcs_kind(kind);
     if(!is_valid_token(source_location)) {
         throw std::invalid_argument(
-                "VCS source location must be nonempty single-line UTF-8 without whitespace.");
+            "VCS source location must be nonempty single-line UTF-8 without whitespace.");
     }
     if(architecture.has_value() && !is_valid_token(*architecture)) {
         throw std::invalid_argument(
-                "VCS source architecture must be nonempty single-line UTF-8 without whitespace.");
+            "VCS source architecture must be nonempty single-line UTF-8 without whitespace.");
     }
     return VcsSourceIdentity(
-            kind,
-            std::move(source_location),
-            std::move(selector),
-            std::move(architecture));
+        kind,
+        std::move(source_location),
+        std::move(selector),
+        std::move(architecture));
 }
 
 VcsKind VcsSourceIdentity::kind() const noexcept {
@@ -258,11 +260,12 @@ const std::string* VcsSourceIdentity::architecture() const noexcept {
 }
 
 AurRecipeRevision::AurRecipeRevision(SourceRevisionIdentity value) noexcept
-    : value_(std::move(value)) {}
+    : value_(std::move(value)) {
+}
 
 AurRecipeRevision AurRecipeRevision::git_commit(std::string object_id) {
     return AurRecipeRevision(
-            SourceRevisionIdentity::git_commit(std::move(object_id)));
+        SourceRevisionIdentity::git_commit(std::move(object_id)));
 }
 
 const SourceRevisionIdentity& AurRecipeRevision::value() const noexcept {
@@ -270,19 +273,20 @@ const SourceRevisionIdentity& AurRecipeRevision::value() const noexcept {
 }
 
 UpstreamGitRevision::UpstreamGitRevision(
-        VcsSourceIdentity source,
-        SourceRevisionIdentity value) noexcept
-    : source_(std::move(source)), value_(std::move(value)) {}
+    VcsSourceIdentity source,
+    SourceRevisionIdentity value) noexcept
+    : source_(std::move(source)), value_(std::move(value)) {
+}
 
 UpstreamGitRevision UpstreamGitRevision::git_commit(
-        VcsSourceIdentity source, std::string object_id) {
+    VcsSourceIdentity source, std::string object_id) {
     if(source.kind() != VcsKind::Git) {
         throw std::invalid_argument(
-                "Upstream Git revision requires a Git VCS source identity.");
+            "Upstream Git revision requires a Git VCS source identity.");
     }
     return UpstreamGitRevision(
-            std::move(source),
-            SourceRevisionIdentity::git_commit(std::move(object_id)));
+        std::move(source),
+        SourceRevisionIdentity::git_commit(std::move(object_id)));
 }
 
 const VcsSourceIdentity& UpstreamGitRevision::source() const noexcept {

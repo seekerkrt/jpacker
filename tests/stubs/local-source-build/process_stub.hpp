@@ -11,10 +11,10 @@ using ProcessHook = void (*)();
 
 void reset_process_stub();
 void expect_capture_command(
-        std::string command, CapturedCommandResult result,
-        ProcessHook hook = nullptr);
+    std::string command, CapturedCommandResult result,
+    ProcessHook hook = nullptr);
 void expect_run_command(
-        std::string command, int exit_code, ProcessHook hook = nullptr);
+    std::string command, int exit_code, ProcessHook hook = nullptr);
 void require_process_expectations_consumed();
 
 std::size_t capture_command_call_count();

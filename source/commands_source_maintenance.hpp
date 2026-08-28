@@ -14,7 +14,7 @@ struct AppConfig;
 // root inspectionを束ねる。missing/unsafe pathはstate/cache作成前に停止する。
 struct PreparedLocalSourceBuildRoute {
     LocalSourceBuildInvocation invocation;
-    LocalSourceRoot            source_root;
+    LocalSourceRoot source_root;
 };
 
 struct RemoteSourceBuildInvocation {
@@ -23,39 +23,39 @@ struct RemoteSourceBuildInvocation {
 };
 
 PreparedLocalSourceBuildRoute prepare_local_source_build_route(
-        LocalSourceBuildInvocation invocation,
-        const AppConfig& config);
+    LocalSourceBuildInvocation invocation,
+    const AppConfig& config);
 
 void require_executable_local_source_build_route(
-        const PreparedLocalSourceBuildRoute& route);
+    const PreparedLocalSourceBuildRoute& route);
 
 RemoteSourceBuildInvocation require_remote_source_build_invocation(
-        const std::vector<std::string>& args);
+    const std::vector<std::string>& args);
 
 std::string local_source_workspace_failure_diagnostic(
-        const LocalSourceWorkspaceFailure& failure);
+    const LocalSourceWorkspaceFailure& failure);
 
 int cmd_build_local(
-        PreparedLocalSourceBuildRoute route,
-        const AppConfig& config);
+    PreparedLocalSourceBuildRoute route,
+    const AppConfig& config);
 
 int cmd_build(
-        const std::vector<std::string>& args,
-        const AppConfig& config);
+    const std::vector<std::string>& args,
+    const AppConfig& config);
 
 int cmd_add_src(const std::vector<std::string>& args);
 
 int cmd_edit_src(
-        const std::vector<std::string>& targets,
-        const AppConfig& config);
+    const std::vector<std::string>& targets,
+    const AppConfig& config);
 
 void cmd_list_src();
 
 int cmd_del_src(const std::vector<std::string>& targets);
 
 void cmd_revert(
-        const std::vector<std::string>& targets,
-        const AppConfig& config);
+    const std::vector<std::string>& targets,
+    const AppConfig& config);
 
 int cmd_clean(const AppConfig& config);
 

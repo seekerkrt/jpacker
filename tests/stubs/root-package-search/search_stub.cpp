@@ -8,12 +8,12 @@
 namespace {
 
 using AurSearchOutcome =
-        std::variant<std::vector<AurPackageInfo>, std::string>;
+    std::variant<std::vector<AurPackageInfo>, std::string>;
 
 std::deque<RepositoryPackageSearchResult> g_repository_results;
-std::deque<AurSearchOutcome>               g_aur_results;
-std::vector<std::string>                   g_repository_queries;
-std::vector<std::string>                   g_aur_queries;
+std::deque<AurSearchOutcome> g_aur_results;
+std::vector<std::string> g_repository_queries;
+std::vector<std::string> g_aur_queries;
 
 } // namespace
 
@@ -57,20 +57,20 @@ std::vector<std::string> aur_queries() {
 } // namespace root_package_search_test_stub
 
 RepositoryPackageSearchResult query_repository_root_package_search(
-        const std::string& query) {
+    const std::string& query) {
     g_repository_queries.push_back(query);
     if(g_repository_results.empty()) {
         throw std::logic_error(
-                "Unexpected repository root package search query.");
+            "Unexpected repository root package search query.");
     }
     RepositoryPackageSearchResult result =
-            std::move(g_repository_results.front());
+        std::move(g_repository_results.front());
     g_repository_results.pop_front();
     return result;
 }
 
 std::vector<AurPackageInfo> AurClient::search_strict(
-        const std::string& query) {
+    const std::string& query) {
     g_aur_queries.push_back(query);
     if(g_aur_results.empty()) {
         throw std::logic_error("Unexpected strict AUR root package search.");

@@ -7,57 +7,57 @@
 
 std::string diagnostic_class_label(DiagnosticClass classification) {
     switch(classification) {
-    case DiagnosticClass::Invalid:
-        return localization::translate_message("Invalid");
-    case DiagnosticClass::Unsupported:
-        return localization::translate_message("Unsupported");
-    case DiagnosticClass::Ambiguous:
-        return localization::translate_message("Ambiguous");
-    case DiagnosticClass::Declined:
-        return localization::translate_message("Declined");
-    case DiagnosticClass::Cancelled:
-        return localization::translate_message("Cancelled");
-    case DiagnosticClass::Unavailable:
-        return localization::translate_message("Unavailable");
-    case DiagnosticClass::InputFailure:
-        return localization::translate_message("Input failure");
-    case DiagnosticClass::QueryFailure:
-        return localization::translate_message("Query failure");
-    case DiagnosticClass::MetadataFailure:
-        return localization::translate_message("Metadata failure");
-    case DiagnosticClass::RequiresCheck:
-        return localization::translate_message("Requires check");
-    case DiagnosticClass::Blocked:
-        return localization::translate_message("Blocked");
-    case DiagnosticClass::PartialFailure:
-        return localization::translate_message("Partial failure");
-    case DiagnosticClass::ExecutionFailure:
-        return localization::translate_message("Execution failure");
-    case DiagnosticClass::InternalInconsistency:
-        return localization::translate_message("Internal inconsistency");
+        case DiagnosticClass::Invalid:
+            return localization::translate_message("Invalid");
+        case DiagnosticClass::Unsupported:
+            return localization::translate_message("Unsupported");
+        case DiagnosticClass::Ambiguous:
+            return localization::translate_message("Ambiguous");
+        case DiagnosticClass::Declined:
+            return localization::translate_message("Declined");
+        case DiagnosticClass::Cancelled:
+            return localization::translate_message("Cancelled");
+        case DiagnosticClass::Unavailable:
+            return localization::translate_message("Unavailable");
+        case DiagnosticClass::InputFailure:
+            return localization::translate_message("Input failure");
+        case DiagnosticClass::QueryFailure:
+            return localization::translate_message("Query failure");
+        case DiagnosticClass::MetadataFailure:
+            return localization::translate_message("Metadata failure");
+        case DiagnosticClass::RequiresCheck:
+            return localization::translate_message("Requires check");
+        case DiagnosticClass::Blocked:
+            return localization::translate_message("Blocked");
+        case DiagnosticClass::PartialFailure:
+            return localization::translate_message("Partial failure");
+        case DiagnosticClass::ExecutionFailure:
+            return localization::translate_message("Execution failure");
+        case DiagnosticClass::InternalInconsistency:
+            return localization::translate_message("Internal inconsistency");
     }
     throw std::logic_error(localization::translate_message(
-            "Unknown diagnostic classification."));
+        "Unknown diagnostic classification."));
 }
 
 std::string diagnostic_source_label(DiagnosticSourceKind source_kind) {
     // NO_TRANSLATE(Issue #350): Stable typed source tokens.
     switch(source_kind) {
-    case DiagnosticSourceKind::Unspecified:
-        return "unspecified";
-    case DiagnosticSourceKind::RepositoryBinary:
-        return "repository-binary";
-    case DiagnosticSourceKind::RepositorySource:
-        return "repository-source";
-    case DiagnosticSourceKind::Aur:
-        return "aur";
-    case DiagnosticSourceKind::Local:
-        return "local";
-    case DiagnosticSourceKind::Pacman:
-        return "pacman";
+        case DiagnosticSourceKind::Unspecified:
+            return "unspecified";
+        case DiagnosticSourceKind::RepositoryBinary:
+            return "repository-binary";
+        case DiagnosticSourceKind::RepositorySource:
+            return "repository-source";
+        case DiagnosticSourceKind::Aur:
+            return "aur";
+        case DiagnosticSourceKind::Local:
+            return "local";
+        case DiagnosticSourceKind::Pacman:
+            return "pacman";
     }
     throw std::logic_error(localization::translate_message(
-            "Unknown diagnostic source kind."));
+        "Unknown diagnostic source kind."));
 }
 
 std::string diagnostic_identity_suffix(const DiagnosticIdentity& identity) {
@@ -96,17 +96,17 @@ std::string diagnostic_identity_suffix(const DiagnosticIdentity& identity) {
 }
 
 void report_runtime_diagnostic(
-        const RuntimeDiagnosticPresentation& diagnostic) {
+    const RuntimeDiagnosticPresentation& diagnostic) {
     switch(diagnostic.severity) {
-    case DiagnosticSeverity::Info:
-        Logger::info(diagnostic.message);
-        return;
-    case DiagnosticSeverity::Warning:
-        Logger::warn(diagnostic.message);
-        return;
-    case DiagnosticSeverity::Error:
-        Logger::error(diagnostic.message);
-        return;
+        case DiagnosticSeverity::Info:
+            Logger::info(diagnostic.message);
+            return;
+        case DiagnosticSeverity::Warning:
+            Logger::warn(diagnostic.message);
+            return;
+        case DiagnosticSeverity::Error:
+            Logger::error(diagnostic.message);
+            return;
     }
     throw std::logic_error("Unknown runtime diagnostic severity.");
 }

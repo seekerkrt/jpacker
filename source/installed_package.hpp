@@ -10,7 +10,7 @@ enum class InstalledPackageReason {
 };
 
 struct InstalledPackageMetadata {
-    std::string            name;
-    std::string            version;
+    std::string name;
+    std::string version;
     InstalledPackageReason reason = InstalledPackageReason::Unknown;
 };

@@ -26,10 +26,10 @@ public:
 
 private:
     ProviderInstalledStateObservation(
-            ProviderInstalledState state,
-            std::optional<PackageMetadataFailure> failure) noexcept;
+        ProviderInstalledState state,
+        std::optional<PackageMetadataFailure> failure) noexcept;
 
-    ProviderInstalledState               state_;
+    ProviderInstalledState state_;
     std::optional<PackageMetadataFailure> failure_;
 };
 
@@ -50,10 +50,10 @@ public:
 private:
     void open_session_if_needed();
     ProviderInstalledStateObservation project_query_result(
-            InstalledPackageQueryResult result) const;
+        InstalledPackageQueryResult result) const;
 
-    bool                                      session_open_attempted_ = false;
-    std::optional<PackageMetadataSession>      session_;
-    std::optional<PackageMetadataFailure>      session_failure_;
+    bool session_open_attempted_ = false;
+    std::optional<PackageMetadataSession> session_;
+    std::optional<PackageMetadataFailure> session_failure_;
     std::map<std::string, ProviderInstalledStateObservation> observations_by_package_name_;
 };

@@ -6,8 +6,8 @@
 // AUR dependency string の raw/name/operator/version を失わないための最小表現。
 // POLICY: v1.x では version compare は行わず、constraint の検出と表示だけを担当する。
 struct ParsedDependency {
-    std::string                raw;
-    std::string                name;
+    std::string raw;
+    std::string name;
     std::optional<std::string> op;
     std::optional<std::string> version;
 

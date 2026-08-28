@@ -17,9 +17,9 @@
 
 static_assert(!std::is_default_constructible_v<ProviderInstalledStateObservation>);
 static_assert(!std::is_constructible_v<
-        ProviderInstalledStateObservation,
-        ProviderInstalledState,
-        PackageMetadataFailure>);
+              ProviderInstalledStateObservation,
+              ProviderInstalledState,
+              PackageMetadataFailure>);
 static_assert(std::is_copy_constructible_v<ProviderInstalledStateObservation>);
 static_assert(std::is_copy_assignable_v<ProviderInstalledStateObservation>);
 static_assert(!std::is_copy_constructible_v<ProviderInstalledStateLookup>);
@@ -33,7 +33,7 @@ namespace {
 namespace stub = package_metadata_test_stub;
 
 constexpr const char* DATABASE_PATH_COMMAND =
-        "pacman-conf --verbose RootDir DBPath 2>/dev/null";
+    "pacman-conf --verbose RootDir DBPath 2>/dev/null";
 
 void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
@@ -46,35 +46,35 @@ void reset_stubs() {
 
 void enqueue_valid_database_paths() {
     stub::enqueue_captured_command_result(
-            DATABASE_PATH_COMMAND,
-            CapturedCommandResult{
-                    "RootDir = /\nDBPath = /var/lib/pacman/\n", 0});
+        DATABASE_PATH_COMMAND,
+        CapturedCommandResult{
+            "RootDir = /\nDBPath = /var/lib/pacman/\n", 0});
 }
 
 void enqueue_database_path_failure(int exit_code = 127) {
     stub::enqueue_captured_command_result(
-            DATABASE_PATH_COMMAND,
-            CapturedCommandResult{"", exit_code});
+        DATABASE_PATH_COMMAND,
+        CapturedCommandResult{"", exit_code});
 }
 
 void enqueue_malformed_database_paths() {
     stub::enqueue_captured_command_result(
-            DATABASE_PATH_COMMAND,
-            CapturedCommandResult{"RootDir = /\n", 0});
+        DATABASE_PATH_COMMAND,
+        CapturedCommandResult{"RootDir = /\n", 0});
 }
 
 void expect_state(
-        const ProviderInstalledStateObservation& observation,
-        ProviderInstalledState expected_state, const std::string& context) {
+    const ProviderInstalledStateObservation& observation,
+    ProviderInstalledState expected_state, const std::string& context) {
     expect(observation.state() == expected_state, context + ": state differs");
     expect(
-            observation.has_failure() == (expected_state == ProviderInstalledState::Unknown),
-            context + ": failure presence differs");
+        observation.has_failure() == (expected_state == ProviderInstalledState::Unknown),
+        context + ": failure presence differs");
 }
 
 void expect_unknown_failure(
-        const ProviderInstalledStateObservation& observation,
-        PackageMetadataErrorCode expected_code, const std::string& context) {
+    const ProviderInstalledStateObservation& observation,
+    PackageMetadataErrorCode expected_code, const std::string& context) {
     expect_state(observation, ProviderInstalledState::Unknown, context);
     const PackageMetadataFailure& failure = observation.failure();
     expect(failure.code == expected_code, context + ": failure code differs");
@@ -83,8 +83,8 @@ void expect_unknown_failure(
 
 template <typename Callable>
 void expect_metadata_error(
-        Callable callable, PackageMetadataErrorCode expected_code,
-        const std::string& context) {
+    Callable callable, PackageMetadataErrorCode expected_code,
+    const std::string& context) {
     try {
         callable();
     } catch(const PackageMetadataError& error) {
@@ -93,35 +93,35 @@ void expect_metadata_error(
         return;
     } catch(const std::exception& error) {
         throw std::runtime_error(
-                context + ": unexpected exception category: " + error.what());
+            context + ": unexpected exception category: " + error.what());
     }
     throw std::runtime_error(context + ": expected PackageMetadataError");
 }
 
 void test_pure_model_states_and_invariants() {
     ProviderInstalledStateObservation installed =
-            ProviderInstalledStateObservation::installed();
+        ProviderInstalledStateObservation::installed();
     expect_state(installed, ProviderInstalledState::Installed, "installed observation");
 
     ProviderInstalledStateObservation not_installed =
-            ProviderInstalledStateObservation::not_installed();
+        ProviderInstalledStateObservation::not_installed();
     expect_state(not_installed, ProviderInstalledState::NotInstalled, "not-installed observation");
 
     const PackageMetadataFailure expected_failure{
-            PackageMetadataErrorCode::QueryFailed, "typed query failure"};
+        PackageMetadataErrorCode::QueryFailed, "typed query failure"};
     ProviderInstalledStateObservation unknown =
-            ProviderInstalledStateObservation::unknown(expected_failure);
+        ProviderInstalledStateObservation::unknown(expected_failure);
     expect_unknown_failure(
-            unknown, PackageMetadataErrorCode::QueryFailed, "unknown observation");
+        unknown, PackageMetadataErrorCode::QueryFailed, "unknown observation");
     expect(
-            unknown.failure().diagnostic == expected_failure.diagnostic,
-            "unknown observation lost the diagnostic");
+        unknown.failure().diagnostic == expected_failure.diagnostic,
+        "unknown observation lost the diagnostic");
 
     try {
         static_cast<void>(ProviderInstalledStateObservation::unknown(
-                PackageMetadataFailure{
-                        PackageMetadataErrorCode::InvalidPackageName,
-                        "invalid package name"}));
+            PackageMetadataFailure{
+                PackageMetadataErrorCode::InvalidPackageName,
+                "invalid package name"}));
     } catch(const std::invalid_argument&) {
         return;
     }
@@ -173,30 +173,30 @@ void test_query_failure_projects_to_unknown() {
     ProviderInstalledStateObservation observation = lookup.query("failed-package");
 
     expect_unknown_failure(
-            observation, PackageMetadataErrorCode::QueryFailed, "query failure");
+        observation, PackageMetadataErrorCode::QueryFailed, "query failure");
     expect(
-            observation.state() != ProviderInstalledState::NotInstalled,
-            "query failure was flattened to not installed");
+        observation.state() != ProviderInstalledState::NotInstalled,
+        "query failure was flattened to not installed");
 }
 
 void test_malformed_query_metadata_projects_to_unknown() {
     reset_stubs();
     enqueue_valid_database_paths();
     stub::enqueue_local_package_query_present(
-            "mismatched-package", "different-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT);
+        "mismatched-package", "different-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT);
     stub::enqueue_local_package_query_present(
-            "empty-version-package", "empty-version-package", "", ALPM_PKG_REASON_EXPLICIT);
+        "empty-version-package", "empty-version-package", "", ALPM_PKG_REASON_EXPLICIT);
 
     ProviderInstalledStateLookup lookup;
     ProviderInstalledStateObservation mismatched = lookup.query("mismatched-package");
     ProviderInstalledStateObservation empty_version = lookup.query("empty-version-package");
 
     expect_unknown_failure(
-            mismatched, PackageMetadataErrorCode::MalformedMetadata,
-            "mismatched returned package name");
+        mismatched, PackageMetadataErrorCode::MalformedMetadata,
+        "mismatched returned package name");
     expect_unknown_failure(
-            empty_version, PackageMetadataErrorCode::MalformedMetadata,
-            "empty returned package version");
+        empty_version, PackageMetadataErrorCode::MalformedMetadata,
+        "empty returned package version");
     stub::require_local_package_query_expectations_consumed();
 }
 
@@ -205,8 +205,8 @@ void test_invalid_package_name_is_strict_before_authority_access() {
     ProviderInstalledStateLookup lookup;
 
     expect_metadata_error(
-            [&lookup]() { static_cast<void>(lookup.query("invalid/package")); },
-            PackageMetadataErrorCode::InvalidPackageName, "invalid package name");
+        [&lookup]() { static_cast<void>(lookup.query("invalid/package")); },
+        PackageMetadataErrorCode::InvalidPackageName, "invalid package name");
     expect(stub::capture_command_call_count() == 0, "invalid name ran pacman-conf");
     expect(stub::initialize_call_count() == 0, "invalid name initialized libalpm");
     expect(stub::package_query_call_count() == 0, "invalid name reached the package query");
@@ -221,14 +221,14 @@ void test_configuration_command_failure_becomes_cached_unknown() {
     ProviderInstalledStateObservation second = lookup.query("second-package");
 
     expect_unknown_failure(
-            first, PackageMetadataErrorCode::ConfigurationUnavailable,
-            "configuration command failure");
+        first, PackageMetadataErrorCode::ConfigurationUnavailable,
+        "configuration command failure");
     expect_unknown_failure(
-            second, PackageMetadataErrorCode::ConfigurationUnavailable,
-            "cached configuration command failure");
+        second, PackageMetadataErrorCode::ConfigurationUnavailable,
+        "cached configuration command failure");
     expect(
-            first.failure().diagnostic == second.failure().diagnostic,
-            "cached session failure diagnostic differs");
+        first.failure().diagnostic == second.failure().diagnostic,
+        "cached session failure diagnostic differs");
     expect(stub::capture_command_call_count() == 1, "session failure retried pacman-conf");
     expect(stub::initialize_call_count() == 0, "configuration failure initialized libalpm");
     expect(stub::package_query_call_count() == 0, "configuration failure queried local DB");
@@ -240,9 +240,9 @@ void test_malformed_configuration_becomes_unknown() {
 
     ProviderInstalledStateLookup lookup;
     expect_unknown_failure(
-            lookup.query("configured-package"),
-            PackageMetadataErrorCode::ConfigurationMalformed,
-            "malformed configuration");
+        lookup.query("configured-package"),
+        PackageMetadataErrorCode::ConfigurationMalformed,
+        "malformed configuration");
     expect(stub::initialize_call_count() == 0, "malformed configuration initialized libalpm");
 }
 
@@ -253,9 +253,9 @@ void test_initialization_failure_becomes_unknown() {
 
     ProviderInstalledStateLookup lookup;
     expect_unknown_failure(
-            lookup.query("initialize-package"),
-            PackageMetadataErrorCode::InitializationFailed,
-            "initialization failure");
+        lookup.query("initialize-package"),
+        PackageMetadataErrorCode::InitializationFailed,
+        "initialization failure");
     expect(stub::initialize_call_count() == 1, "initialization failure call count differs");
 }
 
@@ -266,9 +266,9 @@ void test_local_database_failures_become_unknown() {
     {
         ProviderInstalledStateLookup lookup;
         expect_unknown_failure(
-                lookup.query("unavailable-package"),
-                PackageMetadataErrorCode::LocalDatabaseUnavailable,
-                "local database unavailable");
+            lookup.query("unavailable-package"),
+            PackageMetadataErrorCode::LocalDatabaseUnavailable,
+            "local database unavailable");
     }
 
     reset_stubs();
@@ -277,9 +277,9 @@ void test_local_database_failures_become_unknown() {
     {
         ProviderInstalledStateLookup lookup;
         expect_unknown_failure(
-                lookup.query("invalid-database-package"),
-                PackageMetadataErrorCode::LocalDatabaseUnavailable,
-                "local database invalid");
+            lookup.query("invalid-database-package"),
+            PackageMetadataErrorCode::LocalDatabaseUnavailable,
+            "local database invalid");
     }
 
     reset_stubs();
@@ -288,9 +288,9 @@ void test_local_database_failures_become_unknown() {
     {
         ProviderInstalledStateLookup lookup;
         expect_unknown_failure(
-                lookup.query("cache-failure-package"),
-                PackageMetadataErrorCode::LocalDatabaseUnavailable,
-                "local database cache preload failure");
+            lookup.query("cache-failure-package"),
+            PackageMetadataErrorCode::LocalDatabaseUnavailable,
+            "local database cache preload failure");
     }
 }
 
@@ -298,7 +298,7 @@ void test_package_name_cache_is_per_name_and_preserves_query_order() {
     reset_stubs();
     enqueue_valid_database_paths();
     stub::enqueue_local_package_query_present(
-            "alpha-package", "alpha-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT);
+        "alpha-package", "alpha-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT);
     stub::enqueue_local_package_query_absent("beta-package");
     stub::enqueue_local_package_query_failure("gamma-package");
 
@@ -315,19 +315,19 @@ void test_package_name_cache_is_per_name_and_preserves_query_order() {
     expect_state(beta_first, ProviderInstalledState::NotInstalled, "first beta query");
     expect_state(beta_cached, ProviderInstalledState::NotInstalled, "cached beta query");
     expect_unknown_failure(
-            gamma_first, PackageMetadataErrorCode::QueryFailed, "first gamma query");
+        gamma_first, PackageMetadataErrorCode::QueryFailed, "first gamma query");
     expect_unknown_failure(
-            gamma_cached, PackageMetadataErrorCode::QueryFailed, "cached gamma query");
+        gamma_cached, PackageMetadataErrorCode::QueryFailed, "cached gamma query");
     expect(
-            gamma_first.failure().diagnostic == gamma_cached.failure().diagnostic,
-            "cached query failure diagnostic differs");
+        gamma_first.failure().diagnostic == gamma_cached.failure().diagnostic,
+        "cached query failure diagnostic differs");
 
     expect(stub::package_query_call_count() == 3, "package-name cache query count differs");
     expect(
-            stub::local_package_query_history() ==
-                    std::vector<std::string>{
-                            "alpha-package", "beta-package", "gamma-package"},
-            "package-name cache query order differs");
+        stub::local_package_query_history() ==
+            std::vector<std::string>{
+                "alpha-package", "beta-package", "gamma-package"},
+        "package-name cache query order differs");
     stub::require_local_package_query_expectations_consumed();
 }
 
@@ -339,8 +339,8 @@ void test_lookup_releases_open_session_exactly_once() {
     {
         ProviderInstalledStateLookup lookup;
         expect_state(
-                lookup.query("lifetime-package"), ProviderInstalledState::Installed,
-                "lifetime package");
+            lookup.query("lifetime-package"), ProviderInstalledState::Installed,
+            "lifetime package");
         expect(stub::release_call_count() == 0, "lookup released a live session early");
     }
 
@@ -354,7 +354,7 @@ void test_unknown_observation_owns_diagnostic_after_lookup_destruction() {
     stub::set_package_query_failure(ALPM_ERR_DB_OPEN);
 
     ProviderInstalledStateObservation observation =
-            ProviderInstalledStateObservation::not_installed();
+        ProviderInstalledStateObservation::not_installed();
     std::string expected_diagnostic;
     {
         ProviderInstalledStateLookup lookup;
@@ -364,10 +364,10 @@ void test_unknown_observation_owns_diagnostic_after_lookup_destruction() {
     reset_stubs();
 
     expect_unknown_failure(
-            observation, PackageMetadataErrorCode::QueryFailed, "owned diagnostic");
+        observation, PackageMetadataErrorCode::QueryFailed, "owned diagnostic");
     expect(
-            observation.failure().diagnostic == expected_diagnostic,
-            "observation diagnostic did not outlive lookup and stub state");
+        observation.failure().diagnostic == expected_diagnostic,
+        "observation diagnostic did not outlive lookup and stub state");
 }
 
 } // namespace

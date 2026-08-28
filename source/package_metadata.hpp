@@ -19,7 +19,7 @@ struct PacmanDatabasePaths {
 };
 
 struct PacmanRepositoryConfiguration {
-    PacmanDatabasePaths      database_paths;
+    PacmanDatabasePaths database_paths;
     std::vector<std::string> repository_names;
 };
 
@@ -29,8 +29,8 @@ enum class RepositoryPackageSearchMatchKind {
 };
 
 struct RepositoryPackageSearchMatch {
-    std::string                repository_name;
-    std::string                package_name;
+    std::string repository_name;
+    std::string package_name;
     std::optional<std::string> version;
     std::optional<std::string> description;
     RepositoryPackageSearchMatchKind kind;
@@ -38,7 +38,7 @@ struct RepositoryPackageSearchMatch {
 };
 
 struct RepositoryPackageSearchSnapshot {
-    std::vector<std::string>                  repository_order;
+    std::vector<std::string> repository_order;
     std::vector<RepositoryPackageSearchMatch> matches;
 };
 
@@ -51,13 +51,13 @@ enum class PackageStateChange {
 };
 
 struct RepositoryPackageLookup {
-    std::string                package_name;
+    std::string package_name;
     std::optional<std::string> exact_repository_name;
 };
 
 struct RepositoryPackageMetadata {
-    std::string   repository_name;
-    std::string   package_name;
+    std::string repository_name;
+    std::string package_name;
     std::uint64_t package_size_bytes;
     std::uint64_t installed_size_bytes;
 };
@@ -78,7 +78,7 @@ enum class PackageMetadataErrorCode {
 
 struct PackageMetadataFailure {
     PackageMetadataErrorCode code;
-    std::string              diagnostic;
+    std::string diagnostic;
 };
 
 // Slice 3 adapterへ渡すlibalpm read-phaseのowned snapshot。
@@ -94,24 +94,24 @@ enum class RepositoryProvidedPackageRelation {
 };
 
 struct RepositoryProvidedPackageMetadata {
-    std::optional<std::string>          package_name;
-    std::optional<std::string>          version;
+    std::optional<std::string> package_name;
+    std::optional<std::string> version;
     RepositoryProvidedPackageRelation relation;
 };
 
 struct InstalledExactPackageMetadata {
-    std::string                package_name;
+    std::string package_name;
     std::optional<std::string> version;
 };
 
 struct InstalledPackageRelationMetadata {
-    std::string                                    package_name;
-    std::optional<std::string>                     version;
+    std::string package_name;
+    std::optional<std::string> version;
     std::vector<RepositoryProvidedPackageMetadata> provides;
 };
 
 using InstalledPackageRelationMetadataInventory =
-        std::vector<InstalledPackageRelationMetadata>;
+    std::vector<InstalledPackageRelationMetadata>;
 
 struct InstalledPackageRelationMetadataInventoryFailure {
     InstalledPackageRelationMetadataInventory observed_packages;
@@ -120,19 +120,19 @@ struct InstalledPackageRelationMetadataInventoryFailure {
 };
 
 using InstalledPackageRelationMetadataInventoryResult = std::variant<
-        InstalledPackageRelationMetadataInventory,
-        InstalledPackageRelationMetadataInventoryFailure>;
+    InstalledPackageRelationMetadataInventory,
+    InstalledPackageRelationMetadataInventoryFailure>;
 
 // Issue #460のcandidate observation専用read phase。既存relation inventoryを
 // 肥大化させず、libalpmが所有するdirect runtime dependencyだけをcanonicalな
 // specificationとしてowned保持する。source/provenanceやresolutionは表さない。
 struct InstalledPackageRuntimeDependencyMetadata {
-    std::string              package_name;
+    std::string package_name;
     std::vector<std::string> dependency_specifications;
 };
 
 using InstalledPackageRuntimeDependencyMetadataInventory =
-        std::vector<InstalledPackageRuntimeDependencyMetadata>;
+    std::vector<InstalledPackageRuntimeDependencyMetadata>;
 
 struct InstalledPackageRuntimeDependencyMetadataInventoryFailure {
     InstalledPackageRuntimeDependencyMetadataInventory observed_packages;
@@ -141,20 +141,20 @@ struct InstalledPackageRuntimeDependencyMetadataInventoryFailure {
 };
 
 using InstalledPackageRuntimeDependencyMetadataInventoryResult = std::variant<
-        InstalledPackageRuntimeDependencyMetadataInventory,
-        InstalledPackageRuntimeDependencyMetadataInventoryFailure>;
+    InstalledPackageRuntimeDependencyMetadataInventory,
+    InstalledPackageRuntimeDependencyMetadataInventoryFailure>;
 
 using InstalledExactPackageMetadataQueryResult = std::variant<
-        InstalledExactPackageMetadata,
-        PackageNotFound,
-        PackageMetadataFailure>;
+    InstalledExactPackageMetadata,
+    PackageNotFound,
+    PackageMetadataFailure>;
 
 struct RepositoryExactPackageMetadata {
-    std::size_t                                    configured_repository_order;
-    std::string                                    repository_name;
-    std::string                                    package_name;
-    std::string                                    package_base;
-    std::optional<std::string>                     version;
+    std::size_t configured_repository_order;
+    std::string repository_name;
+    std::string package_name;
+    std::string package_base;
+    std::optional<std::string> version;
     std::vector<RepositoryProvidedPackageMetadata> provides;
 };
 
@@ -165,16 +165,16 @@ struct RepositoryExactPackageMetadataNotFound {
 };
 
 struct RepositoryExactPackageMetadataSourceFailure {
-    std::size_t            configured_repository_order;
-    std::string            repository_name;
-    std::string            package_name;
+    std::size_t configured_repository_order;
+    std::string repository_name;
+    std::string package_name;
     PackageMetadataFailure failure;
 };
 
 using RepositoryExactPackageMetadataSourceResult = std::variant<
-        RepositoryExactPackageMetadata,
-        RepositoryExactPackageMetadataNotFound,
-        RepositoryExactPackageMetadataSourceFailure>;
+    RepositoryExactPackageMetadata,
+    RepositoryExactPackageMetadataNotFound,
+    RepositoryExactPackageMetadataSourceFailure>;
 
 struct RepositoryExactPackageMetadataSnapshot {
     std::vector<std::string> repository_order;
@@ -182,8 +182,8 @@ struct RepositoryExactPackageMetadataSnapshot {
 };
 
 using RepositoryExactPackageMetadataQueryResult = std::variant<
-        RepositoryExactPackageMetadataSnapshot,
-        PackageMetadataFailure>;
+    RepositoryExactPackageMetadataSnapshot,
+    PackageMetadataFailure>;
 
 // Provider enumeration uses the same owned libalpm projection as exact
 // lookup. Each configured source keeps its own success/failure state so a
@@ -195,14 +195,14 @@ struct RepositoryProviderPackageMetadataSourceSnapshot {
 };
 
 struct RepositoryProviderPackageMetadataSourceFailure {
-    std::size_t            configured_repository_order;
-    std::string            repository_name;
+    std::size_t configured_repository_order;
+    std::string repository_name;
     PackageMetadataFailure failure;
 };
 
 using RepositoryProviderPackageMetadataSourceResult = std::variant<
-        RepositoryProviderPackageMetadataSourceSnapshot,
-        RepositoryProviderPackageMetadataSourceFailure>;
+    RepositoryProviderPackageMetadataSourceSnapshot,
+    RepositoryProviderPackageMetadataSourceFailure>;
 
 struct RepositoryProviderPackageMetadataSnapshot {
     std::vector<std::string> repository_order;
@@ -210,44 +210,44 @@ struct RepositoryProviderPackageMetadataSnapshot {
 };
 
 using RepositoryProviderPackageMetadataQueryResult = std::variant<
-        RepositoryProviderPackageMetadataSnapshot,
-        PackageMetadataFailure>;
+    RepositoryProviderPackageMetadataSnapshot,
+    PackageMetadataFailure>;
 
 using InstalledPackageQueryResult = std::variant<
-        InstalledPackageMetadata,
-        PackageNotFound,
-        PackageMetadataFailure>;
+    InstalledPackageMetadata,
+    PackageNotFound,
+    PackageMetadataFailure>;
 
 using RepositoryPackageQueryResult = std::variant<
-        RepositoryPackageMetadata,
-        PackageNotFound,
-        PackageMetadataFailure>;
+    RepositoryPackageMetadata,
+    PackageNotFound,
+    PackageMetadataFailure>;
 
 using RepositoryPackageSearchResult = std::variant<
-        RepositoryPackageSearchSnapshot,
-        PackageMetadataFailure>;
+    RepositoryPackageSearchSnapshot,
+    PackageMetadataFailure>;
 
 using ForeignPackageInventory = std::vector<InstalledPackageMetadata>;
 
 using ForeignPackageInventoryResult = std::variant<
-        ForeignPackageInventory,
-        PackageMetadataFailure>;
+    ForeignPackageInventory,
+    PackageMetadataFailure>;
 
 // package state比較用に、libalpmのborrowを残さないname/version snapshotを保持する。
 using LocalPackageVersionSnapshot = std::map<std::string, std::string>;
 
 using LocalPackageVersionSnapshotResult = std::variant<
-        LocalPackageVersionSnapshot,
-        PackageMetadataFailure>;
+    LocalPackageVersionSnapshot,
+    PackageMetadataFailure>;
 
 // cleanup baseline/current observation向けのfull local DB snapshot。
 // keyとvalueはともにownedで、1 read phaseのname/version/reasonを保持する。
 using InstalledPackageStateSnapshot =
-        std::map<std::string, InstalledPackageMetadata>;
+    std::map<std::string, InstalledPackageMetadata>;
 
 using InstalledPackageStateSnapshotResult = std::variant<
-        InstalledPackageStateSnapshot,
-        PackageMetadataFailure>;
+    InstalledPackageStateSnapshot,
+    PackageMetadataFailure>;
 
 // resolver/session openの失敗を、CLI境界でstd::exceptionとして扱える形で伝播する。
 class PackageMetadataError : public std::runtime_error {
@@ -266,23 +266,23 @@ PacmanRepositoryConfiguration
 resolve_pacman_root_search_repository_configuration();
 
 RepositoryPackageSearchResult query_repository_root_package_search(
-        const std::string& query);
+    const std::string& query);
 
 // Slice 3のconfigured repository exact observation用read phase。
 // repository固有のopen/query failureをconfigured order付きowned resultへ保持する。
 RepositoryExactPackageMetadataQueryResult
 query_configured_repository_exact_package_metadata(
-        const PacmanRepositoryConfiguration& configuration,
-        const std::string& package_name);
+    const PacmanRepositoryConfiguration& configuration,
+    const std::string& package_name);
 
 RepositoryProviderPackageMetadataQueryResult
 query_configured_repository_provider_package_metadata(
-        const PacmanRepositoryConfiguration& configuration,
-        const std::string& dependency_name);
+    const PacmanRepositoryConfiguration& configuration,
+    const std::string& dependency_name);
 
 // local DBと全sync DBを1 handleで照合し、borrowを残さないowned inventoryを返す。
 ForeignPackageInventoryResult query_foreign_package_inventory(
-        const PacmanRepositoryConfiguration& configuration);
+    const PacmanRepositoryConfiguration& configuration);
 
 // 1 read phaseのlibalpm handleを単独所有し、raw libalpm型をdomain側へ公開しない。
 class PackageMetadataSession {
@@ -298,11 +298,11 @@ public:
     ~PackageMetadataSession() noexcept;
 
     InstalledPackageQueryResult query_installed_package(
-            const std::string& package_name) const;
+        const std::string& package_name) const;
 
     InstalledExactPackageMetadataQueryResult
     query_installed_exact_package_metadata(
-            const std::string& package_name) const;
+        const std::string& package_name) const;
 
     LocalPackageVersionSnapshotResult snapshot_local_package_versions() const;
 
@@ -325,42 +325,42 @@ private:
 
 // Session open failureもempty inventoryへ丸めず、同じtyped resultへ戻す。
 InstalledPackageStateSnapshotResult snapshot_installed_package_states(
-        const PacmanDatabasePaths& paths);
+    const PacmanDatabasePaths& paths);
 
 // Session open failureもsuccessful empty inventoryへ丸めない。
 InstalledPackageRuntimeDependencyMetadataInventoryResult
 query_installed_package_runtime_dependency_metadata(
-        const PacmanDatabasePaths& paths);
+    const PacmanDatabasePaths& paths);
 
 // repository sync DB専用のread phaseを所有し、installed/local sessionとは分離する。
 class RepositoryPackageMetadataSession {
 public:
     static RepositoryPackageMetadataSession open(
-            const PacmanRepositoryConfiguration& configuration);
+        const PacmanRepositoryConfiguration& configuration);
 
     RepositoryPackageMetadataSession(const RepositoryPackageMetadataSession&) = delete;
     RepositoryPackageMetadataSession& operator=(
-            const RepositoryPackageMetadataSession&) = delete;
+        const RepositoryPackageMetadataSession&) = delete;
 
     RepositoryPackageMetadataSession(RepositoryPackageMetadataSession&&) noexcept;
     RepositoryPackageMetadataSession& operator=(
-            RepositoryPackageMetadataSession&&) noexcept;
+        RepositoryPackageMetadataSession&&) noexcept;
 
     ~RepositoryPackageMetadataSession() noexcept;
 
     RepositoryPackageQueryResult query_repository_package(
-            const RepositoryPackageLookup& lookup) const;
+        const RepositoryPackageLookup& lookup) const;
 
     RepositoryExactPackageMetadataQueryResult
     query_repository_exact_package_metadata(
-            const std::string& package_name) const;
+        const std::string& package_name) const;
 
     RepositoryProviderPackageMetadataQueryResult
     query_repository_provider_package_metadata(
-            const std::string& dependency_name) const;
+        const std::string& dependency_name) const;
 
     RepositoryPackageSearchResult query_root_package_search(
-            const std::string& query) const;
+        const std::string& query) const;
 
 private:
     struct Impl;

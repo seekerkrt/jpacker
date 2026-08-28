@@ -25,21 +25,21 @@ enum class BuildPlanArtifactTargetProjectionIssueKind {
 
 struct BuildPlanArtifactTargetProjectionIssue {
     BuildPlanArtifactTargetProjectionIssueKind kind;
-    std::optional<std::size_t>                  build_plan_order_index;
-    std::optional<std::size_t>                  entry_package_name_index;
-    std::vector<std::size_t>                    package_target_indices;
-    std::optional<std::string>                  package_base;
-    std::optional<std::string>                  package_name;
-    std::vector<RootTargetIdentity>             roots;
-    std::string                                 diagnostic;
+    std::optional<std::size_t> build_plan_order_index;
+    std::optional<std::size_t> entry_package_name_index;
+    std::vector<std::size_t> package_target_indices;
+    std::optional<std::string> package_base;
+    std::optional<std::string> package_name;
+    std::vector<RootTargetIdentity> roots;
+    std::string diagnostic;
 
     bool operator==(
-            const BuildPlanArtifactTargetProjectionIssue&) const = default;
+        const BuildPlanArtifactTargetProjectionIssue&) const = default;
 };
 
 struct ProjectedBuildPlanArtifactTargets {
-    std::size_t                                build_plan_order_index;
-    std::string                                package_base;
+    std::size_t build_plan_order_index;
+    std::string package_base;
     std::vector<RequiredPackageArtifactTarget> required_targets;
 };
 
@@ -55,33 +55,33 @@ struct BuildPlanArtifactTargetProjectionFailure {
 };
 
 class BuildPlanArtifactTargetProjectionResult final {
-  public:
+public:
     BuildPlanArtifactTargetProjectionResult() = delete;
     BuildPlanArtifactTargetProjectionResult(
-            const BuildPlanArtifactTargetProjectionResult&) = default;
+        const BuildPlanArtifactTargetProjectionResult&) = default;
     BuildPlanArtifactTargetProjectionResult(
-            BuildPlanArtifactTargetProjectionResult&&) noexcept = default;
+        BuildPlanArtifactTargetProjectionResult&&) noexcept = default;
     BuildPlanArtifactTargetProjectionResult& operator=(
-            const BuildPlanArtifactTargetProjectionResult&) = delete;
+        const BuildPlanArtifactTargetProjectionResult&) = delete;
     BuildPlanArtifactTargetProjectionResult& operator=(
-            BuildPlanArtifactTargetProjectionResult&&) noexcept = delete;
+        BuildPlanArtifactTargetProjectionResult&&) noexcept = delete;
     ~BuildPlanArtifactTargetProjectionResult() = default;
 
     [[nodiscard]] bool is_success() const noexcept;
     [[nodiscard]] const BuildPlanArtifactTargetProjectionSuccess* success()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const BuildPlanArtifactTargetProjectionFailure* failure()
-            const noexcept;
+        const noexcept;
 
-  private:
+private:
     explicit BuildPlanArtifactTargetProjectionResult(
-            BuildPlanArtifactTargetProjectionSuccess success);
+        BuildPlanArtifactTargetProjectionSuccess success);
     explicit BuildPlanArtifactTargetProjectionResult(
-            BuildPlanArtifactTargetProjectionFailure failure);
+        BuildPlanArtifactTargetProjectionFailure failure);
 
     std::variant<BuildPlanArtifactTargetProjectionSuccess,
                  BuildPlanArtifactTargetProjectionFailure>
-            outcome_;
+        outcome_;
 
     friend BuildPlanArtifactTargetProjectionResult
     project_build_plan_required_artifact_targets(const BuildPlan& plan);
