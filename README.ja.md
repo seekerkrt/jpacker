@@ -44,11 +44,12 @@ Moguet v2.0.1は、採用済みXDG storage契約のうちsource-preference部分
 preferenceは実行user自身のXDG config contextだけを使い、公開済みv2.0.0のtag、Release、
 release noteは歴史的記録のまま変更しません。
 
-Moguet v2.4.1は最新releaseです。このpatch / maintenance releaseでは、canonicalな
-`sample/config.toml`を追加し、standard Arch packageのdocumentationへexampleとしてinstallし、
-`moguet --help`のTOML string enumをquote付きで表示します。strict parser、configuration schema、
-built-in defaultは変更せず、malformedな既存configurationは引き続きfail closedです。利用者から
-見える変更の全体は[v2.4.1 release](https://github.com/seekerkrt/moguet/releases/tag/v2.4.1)を
+Moguet v2.5.0は最新releaseです。このminor releaseでは、authoritativeな追跡がまだ
+成立しないconventionalなVCS/devel AUR packageをfalse `UpToDate`へ丸めず
+`RequiresCheck`として公開し、repo/AURを跨ぐexact-version dependency lockに対する
+`upgrade-all`のtargeted diagnosticを追加します。また、invocation-owned dependency cleanupの
+安全基盤を整備しますが、public source-build `--rmdeps`はまだ有効化しません。利用者から
+見える変更の全体は[v2.5.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.5.0)を
 参照してください。
 
 canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ちます。Moguet
