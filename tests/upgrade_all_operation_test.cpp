@@ -14,6 +14,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <new>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -54,6 +55,10 @@ namespace {
 
 namespace fs = std::filesystem;
 namespace stub = upgrade_all_operation_test_stub;
+
+constexpr int CORRELATION_SYSTEM_FAILURE_EXIT_STATUS = 37;
+
+struct UnknownCorrelationObservationFailure {};
 
 class TemporaryCacheEnvironment final {
     fs::path root_;
@@ -288,6 +293,92 @@ ForeignPackageInventory foreign_inventory(
     return inventory;
 }
 
+PackageRelationInstalledDatabaseIdentity
+cross_source_observation_database_identity() {
+    return PackageRelationInstalledDatabaseIdentity{
+            fs::path("/upgrade-all-stub/root"),
+            fs::path("/upgrade-all-stub/database")};
+}
+
+PackageRelationObservedPackage observed_installed_package(
+        std::string package_name,
+        std::string version) {
+    return PackageRelationObservedPackage{
+            std::move(package_name),
+            std::nullopt,
+            ObservedVersion::available(
+                    ObservedVersionSource::InstalledExactPackage,
+                    std::move(version)),
+            {},
+            cross_source_observation_database_identity(),
+            PackageRelationObservationRole::Installed,
+            {}};
+}
+
+DependencyRequirement parsed_dependency_requirement(
+        const std::string& specification) {
+    const DependencyRequirementParseResult parsed =
+            parse_dependency_requirement(specification);
+    expect(
+            parsed.failure() == nullptr,
+            "Cross-source fixture dependency parse failed: " +
+                    specification);
+    const DependencyRequirement* requirement = parsed.requirement();
+    expect(
+            requirement != nullptr,
+            "Cross-source fixture dependency requirement is missing");
+    return *requirement;
+}
+
+AurPackageInfo virtualbox_replacement_package() {
+    AurPackageInfo package = package_info(
+            "virtualbox-ext-oracle",
+            "virtualbox-ext-oracle",
+            "7.2.16-1");
+    package.constraint_metadata = AurPackageConstraintMetadata{
+            "virtualbox-ext-oracle",
+            "virtualbox-ext-oracle",
+            ObservedVersion::available(
+                    ObservedVersionSource::AurExactPackage,
+                    "7.2.16-1"),
+            {parsed_dependency_requirement("virtualbox=7.2.16")},
+            {},
+            {},
+            {},
+            {}};
+    return package;
+}
+
+void arrange_virtualbox_cross_source_observation() {
+    stub::set_foreign_inventory(foreign_inventory(
+            {"virtualbox-ext-oracle"}, "7.2.14-1"));
+    stub::set_installed_relation_inventory(
+            InstalledPackageRelationInventory{
+                    cross_source_observation_database_identity(),
+                    {observed_installed_package(
+                             "virtualbox", "7.2.14-1"),
+                     observed_installed_package(
+                             "virtualbox-ext-oracle", "7.2.14-1")}});
+    stub::set_installed_runtime_dependency_inventory(
+            InstalledPackageRuntimeDependencyMetadataInventory{
+                    InstalledPackageRuntimeDependencyMetadata{
+                            "virtualbox-ext-oracle",
+                            {"virtualbox=7.2.14"}}});
+    stub::set_repository_candidate_result(
+            "virtualbox",
+            RepositoryPackagePresent{
+                    "upgrade-all-stub-repository",
+                    0,
+                    "virtualbox",
+                    "virtualbox",
+                    ObservedVersion::available(
+                            ObservedVersionSource::RepositoryExactPackage,
+                            "7.2.16-1"),
+                    std::vector<std::string>{
+                            "upgrade-all-stub-repository"},
+                    {}});
+}
+
 void enqueue_aur_query(
         const std::vector<std::pair<std::string, std::string>>& packages,
         const std::string& comparison = "1") {
@@ -495,13 +586,100 @@ void expect_aur_not_attempted(
 void expect_no_inventory_or_aur(const std::string& context) {
     expect(
             stub::repository_configuration_calls() == 0 &&
-                    stub::inventory_calls() == 0,
+                    stub::inventory_calls() == 0 &&
+                    stub::installed_relation_inventory_calls() == 0 &&
+                    stub::installed_runtime_dependency_inventory_calls() ==
+                            0 &&
+                    stub::repository_candidate_call_history().empty(),
             context + ": foreign inventory boundary was crossed");
     expect(
             stub::info_many_call_history().empty() &&
+                    stub::info_strict_call_history().empty() &&
                     stub::resolver_call_count() == 0 &&
                     stub::aur_execution_calls().empty(),
             context + ": AUR boundary was crossed");
+}
+
+const UpgradeAllCrossSourceVersionLockCorrelationResult*
+require_cross_source_correlation(
+        const UpgradeAllOperationResult& result,
+        const char* context) {
+    expect(
+            result.cross_source_version_lock_correlation.has_value(),
+            std::string(context) +
+                    ": secondary correlation was not attempted");
+    return &result.cross_source_version_lock_correlation.value();
+}
+
+void expect_system_failure_primary_preserved(
+        const UpgradeAllOperationResult& result,
+        const std::string& context) {
+    expect(
+            result.status ==
+                            UpgradeAllOperationStatus::
+                                    StoppedOnSystemFailure &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::System &&
+                    result.system_source.status ==
+                            SystemSourceUpgradeStatus::
+                                    StoppedOnSystemFailure &&
+                    result.system_source.stopped_phase ==
+                            SystemSourceUpgradePhase::System &&
+                    result.system_source.system.status ==
+                            SystemUpgradePhaseStatus::Failed &&
+                    result.system_source.system.package_state_change ==
+                            PackageStateChange::Unknown &&
+                    result.system_source.system.command_exit_status ==
+                            std::optional<int>{
+                                    CORRELATION_SYSTEM_FAILURE_EXIT_STATUS} &&
+                    result.system_source.system.diagnostic ==
+                            std::optional<std::string>{
+                                    "The update failed."} &&
+                    result.system_source.issues.empty() &&
+                    result.system_source.diagnostics.size() == 1 &&
+                    result.system_source.diagnostics.front().diagnostic ==
+                            "The update failed." &&
+                    result.has_not_attempted_phase() &&
+                    !result.has_partial_completion(),
+            context + ": primary system failure changed");
+    expect(
+            result.system_source.registered_source_results.size() == 1 &&
+                    result.system_source.registered_source_results.front()
+                                    .status ==
+                            RegisteredSourceUpgradeStatus::NotAttempted &&
+                    result.system_source.registered_source_results.front()
+                                    .failure_kind ==
+                            RegisteredSourceUpgradeFailureKind::
+                                    PriorPhaseStopped,
+            context + ": later registered source changed");
+    expect(
+            result.foreign_inventory.status ==
+                            UpgradeAllForeignInventoryPhaseStatus::
+                                    NotAttempted &&
+                    result.foreign_inventory.not_attempted_reason ==
+                            UpgradeAllNotAttemptedReason::SystemFailure,
+            context + ": foreign inventory NotAttempted reason changed");
+    expect_aur_not_attempted(
+            result,
+            UpgradeAllNotAttemptedReason::SystemFailure,
+            context);
+    expect(
+            stub::system_commands().size() == 1 &&
+                    stub::source_execution_calls().empty() &&
+                    stub::info_many_call_history().empty() &&
+                    stub::resolver_call_count() == 0 &&
+                    stub::aur_execution_calls().empty(),
+            context + ": later production execution was reached");
+}
+
+UpgradeAllOperationResult execute_system_failure_for_correlation() {
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared =
+            prepare_sources({"source-root"}, config);
+    stub::set_system_command_exit_status(
+            CORRELATION_SYSTEM_FAILURE_EXIT_STATUS);
+    return execute_prepared_upgrade_all_operation(
+            std::move(prepared), config);
 }
 
 void test_empty_source_preparation_snapshot() {
@@ -772,7 +950,8 @@ void test_system_source_preparation_blocker_is_aggregate_blocker() {
                     observation != nullptr &&
                     observation->status() ==
                             UnifiedPlanObservationStatus::Blocked &&
-                    observation->transaction_intents().empty(),
+                    observation->transaction_intents().empty() &&
+                    !result.cross_source_version_lock_correlation.has_value(),
             "Nested preparation blocker was not preserved");
     expect_no_inventory_or_aur("system/source preparation blocker");
     stub::require_script_consumed();
@@ -907,7 +1086,8 @@ void test_nested_system_source_correlation_mismatch_is_rejected() {
             result.status == UpgradeAllOperationStatus::InconsistentResult &&
                     result.system_source.status ==
                             SystemSourceUpgradeStatus::InconsistentResult &&
-                    result.has_inconsistency(),
+                    result.has_inconsistency() &&
+                    !result.cross_source_version_lock_correlation.has_value(),
             "Nested PR2 correlation mismatch was not retained");
     expect(stub::system_commands().empty(),
            "Nested PR2 mismatch executed system mutation");
@@ -1058,32 +1238,241 @@ void test_unexpected_exception_preserves_recorded_source_result() {
 
 void test_system_failure_is_fail_fast() {
     stub::reset();
-    const AppConfig config;
-    PreparedUpgradeAllOperation prepared =
-            prepare_sources({"source-root"}, config);
-    stub::set_system_command_exit_status(7);
+    UpgradeAllOperationResult result =
+            execute_system_failure_for_correlation();
+    expect_system_failure_primary_preserved(
+            result, "complete-zero system failure");
+
+    const auto& correlation = *require_cross_source_correlation(
+            result, "complete-zero system failure");
+    expect(
+            correlation.observation.has_value() &&
+                    correlation.observation->status ==
+                            CrossSourceVersionLockObservationStatus::
+                                    Complete &&
+                    correlation.observation->candidates.empty() &&
+                    correlation.observation->issues.empty() &&
+                    correlation.assessments.empty() &&
+                    correlation.possible_blocker_assessment_indices.empty() &&
+                    !correlation.failure.has_value(),
+            "Complete-zero correlation was not retained");
+    expect(
+            stub::repository_configuration_calls() == 1 &&
+                    stub::inventory_calls() == 1 &&
+                    stub::installed_relation_inventory_calls() == 0 &&
+                    stub::installed_runtime_dependency_inventory_calls() ==
+                            0 &&
+                    stub::repository_candidate_call_history().empty() &&
+                    stub::info_strict_call_history().empty(),
+            "Complete-zero observer did not run exactly once");
+    expect(
+            event_position(
+                    stub::EventKind::SystemCommand,
+                    stub::system_commands().front()) <
+                    event_position(
+                            stub::EventKind::
+                                    RepositoryConfigurationResolution,
+                            "repository-configuration"),
+            "Secondary observation ran before the system command failed");
+    stub::require_script_consumed();
+}
+
+void test_virtualbox_system_failure_retains_possible_correlation() {
+    stub::reset();
+    arrange_virtualbox_cross_source_observation();
+    stub::enqueue_info_strict_result(virtualbox_replacement_package());
 
     UpgradeAllOperationResult result =
-            execute_prepared_upgrade_all_operation(
-                    std::move(prepared), config);
+            execute_system_failure_for_correlation();
+    expect_system_failure_primary_preserved(
+            result, "VirtualBox system failure");
+
+    const auto& correlation = *require_cross_source_correlation(
+            result, "VirtualBox system failure");
     expect(
-            result.status ==
-                            UpgradeAllOperationStatus::
-                                    StoppedOnSystemFailure &&
-                    result.system_source.system.status ==
-                            SystemUpgradePhaseStatus::Failed &&
-                    result.system_source.registered_source_results[0].status ==
-                            RegisteredSourceUpgradeStatus::NotAttempted &&
-                    result.has_not_attempted_phase() &&
-                    !result.has_partial_completion(),
-            "System failure aggregate state differs");
-    expect_aur_not_attempted(
-            result,
-            UpgradeAllNotAttemptedReason::SystemFailure,
-            "system failure");
-    expect(stub::source_execution_calls().empty(),
-           "System failure started source mutation");
-    expect_no_inventory_or_aur("system failure");
+            correlation.observation.has_value() &&
+                    correlation.observation->status ==
+                            CrossSourceVersionLockObservationStatus::
+                                    Complete &&
+                    correlation.observation->candidates.size() == 1 &&
+                    correlation.assessments.size() == 1 &&
+                    correlation.assessments.front().status ==
+                            CrossSourceVersionLockStatus::
+                                    CompatibleReplacement &&
+                    correlation.possible_blocker_assessment_indices ==
+                            std::vector<std::size_t>{0} &&
+                    !correlation.failure.has_value(),
+            "VirtualBox possible candidate correlation differs");
+    expect(
+            correlation.assessments.front()
+                            .installed_requirement_against_installed_version
+                            ->satisfaction() ==
+                            ConstraintSatisfaction::Satisfied &&
+                    correlation.assessments.front()
+                                    .installed_requirement_against_repository_candidate
+                                    ->satisfaction() ==
+                            ConstraintSatisfaction::Unsatisfied,
+            "VirtualBox possible-candidate typed evidence differs");
+    expect(
+            stub::repository_configuration_calls() == 1 &&
+                    stub::inventory_calls() == 1 &&
+                    stub::installed_relation_inventory_calls() == 1 &&
+                    stub::installed_runtime_dependency_inventory_calls() ==
+                            1 &&
+                    stub::repository_candidate_call_history() ==
+                            std::vector<std::string>{"virtualbox"} &&
+                    stub::info_strict_call_history() ==
+                            std::vector<std::string>{
+                                    "virtualbox-ext-oracle"},
+            "VirtualBox observer was retried or skipped a read-only stage");
+    stub::require_script_consumed();
+}
+
+void test_partial_system_failure_observation_is_retained() {
+    stub::reset();
+    arrange_virtualbox_cross_source_observation();
+    stub::enqueue_info_strict_response_failure(
+            "fixture AUR replacement schema failure");
+
+    UpgradeAllOperationResult result =
+            execute_system_failure_for_correlation();
+    expect_system_failure_primary_preserved(
+            result, "partial system failure observation");
+
+    const auto& correlation = *require_cross_source_correlation(
+            result, "partial system failure observation");
+    expect(
+            correlation.observation.has_value() &&
+                    correlation.observation->status ==
+                            CrossSourceVersionLockObservationStatus::Partial &&
+                    correlation.observation->candidates.size() == 1 &&
+                    correlation.assessments.size() == 1 &&
+                    correlation.assessments.front().status ==
+                            CrossSourceVersionLockStatus::Unknown &&
+                    correlation.possible_blocker_assessment_indices ==
+                            std::vector<std::size_t>{0} &&
+                    !correlation.failure.has_value(),
+            "Partial observation was flattened or discarded");
+    expect(
+            stub::repository_configuration_calls() == 1 &&
+                    stub::inventory_calls() == 1 &&
+                    stub::info_strict_call_history().size() == 1,
+            "Partial observer was not attempted exactly once");
+    stub::require_script_consumed();
+}
+
+void test_failed_system_failure_observation_is_retained() {
+    stub::reset();
+    stub::set_foreign_inventory_failure(PackageMetadataFailure{
+            PackageMetadataErrorCode::QueryFailed,
+            "fixture secondary foreign inventory failure"});
+
+    UpgradeAllOperationResult result =
+            execute_system_failure_for_correlation();
+    expect_system_failure_primary_preserved(
+            result, "failed system failure observation");
+
+    const auto& correlation = *require_cross_source_correlation(
+            result, "failed system failure observation");
+    expect(
+            correlation.observation.has_value() &&
+                    correlation.observation->status ==
+                            CrossSourceVersionLockObservationStatus::Failed &&
+                    correlation.observation->candidates.empty() &&
+                    correlation.assessments.empty() &&
+                    correlation.possible_blocker_assessment_indices.empty() &&
+                    !correlation.failure.has_value(),
+            "Failed observation was flattened into no correlation");
+    expect(
+            stub::repository_configuration_calls() == 1 &&
+                    stub::inventory_calls() == 1 &&
+                    stub::installed_relation_inventory_calls() == 0,
+            "Failed observer was retried or crossed a later stage");
+    stub::require_script_consumed();
+}
+
+void test_system_failure_observer_bad_alloc_is_secondary() {
+    stub::reset();
+    stub::set_after_foreign_inventory_hook([]() { throw std::bad_alloc(); });
+
+    UpgradeAllOperationResult result =
+            execute_system_failure_for_correlation();
+    expect_system_failure_primary_preserved(
+            result, "secondary allocation failure");
+
+    const auto& correlation = *require_cross_source_correlation(
+            result, "secondary allocation failure");
+    expect(
+            !correlation.observation.has_value() &&
+                    correlation.assessments.empty() &&
+                    correlation.possible_blocker_assessment_indices.empty() &&
+                    correlation.failure.has_value() &&
+                    correlation.failure->kind ==
+                            UpgradeAllCrossSourceVersionLockCorrelationFailureKind::
+                                    ResourceExhaustion &&
+                    !correlation.failure->diagnostic.has_value(),
+            "Allocation failure did not remain allocation-free secondary evidence");
+    expect(
+            stub::repository_configuration_calls() == 1 &&
+                    stub::inventory_calls() == 1,
+            "Allocation failure retried the observer");
+    stub::require_script_consumed();
+}
+
+void test_system_failure_observer_runtime_error_is_secondary() {
+    stub::reset();
+    stub::set_after_foreign_inventory_hook([]() {
+        throw std::runtime_error("fixture unexpected observer failure");
+    });
+
+    UpgradeAllOperationResult result =
+            execute_system_failure_for_correlation();
+    expect_system_failure_primary_preserved(
+            result, "secondary std::exception");
+
+    const auto& correlation = *require_cross_source_correlation(
+            result, "secondary std::exception");
+    expect(
+            !correlation.observation.has_value() &&
+                    correlation.failure.has_value() &&
+                    correlation.failure->kind ==
+                            UpgradeAllCrossSourceVersionLockCorrelationFailureKind::
+                                    UnexpectedException &&
+                    correlation.failure->diagnostic ==
+                            std::optional<std::string>{
+                                    "fixture unexpected observer failure"},
+            "std::exception did not become typed secondary evidence");
+    expect(
+            stub::repository_configuration_calls() == 1 &&
+                    stub::inventory_calls() == 1,
+            "std::exception retried the observer");
+    stub::require_script_consumed();
+}
+
+void test_system_failure_observer_unknown_exception_is_secondary() {
+    stub::reset();
+    stub::set_after_foreign_inventory_hook(
+            []() { throw UnknownCorrelationObservationFailure{}; });
+
+    UpgradeAllOperationResult result =
+            execute_system_failure_for_correlation();
+    expect_system_failure_primary_preserved(
+            result, "secondary unknown exception");
+
+    const auto& correlation = *require_cross_source_correlation(
+            result, "secondary unknown exception");
+    expect(
+            !correlation.observation.has_value() &&
+                    correlation.failure.has_value() &&
+                    correlation.failure->kind ==
+                            UpgradeAllCrossSourceVersionLockCorrelationFailureKind::
+                                    UnknownException &&
+                    !correlation.failure->diagnostic.has_value(),
+            "Non-std exception did not become typed secondary evidence");
+    expect(
+            stub::repository_configuration_calls() == 1 &&
+                    stub::inventory_calls() == 1,
+            "Non-std exception retried the observer");
     stub::require_script_consumed();
 }
 
@@ -1232,7 +1621,8 @@ void test_first_source_failure_stops_remaining_and_aur() {
                     result.system_source.registered_source_results[2].status ==
                             RegisteredSourceUpgradeStatus::NotAttempted &&
                     result.has_partial_completion() &&
-                    result.has_not_attempted_phase(),
+                    result.has_not_attempted_phase() &&
+                    !result.cross_source_version_lock_correlation.has_value(),
             "First source failure did not preserve fail-fast results");
     expect(
             stub::source_execution_calls().size() == 1,
@@ -1298,7 +1688,8 @@ void test_source_cleanup_failure_stops_before_inventory() {
                     result.has_cleanup_failure() &&
                     result.has_partial_completion() &&
                     result.package_state_change() ==
-                            PackageStateChange::Changed,
+                            PackageStateChange::Changed &&
+                    !result.cross_source_version_lock_correlation.has_value(),
             "Source cleanup failure lost post-transaction state");
     expect_aur_not_attempted(
             result,
@@ -2026,7 +2417,8 @@ void test_no_updates_success_contract() {
                     result.package_state_change() ==
                             PackageStateChange::NoChange &&
                     !result.has_partial_completion() &&
-                    !result.has_not_attempted_phase(),
+                    !result.has_not_attempted_phase() &&
+                    !result.cross_source_version_lock_correlation.has_value(),
             "NoUpdates conjunction was not enforced");
     const OperationStateProjection projection =
             project_upgrade_all_operation_state(result);
@@ -3357,6 +3749,24 @@ int main() {
                 "unexpected exception preserves source result",
                 test_unexpected_exception_preserves_recorded_source_result);
         run_case("system failure fail-fast", test_system_failure_is_fail_fast);
+        run_case(
+                "VirtualBox post-system-failure correlation",
+                test_virtualbox_system_failure_retains_possible_correlation);
+        run_case(
+                "partial post-system-failure observation",
+                test_partial_system_failure_observation_is_retained);
+        run_case(
+                "failed post-system-failure observation",
+                test_failed_system_failure_observation_is_retained);
+        run_case(
+                "post-system-failure observer bad_alloc",
+                test_system_failure_observer_bad_alloc_is_secondary);
+        run_case(
+                "post-system-failure observer std::exception",
+                test_system_failure_observer_runtime_error_is_secondary);
+        run_case(
+                "post-system-failure observer unknown exception",
+                test_system_failure_observer_unknown_exception_is_secondary);
         run_case(
                 "nested cache seed failure",
                 test_nested_cache_seed_failure_is_typed);

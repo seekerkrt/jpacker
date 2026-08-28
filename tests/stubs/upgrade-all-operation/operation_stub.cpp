@@ -109,6 +109,17 @@ struct OperationStubState {
                     {"upgrade-all-stub-repository"}};
     ForeignInventoryScript foreign_inventory = ForeignPackageInventory{};
     std::function<void()> after_foreign_inventory_hook;
+    InstalledPackageRelationInventoryResult installed_relation_inventory =
+            InstalledPackageRelationInventory{
+                    PackageRelationInstalledDatabaseIdentity{
+                            "/upgrade-all-stub/root",
+                            "/upgrade-all-stub/database"},
+                    {}};
+    InstalledPackageRuntimeDependencyMetadataInventoryResult
+            installed_runtime_dependency_inventory =
+                    InstalledPackageRuntimeDependencyMetadataInventory{};
+    std::map<std::string, StrictRepositoryPackageQueryResult>
+            repository_candidate_results;
     std::deque<InfoManyScript> info_many_scripts;
     std::function<void()> after_info_many_hook;
     std::deque<InfoStrictScript> info_strict_scripts;
@@ -142,6 +153,9 @@ struct OperationStubState {
     std::vector<std::string> system_commands;
     std::size_t repository_configuration_call_count = 0;
     std::vector<PacmanRepositoryConfiguration> inventory_configurations;
+    std::size_t installed_relation_inventory_call_count = 0;
+    std::size_t installed_runtime_dependency_inventory_call_count = 0;
+    std::vector<std::string> repository_candidate_calls;
     std::vector<std::vector<std::string>> info_many_calls;
     std::vector<std::string> info_strict_calls;
     std::vector<std::string> vercmp_calls;
@@ -399,6 +413,23 @@ void set_after_foreign_inventory_hook(std::function<void()> hook) {
     g_state.after_foreign_inventory_hook = std::move(hook);
 }
 
+void set_installed_relation_inventory(
+        InstalledPackageRelationInventoryResult inventory) {
+    g_state.installed_relation_inventory = std::move(inventory);
+}
+
+void set_installed_runtime_dependency_inventory(
+        InstalledPackageRuntimeDependencyMetadataInventoryResult inventory) {
+    g_state.installed_runtime_dependency_inventory = std::move(inventory);
+}
+
+void set_repository_candidate_result(
+        const std::string& package_name,
+        StrictRepositoryPackageQueryResult result) {
+    g_state.repository_candidate_results.insert_or_assign(
+            package_name, std::move(result));
+}
+
 void enqueue_info_many_result(
         std::map<std::string, AurPackageInfo> result) {
     g_state.info_many_scripts.push_back(std::move(result));
@@ -563,9 +594,21 @@ std::size_t inventory_calls() {
     return g_state.inventory_configurations.size();
 }
 
+std::size_t installed_relation_inventory_calls() {
+    return g_state.installed_relation_inventory_call_count;
+}
+
+std::size_t installed_runtime_dependency_inventory_calls() {
+    return g_state.installed_runtime_dependency_inventory_call_count;
+}
+
 const std::vector<PacmanRepositoryConfiguration>&
 inventory_configuration_history() {
     return g_state.inventory_configurations;
+}
+
+const std::vector<std::string>& repository_candidate_call_history() {
+    return g_state.repository_candidate_calls;
 }
 
 const std::vector<std::vector<std::string>>& info_many_call_history() {
@@ -1180,6 +1223,75 @@ ForeignPackageInventoryResult query_foreign_package_inventory(
         hook();
     }
     return inventory;
+}
+
+InstalledPackageRelationInventoryResult query_installed_package_relations(
+        const PacmanDatabasePaths& paths) {
+    ++g_state.installed_relation_inventory_call_count;
+    record_event(
+            stub::EventKind::InstalledRelationInventoryQuery,
+            "installed-relations");
+
+    const auto* configuration =
+            std::get_if<PacmanRepositoryConfiguration>(
+                    &g_state.repository_configuration);
+    if(configuration == nullptr ||
+       configuration->database_paths.root_dir != paths.root_dir ||
+       configuration->database_paths.db_path != paths.db_path) {
+        fail_unexpected(
+                "Installed relation query received different database paths.");
+    }
+    return g_state.installed_relation_inventory;
+}
+
+InstalledPackageRuntimeDependencyMetadataInventoryResult
+query_installed_package_runtime_dependency_metadata(
+        const PacmanDatabasePaths& paths) {
+    ++g_state.installed_runtime_dependency_inventory_call_count;
+    record_event(
+            stub::EventKind::InstalledRuntimeDependencyInventoryQuery,
+            "installed-runtime-dependencies");
+
+    const auto* configuration =
+            std::get_if<PacmanRepositoryConfiguration>(
+                    &g_state.repository_configuration);
+    if(configuration == nullptr ||
+       configuration->database_paths.root_dir != paths.root_dir ||
+       configuration->database_paths.db_path != paths.db_path) {
+        fail_unexpected(
+                "Installed runtime dependency query received different database paths.");
+    }
+    return g_state.installed_runtime_dependency_inventory;
+}
+
+StrictRepositoryPackageQueryResult query_repository_package_strict(
+        const PacmanRepositoryConfiguration& configuration,
+        const std::string& package_name) {
+    g_state.repository_candidate_calls.push_back(package_name);
+    record_event(
+            stub::EventKind::RepositoryCandidateQuery,
+            package_name,
+            {package_name});
+
+    const auto* expected =
+            std::get_if<PacmanRepositoryConfiguration>(
+                    &g_state.repository_configuration);
+    if(expected == nullptr ||
+       expected->repository_names != configuration.repository_names ||
+       expected->database_paths.root_dir !=
+               configuration.database_paths.root_dir ||
+       expected->database_paths.db_path !=
+               configuration.database_paths.db_path) {
+        fail_unexpected(
+                "Repository candidate query received a different configuration.");
+    }
+    const auto result =
+            g_state.repository_candidate_results.find(package_name);
+    return result == g_state.repository_candidate_results.end()
+            ? StrictRepositoryPackageQueryResult{
+                      RepositoryPackageNotFound{
+                              configuration.repository_names}}
+            : result->second;
 }
 
 std::map<std::string, AurPackageInfo> AurClient::info_many(

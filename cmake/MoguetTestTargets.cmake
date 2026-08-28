@@ -1752,6 +1752,8 @@ set(
     source/diagnostic_projection.cpp
     source/presentation_projection.cpp
     source/upgrade_all_presentation_projection.cpp
+    source/cross_source_version_lock.cpp
+    source/cross_source_version_lock_observation.cpp
     source/system_source_upgrade.cpp
     source/unified_plan_projection.cpp
     source/unified_plan_observation.cpp
@@ -1773,6 +1775,7 @@ set(
     source/dependency_constraint_presentation.cpp
     source/dependency_plan_model.cpp
     source/package_relation.cpp
+    source/package_relation_observation.cpp
     source/package_relation_presentation.cpp
     source/aur_update_execution_runner.cpp
     source/aur_update_operation_result.cpp
@@ -2520,7 +2523,7 @@ set(
     aur-update-execution-runner-test=6bc5943cf6a1bdd3dacb4956d45aa9e670ae0467dc417176b9c4b9c0b2001818
     aur-update-operation-result-test=794c70c37241de19fa40d3e5369fadebe282fb321fd0e3771b8b3d89e0a369d2
     filtered-aur-update-operation-test=7fbff061914929873f29f271c3dc7608304895c6be1eb71817e5ad77d75d0372
-    upgrade-all-operation-test=3eb75c514bca5519aeeb86413e1a9d8de82eb9f50736ec12ed3f824f7872331c
+    upgrade-all-operation-test=d284931ba18245ab9fbeb96e5632c13a713a406dcc2e69cbef4af136bd335fd7
     cli-diagnostic-model-test=10221fdfdc4758b92d0052cca9663b92d48ac151413dca8661616efe5882195e
     runtime-cli-connection-test=01030302cec868168221d1360f841e059cb415a0179cb325d39910d3985975ef
     dependency-plan-model-test=3e1d1988b67b0e26e3a2d77c8bca60cf92c2e6fb43badd228e46876ce57f03c8
