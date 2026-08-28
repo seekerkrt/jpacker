@@ -192,7 +192,7 @@ def main() -> int:
 
     quoted_pkgbuild_help_entry = (
         "    print_help_entry(\n"
-        '            "review.pkgbuild = \\"prompt\\"|\\"skip\\"",'
+        '        "review.pkgbuild = \\"prompt\\"|\\"skip\\"",'
     )
     additive_unquoted_pkgbuild_help_entry = (
         "    print_help_entry(\n"

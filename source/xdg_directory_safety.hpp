@@ -49,12 +49,12 @@ enum class PreparationErrorCode {
 
 struct PreparationFailure {
     xdg_paths::DirectoryKind directory_kind =
-            xdg_paths::DirectoryKind::Config;
-    PreparationStage     stage = PreparationStage::BoundaryValidation;
+        xdg_paths::DirectoryKind::Config;
+    PreparationStage stage = PreparationStage::BoundaryValidation;
     PreparationErrorCode code =
-            PreparationErrorCode::InvalidCreationBoundary;
+        PreparationErrorCode::InvalidCreationBoundary;
     std::optional<std::error_code> system_error;
-    std::optional<std::size_t>     component_index;
+    std::optional<std::size_t> component_index;
 };
 
 class PreparationError final : public std::runtime_error {
@@ -77,57 +77,57 @@ struct DirectoryIdentity {
 // The supplied identity belongs to the descriptor-retained current parent;
 // its named lineage is revalidated before and after the callback.
 using DirectoryCreationPrecondition =
-        std::function<void(const DirectoryIdentity&)>;
+    std::function<void(const DirectoryIdentity&)>;
 
 // Validation後のapplication directoryと、filesystem rootから各named linkを
 // 再証明するprivate descriptor lineageを一体で保持する。作成済みcomponentは
 // failure時にもrollbackせず、安全なpartial stateとして残す。
 class PreparedDirectory final {
     struct RetainedDirectoryIdentity {
-        int            descriptor = -1;
-        std::string    leaf_name;
+        int descriptor = -1;
+        std::string leaf_name;
         std::uintmax_t device = 0;
         std::uintmax_t inode = 0;
         std::uintmax_t filesystem_owner = 0;
-        bool           requires_security_validation = false;
-        bool           requires_private_mode = false;
+        bool requires_security_validation = false;
+        bool requires_private_mode = false;
     };
 
     xdg_paths::DirectoryKind directory_kind_;
-    std::filesystem::path    path_;
-    int                      parent_descriptor_ = -1;
-    int                      directory_descriptor_ = -1;
-    std::string              leaf_name_;
-    std::uintmax_t           device_ = 0;
-    std::uintmax_t           inode_ = 0;
-    std::uintmax_t           owner_ = 0;
-    std::uintmax_t           filesystem_owner_ = 0;
-    std::uintmax_t           permissions_ = 0;
+    std::filesystem::path path_;
+    int parent_descriptor_ = -1;
+    int directory_descriptor_ = -1;
+    std::string leaf_name_;
+    std::uintmax_t device_ = 0;
+    std::uintmax_t inode_ = 0;
+    std::uintmax_t owner_ = 0;
+    std::uintmax_t filesystem_owner_ = 0;
+    std::uintmax_t permissions_ = 0;
     std::size_t created_component_count_ = 0;
     std::vector<RetainedDirectoryIdentity> retained_lineage_;
 
     PreparedDirectory(
-            xdg_paths::DirectoryKind directory_kind,
-            std::filesystem::path path, int parent_descriptor,
-            int directory_descriptor, std::string leaf_name,
-            std::uintmax_t device, std::uintmax_t inode,
-            std::uintmax_t owner, std::uintmax_t filesystem_owner,
-            std::uintmax_t permissions,
-            std::size_t created_component_count,
-            std::vector<RetainedDirectoryIdentity> retained_lineage) noexcept;
+        xdg_paths::DirectoryKind directory_kind,
+        std::filesystem::path path, int parent_descriptor,
+        int directory_descriptor, std::string leaf_name,
+        std::uintmax_t device, std::uintmax_t inode,
+        std::uintmax_t owner, std::uintmax_t filesystem_owner,
+        std::uintmax_t permissions,
+        std::size_t created_component_count,
+        std::vector<RetainedDirectoryIdentity> retained_lineage) noexcept;
 
     friend PreparedDirectory prepare_directory(
-            const xdg_paths::ConfigPaths& paths);
+        const xdg_paths::ConfigPaths& paths);
     friend PreparedDirectory prepare_directory(
-            const xdg_paths::StatePaths& paths);
+        const xdg_paths::StatePaths& paths);
     friend PreparedDirectory prepare_directory(
-            const xdg_paths::CachePaths& paths);
+        const xdg_paths::CachePaths& paths);
     friend PreparedDirectory prepare_directory(
-            const xdg_paths::SourcePreferencePaths& paths);
+        const xdg_paths::SourcePreferencePaths& paths);
     friend PreparedDirectory prepare_directory(
-            const xdg_paths::ReviewedSourceStatePaths& paths);
+        const xdg_paths::ReviewedSourceStatePaths& paths);
     friend std::optional<PreparedDirectory> open_existing_directory(
-            const xdg_paths::ReviewedSourceStatePaths& paths);
+        const xdg_paths::ReviewedSourceStatePaths& paths);
 
     friend struct DirectorySafetyAccess;
     friend struct xdg_state_log::StateLogDirectoryAccess;
@@ -179,25 +179,25 @@ public:
 PreparedDirectory prepare_directory(const xdg_paths::ConfigPaths& paths);
 PreparedDirectory prepare_directory(const xdg_paths::StatePaths& paths);
 PreparedDirectory prepare_directory(
-        const xdg_paths::StatePaths& paths,
-        const DirectoryCreationPrecondition& creation_precondition);
+    const xdg_paths::StatePaths& paths,
+    const DirectoryCreationPrecondition& creation_precondition);
 PreparedDirectory prepare_directory(const xdg_paths::CachePaths& paths);
 PreparedDirectory prepare_directory(
-        const xdg_paths::CachePaths& paths,
-        const DirectoryCreationPrecondition& creation_precondition);
+    const xdg_paths::CachePaths& paths,
+    const DirectoryCreationPrecondition& creation_precondition);
 
 // Source preference directoryだけを対象とするcreation / read-only境界。
 // open_existing_directory()のnulloptはmanaged componentのmissingだけを表す。
 PreparedDirectory prepare_directory(
-        const xdg_paths::SourcePreferencePaths& paths);
+    const xdg_paths::SourcePreferencePaths& paths);
 std::optional<PreparedDirectory> open_existing_directory(
-        const xdg_paths::SourcePreferencePaths& paths);
+    const xdg_paths::SourcePreferencePaths& paths);
 
 // Reviewed-source AUR store directory。lookupはcreateせず、missingはnullopt。
 PreparedDirectory prepare_directory(
-        const xdg_paths::ReviewedSourceStatePaths& paths);
+    const xdg_paths::ReviewedSourceStatePaths& paths);
 std::optional<PreparedDirectory> open_existing_directory(
-        const xdg_paths::ReviewedSourceStatePaths& paths);
+    const xdg_paths::ReviewedSourceStatePaths& paths);
 
 #ifdef MOGUET_TEST_XDG_DIRECTORY_SAFETY_HOOKS
 enum class DirectorySafetyTestEvent {
@@ -217,13 +217,13 @@ enum class DirectorySafetyTestFailurePoint {
 
 struct DirectorySafetyInjectedFailure {
     DirectorySafetyTestFailurePoint failure_point;
-    std::size_t                     component_index;
-    int                             error_number;
+    std::size_t component_index;
+    int error_number;
 };
 
 using DirectorySafetyTestEventHook = std::function<void(
-        DirectorySafetyTestEvent, xdg_paths::DirectoryKind, std::size_t,
-        const std::filesystem::path&)>;
+    DirectorySafetyTestEvent, xdg_paths::DirectoryKind, std::size_t,
+    const std::filesystem::path&)>;
 
 // Focused test binaryだけがeffective UID / observed owner / syscall timingを
 // 差し替える。production path overrideやunsafe bypassは提供しない。
@@ -235,26 +235,26 @@ struct DirectorySafetyTestOverrides {
 };
 
 PreparedDirectory prepare_directory_for_test(
-        const xdg_paths::ConfigPaths& paths,
-        const DirectorySafetyTestOverrides& overrides);
+    const xdg_paths::ConfigPaths& paths,
+    const DirectorySafetyTestOverrides& overrides);
 PreparedDirectory prepare_directory_for_test(
-        const xdg_paths::StatePaths& paths,
-        const DirectorySafetyTestOverrides& overrides);
+    const xdg_paths::StatePaths& paths,
+    const DirectorySafetyTestOverrides& overrides);
 PreparedDirectory prepare_directory_for_test(
-        const xdg_paths::CachePaths& paths,
-        const DirectorySafetyTestOverrides& overrides);
+    const xdg_paths::CachePaths& paths,
+    const DirectorySafetyTestOverrides& overrides);
 PreparedDirectory prepare_directory_for_test(
-        const xdg_paths::SourcePreferencePaths& paths,
-        const DirectorySafetyTestOverrides& overrides);
+    const xdg_paths::SourcePreferencePaths& paths,
+    const DirectorySafetyTestOverrides& overrides);
 std::optional<PreparedDirectory> open_existing_directory_for_test(
-        const xdg_paths::SourcePreferencePaths& paths,
-        const DirectorySafetyTestOverrides& overrides);
+    const xdg_paths::SourcePreferencePaths& paths,
+    const DirectorySafetyTestOverrides& overrides);
 PreparedDirectory prepare_directory_for_test(
-        const xdg_paths::ReviewedSourceStatePaths& paths,
-        const DirectorySafetyTestOverrides& overrides);
+    const xdg_paths::ReviewedSourceStatePaths& paths,
+    const DirectorySafetyTestOverrides& overrides);
 std::optional<PreparedDirectory> open_existing_directory_for_test(
-        const xdg_paths::ReviewedSourceStatePaths& paths,
-        const DirectorySafetyTestOverrides& overrides);
+    const xdg_paths::ReviewedSourceStatePaths& paths,
+    const DirectorySafetyTestOverrides& overrides);
 #endif
 
 } // namespace xdg_directory_safety

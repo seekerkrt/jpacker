@@ -15,13 +15,13 @@ void require_valid_lookup_package_name(const std::string& package_name) {
         // POLICY: invalid candidate identityはmetadata availabilityではないため、
         // session open前にtyped strict failureとして止める。
         throw PackageMetadataError(PackageMetadataFailure{
-                PackageMetadataErrorCode::InvalidPackageName,
-                error.what()});
+            PackageMetadataErrorCode::InvalidPackageName,
+            error.what()});
     }
 }
 
 ProviderInstalledStateObservation observe_metadata_failure(
-        PackageMetadataFailure failure) {
+    PackageMetadataFailure failure) {
     if(failure.code == PackageMetadataErrorCode::InvalidPackageName) {
         throw PackageMetadataError(std::move(failure));
     }
@@ -31,9 +31,10 @@ ProviderInstalledStateObservation observe_metadata_failure(
 } // namespace
 
 ProviderInstalledStateObservation::ProviderInstalledStateObservation(
-        ProviderInstalledState state,
-        std::optional<PackageMetadataFailure> failure) noexcept
-    : state_(state), failure_(std::move(failure)) {}
+    ProviderInstalledState state,
+    std::optional<PackageMetadataFailure> failure) noexcept
+    : state_(state), failure_(std::move(failure)) {
+}
 
 ProviderInstalledStateObservation ProviderInstalledStateObservation::installed() {
     return ProviderInstalledStateObservation(ProviderInstalledState::Installed, std::nullopt);
@@ -44,13 +45,13 @@ ProviderInstalledStateObservation ProviderInstalledStateObservation::not_install
 }
 
 ProviderInstalledStateObservation ProviderInstalledStateObservation::unknown(
-        PackageMetadataFailure failure) {
+    PackageMetadataFailure failure) {
     if(failure.code == PackageMetadataErrorCode::InvalidPackageName) {
         throw std::invalid_argument(
-                "Invalid package name failures must not become an installed-state observation.");
+            "Invalid package name failures must not become an installed-state observation.");
     }
     return ProviderInstalledStateObservation(
-            ProviderInstalledState::Unknown, std::move(failure));
+        ProviderInstalledState::Unknown, std::move(failure));
 }
 
 ProviderInstalledState ProviderInstalledStateObservation::state() const noexcept {
@@ -69,7 +70,7 @@ const PackageMetadataFailure& ProviderInstalledStateObservation::failure() const
 }
 
 ProviderInstalledStateObservation ProviderInstalledStateLookup::query(
-        const std::string& package_name) {
+    const std::string& package_name) {
     require_valid_lookup_package_name(package_name);
 
     const auto cached = observations_by_package_name_.find(package_name);
@@ -78,7 +79,7 @@ ProviderInstalledStateObservation ProviderInstalledStateLookup::query(
     open_session_if_needed();
     if(session_failure_.has_value()) {
         ProviderInstalledStateObservation observation =
-                ProviderInstalledStateObservation::unknown(*session_failure_);
+            ProviderInstalledStateObservation::unknown(*session_failure_);
         observations_by_package_name_.emplace(package_name, observation);
         return observation;
     }
@@ -88,7 +89,7 @@ ProviderInstalledStateObservation ProviderInstalledStateLookup::query(
     }
 
     ProviderInstalledStateObservation observation = project_query_result(
-            session_->query_installed_package(package_name));
+        session_->query_installed_package(package_name));
     observations_by_package_name_.emplace(package_name, observation);
     return observation;
 }
@@ -111,7 +112,7 @@ void ProviderInstalledStateLookup::open_session_if_needed() {
 }
 
 ProviderInstalledStateObservation ProviderInstalledStateLookup::project_query_result(
-        InstalledPackageQueryResult result) const {
+    InstalledPackageQueryResult result) const {
     if(std::get_if<InstalledPackageMetadata>(&result) != nullptr) {
         return ProviderInstalledStateObservation::installed();
     }

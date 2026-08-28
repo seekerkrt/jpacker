@@ -20,9 +20,9 @@ enum class AurVersionRelation {
 
 // AUR RPC metadataを、更新判定に必要な値だけへprojectしたもの。
 struct AurUpdateRemotePackage {
-    std::string        aur_name;
-    std::string        package_base;
-    std::string        version;
+    std::string aur_name;
+    std::string package_base;
+    std::string version;
     AurVersionRelation version_relation = AurVersionRelation::Unavailable;
 };
 
@@ -33,9 +33,9 @@ struct AurUpdateMetadataNotFound {};
 struct AurUpdateMetadataUnavailable {};
 
 using AurUpdateMetadataResult = std::variant<
-        AurUpdateRemotePackage,
-        AurUpdateMetadataNotFound,
-        AurUpdateMetadataUnavailable>;
+    AurUpdateRemotePackage,
+    AurUpdateMetadataNotFound,
+    AurUpdateMetadataUnavailable>;
 
 enum class AurUpdateClassification {
     UpdateAvailable,
@@ -60,42 +60,43 @@ enum class AurUpdateEffectiveState {
 };
 
 struct AurUpdatePlanInput {
-    std::string             installed_name;
-    std::string             installed_version;
-    InstalledPackageReason  install_reason = InstalledPackageReason::Unknown;
+    std::string installed_name;
+    std::string installed_version;
+    InstalledPackageReason install_reason = InstalledPackageReason::Unknown;
     AurUpdateMetadataResult aur_metadata = AurUpdateMetadataUnavailable{};
 };
 
 struct AurUpdatePlanEntry {
-    std::string                           installed_name;
-    std::string                           installed_version;
-    InstalledPackageReason                install_reason = InstalledPackageReason::Unknown;
+    std::string installed_name;
+    std::string installed_version;
+    InstalledPackageReason install_reason = InstalledPackageReason::Unknown;
     std::optional<AurUpdateRemotePackage> aur_package;
-    AurUpdateClassification               classification =
-            AurUpdateClassification::MetadataUnavailable;
+    AurUpdateClassification classification =
+        AurUpdateClassification::MetadataUnavailable;
     std::optional<DevelPackageClassification> devel_classification;
     DevelUpdateAssessment devel_assessment =
-            DevelUpdateAssessment::not_applicable();
+        DevelUpdateAssessment::not_applicable();
 
     AurUpdatePlanEntry() = default;
 
     AurUpdatePlanEntry(
-            std::string installed_name_value,
-            std::string installed_version_value,
-            InstalledPackageReason install_reason_value,
-            std::optional<AurUpdateRemotePackage> aur_package_value,
-            AurUpdateClassification classification_value,
-            std::optional<DevelPackageClassification>
-                    devel_classification_value = std::nullopt,
-            DevelUpdateAssessment devel_assessment_value =
-                    DevelUpdateAssessment::not_applicable())
+        std::string installed_name_value,
+        std::string installed_version_value,
+        InstalledPackageReason install_reason_value,
+        std::optional<AurUpdateRemotePackage> aur_package_value,
+        AurUpdateClassification classification_value,
+        std::optional<DevelPackageClassification>
+            devel_classification_value = std::nullopt,
+        DevelUpdateAssessment devel_assessment_value =
+            DevelUpdateAssessment::not_applicable())
         : installed_name(std::move(installed_name_value)),
           installed_version(std::move(installed_version_value)),
           install_reason(install_reason_value),
           aur_package(std::move(aur_package_value)),
           classification(classification_value),
           devel_classification(std::move(devel_classification_value)),
-          devel_assessment(std::move(devel_assessment_value)) {}
+          devel_assessment(std::move(devel_assessment_value)) {
+    }
 };
 
 // installed inventoryの順序を保った、表示や将来のupdate workflow向けのpure plan。
@@ -109,10 +110,10 @@ AurUpdatePlan make_aur_update_plan(const std::vector<AurUpdatePlanInput>& inputs
 // Conservative production producer: only suffix-candidate evidence is
 // connected. Trusted metadata and build provenance remain disconnected.
 DevelUpdateAssessment project_conservative_devel_update_assessment(
-        const DevelPackageClassification& classification);
+    const DevelPackageClassification& classification);
 
 // Normal AUR UpdateAvailable always wins. Other normal failure/absence states
 // retain their existing authority; only normal UpToDate can expose the
 // conservative devel assessment.
 AurUpdateEffectiveState project_aur_update_effective_state(
-        const AurUpdatePlanEntry& entry) noexcept;
+    const AurUpdatePlanEntry& entry) noexcept;

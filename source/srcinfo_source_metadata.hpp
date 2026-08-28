@@ -10,9 +10,9 @@
 #include <vector>
 
 struct ParsedSrcinfoSourceEntry {
-    std::string                raw_value;
+    std::string raw_value;
     std::optional<std::string> architecture_qualifier;
-    ParsedSourceEntry          parsed_source;
+    ParsedSourceEntry parsed_source;
 
     bool operator==(const ParsedSrcinfoSourceEntry&) const = default;
 };
@@ -20,7 +20,7 @@ struct ParsedSrcinfoSourceEntry {
 // This type describes parsed, untrusted bytes. It intentionally has no
 // conversion to TrustedDevelSourceMetadata or any production observer input.
 struct ParsedSrcinfoSourceMetadata {
-    std::string                           package_base;
+    std::string package_base;
     std::vector<ParsedSrcinfoSourceEntry> source_entries;
 
     bool operator==(const ParsedSrcinfoSourceMetadata&) const = default;
@@ -42,49 +42,49 @@ enum class SrcinfoSourceMetadataParseErrorCode {
 };
 
 struct SrcinfoSourceMetadataParseFailure {
-    SrcinfoSourceMetadataParseErrorCode     code;
-    std::size_t                             line;
+    SrcinfoSourceMetadataParseErrorCode code;
+    std::size_t line;
     std::optional<SourceEntryParseErrorCode> source_entry_error;
 
     bool operator==(const SrcinfoSourceMetadataParseFailure&) const =
-            default;
+        default;
 };
 
 class SrcinfoSourceMetadataParseResult final {
 public:
     SrcinfoSourceMetadataParseResult() = delete;
     SrcinfoSourceMetadataParseResult(
-            const SrcinfoSourceMetadataParseResult&) = default;
+        const SrcinfoSourceMetadataParseResult&) = default;
     SrcinfoSourceMetadataParseResult(
-            SrcinfoSourceMetadataParseResult&&) noexcept = default;
+        SrcinfoSourceMetadataParseResult&&) noexcept = default;
     SrcinfoSourceMetadataParseResult& operator=(
-            const SrcinfoSourceMetadataParseResult&) = delete;
+        const SrcinfoSourceMetadataParseResult&) = delete;
     SrcinfoSourceMetadataParseResult& operator=(
-            SrcinfoSourceMetadataParseResult&&) noexcept = delete;
+        SrcinfoSourceMetadataParseResult&&) noexcept = delete;
     ~SrcinfoSourceMetadataParseResult() = default;
 
     [[nodiscard]] bool is_success() const noexcept;
     [[nodiscard]] const ParsedSrcinfoSourceMetadata* metadata()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const SrcinfoSourceMetadataParseFailure* failure()
-            const noexcept;
+        const noexcept;
 
 private:
     explicit SrcinfoSourceMetadataParseResult(
-            ParsedSrcinfoSourceMetadata metadata) noexcept;
+        ParsedSrcinfoSourceMetadata metadata) noexcept;
     explicit SrcinfoSourceMetadataParseResult(
-            SrcinfoSourceMetadataParseFailure failure) noexcept;
+        SrcinfoSourceMetadataParseFailure failure) noexcept;
 
     std::variant<
-            ParsedSrcinfoSourceMetadata,
-            SrcinfoSourceMetadataParseFailure>
-            outcome_;
+        ParsedSrcinfoSourceMetadata,
+        SrcinfoSourceMetadataParseFailure>
+        outcome_;
 
     friend SrcinfoSourceMetadataParseResult parse_srcinfo_source_metadata(
-            std::string_view source);
+        std::string_view source);
 };
 
 // `.SRCINFO` textだけを入力とし、filesystem、network、PKGBUILD evaluation、
 // process、environment、current directoryを参照しない。
 [[nodiscard]] SrcinfoSourceMetadataParseResult parse_srcinfo_source_metadata(
-        std::string_view source);
+    std::string_view source);

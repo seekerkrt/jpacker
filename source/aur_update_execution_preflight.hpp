@@ -48,63 +48,63 @@ enum class AurUpdateExecutionReason {
 };
 
 struct AurUpdateExecutionIssue {
-    AurUpdateExecutionReason   reason = AurUpdateExecutionReason::None;
+    AurUpdateExecutionReason reason = AurUpdateExecutionReason::None;
     std::optional<std::string> package_name;
     std::optional<std::string> package_base;
     std::optional<std::string> dependency_specification;
-    std::string                diagnostic;
+    std::string diagnostic;
     std::optional<DevelRequiresCheckReason> devel_requires_check_reason;
     std::optional<BuildPlanArtifactTargetProjectionIssue>
-            build_plan_projection_issue;
+        build_plan_projection_issue;
     std::optional<PlanDeclaredRelationReason> relation_reason;
 
     AurUpdateExecutionIssue() = default;
 
     AurUpdateExecutionIssue(
-            AurUpdateExecutionReason reason_value,
-            std::optional<std::string> package_name_value,
-            std::optional<std::string> package_base_value,
-            std::optional<std::string> dependency_specification_value,
-            std::string diagnostic_value,
-            std::optional<BuildPlanArtifactTargetProjectionIssue>
-                    projection_issue = std::nullopt,
-            std::optional<PlanDeclaredRelationReason>
-                    relation_reason_value = std::nullopt,
-            std::optional<DevelRequiresCheckReason>
-                    devel_requires_check_reason_value = std::nullopt)
+        AurUpdateExecutionReason reason_value,
+        std::optional<std::string> package_name_value,
+        std::optional<std::string> package_base_value,
+        std::optional<std::string> dependency_specification_value,
+        std::string diagnostic_value,
+        std::optional<BuildPlanArtifactTargetProjectionIssue>
+            projection_issue = std::nullopt,
+        std::optional<PlanDeclaredRelationReason>
+            relation_reason_value = std::nullopt,
+        std::optional<DevelRequiresCheckReason>
+            devel_requires_check_reason_value = std::nullopt)
         : reason(reason_value),
           package_name(std::move(package_name_value)),
           package_base(std::move(package_base_value)),
           dependency_specification(
-                  std::move(dependency_specification_value)),
+              std::move(dependency_specification_value)),
           diagnostic(std::move(diagnostic_value)),
           devel_requires_check_reason(
-                  devel_requires_check_reason_value),
+              devel_requires_check_reason_value),
           build_plan_projection_issue(std::move(projection_issue)),
           relation_reason(std::move(relation_reason_value)) {
     }
 };
 
 struct AurUpdateExecutionTarget {
-    std::size_t                         update_plan_index = 0;
-    std::optional<std::size_t>          build_plan_root_index;
-    AurUpdatePlanEntry                  update;
-    AurUpdateExecutionTargetStatus      status =
-            AurUpdateExecutionTargetStatus::Incomplete;
+    std::size_t update_plan_index = 0;
+    std::optional<std::size_t> build_plan_root_index;
+    AurUpdatePlanEntry update;
+    AurUpdateExecutionTargetStatus status =
+        AurUpdateExecutionTargetStatus::Incomplete;
     std::optional<DesiredInstallReason> desired_install_reason;
     std::vector<AurUpdateExecutionIssue> issues;
 };
 
 struct AurUpdateExecutionPreflight {
     std::vector<AurUpdateExecutionTarget> targets;
-    std::optional<BuildPlan>               build_plan;
+    std::optional<BuildPlan> build_plan;
 };
 
 AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
-        const AurUpdatePlan& update_plan);
+    const AurUpdatePlan& update_plan);
 AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
-        const AurUpdatePlan& update_plan,
-        const ProviderSelectionCallback& select_provider);
+    const AurUpdatePlan& update_plan,
+    const ProviderSelectionCallback& select_provider);
 bool has_executable_targets(const AurUpdateExecutionPreflight& preflight) noexcept;
 bool has_blocking_targets(const AurUpdateExecutionPreflight& preflight) noexcept;
 bool can_execute(const AurUpdateExecutionPreflight& preflight) noexcept;

@@ -23,14 +23,14 @@ std::filesystem::path source_preference_entry_path(const std::string& package_na
 // system/source upgrade preparationが最初のdirectory iteration順をowned化する。
 // LOCK_SHを全validation期間保持し、不正entryが1件でもあれば失敗する。
 struct SourcePreferenceEntrySnapshot {
-    std::size_t           original_index = 0;
+    std::size_t original_index = 0;
     std::filesystem::path entry_path;
-    std::string           package_name;
-    bool                  is_regular_file = false;
+    std::string package_name;
+    bool is_regular_file = false;
 };
 
 struct SourcePreferenceDirectorySnapshot {
-    bool                                       root_exists = false;
+    bool root_exists = false;
     std::vector<SourcePreferenceEntrySnapshot> entries;
 };
 
@@ -39,12 +39,12 @@ SourcePreferenceDirectorySnapshot snapshot_source_preference_directory();
 // list-srcはLOCK_SH中に全entryの検証とreadを完了してから初めて出力する。
 struct SourcePreferenceListEntrySnapshot {
     std::filesystem::path entry_path;
-    std::string           package_name;
+    std::string package_name;
     std::vector<std::string> display_lines;
 };
 
 struct SourcePreferenceListSnapshot {
-    bool                                           root_exists = false;
+    bool root_exists = false;
     std::vector<SourcePreferenceListEntrySnapshot> entries;
 };
 
@@ -108,9 +108,9 @@ struct SourcePreferenceFailure {
 };
 
 using StrictSourcePreferenceResult = std::variant<
-        SourcePreferenceAbsent,
-        SourcePreferenceLoaded,
-        SourcePreferenceFailure>;
+    SourcePreferenceAbsent,
+    SourcePreferenceLoaded,
+    SourcePreferenceFailure>;
 
 class SourcePreferenceError final : public std::runtime_error {
     SourcePreferenceFailure failure_;
@@ -126,22 +126,22 @@ public:
 // Absentはentryが実在しない場合だけ。LOCK_SH中にregular fileを全byte readし、
 // validation後のowned resultだけを返す。
 StrictSourcePreferenceResult read_source_preference_strict(
-        const std::string& package_name);
+    const std::string& package_name);
 
 SourceBuildEnvironment get_package_env(
-        const std::string& package_name, SourcePreferenceLoadHandler on_load,
-        SourcePreferenceWarningHandler on_warning);
+    const std::string& package_name, SourcePreferenceLoadHandler on_load,
+    SourcePreferenceWarningHandler on_warning);
 
 // add/editだけがdirectoryをprepareする。writerはstoreのLOCK_EXで直列化し、
 // identity不明のpublication artifactは変更せずtyped errorにする。
 // 既存entryはexact 0600でなければ失敗する。
 void create_source_preference_entry(const std::string& package_name);
 void append_source_preference_assignment(
-        const std::string& package_name,
-        const std::string& serialized_assignment);
+    const std::string& package_name,
+    const std::string& serialized_assignment);
 void replace_source_preference_entry_from_descriptor(
-        const std::string& package_name, int source_descriptor,
-        std::optional<SourcePreferenceEntryIdentity> expected_identity);
+    const std::string& package_name, int source_descriptor,
+    std::optional<SourcePreferenceEntryIdentity> expected_identity);
 
 // store/entry missingはfalse。それ以外のvalidation/IO failureは例外にする。
 bool remove_source_preference_entry(const std::string& package_name);
@@ -164,15 +164,15 @@ enum class SourcePreferenceTestRacePoint {
 };
 
 using SourcePreferenceTestRaceHandler = void (*)(
-        const std::filesystem::path& entry_path);
+    const std::filesystem::path& entry_path);
 
 // Strict readerの一回限りのfailureだけを注入し、production IO APIは差し替えない。
 void fail_next_source_preference_operation_for_test(
-        const std::string& package_name,
-        SourcePreferenceTestFailurePoint failure_point);
+    const std::string& package_name,
+    SourcePreferenceTestFailurePoint failure_point);
 void run_source_preference_race_once_for_test(
-        const std::string& package_name,
-        SourcePreferenceTestRacePoint race_point,
-        SourcePreferenceTestRaceHandler handler);
+    const std::string& package_name,
+    SourcePreferenceTestRacePoint race_point,
+    SourcePreferenceTestRaceHandler handler);
 void reset_source_preference_test_hooks();
 #endif

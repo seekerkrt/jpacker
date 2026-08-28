@@ -25,22 +25,22 @@ std::exception_ptr pending_state_log_failure;
 bool initialized = false;
 bool diagnostics_to_stderr = false;
 thread_local ScopedLoggerDiagnosticCapture* active_diagnostic_capture =
-        nullptr;
+    nullptr;
 
 std::ostream& diagnostic_stream() {
     return diagnostics_to_stderr ? std::cerr : std::cout;
 }
 
 std::string get_timestamp() {
-    auto              now = std::chrono::system_clock::now();
-    auto              in_time_t = std::chrono::system_clock::to_time_t(now);
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
     std::stringstream ss;
     ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S");
     return ss.str();
 }
 
 std::string make_log_record(
-        std::string_view level, const std::string& message) {
+    std::string_view level, const std::string& message) {
     return "[" + get_timestamp() + "] [" + std::string(level) + "] " +
            message + "\n";
 }
@@ -57,7 +57,7 @@ void reset_log_backend() noexcept {
 ScopedLoggerDiagnosticCapture::ScopedLoggerDiagnosticCapture() {
     if(active_diagnostic_capture != nullptr) {
         throw std::logic_error(
-                "Logger diagnostic capture is already active.");
+            "Logger diagnostic capture is already active.");
     }
     active_diagnostic_capture = this;
     active_ = true;
@@ -76,7 +76,7 @@ void ScopedLoggerDiagnosticCapture::stop() noexcept {
 }
 
 void ScopedLoggerDiagnosticCapture::capture(
-        LoggerDiagnosticLevel level, const std::string& message) {
+    LoggerDiagnosticLevel level, const std::string& message) {
     events_.push_back(LoggerDiagnosticEvent{level, message});
 }
 
@@ -87,24 +87,24 @@ void ScopedLoggerDiagnosticCapture::replay() {
     std::vector<LoggerDiagnosticEvent> events = std::move(events_);
     for(const auto& event : events) {
         switch(event.level) {
-        case LoggerDiagnosticLevel::Info:
-            Logger::info(event.message);
-            break;
-        case LoggerDiagnosticLevel::Warning:
-            Logger::warn(event.message);
-            break;
-        case LoggerDiagnosticLevel::Error:
-            Logger::error(event.message);
-            break;
-        case LoggerDiagnosticLevel::Command:
-            Logger::raw_cmd(event.message);
-            break;
+            case LoggerDiagnosticLevel::Info:
+                Logger::info(event.message);
+                break;
+            case LoggerDiagnosticLevel::Warning:
+                Logger::warn(event.message);
+                break;
+            case LoggerDiagnosticLevel::Error:
+                Logger::error(event.message);
+                break;
+            case LoggerDiagnosticLevel::Command:
+                Logger::raw_cmd(event.message);
+                break;
         }
     }
 }
 
 bool Logger::capture_diagnostic(
-        LoggerDiagnosticLevel level, const std::string& message) {
+    LoggerDiagnosticLevel level, const std::string& message) {
     if(active_diagnostic_capture == nullptr) return false;
     active_diagnostic_capture->capture(level, message);
     return true;
@@ -125,8 +125,8 @@ void Logger::init(const std::filesystem::path& path) {
 }
 
 void Logger::adopt_state_log_backend(
-        std::unique_ptr<logging_detail::StateLogBackend> backend,
-        const std::string& initial_info_message) {
+    std::unique_ptr<logging_detail::StateLogBackend> backend,
+    const std::string& initial_info_message) {
     reset_log_backend();
     pending_state_log_failure = nullptr;
     state_log_backend = std::move(backend);
@@ -137,7 +137,7 @@ void Logger::adopt_state_log_backend(
     try {
         // NO_TRANSLATE: INFO is a stable state-log schema token.
         state_log_backend->append_record(
-                make_log_record("INFO", initial_info_message));
+            make_log_record("INFO", initial_info_message));
     } catch(...) {
         reset_log_backend();
         throw;
@@ -146,11 +146,11 @@ void Logger::adopt_state_log_backend(
 
 void Logger::shutdown() {
     std::exception_ptr failure =
-            std::exchange(pending_state_log_failure, nullptr);
+        std::exchange(pending_state_log_failure, nullptr);
 
     if(state_log_backend) {
         std::unique_ptr<logging_detail::StateLogBackend> closing_backend =
-                std::move(state_log_backend);
+            std::move(state_log_backend);
         initialized = false;
         try {
             closing_backend->close_checked();
@@ -171,7 +171,7 @@ void Logger::shutdown() {
 }
 
 void Logger::write_log_record(
-        std::string_view level, const std::string& message) {
+    std::string_view level, const std::string& message) {
     if(pending_state_log_failure != nullptr)
         std::rethrow_exception(pending_state_log_failure);
     if(!initialized) return;
@@ -201,7 +201,7 @@ void Logger::warn(const std::string& msg) {
     // TRANSLATORS: The placeholder is a complete warning diagnostic.
     diagnostic_stream() << "\033[1;33m::\033[0m "
                         << localization::format_translated_message(
-                                   "Warning: {}", msg)
+                               "Warning: {}", msg)
                         << std::endl;
     // NO_TRANSLATE: WARN is a stable state-log schema token.
     write_log_record("WARN", msg);
@@ -212,14 +212,14 @@ void Logger::write_noexcept_warning_fallback() noexcept {
     // message construction or logging itself has failed; gettext is not safe
     // inside this noexcept recovery boundary.
     static constexpr char FALLBACK_DIAGNOSTIC[] =
-            "\033[1;31m:: Error:\033[0m Cleanup warning could not be "
-            "constructed or logged safely.\n";
-    const int   saved_errno = errno;
+        "\033[1;31m:: Error:\033[0m Cleanup warning could not be "
+        "constructed or logged safely.\n";
+    const int saved_errno = errno;
     std::size_t offset = 0;
     while(offset < sizeof(FALLBACK_DIAGNOSTIC) - 1) {
         const ssize_t written = write(
-                STDERR_FILENO, FALLBACK_DIAGNOSTIC + offset,
-                sizeof(FALLBACK_DIAGNOSTIC) - 1 - offset);
+            STDERR_FILENO, FALLBACK_DIAGNOSTIC + offset,
+            sizeof(FALLBACK_DIAGNOSTIC) - 1 - offset);
         if(written > 0) {
             offset += static_cast<std::size_t>(written);
             continue;
@@ -246,7 +246,7 @@ void Logger::raw_cmd(const std::string& cmd) {
     // byte-for-byte locale-neutral.
     diagnostic_stream() << "\033[1;33m::\033[0m "
                         << localization::format_translated_message(
-                                   "Running: {}", cmd)
+                               "Running: {}", cmd)
                         << std::endl;
     // NO_TRANSLATE: EXEC is a stable state-log schema token.
     write_log_record("EXEC", cmd);

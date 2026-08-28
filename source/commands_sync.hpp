@@ -45,41 +45,42 @@ enum class RootPackageInstallPreparationIssueKind {
 
 struct RootPackageInstallPreparationIssue {
     RootPackageInstallPreparationIssueKind kind =
-            RootPackageInstallPreparationIssueKind::EmptyQuery;
+        RootPackageInstallPreparationIssueKind::EmptyQuery;
     std::optional<RootPackageSelectionInputGate> input_gate = std::nullopt;
     std::optional<RootPackageSelectionUnavailableReason>
-            selection_unavailable_reason = std::nullopt;
+        selection_unavailable_reason = std::nullopt;
     std::optional<RootPackageSelectionCancellationReason>
-            selection_cancellation_reason = std::nullopt;
+        selection_cancellation_reason = std::nullopt;
     std::string diagnostic;
     std::optional<ReviewedSourceProductionFailure>
-            reviewed_source_failure;
+        reviewed_source_failure;
 
     RootPackageInstallPreparationIssue() = default;
     RootPackageInstallPreparationIssue(
-            RootPackageInstallPreparationIssueKind value_kind,
-            std::optional<RootPackageSelectionInputGate> value_input_gate,
-            std::optional<RootPackageSelectionUnavailableReason>
-                    value_unavailable_reason,
-            std::optional<RootPackageSelectionCancellationReason>
-                    value_cancellation_reason,
-            std::string value_diagnostic,
-            std::optional<ReviewedSourceProductionFailure>
-                    value_reviewed_source_failure = std::nullopt)
+        RootPackageInstallPreparationIssueKind value_kind,
+        std::optional<RootPackageSelectionInputGate> value_input_gate,
+        std::optional<RootPackageSelectionUnavailableReason>
+            value_unavailable_reason,
+        std::optional<RootPackageSelectionCancellationReason>
+            value_cancellation_reason,
+        std::string value_diagnostic,
+        std::optional<ReviewedSourceProductionFailure>
+            value_reviewed_source_failure = std::nullopt)
         : kind(value_kind), input_gate(value_input_gate),
           selection_unavailable_reason(value_unavailable_reason),
           selection_cancellation_reason(value_cancellation_reason),
           diagnostic(std::move(value_diagnostic)),
           reviewed_source_failure(
-                  std::move(value_reviewed_source_failure)) {}
+              std::move(value_reviewed_source_failure)) {
+    }
 };
 
 using RootPackageInstallPreparationFailureDetail = std::variant<
-        RootPackageInstallPreparationIssue,
-        RepositoryRootPackageSearchFailure,
-        AurRootPackageSearchFailure,
-        InvalidRootPackageSearchSnapshot,
-        InvalidRootPackageRoutingProjection>;
+    RootPackageInstallPreparationIssue,
+    RepositoryRootPackageSearchFailure,
+    AurRootPackageSearchFailure,
+    InvalidRootPackageSearchSnapshot,
+    InvalidRootPackageRoutingProjection>;
 
 // preparation failureもtyped authorityを失わず所有し、successful prepared
 // capabilityやfake work itemと同居させない。
@@ -91,20 +92,20 @@ struct RootPackageInstallPreparationFailure {
 };
 
 using RootPackageInstallPreparation = std::variant<
-        PreparedRootPackageInstall,
-        RootPackageInstallPreparationFailure>;
+    PreparedRootPackageInstall,
+    RootPackageInstallPreparationFailure>;
 
 // ordinary -S rootを元CLI ordinalとstrict repository authorityへ結ぶ。
 // repository source-buildはbinary transactionと別routeとして保持する。
 struct SyncRepositoryTransactionRoot {
-    RootTargetIdentity        invocation_correlation;
+    RootTargetIdentity invocation_correlation;
     RepositoryPackagePresent package;
 };
 
 struct SyncRepositorySourceRoot {
-    RootTargetIdentity             invocation_correlation;
-    RepositoryPackagePresent      package;
-    ResolvedSourceBuildIdentity   source;
+    RootTargetIdentity invocation_correlation;
+    RepositoryPackagePresent package;
+    ResolvedSourceBuildIdentity source;
     // preparationが確定したexact source invocation ownerへのtyped relation。
     // failure snapshotでは未確定を保持できるが、successful projectionは必須。
     std::optional<std::size_t> source_work_item_index = std::nullopt;
@@ -118,9 +119,9 @@ struct SyncAurRoot {
 };
 
 using SyncInstallRoot = std::variant<
-        SyncRepositoryTransactionRoot,
-        SyncRepositorySourceRoot,
-        SyncAurRoot>;
+    SyncRepositoryTransactionRoot,
+    SyncRepositorySourceRoot,
+    SyncAurRoot>;
 
 enum class SyncInstallPreparationIssueKind {
     UnsupportedSourceSelection,
@@ -139,37 +140,38 @@ enum class SyncInstallPreparationIssueKind {
 
 struct SyncInstallPreparationIssue {
     SyncInstallPreparationIssueKind kind =
-            SyncInstallPreparationIssueKind::InvalidTarget;
+        SyncInstallPreparationIssueKind::InvalidTarget;
     std::optional<RootTargetIdentity> root;
     std::optional<std::string> option;
     std::string diagnostic;
     std::optional<ReviewedSourceProductionFailure>
-            reviewed_source_failure;
+        reviewed_source_failure;
 
     SyncInstallPreparationIssue() = default;
     SyncInstallPreparationIssue(
-            SyncInstallPreparationIssueKind value_kind,
-            std::optional<RootTargetIdentity> value_root,
-            std::optional<std::string> value_option,
-            std::string value_diagnostic,
-            std::optional<ReviewedSourceProductionFailure>
-                    value_reviewed_source_failure = std::nullopt)
+        SyncInstallPreparationIssueKind value_kind,
+        std::optional<RootTargetIdentity> value_root,
+        std::optional<std::string> value_option,
+        std::string value_diagnostic,
+        std::optional<ReviewedSourceProductionFailure>
+            value_reviewed_source_failure = std::nullopt)
         : kind(value_kind), root(std::move(value_root)),
           option(std::move(value_option)),
           diagnostic(std::move(value_diagnostic)),
           reviewed_source_failure(
-                  std::move(value_reviewed_source_failure)) {}
+              std::move(value_reviewed_source_failure)) {
+    }
 };
 
 struct SyncRepositoryMetadataReadFailure {
-    RootTargetIdentity        root;
+    RootTargetIdentity root;
     RepositoryMetadataFailure failure;
 };
 
 using SyncInstallPreparationFailureDetail = std::variant<
-        SyncInstallPreparationIssue,
-        SyncRepositoryMetadataReadFailure,
-        SourcePreferenceFailure>;
+    SyncInstallPreparationIssue,
+    SyncRepositoryMetadataReadFailure,
+    SourcePreferenceFailure>;
 
 struct PreparedSyncInstall {
     std::vector<SyncInstallRoot> ordered_roots;
@@ -192,46 +194,46 @@ struct SyncInstallPreparationFailure {
 };
 
 using SyncInstallPreparation = std::variant<
-        PreparedSyncInstall,
-        SyncInstallPreparationFailure>;
+    PreparedSyncInstall,
+    SyncInstallPreparationFailure>;
 
 int cmd_sync_search(
-        const ParsedCliArguments& parsed,
-        bool use_sudo,
-        PackageSourceSelection source_selection,
-        const AppConfig& config);
+    const ParsedCliArguments& parsed,
+    bool use_sudo,
+    PackageSourceSelection source_selection,
+    const AppConfig& config);
 
 int cmd_sync_info(
-        const ParsedCliArguments& parsed,
-        bool use_sudo,
-        PackageSourceSelection source_selection,
-        const AppConfig& config);
+    const ParsedCliArguments& parsed,
+    bool use_sudo,
+    PackageSourceSelection source_selection,
+    const AppConfig& config);
 
 int cmd_sync_install(
-        const ParsedCliArguments& parsed,
-        bool is_sys_upgrade,
-        PackageSourceSelection source_selection,
-        const AppConfig& config);
+    const ParsedCliArguments& parsed,
+    bool is_sys_upgrade,
+    PackageSourceSelection source_selection,
+    const AppConfig& config);
 
 // Auto/AurOnlyまたは明示system-updateのcache-free production preflight。
 // RepoOnlyとplain targetless -Sはgeneric pacman ownerなので受理しない。
 SyncInstallPreparation prepare_sync_install(
-        const ParsedCliArguments& parsed,
-        bool system_update,
-        PackageSourceSelection source_selection,
-        const AppConfig& config);
+    const ParsedCliArguments& parsed,
+    bool system_update,
+    PackageSourceSelection source_selection,
+    const AppConfig& config);
 
 int execute_prepared_sync_install(
-        PreparedSyncInstall prepared,
-        const AppConfig& config);
+    PreparedSyncInstall prepared,
+    const AppConfig& config);
 
 // productionはTTY gateをcandidate queryより先に確定する。
 RootPackageInstallPreparation prepare_root_package_install(
-        const ParsedCliArguments& parsed,
-        RootPackageSelectionInvocation invocation,
-        const AppConfig& config);
+    const ParsedCliArguments& parsed,
+    RootPackageSelectionInvocation invocation,
+    const AppConfig& config);
 
 // exact repository transactionを先に1回だけ実行し、成功時だけAUR lifecycleへ進む。
 int execute_prepared_root_package_install(
-        PreparedRootPackageInstall prepared,
-        const AppConfig& config);
+    PreparedRootPackageInstall prepared,
+    const AppConfig& config);

@@ -9,18 +9,20 @@
 #include <utility>
 
 ReviewedSourcePackageBaseLease::ReviewedSourcePackageBaseLease(
-        RetainedTrustedCacheDirectory directory,
-        int descriptor) noexcept
-    : directory_(std::move(directory)), descriptor_(descriptor) {}
+    RetainedTrustedCacheDirectory directory,
+    int descriptor) noexcept
+    : directory_(std::move(directory)), descriptor_(descriptor) {
+}
 
 ReviewedSourcePackageBaseLease::ReviewedSourcePackageBaseLease(
-        ReviewedSourcePackageBaseLease&& other) noexcept
+    ReviewedSourcePackageBaseLease&& other) noexcept
     : directory_(std::move(other.directory_)),
       descriptor_(std::exchange(other.descriptor_, -1)),
-      valid_(std::exchange(other.valid_, false)) {}
+      valid_(std::exchange(other.valid_, false)) {
+}
 
 ReviewedSourcePackageBaseLease::~ReviewedSourcePackageBaseLease() noexcept =
-        default;
+    default;
 
 bool ReviewedSourcePackageBaseLease::valid() const noexcept {
     return valid_ && descriptor_ >= 0;
@@ -29,7 +31,7 @@ bool ReviewedSourcePackageBaseLease::valid() const noexcept {
 const ValidatedCachePath& ReviewedSourcePackageBaseLease::path() const {
     if(!valid()) {
         throw std::logic_error(
-                "A moved-from PackageBase lease has no authority.");
+            "A moved-from PackageBase lease has no authority.");
     }
     return directory_.path();
 }
@@ -45,41 +47,41 @@ std::uintmax_t ReviewedSourcePackageBaseLease::inode() const {
 void ReviewedSourcePackageBaseLease::require_unchanged_identity() const {
     if(!valid()) {
         throw std::logic_error(
-                "A moved-from PackageBase lease has no authority.");
+            "A moved-from PackageBase lease has no authority.");
     }
     directory_.require_unchanged_identity();
 }
 
 int ReviewedSourcePackageBaseLease::run_guarded_command(
-        const std::string& command,
-        const std::string& display_command) const {
+    const std::string& command,
+    const std::string& display_command) const {
     require_unchanged_identity();
     const int status =
-            run_command_with_parent_independent_lifetime_guard(
-                    command, descriptor_, display_command);
+        run_command_with_parent_independent_lifetime_guard(
+            command, descriptor_, display_command);
     require_unchanged_identity();
     return status;
 }
 
 int ReviewedSourcePackageBaseLease::run_guarded_production_command(
-        const std::string& command,
-        const std::string& display_command) const {
+    const std::string& command,
+    const std::string& display_command) const {
     require_unchanged_identity();
     const int status =
-            run_command_with_parent_independent_lifetime_guard(
-                    command, descriptor_, display_command);
+        run_command_with_parent_independent_lifetime_guard(
+            command, descriptor_, display_command);
     try {
         require_unchanged_identity();
     } catch(...) {
         throw ProductionSourceBuildPostCommandRevalidationError(
-                status, std::current_exception());
+            status, std::current_exception());
     }
     return status;
 }
 
 ReviewedSourcePackageBaseLease
 acquire_reviewed_source_package_base_lease(
-        RetainedTrustedCacheDirectory directory) {
+    RetainedTrustedCacheDirectory directory) {
     directory.require_unchanged_identity();
     const int descriptor = directory.descriptor_;
     int lock_result;
@@ -88,10 +90,10 @@ acquire_reviewed_source_package_base_lease(
     } while(lock_result != 0 && errno == EINTR);
     if(lock_result != 0) {
         throw std::system_error(
-                errno, std::generic_category(),
-                "Failed to acquire reviewed source PackageBase lease");
+            errno, std::generic_category(),
+            "Failed to acquire reviewed source PackageBase lease");
     }
     directory.require_unchanged_identity();
     return ReviewedSourcePackageBaseLease(
-            std::move(directory), descriptor);
+        std::move(directory), descriptor);
 }

@@ -9,7 +9,7 @@
 #include <vector>
 
 struct InstalledExactPackage {
-    std::string     package_name;
+    std::string package_name;
     ObservedVersion observed_version;
 };
 
@@ -18,14 +18,14 @@ struct InstalledExactPackageAbsent {
 };
 
 struct InstalledExactPackageQueryFailure {
-    std::string            package_name;
+    std::string package_name;
     PackageMetadataFailure failure;
 };
 
 using InstalledExactPackageObservationResult = std::variant<
-        InstalledExactPackage,
-        InstalledExactPackageAbsent,
-        InstalledExactPackageQueryFailure>;
+    InstalledExactPackage,
+    InstalledExactPackageAbsent,
+    InstalledExactPackageQueryFailure>;
 
 struct ConfiguredRepositoryIdentity {
     std::string repository_name;
@@ -36,101 +36,101 @@ struct ConfiguredRepositoryIdentity {
 
 struct RepositoryProviderCapability {
     ProviderCapability capability;
-    ObservedVersion    provided_version;
+    ObservedVersion provided_version;
 
     bool operator==(const RepositoryProviderCapability&) const = default;
 };
 
 using ProviderCapabilityMetadataProjectionResult = std::variant<
-        std::vector<RepositoryProviderCapability>,
-        DependencyConstraintParseFailure>;
+    std::vector<RepositoryProviderCapability>,
+    DependencyConstraintParseFailure>;
 
 // libalpm由来のowned provide metadataをrelation-awareにtyped capabilityへ
 // 変換する。Installed / repository adapterは同じprovider-domain authorityを
 // 共有し、typed fieldをsynthetic dependency stringとして再parseしない。
 ProviderCapabilityMetadataProjectionResult
 project_package_metadata_provides(
-        const std::vector<RepositoryProvidedPackageMetadata>& metadata,
-        ObservedVersionSource version_source);
+    const std::vector<RepositoryProvidedPackageMetadata>& metadata,
+    ObservedVersionSource version_source);
 
 struct RepositoryExactPackage {
-    ConfiguredRepositoryIdentity             repository;
-    std::string                              package_name;
-    std::string                              package_base;
-    ObservedVersion                          package_version;
+    ConfiguredRepositoryIdentity repository;
+    std::string package_name;
+    std::string package_base;
+    ObservedVersion package_version;
     std::vector<RepositoryProviderCapability> provides;
 };
 
 struct RepositoryExactPackageAbsent {
     ConfiguredRepositoryIdentity repository;
-    std::string                  package_name;
+    std::string package_name;
 };
 
 using RepositoryExactPackageSourceFailureReason = std::variant<
-        PackageMetadataFailure,
-        DependencyConstraintParseFailure>;
+    PackageMetadataFailure,
+    DependencyConstraintParseFailure>;
 
 struct RepositoryExactPackageSourceFailure {
-    ConfiguredRepositoryIdentity             repository;
-    std::string                              package_name;
+    ConfiguredRepositoryIdentity repository;
+    std::string package_name;
     RepositoryExactPackageSourceFailureReason reason;
 };
 
 using RepositoryExactPackageSourceResult = std::variant<
-        RepositoryExactPackage,
-        RepositoryExactPackageAbsent,
-        RepositoryExactPackageSourceFailure>;
+    RepositoryExactPackage,
+    RepositoryExactPackageAbsent,
+    RepositoryExactPackageSourceFailure>;
 
 struct RepositoryExactPackageObservation {
-    std::vector<std::string>                       configured_repository_order;
+    std::vector<std::string> configured_repository_order;
     std::vector<RepositoryExactPackageSourceResult> source_results;
 };
 
 struct RepositoryExactPackageObservationFailure {
-    std::string            package_name;
+    std::string package_name;
     PackageMetadataFailure failure;
 };
 
 using RepositoryExactPackageObservationResult = std::variant<
-        RepositoryExactPackageObservation,
-        RepositoryExactPackageObservationFailure>;
+    RepositoryExactPackageObservation,
+    RepositoryExactPackageObservationFailure>;
 
 struct RepositoryProviderSourceObservation {
-    ConfiguredRepositoryIdentity          repository;
+    ConfiguredRepositoryIdentity repository;
     std::vector<RepositoryExactPackage> packages;
 };
 
 struct RepositoryProviderSourceFailure {
-    ConfiguredRepositoryIdentity             repository;
+    ConfiguredRepositoryIdentity repository;
     RepositoryExactPackageSourceFailureReason reason;
 };
 
 using RepositoryProviderSourceResult = std::variant<
-        RepositoryProviderSourceObservation,
-        RepositoryProviderSourceFailure>;
+    RepositoryProviderSourceObservation,
+    RepositoryProviderSourceFailure>;
 
 struct RepositoryProviderObservation {
-    std::vector<std::string>                 configured_repository_order;
+    std::vector<std::string> configured_repository_order;
     std::vector<RepositoryProviderSourceResult> source_results;
 };
 
 struct RepositoryProviderObservationFailure {
-    std::string            dependency_name;
+    std::string dependency_name;
     PackageMetadataFailure failure;
 };
 
 using RepositoryProviderObservationResult = std::variant<
-        RepositoryProviderObservation,
-        RepositoryProviderObservationFailure>;
+    RepositoryProviderObservation,
+    RepositoryProviderObservationFailure>;
 
 InstalledExactPackageObservationResult observe_installed_exact_package(
-        const PackageMetadataSession& session,
-        const std::string& package_name);
+    const PackageMetadataSession& session,
+    const std::string& package_name);
 
 RepositoryExactPackageObservationResult observe_repository_exact_package(
-        const PacmanRepositoryConfiguration& configuration,
-        const std::string& package_name);
+    const PacmanRepositoryConfiguration& configuration,
+    const std::string& package_name);
 
 RepositoryProviderObservationResult observe_repository_providers(
-        const PacmanRepositoryConfiguration& configuration,
-        const std::string& dependency_name);
+    const PacmanRepositoryConfiguration& configuration,
+    const std::string& dependency_name);

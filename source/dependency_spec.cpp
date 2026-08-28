@@ -49,23 +49,23 @@ std::string dependency_constraint_note(const std::string& dependency) {
     ParsedDependency parsed = parse_dependency_string(dependency);
     if(!parsed.has_parseable_constraint()) return "";
     return localization::format_translated_message(
-            // TRANSLATORS: The placeholders are a literal dependency operator and version.
-            "[constraint: {} {}, not verified]", parsed.op.value(),
-            parsed.version.value());
+        // TRANSLATORS: The placeholders are a literal dependency operator and version.
+        "[constraint: {} {}, not verified]", parsed.op.value(),
+        parsed.version.value());
 }
 
 std::string dependency_constraint_unresolved_reason(const std::string& dependency) {
     ParsedDependency parsed = parse_dependency_string(dependency);
     if(parsed.has_malformed_constraint()) {
         return localization::format_translated_message(
-                // TRANSLATORS: The placeholder is a dependency specification.
-                "{} (invalid version constraint)", parsed.raw);
+            // TRANSLATORS: The placeholder is a dependency specification.
+            "{} (invalid version constraint)", parsed.raw);
     }
     // POLICY(#96): dependency の version constraint は表示・警告まで。Moguet 側で比較解決しない。
     if(parsed.has_constraint()) {
         return localization::format_translated_message(
-                // TRANSLATORS: The placeholder is a dependency specification.
-                "{} (version constraint is not verified)", parsed.raw);
+            // TRANSLATORS: The placeholder is a dependency specification.
+            "{} (version constraint is not verified)", parsed.raw);
     }
     return parsed.raw;
 }

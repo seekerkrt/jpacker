@@ -50,20 +50,20 @@ public:
 
     [[nodiscard]] VcsSelectorKind kind() const noexcept;
     [[nodiscard]] VcsSelectorTrackingBehavior tracking_behavior()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const std::string* value() const noexcept;
 
     bool operator==(const VcsSelector&) const = default;
 
 private:
     VcsSelector(
-            VcsSelectorKind kind,
-            VcsSelectorTrackingBehavior tracking_behavior,
-            std::optional<std::string> value) noexcept;
+        VcsSelectorKind kind,
+        VcsSelectorTrackingBehavior tracking_behavior,
+        std::optional<std::string> value) noexcept;
 
-    VcsSelectorKind             kind_;
+    VcsSelectorKind kind_;
     VcsSelectorTrackingBehavior tracking_behavior_;
-    std::optional<std::string>   value_;
+    std::optional<std::string> value_;
 };
 
 class VcsSourceIdentity final {
@@ -76,10 +76,10 @@ public:
     ~VcsSourceIdentity() = default;
 
     [[nodiscard]] static VcsSourceIdentity make(
-            VcsKind kind,
-            std::string source_location,
-            VcsSelector selector,
-            std::optional<std::string> architecture = std::nullopt);
+        VcsKind kind,
+        std::string source_location,
+        VcsSelector selector,
+        std::optional<std::string> architecture = std::nullopt);
 
     [[nodiscard]] VcsKind kind() const noexcept;
     [[nodiscard]] const std::string& source_location() const noexcept;
@@ -90,14 +90,14 @@ public:
 
 private:
     VcsSourceIdentity(
-            VcsKind kind,
-            std::string source_location,
-            VcsSelector selector,
-            std::optional<std::string> architecture) noexcept;
+        VcsKind kind,
+        std::string source_location,
+        VcsSelector selector,
+        std::optional<std::string> architecture) noexcept;
 
-    VcsKind                    kind_;
-    std::string                source_location_;
-    VcsSelector                selector_;
+    VcsKind kind_;
+    std::string source_location_;
+    VcsSelector selector_;
     std::optional<std::string> architecture_;
 };
 
@@ -135,7 +135,7 @@ public:
     ~UpstreamGitRevision() = default;
 
     [[nodiscard]] static UpstreamGitRevision git_commit(
-            VcsSourceIdentity source, std::string object_id);
+        VcsSourceIdentity source, std::string object_id);
 
     [[nodiscard]] const VcsSourceIdentity& source() const noexcept;
     [[nodiscard]] const SourceRevisionIdentity& value() const noexcept;
@@ -144,9 +144,9 @@ public:
 
 private:
     UpstreamGitRevision(
-            VcsSourceIdentity source,
-            SourceRevisionIdentity value) noexcept;
+        VcsSourceIdentity source,
+        SourceRevisionIdentity value) noexcept;
 
-    VcsSourceIdentity       source_;
+    VcsSourceIdentity source_;
     SourceRevisionIdentity value_;
 };

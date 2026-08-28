@@ -15,8 +15,8 @@ struct InstalledPackageRelationInventory {
 };
 
 using InstalledPackageRelationInventoryFailureReason = std::variant<
-        PackageMetadataFailure,
-        DependencyConstraintParseFailure>;
+    PackageMetadataFailure,
+    DependencyConstraintParseFailure>;
 
 struct InstalledPackageRelationInventoryFailure {
     PackageRelationInstalledDatabaseIdentity source;
@@ -26,22 +26,22 @@ struct InstalledPackageRelationInventoryFailure {
     InstalledPackageRelationInventoryFailureReason reason;
 
     bool operator==(const InstalledPackageRelationInventoryFailure&) const =
-            default;
+        default;
 };
 
 using InstalledPackageRelationInventoryResult = std::variant<
-        InstalledPackageRelationInventory,
-        InstalledPackageRelationInventoryFailure>;
+    InstalledPackageRelationInventory,
+    InstalledPackageRelationInventoryFailure>;
 
 InstalledPackageRelationInventoryResult observe_installed_package_relations(
-        const PackageMetadataSession& session,
-        PackageRelationInstalledDatabaseIdentity source);
+    const PackageMetadataSession& session,
+    PackageRelationInstalledDatabaseIdentity source);
 
 InstalledPackageRelationInventoryResult query_installed_package_relations(
-        const PacmanDatabasePaths& paths);
+    const PacmanDatabasePaths& paths);
 
 PackageRelationObservationSet project_installed_relation_observations(
-        const InstalledPackageRelationInventoryResult& inventory);
+    const InstalledPackageRelationInventoryResult& inventory);
 
 // Resolves the configured local database once and returns an owned observation
 // set. Configuration/query failure is retained as typed evidence and is never

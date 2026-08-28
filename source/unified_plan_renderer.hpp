@@ -28,16 +28,16 @@ enum class UnifiedPlanRenderingSection {
 // production authority escapes the render call.
 struct UnifiedPlanRenderingIssue {
     UnifiedPlanRenderingIssueKind kind;
-    UnifiedPlanRenderingSection   section;
-    std::size_t                   item_index;
-    std::optional<std::size_t>    detail_index;
-    std::string                   diagnostic;
+    UnifiedPlanRenderingSection section;
+    std::size_t item_index;
+    std::optional<std::size_t> detail_index;
+    std::string diagnostic;
 
     bool operator==(const UnifiedPlanRenderingIssue&) const = default;
 };
 
 struct UnifiedPlanRenderingResult {
-    std::string                            text;
+    std::string text;
     std::vector<UnifiedPlanRenderingIssue> issues;
 
     [[nodiscard]] bool is_complete() const noexcept {
@@ -48,4 +48,4 @@ struct UnifiedPlanRenderingResult {
 // The renderer observes the existing vector order and typed identities. It
 // does not resolve, sort, rebuild transaction intent, or retain references.
 UnifiedPlanRenderingResult render_unified_plan_observation(
-        const UnifiedPlanObservation& observation);
+    const UnifiedPlanObservation& observation);

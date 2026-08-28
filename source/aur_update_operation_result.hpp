@@ -70,9 +70,9 @@ enum class AurUpdateOperationReductionReason {
 
 struct AurUpdateOperationReductionIssue {
     AurUpdateOperationReductionReason reason =
-            AurUpdateOperationReductionReason::OtherCorrelationInconsistent;
+        AurUpdateOperationReductionReason::OtherCorrelationInconsistent;
     AurUpdateOperationReductionStage stage =
-            AurUpdateOperationReductionStage::Preflight;
+        AurUpdateOperationReductionStage::Preflight;
     std::vector<std::size_t> affected_update_plan_indices;
     std::vector<std::size_t> preflight_target_positions;
     std::optional<std::size_t> execution_work_item_index;
@@ -91,9 +91,9 @@ struct AurUpdateOperationExecutionContribution {
     std::vector<RootTargetIdentity> affected_roots;
     std::vector<PackageRole> roles;
     AurUpdateWorkItemExecutionStatus status =
-            AurUpdateWorkItemExecutionStatus::NotAttempted;
+        AurUpdateWorkItemExecutionStatus::NotAttempted;
     AurUpdateWorkItemFailureKind failure_kind =
-            AurUpdateWorkItemFailureKind::PriorWorkItemStopped;
+        AurUpdateWorkItemFailureKind::PriorWorkItemStopped;
     AurUpdateWorkItemFailureDetail failure_detail;
     std::optional<std::string> diagnostic;
 };
@@ -104,7 +104,7 @@ struct AurUpdateOperationTargetResult {
     std::optional<std::string> package_base;
 
     AurUpdateOperationTargetStatus status =
-            AurUpdateOperationTargetStatus::Incomplete;
+        AurUpdateOperationTargetStatus::Incomplete;
 
     std::vector<AurUpdateExecutionIssue> preflight_issues;
     std::vector<AurUpdatePreparationIssue> preparation_issues;
@@ -116,12 +116,12 @@ struct AurUpdateOperationTargetResult {
     std::optional<std::string> execution_diagnostic;
 
     std::vector<AurUpdateOperationExecutionContribution>
-            execution_contributions;
+        execution_contributions;
 };
 
 struct AurUpdateOperationResult {
     AurUpdateOperationStatus status =
-            AurUpdateOperationStatus::InconsistentResult;
+        AurUpdateOperationStatus::InconsistentResult;
     std::vector<AurUpdateOperationTargetResult> targets;
 
     // attributionが壊れてtargetへ射影できない場合も、runnerが返した既知の
@@ -129,7 +129,7 @@ struct AurUpdateOperationResult {
     std::optional<AurUpdateInvocationExecutionStatus> execution_status;
     std::vector<AurUpdateWorkItemExecutionResult> execution_work_items;
     SelectedRepositoryProviderTransactionResult
-            selected_repository_provider_transaction;
+        selected_repository_provider_transaction;
 
     // operation-level snapshotはglobal/target-attributedを分けず、入力順と
     // nested typed failureを保って保持する。
@@ -149,6 +149,6 @@ struct AurUpdateOperationResult {
 // Preflight、preparation、optional executionを、元update plan順の
 // target-level owned resultへ畳む。通常の相関不整合はthrowせずissue化する。
 AurUpdateOperationResult reduce_aur_update_operation_result(
-        const AurUpdateExecutionPreflight& preflight,
-        const AurUpdateSourceBuildPreparation& preparation,
-        const std::optional<AurUpdateSourceBuildExecutionResult>& execution);
+    const AurUpdateExecutionPreflight& preflight,
+    const AurUpdateSourceBuildPreparation& preparation,
+    const std::optional<AurUpdateSourceBuildExecutionResult>& execution);

@@ -5,6 +5,6 @@
 #include <string>
 
 void fetch_persistent_checkout(
-        const ValidatedCacheRoot& cache_root,
-        const std::string& package_base,
-        const std::string& expected_remote_url);
+    const ValidatedCacheRoot& cache_root,
+    const std::string& package_base,
+    const std::string& expected_remote_url);

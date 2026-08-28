@@ -6,7 +6,7 @@
 // phase-local lookupを借用し、installed stateをcandidate presentationだけへ
 // 投影する。候補identity、selection result、BuildPlanへstateを返さない。
 ProviderCandidatePresenter make_provider_installed_state_candidate_presenter(
-        ProviderInstalledStateLookup& lookup);
+    ProviderInstalledStateLookup& lookup);
 
 // production callbackがphaseごとにlookupとpresenterを生成するfactory。
 ProviderCandidatePresenterFactory

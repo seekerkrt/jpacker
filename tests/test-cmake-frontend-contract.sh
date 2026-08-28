@@ -788,12 +788,12 @@ done
 
 completion_authority=$completion_fixture/source/cli_public_projection.cpp
 awk '
-    $0 == "        OperationId::Build," {
-        print "        OperationId::Upgrade,"
+    $0 == "    OperationId::Build," {
+        print "    OperationId::Upgrade,"
         next
     }
-    $0 == "        OperationId::Upgrade," {
-        print "        OperationId::Build,"
+    $0 == "    OperationId::Upgrade," {
+        print "    OperationId::Build,"
         next
     }
     { print }

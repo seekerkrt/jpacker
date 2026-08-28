@@ -55,44 +55,45 @@ public:
     DevelUpdateAssessment(DevelUpdateAssessment&&) noexcept = default;
     DevelUpdateAssessment& operator=(const DevelUpdateAssessment&) = default;
     DevelUpdateAssessment& operator=(DevelUpdateAssessment&&) noexcept =
-            default;
+        default;
     ~DevelUpdateAssessment() = default;
 
     [[nodiscard]] static DevelUpdateAssessment not_applicable() noexcept {
         return DevelUpdateAssessment(
-                DevelUpdateAssessmentState::NotApplicable,
-                std::monostate{});
+            DevelUpdateAssessmentState::NotApplicable,
+            std::monostate{});
     }
     [[nodiscard]] static DevelUpdateAssessment update_available() noexcept;
     [[nodiscard]] static DevelUpdateAssessment up_to_date() noexcept;
     [[nodiscard]] static DevelUpdateAssessment unknown(
-            DevelUnknownReason reason);
+        DevelUnknownReason reason);
     [[nodiscard]] static DevelUpdateAssessment requires_check(
-            DevelRequiresCheckReason reason);
+        DevelRequiresCheckReason reason);
     [[nodiscard]] static DevelUpdateAssessment unsupported(
-            DevelUnsupportedReason reason);
+        DevelUnsupportedReason reason);
 
     [[nodiscard]] DevelUpdateAssessmentState state() const noexcept;
     [[nodiscard]] const DevelUnknownReason* unknown_reason() const noexcept;
     [[nodiscard]] const DevelRequiresCheckReason* requires_check_reason()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const DevelUnsupportedReason* unsupported_reason()
-            const noexcept;
+        const noexcept;
 
     bool operator==(const DevelUpdateAssessment&) const = default;
 
 private:
     using Reason = std::variant<
-            std::monostate,
-            DevelUnknownReason,
-            DevelRequiresCheckReason,
-            DevelUnsupportedReason>;
+        std::monostate,
+        DevelUnknownReason,
+        DevelRequiresCheckReason,
+        DevelUnsupportedReason>;
 
     DevelUpdateAssessment(
-            DevelUpdateAssessmentState state,
-            Reason reason) noexcept
-        : state_(state), reason_(std::move(reason)) {}
+        DevelUpdateAssessmentState state,
+        Reason reason) noexcept
+        : state_(state), reason_(std::move(reason)) {
+    }
 
     DevelUpdateAssessmentState state_;
-    Reason                     reason_;
+    Reason reason_;
 };

@@ -12,10 +12,10 @@
 // AUR RPC の package info response を、依存解決や表示で扱いやすくした型。
 // NOTE: メンバ名は AUR RPC JSON key と 1:1 で対応させるため PascalCase のまま維持する。
 struct AurPackageInfo {
-    std::string              Name;
-    std::string              PackageBase;
-    std::string              Version;
-    std::string              Description;
+    std::string Name;
+    std::string PackageBase;
+    std::string Version;
+    std::string Description;
     std::vector<std::string> Depends;
     std::vector<std::string> MakeDepends;
     std::vector<std::string> CheckDepends;
@@ -23,7 +23,7 @@ struct AurPackageInfo {
     std::vector<std::string> Provides;
     std::vector<std::string> Conflicts;
     std::vector<std::string> Replaces;
-    std::string              Maintainer;
+    std::string Maintainer;
     std::optional<long long> OutOfDate;
     // Non-JSON Slice 4 projection populated once by the production RPC parser.
     std::optional<AurPackageConstraintMetadata> constraint_metadata;
@@ -57,10 +57,10 @@ public:
 #ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
 void set_aur_rpc_write_append_failure_for_test(bool should_fail) noexcept;
 void set_aur_rpc_encode_failure_package_for_test(
-        const std::string& package_name);
+    const std::string& package_name);
 void set_aur_rpc_encode_failure_search_query_for_test(
-        const std::string& query);
+    const std::string& query);
 std::size_t invoke_aur_rpc_write_callback_for_test(
-        char* contents, std::size_t size, std::size_t nmemb,
-        std::string& buffer) noexcept;
+    char* contents, std::size_t size, std::size_t nmemb,
+    std::string& buffer) noexcept;
 #endif

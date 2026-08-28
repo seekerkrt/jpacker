@@ -12,13 +12,13 @@ public:
     DevelChildSuffixEvidence(const DevelChildSuffixEvidence&) = default;
     DevelChildSuffixEvidence(DevelChildSuffixEvidence&&) noexcept = default;
     DevelChildSuffixEvidence& operator=(
-            const DevelChildSuffixEvidence&) = default;
+        const DevelChildSuffixEvidence&) = default;
     DevelChildSuffixEvidence& operator=(
-            DevelChildSuffixEvidence&&) noexcept = default;
+        DevelChildSuffixEvidence&&) noexcept = default;
     ~DevelChildSuffixEvidence() = default;
 
     [[nodiscard]] static DevelChildSuffixEvidence classify(
-            std::string package_name);
+        std::string package_name);
 
     [[nodiscard]] const std::string& package_name() const noexcept;
     [[nodiscard]] const VcsKind* candidate_kind() const noexcept;
@@ -27,10 +27,10 @@ public:
 
 private:
     DevelChildSuffixEvidence(
-            std::string package_name,
-            std::optional<VcsKind> candidate_kind) noexcept;
+        std::string package_name,
+        std::optional<VcsKind> candidate_kind) noexcept;
 
-    std::string            package_name_;
+    std::string package_name_;
     std::optional<VcsKind> candidate_kind_;
 };
 
@@ -41,20 +41,20 @@ public:
     DevelPackageSuffixEvidence() = delete;
     DevelPackageSuffixEvidence(const DevelPackageSuffixEvidence&) = default;
     DevelPackageSuffixEvidence(DevelPackageSuffixEvidence&&) noexcept =
-            default;
+        default;
     DevelPackageSuffixEvidence& operator=(
-            const DevelPackageSuffixEvidence&) = default;
+        const DevelPackageSuffixEvidence&) = default;
     DevelPackageSuffixEvidence& operator=(
-            DevelPackageSuffixEvidence&&) noexcept = default;
+        DevelPackageSuffixEvidence&&) noexcept = default;
     ~DevelPackageSuffixEvidence() = default;
 
     [[nodiscard]] static DevelPackageSuffixEvidence classify(
-            std::string package_base,
-            std::vector<std::string> installed_children);
+        std::string package_base,
+        std::vector<std::string> installed_children);
 
     [[nodiscard]] const std::string& package_base() const noexcept;
     [[nodiscard]] const VcsKind* package_base_candidate_kind()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const std::vector<DevelChildSuffixEvidence>&
     installed_children() const noexcept;
     [[nodiscard]] bool has_candidate() const noexcept;
@@ -63,13 +63,12 @@ public:
 
 private:
     DevelPackageSuffixEvidence(
-            std::string package_base,
-            std::optional<VcsKind> package_base_candidate_kind,
-            std::vector<DevelChildSuffixEvidence> installed_children)
-        noexcept;
+        std::string package_base,
+        std::optional<VcsKind> package_base_candidate_kind,
+        std::vector<DevelChildSuffixEvidence> installed_children) noexcept;
 
-    std::string                           package_base_;
-    std::optional<VcsKind>                package_base_candidate_kind_;
+    std::string package_base_;
+    std::optional<VcsKind> package_base_candidate_kind_;
     std::vector<DevelChildSuffixEvidence> installed_children_;
 };
 
@@ -78,15 +77,15 @@ public:
     TrustedDevelSourceMetadata() = delete;
     TrustedDevelSourceMetadata(const TrustedDevelSourceMetadata&) = default;
     TrustedDevelSourceMetadata(TrustedDevelSourceMetadata&&) noexcept =
-            default;
+        default;
     TrustedDevelSourceMetadata& operator=(
-            const TrustedDevelSourceMetadata&) = default;
+        const TrustedDevelSourceMetadata&) = default;
     TrustedDevelSourceMetadata& operator=(
-            TrustedDevelSourceMetadata&&) noexcept = default;
+        TrustedDevelSourceMetadata&&) noexcept = default;
     ~TrustedDevelSourceMetadata() = default;
 
     [[nodiscard]] static TrustedDevelSourceMetadata make(
-            VcsSourceIdentity source) noexcept;
+        VcsSourceIdentity source) noexcept;
 
     [[nodiscard]] const VcsSourceIdentity& source() const noexcept;
 
@@ -104,26 +103,26 @@ class SuccessfulBuildSourceConfirmation final {
 public:
     SuccessfulBuildSourceConfirmation() = delete;
     SuccessfulBuildSourceConfirmation(
-            const SuccessfulBuildSourceConfirmation&) = default;
+        const SuccessfulBuildSourceConfirmation&) = default;
     SuccessfulBuildSourceConfirmation(
-            SuccessfulBuildSourceConfirmation&&) noexcept = default;
+        SuccessfulBuildSourceConfirmation&&) noexcept = default;
     SuccessfulBuildSourceConfirmation& operator=(
-            const SuccessfulBuildSourceConfirmation&) = default;
+        const SuccessfulBuildSourceConfirmation&) = default;
     SuccessfulBuildSourceConfirmation& operator=(
-            SuccessfulBuildSourceConfirmation&&) noexcept = default;
+        SuccessfulBuildSourceConfirmation&&) noexcept = default;
     ~SuccessfulBuildSourceConfirmation() = default;
 
     [[nodiscard]] static SuccessfulBuildSourceConfirmation make(
-            VcsSourceIdentity source) noexcept;
+        VcsSourceIdentity source) noexcept;
 
     [[nodiscard]] const VcsSourceIdentity& source() const noexcept;
 
     bool operator==(
-            const SuccessfulBuildSourceConfirmation&) const = default;
+        const SuccessfulBuildSourceConfirmation&) const = default;
 
 private:
     explicit SuccessfulBuildSourceConfirmation(
-            VcsSourceIdentity source) noexcept;
+        VcsSourceIdentity source) noexcept;
 
     VcsSourceIdentity source_;
 };
@@ -156,24 +155,24 @@ public:
     DevelPackageClassification() = delete;
     DevelPackageClassification(const DevelPackageClassification&) = default;
     DevelPackageClassification(DevelPackageClassification&&) noexcept =
-            default;
+        default;
     DevelPackageClassification& operator=(
-            const DevelPackageClassification&) = default;
+        const DevelPackageClassification&) = default;
     DevelPackageClassification& operator=(
-            DevelPackageClassification&&) noexcept = default;
+        DevelPackageClassification&&) noexcept = default;
     ~DevelPackageClassification() = default;
 
     [[nodiscard]] static DevelPackageClassification classify(
-            DevelPackageSuffixEvidence suffix_evidence,
-            std::vector<TrustedDevelSourceMetadata> trusted_metadata = {},
-            std::vector<SuccessfulBuildSourceConfirmation>
-                    successful_build_confirmations = {});
+        DevelPackageSuffixEvidence suffix_evidence,
+        std::vector<TrustedDevelSourceMetadata> trusted_metadata = {},
+        std::vector<SuccessfulBuildSourceConfirmation>
+            successful_build_confirmations = {});
 
     [[nodiscard]] DevelEvidenceLevel evidence_level() const noexcept;
     [[nodiscard]] DevelSourceFormDisposition source_form_disposition()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const DevelPackageSuffixEvidence& suffix_evidence()
-            const noexcept;
+        const noexcept;
     [[nodiscard]] const std::vector<TrustedDevelSourceMetadata>&
     trusted_metadata() const noexcept;
     [[nodiscard]] const std::vector<SuccessfulBuildSourceConfirmation>&
@@ -183,23 +182,23 @@ public:
 
 private:
     DevelPackageClassification(
-            DevelEvidenceLevel evidence_level,
-            DevelSourceFormDisposition source_form_disposition,
-            DevelPackageSuffixEvidence suffix_evidence,
-            std::vector<TrustedDevelSourceMetadata> trusted_metadata,
-            std::vector<SuccessfulBuildSourceConfirmation>
-                    successful_build_confirmations) noexcept;
+        DevelEvidenceLevel evidence_level,
+        DevelSourceFormDisposition source_form_disposition,
+        DevelPackageSuffixEvidence suffix_evidence,
+        std::vector<TrustedDevelSourceMetadata> trusted_metadata,
+        std::vector<SuccessfulBuildSourceConfirmation>
+            successful_build_confirmations) noexcept;
 
-    DevelEvidenceLevel          evidence_level_;
+    DevelEvidenceLevel evidence_level_;
     DevelSourceFormDisposition source_form_disposition_;
     DevelPackageSuffixEvidence suffix_evidence_;
     std::vector<TrustedDevelSourceMetadata> trusted_metadata_;
     std::vector<SuccessfulBuildSourceConfirmation>
-            successful_build_confirmations_;
+        successful_build_confirmations_;
 };
 
 [[nodiscard]] std::optional<VcsKind> devel_suffix_candidate_kind(
-        const std::string& package_name);
+    const std::string& package_name);
 
 [[nodiscard]] DevelSourceFormDisposition classify_devel_source_form(
-        const VcsSourceIdentity& source);
+    const VcsSourceIdentity& source);

@@ -69,7 +69,7 @@
 // - named unlink is never used as cleanup
 
 inline constexpr std::size_t reviewed_source_state_store_max_record_bytes =
-        65536;
+    65536;
 
 struct ReviewedSourceStateRecordIdentity {
     std::uintmax_t device = 0;
@@ -81,33 +81,33 @@ struct ReviewedSourceStateRecordIdentity {
     // proof token and a CAS guard state that, instead of leaving it to a ctime
     // side effect no filesystem is required to make distinguishable.
     std::uintmax_t link_count = 0;
-    std::intmax_t  size = 0;
-    std::intmax_t  modification_time_seconds = 0;
-    std::intmax_t  modification_time_nanoseconds = 0;
-    std::intmax_t  status_change_time_seconds = 0;
-    std::intmax_t  status_change_time_nanoseconds = 0;
+    std::intmax_t size = 0;
+    std::intmax_t modification_time_seconds = 0;
+    std::intmax_t modification_time_nanoseconds = 0;
+    std::intmax_t status_change_time_seconds = 0;
+    std::intmax_t status_change_time_nanoseconds = 0;
 
     bool operator==(const ReviewedSourceStateRecordIdentity&) const = default;
 };
 
 struct ReviewedSourceStateObservedRecord {
-    std::uint64_t                     generation = 0;
-    std::string                       leaf_name;
+    std::uint64_t generation = 0;
+    std::string leaf_name;
     ReviewedSourceStateRecordIdentity identity;
-    std::string                       raw_contents;
+    std::string raw_contents;
 
     bool operator==(const ReviewedSourceStateObservedRecord&) const = default;
 };
 
 struct ReviewedSourceStateStoreRead {
-    ReviewedSourceStateObservation                   observation;
+    ReviewedSourceStateObservation observation;
     std::optional<ReviewedSourceStateObservedRecord> observed;
 
     bool operator==(const ReviewedSourceStateStoreRead&) const = default;
 };
 
 struct ReviewedSourceStateStorePublished {
-    ReviewedSourceState               state;
+    ReviewedSourceState state;
     ReviewedSourceStateObservedRecord observed;
 
     bool operator==(const ReviewedSourceStateStorePublished&) const = default;
@@ -134,11 +134,11 @@ enum class ReviewedSourceStateStoreFailureKind {
 };
 
 struct ReviewedSourceStateStoreFailure {
-    ReviewedSourceStateStoreFailureKind       kind;
-    std::filesystem::path                     entry_path;
-    std::optional<std::error_code>            system_error;
+    ReviewedSourceStateStoreFailureKind kind;
+    std::filesystem::path entry_path;
+    std::optional<std::error_code> system_error;
     std::optional<std::filesystem::file_type> observed_file_type;
-    std::optional<std::filesystem::path>      leftover_artifact;
+    std::optional<std::filesystem::path> leftover_artifact;
 
     bool operator==(const ReviewedSourceStateStoreFailure&) const = default;
 };
@@ -156,16 +156,16 @@ enum class ReviewedSourceStatePostPublicationIssue {
 };
 
 struct ReviewedSourceStateStorePublishedUncertain {
-    ReviewedSourceState                          state;
+    ReviewedSourceState state;
     std::optional<ReviewedSourceStateObservedRecord> observed;
-    ReviewedSourceStatePostPublicationIssue      issue;
-    ReviewedSourceStateStoreFailureKind          failure_kind;
-    std::filesystem::path                        entry_path;
-    std::optional<std::filesystem::path>         leftover_artifact;
-    std::optional<std::error_code>               system_error;
+    ReviewedSourceStatePostPublicationIssue issue;
+    ReviewedSourceStateStoreFailureKind failure_kind;
+    std::filesystem::path entry_path;
+    std::optional<std::filesystem::path> leftover_artifact;
+    std::optional<std::error_code> system_error;
 
     bool operator==(const ReviewedSourceStateStorePublishedUncertain&) const =
-            default;
+        default;
 };
 
 enum class ReviewedSourceStateStoreHistoryIssue {
@@ -180,25 +180,25 @@ enum class ReviewedSourceStateStoreHistoryIssue {
 
 struct ReviewedSourceStateStoreUnsafeHistory {
     ReviewedSourceStateStoreHistoryIssue issue;
-    std::filesystem::path                package_path;
-    std::vector<std::string>             observed_leaves;
-    std::optional<std::uint64_t>         matching_generation;
-    std::optional<std::uint64_t>         highest_generation;
+    std::filesystem::path package_path;
+    std::vector<std::string> observed_leaves;
+    std::optional<std::uint64_t> matching_generation;
+    std::optional<std::uint64_t> highest_generation;
 
     bool operator==(const ReviewedSourceStateStoreUnsafeHistory&) const =
-            default;
+        default;
 };
 
 using ReviewedSourceStateStoreReadResult = std::variant<
-        ReviewedSourceStateStoreRead,
-        ReviewedSourceStateStoreUnsafeHistory,
-        ReviewedSourceStateStoreFailure>;
+    ReviewedSourceStateStoreRead,
+    ReviewedSourceStateStoreUnsafeHistory,
+    ReviewedSourceStateStoreFailure>;
 
 using ReviewedSourceStateStorePublishResult = std::variant<
-        ReviewedSourceStateStorePublished,
-        ReviewedSourceStateStorePublishedUncertain,
-        ReviewedSourceStateStoreUnsafeHistory,
-        ReviewedSourceStateStoreFailure>;
+    ReviewedSourceStateStorePublished,
+    ReviewedSourceStateStorePublishedUncertain,
+    ReviewedSourceStateStoreUnsafeHistory,
+    ReviewedSourceStateStoreFailure>;
 
 // Process XDG_STATE_HOME / HOME only. The resolver itself does not touch
 // the filesystem.
@@ -207,7 +207,7 @@ std::filesystem::path reviewed_source_state_store_directory();
 
 // PackageBase directory under the AUR store. Generation files live inside.
 std::filesystem::path reviewed_source_state_store_entry_path(
-        const PackageBaseIdentity& package_base);
+    const PackageBaseIdentity& package_base);
 
 // Origin generation is always 1.toml. Later generations bind the predecessor
 // inode, status-change time, and raw-content digest, so a replacement or a
@@ -222,22 +222,22 @@ std::filesystem::path reviewed_source_state_store_entry_path(
 // rewrite and the restore distinguishable ctimes.
 std::string reviewed_source_state_store_origin_leaf();
 std::string reviewed_source_state_store_successor_leaf(
-        std::uint64_t next_generation,
-        const ReviewedSourceStateRecordIdentity& predecessor,
-        std::string_view predecessor_raw_contents);
+    std::uint64_t next_generation,
+    const ReviewedSourceStateRecordIdentity& predecessor,
+    std::string_view predecessor_raw_contents);
 
 // Read-no-create lookup. Missing is returned only when the package directory
 // is absent after a safe directory open, the managed directory tree itself is
 // absent, or the package directory contains only internal temp residue.
 ReviewedSourceStateStoreReadResult read_reviewed_source_state(
-        const PackageBaseIdentity& expected_package_base);
+    const PackageBaseIdentity& expected_package_base);
 
 // Publish next_state under expected_package_base. expected_observed is the
 // CAS guard from a prior read: nullopt means the caller observed Missing.
 ReviewedSourceStateStorePublishResult publish_reviewed_source_state(
-        const ReviewedSourceState& next_state,
-        const std::optional<ReviewedSourceStateObservedRecord>&
-                expected_observed);
+    const ReviewedSourceState& next_state,
+    const std::optional<ReviewedSourceStateObservedRecord>&
+        expected_observed);
 
 #ifdef MOGUET_ENABLE_REVIEWED_SOURCE_STATE_STORE_TEST_HOOKS
 enum class ReviewedSourceStateStoreTestFailurePoint {
@@ -277,24 +277,24 @@ enum class ReviewedSourceStateStoreTestRacePoint {
 struct ReviewedSourceStateStoreTestRaceContext {
     std::filesystem::path package_directory;
     std::filesystem::path publication_path;
-    std::string           publication_leaf;
+    std::string publication_leaf;
     std::optional<std::filesystem::path> current_path;
-    std::string           temporary_leaf;
-    std::uint64_t         next_generation = 0;
-    std::uintmax_t        source_device = 0;
-    std::uintmax_t        source_inode = 0;
+    std::string temporary_leaf;
+    std::uint64_t next_generation = 0;
+    std::uintmax_t source_device = 0;
+    std::uintmax_t source_inode = 0;
     // Only AfterRecordContentsRead fills this in.
     std::optional<std::filesystem::path> record_path = std::nullopt;
 };
 
 using ReviewedSourceStateStoreTestRaceHandler = void (*)(
-        const ReviewedSourceStateStoreTestRaceContext& context);
+    const ReviewedSourceStateStoreTestRaceContext& context);
 
 void fail_next_reviewed_source_state_store_operation_for_test(
-        ReviewedSourceStateStoreTestFailurePoint failure_point);
+    ReviewedSourceStateStoreTestFailurePoint failure_point);
 void run_reviewed_source_state_store_race_once_for_test(
-        ReviewedSourceStateStoreTestRacePoint race_point,
-        ReviewedSourceStateStoreTestRaceHandler handler);
+    ReviewedSourceStateStoreTestRacePoint race_point,
+    ReviewedSourceStateStoreTestRaceHandler handler);
 // Treat record ctime comparison as equal so tests can prove that direct
 // status/identity fields, rather than timestamp side effects, close a race.
 void simulate_coarse_reviewed_source_state_store_timestamps_for_test();
