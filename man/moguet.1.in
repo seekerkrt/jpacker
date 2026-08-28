@@ -142,6 +142,42 @@ This is not one atomic transaction: execution stops on the first failure,
 does not roll back completed package transactions, and reports later work as
 not attempted.
 .
+.PP
+Only after the repository system-upgrade phase fails, Moguet may append a
+supplemental possible repository/AUR cross-source version-lock diagnostic.
+It appears only when at least one candidate correlation can be presented;
+otherwise the existing failure output is unchanged. The absence of
+supplemental text does not itself prove candidate absence.
+.
+.PP
+The diagnostic can show the installed package and version corresponding
+to the observed repository candidate, the observed repository candidate and
+version, an installed foreign package and
+version with its direct exact dependency requirement, and an observed AUR
+replacement candidate with its direct runtime requirement.
+The foreign classification reflects that the installed package's exact name is
+absent from the currently configured repository metadata; it does not prove
+historical AUR provenance.
+.
+.PP
+An observed repository candidate is read-only metadata, not the actual pacman
+transaction target, and a possible candidate is not a confirmed blocker or an
+identified failure cause. A compatible replacement means only that the
+replacement candidate's direct runtime requirement is satisfied by the
+observed repository candidate version; it does not prove pacman's selection,
+the failure cause, or authorization for a safe coordinated update.
+Incompatible, not-found, unknown, query-failure, and ambiguous replacement
+outcomes remain distinct. A query failure is not a missing replacement, and
+an incomplete or failed observation is not candidate absence.
+.
+.PP
+This supplemental diagnostic does not replace the original pacman or sudo
+output, the existing Moguet failure result, or its failure exit behavior; the
+command remains failed. Moguet presents versions and dependency constraints
+for manual review. It does not automatically coordinate repository/AUR
+updates, remove and reinstall packages, roll back or retry the failed
+transaction, create a partial upgrade, or bypass dependency checks.
+.
 .TP
 .B "clean"
 Clean the official package cache through

@@ -118,6 +118,18 @@ official repository package、AURに存在しないforeign package、source pref
 
 対象がない場合は成功とするが、query failure、preparation failure、cleanup failure、未実行targetを空の成功結果へ丸めない。partial completionはnon-zeroである。source preferenceで選ばれたPackageBaseとautomatic AUR targetが重複する場合はduplicate exclusion / external satisfactionとして扱い、同じsourceを二重buildしない。
 
+### `upgrade-all` system failure後のversion-lock診断
+
+`moguet upgrade-all`のrepository system upgradeが失敗してsystem phaseで停止した後に限り、Moguetはlocal / sync databaseとexact AUR metadataをread-onlyで追加観測する。installed foreign packageのdirect exact runtime dependencyがinstalled repository package versionでは満たされ、観測したより新しいrepository candidate versionでは満たされない相関を1件以上表示できる場合だけ、repository / AURをまたぐpossible version-lock candidateをsupplemental diagnosticとして表示する。すべてのsystem failureへ表示するものではなく、publicに表示できるcoherentなcandidate correlationがなければ既存failure outputのままである。この非表示自体はcandidate absenceの証明ではない。
+
+表示できる根拠は、observed repository candidateと同名のinstalled package / version、observed repository candidate / version、installed foreign package / version、そのinstalled direct exact dependency requirement、observed AUR replacement candidate、およびreplacementのdirect runtime requirementである。`foreign`は、installed packageのexact nameが現在設定されているrepository metadataに存在しないという観測に基づくもので、historical AUR provenanceを証明しない。
+
+observed repository candidateはread-only repository metadataであり、pacmanが実際に選択したtransaction targetではない。possible candidateはconfirmed pacman blockerでもsystem failureの特定済み原因でもない。`CompatibleReplacement`も、observed AUR replacement candidateのdirect runtime requirementがobserved repository candidate versionで満たされるというmetadata correlationだけを表す。pacmanがそのversionを選択したこと、installed foreign packageがfailure原因だったこと、またはsafeなcoordinated updateが許可・証明されたことを意味しない。
+
+replacement assessmentはcompatible、incompatible、matching candidate not found、compatibility unknown、AUR query failure、ambiguous evidenceを区別する。query failureをreplacement missingへ変換せず、candidate observationの`Partial` / `Failed`もabsenceへ丸めない。`Partial` observationからcandidateを表示する場合はsupplemental observationがincompleteであることを明示し、coherentなcandidateがなければsupplemental outputを追加しない。
+
+このdiagnosticは元のpacman / sudo output、既存Moguet failure result、failure exit behaviorを置換しないため、candidateが表示されてもcommandはfailureのままである。Moguetが行うのはpossible candidateとversion / dependency constraintを示してmanual reviewを求めるところまでであり、repository / AURのautomatic coordinated update、automatic remove / reinstall、rollback、retry、partial upgrade、dependency bypassは行わない。
+
 <a id="compat-aur-export"></a>
 ## AUR PKGBUILD export summary
 

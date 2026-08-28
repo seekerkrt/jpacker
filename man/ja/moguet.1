@@ -138,6 +138,37 @@ clone、build、pacman、sudoを開始します。
 最初のfailureで停止し、完了済みpackage transactionをrollbackせず、
 後続作業をnot attemptedとして報告します。
 .
+.PP
+repository system-upgrade phaseが失敗した後に限り、Moguetはrepository / AURをまたぐ
+possible version-lockのsupplemental diagnosticを追加する場合があります。
+candidate correlationを1件以上表示できる場合だけ追加し、それ以外は既存failure outputの
+ままです。supplemental textがないこと自体はcandidate absenceの証明ではありません。
+.
+.PP
+diagnosticには、observed repository candidateと同名のinstalled package / version、observed repository candidate /
+version、installed foreign package / versionとそのdirect exact dependency requirement、
+observed AUR replacement candidateとそのdirect runtime requirementを表示できます。
+foreign classificationは、そのinstalled packageのexact nameが現在設定されている
+repository metadataに存在しないという観測に基づくもので、historical AUR
+provenanceを証明しません。
+.
+.PP
+observed repository candidateはread-only metadataであり、pacmanが実際に選択した
+transaction targetではありません。possible candidateもconfirmed blockerや特定済みの
+failure causeではありません。compatible replacementが意味するのは、replacement candidateの
+direct runtime requirementがobserved repository candidate versionで満たされることだけです。
+pacmanの実際の選択、failure cause、safeなcoordinated updateの許可・証明を意味しません。
+incompatible、not found、unknown、query failure、ambiguousのreplacement outcomeは区別します。
+query failureはmissing replacementではなく、incomplete / failed observationもcandidate absenceでは
+ありません。
+.
+.PP
+このsupplemental diagnosticは元のpacman / sudo output、既存Moguet failure result、failure
+exit behaviorを置換せず、commandはfailureのままです。Moguetはversionとdependency constraintを
+表示してmanual reviewを求めるところまでです。repository / AURのupdateを自動で協調させず、
+packageのremove / reinstall、失敗transactionのrollback / retry、partial upgrade、dependency
+checkのbypassも自動実行しません。
+.
 .TP
 .B "clean"
 .B sudo pacman -Sc
