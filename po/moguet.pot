@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.5.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-28 17:49+0900\n"
+"POT-Creation-Date: 2026-08-29 17:03+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -7528,10 +7528,6 @@ msgid "Refusing unsafe clone rollback: unknown error."
 msgstr ""
 
 #, c++-format
-msgid "Refusing a non-absolute custom CA path in the trusted {} environment variable {}."
-msgstr ""
-
-#, c++-format
 msgid "Refusing unsafe local {} configuration in the managed checkout."
 msgstr ""
 
@@ -7541,6 +7537,10 @@ msgstr ""
 
 #, c++-format
 msgid "Refusing an invalid managed {} branch name."
+msgstr ""
+
+#, c++-format
+msgid "Refusing a non-absolute custom CA path in the trusted {} environment variable {}."
 msgstr ""
 
 #, c++-format

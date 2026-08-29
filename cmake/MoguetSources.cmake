@@ -112,6 +112,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/system_source_upgrade.cpp
     source/trusted_cache.cpp
     source/trusted_git.cpp
+    source/trusted_git_process_policy.cpp
     source/trusted_alpm_receipt_protocol.cpp
     source/trusted_alpm_receipt_transport.cpp
     source/unified_plan_observation.cpp

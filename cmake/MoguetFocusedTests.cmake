@@ -58,6 +58,7 @@ foreach(_moguet_direct_focus IN ITEMS
     separated-package-base-source-build
     production-source-build
     process-capture
+    bounded-process
     aur-update-plan
     upgrade-all-plan
     system-source-upgrade

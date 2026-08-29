@@ -1,9 +1,14 @@
 #include "git_remote_revision_observer.hpp"
 
+#include "process.hpp"
+#include "trusted_git_process_policy.hpp"
+
 #include <curl/curl.h>
 
 #include <algorithm>
 #include <cstddef>
+#include <cerrno>
+#include <fcntl.h>
 #include <memory>
 #include <new>
 #include <stdexcept>
@@ -12,8 +17,31 @@
 #include <utility>
 #include <variant>
 #include <vector>
+#include <unistd.h>
 
 namespace {
+
+class OwnedObserverDescriptor final {
+public:
+    explicit OwnedObserverDescriptor(int descriptor = -1) noexcept
+        : descriptor_(descriptor) {
+    }
+
+    OwnedObserverDescriptor(const OwnedObserverDescriptor&) = delete;
+    OwnedObserverDescriptor& operator=(const OwnedObserverDescriptor&) =
+        delete;
+
+    ~OwnedObserverDescriptor() noexcept {
+        if(descriptor_ >= 0) static_cast<void>(close(descriptor_));
+    }
+
+    [[nodiscard]] int get() const noexcept {
+        return descriptor_;
+    }
+
+private:
+    int descriptor_;
+};
 
 struct CurlUrlDeleter {
     void operator()(CURLU* handle) const noexcept {
@@ -340,6 +368,14 @@ GitRemoteRevisionAmbiguousOutput ambiguous(
 
 namespace git_remote_revision_observer_detail {
 
+class ExactBranchFactory final {
+public:
+    [[nodiscard]] static ValidatedExactGitBranch make(
+        std::string name) noexcept {
+        return ValidatedExactGitBranch(std::move(name));
+    }
+};
+
 class ObservationResultFactory final {
 public:
     [[nodiscard]] static ObservedGitRemoteRevision observed(
@@ -358,6 +394,29 @@ public:
 };
 
 } // namespace git_remote_revision_observer_detail
+
+namespace {
+
+ExactGitBranchValidationResult classify_exact_branch_exited_process(
+    std::string_view branch_name,
+    int exit_code,
+    std::string_view output) {
+    if(exit_code != 0) {
+        return InvalidExactGitBranch{
+            InvalidExactGitBranchReason::GitRejected, exit_code};
+    }
+    std::string expected_output(branch_name);
+    expected_output.push_back('\n');
+    if(output != expected_output) {
+        return ExactGitBranchValidationProcessFailure{
+            ExactGitBranchValidationProcessFailureReason::UnexpectedOutput,
+            std::nullopt};
+    }
+    return git_remote_revision_observer_detail::ExactBranchFactory::make(
+        std::string(branch_name));
+}
+
+} // namespace
 
 AuthorityApprovedGitSourceIdentity::AuthorityApprovedGitSourceIdentity(
     VcsSourceIdentity source)
@@ -393,6 +452,118 @@ ValidatedExactGitBranch::ValidatedExactGitBranch(std::string name) noexcept
 
 const std::string& ValidatedExactGitBranch::name() const noexcept {
     return name_;
+}
+
+ExactGitBranchValidationResult validate_exact_git_branch(
+    std::string_view branch_name) {
+    if(branch_name.empty()) {
+        return InvalidExactGitBranch{
+            InvalidExactGitBranchReason::Empty, std::nullopt};
+    }
+    if(branch_name.find('\0') != std::string_view::npos) {
+        return InvalidExactGitBranch{
+            InvalidExactGitBranchReason::EmbeddedNul, std::nullopt};
+    }
+    if(branch_name.size() >
+       VALIDATED_EXACT_GIT_BRANCH_MAX_INPUT_BYTES) {
+        return InvalidExactGitBranch{
+            InvalidExactGitBranchReason::InputTooLong, std::nullopt};
+    }
+
+    int directory_descriptor;
+    do {
+        directory_descriptor = open(
+            "/", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    } while(directory_descriptor == -1 && errno == EINTR);
+    if(directory_descriptor == -1) {
+        return ExactGitBranchValidationProcessFailure{
+            ExactGitBranchValidationProcessFailureReason::LaunchOrSetup,
+            errno};
+    }
+    OwnedObserverDescriptor directory(directory_descriptor);
+
+    int input_descriptor;
+    do {
+        input_descriptor = open(
+            "/dev/null", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    } while(input_descriptor == -1 && errno == EINTR);
+    if(input_descriptor == -1) {
+        return ExactGitBranchValidationProcessFailure{
+            ExactGitBranchValidationProcessFailureReason::LaunchOrSetup,
+            errno};
+    }
+    OwnedObserverDescriptor input(input_descriptor);
+
+    std::vector<std::string> environment;
+    try {
+        environment = trusted_git_process_environment(
+            TrustedGitProcessEnvironmentMode::ReadOnlyObservation);
+    } catch(const std::runtime_error&) {
+        return ExactGitBranchValidationProcessFailure{
+            ExactGitBranchValidationProcessFailureReason::LaunchOrSetup,
+            EINVAL};
+    }
+
+    std::vector<std::string> arguments =
+        trusted_git_observer_process_arguments();
+    arguments.push_back("check-ref-format");
+    arguments.push_back("--branch");
+    arguments.emplace_back(branch_name);
+
+    ExplicitProcessInvocation invocation{
+        "/usr/bin/git", std::move(arguments), std::move(environment)};
+    invocation.working_directory_fd = directory.get();
+    invocation.standard_input_fd = input.get();
+    const BoundedProcessPolicy policy{
+        GIT_REMOTE_OBSERVER_PROCESS_HARD_TIMEOUT,
+        GIT_REMOTE_OBSERVER_PROCESS_TERMINATION_GRACE,
+        VALIDATED_EXACT_GIT_BRANCH_MAX_INPUT_BYTES + 1U,
+        true};
+    BoundedCapturedProcessResult process_result =
+        capture_bounded_explicit_process_output_raw(invocation, policy);
+
+    if(const auto* exited =
+           std::get_if<BoundedProcessExited>(&process_result.outcome)) {
+        return classify_exact_branch_exited_process(
+            branch_name, exited->exit_code, process_result.output);
+    }
+    if(const auto* signaled =
+           std::get_if<BoundedProcessSignaled>(
+               &process_result.outcome)) {
+        return ExactGitBranchValidationProcessFailure{
+            ExactGitBranchValidationProcessFailureReason::Signaled,
+            signaled->signal_number};
+    }
+    if(const auto* launch_failure =
+           std::get_if<BoundedProcessLaunchOrSetupFailure>(
+               &process_result.outcome)) {
+        return ExactGitBranchValidationProcessFailure{
+            ExactGitBranchValidationProcessFailureReason::LaunchOrSetup,
+            launch_failure->error_number};
+    }
+    if(const auto* io_failure =
+           std::get_if<BoundedProcessIoOrWaitFailure>(
+               &process_result.outcome)) {
+        return ExactGitBranchValidationProcessFailure{
+            ExactGitBranchValidationProcessFailureReason::IoOrWait,
+            io_failure->error_number};
+    }
+    if(std::holds_alternative<BoundedProcessTimedOut>(
+           process_result.outcome)) {
+        return ExactGitBranchValidationProcessFailure{
+            ExactGitBranchValidationProcessFailureReason::TimedOut,
+            std::nullopt};
+    }
+    if(const auto* capture_failure =
+           std::get_if<BoundedProcessCaptureLimitExceeded>(
+               &process_result.outcome)) {
+        return ExactGitBranchValidationProcessFailure{
+            ExactGitBranchValidationProcessFailureReason::
+                CaptureLimitExceeded,
+            static_cast<int>(capture_failure->capture_limit)};
+    }
+    throw std::logic_error(
+        "Unknown exact Git branch validation process outcome.");
 }
 
 ValidatedGitRemoteSelector::ValidatedGitRemoteSelector(
@@ -678,5 +849,14 @@ ValidatedExactGitBranch make_validated_exact_git_branch_fixture_for_test(
     }
     require_no_embedded_nul(branch_name);
     return ValidatedExactGitBranch(std::move(branch_name));
+}
+
+ExactGitBranchValidationResult
+classify_exact_git_branch_exited_process_fixture_for_test(
+    std::string branch_name,
+    int exit_code,
+    std::string stdout_bytes) {
+    return classify_exact_branch_exited_process(
+        branch_name, exit_code, stdout_bytes);
 }
 #endif

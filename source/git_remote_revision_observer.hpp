@@ -2,6 +2,7 @@
 
 #include "vcs_source_identity.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -12,6 +13,17 @@ inline constexpr std::size_t
     VALIDATED_HTTPS_GIT_REMOTE_MAX_INPUT_BYTES = 8U * 1024U;
 inline constexpr std::size_t
     VALIDATED_EXACT_GIT_BRANCH_MAX_INPUT_BYTES = 4U * 1024U;
+inline constexpr std::chrono::seconds
+    GIT_REMOTE_OBSERVER_PROCESS_HARD_TIMEOUT{30};
+inline constexpr std::chrono::milliseconds
+    GIT_REMOTE_OBSERVER_PROCESS_TERMINATION_GRACE{500};
+inline constexpr std::size_t
+    GIT_REMOTE_OBSERVER_STDOUT_CAPTURE_LIMIT = 16U * 1024U;
+
+namespace git_remote_revision_observer_detail {
+class ExactBranchFactory;
+class ObservationResultFactory;
+} // namespace git_remote_revision_observer_detail
 
 // This capability means that a separate authority owner has already approved
 // one effective Git source identity for remote observation. Syntax parsing,
@@ -73,9 +85,8 @@ private:
     std::string canonical_url_;
 };
 
-// Slice 1 deliberately has no production raw-string factory. Slice 2 will
-// add the isolated `git check-ref-format --branch` producer at this private
-// construction boundary.
+// Raw spelling reaches this private construction boundary only through the
+// isolated `git check-ref-format --branch` producer below.
 class ValidatedExactGitBranch final {
 public:
     ValidatedExactGitBranch() = delete;
@@ -92,6 +103,7 @@ public:
     bool operator==(const ValidatedExactGitBranch&) const = default;
 
 private:
+    friend class git_remote_revision_observer_detail::ExactBranchFactory;
 #ifdef MOGUET_ENABLE_GIT_REMOTE_REVISION_OBSERVER_TEST_HOOKS
     friend ValidatedExactGitBranch
     make_validated_exact_git_branch_fixture_for_test(
@@ -102,6 +114,48 @@ private:
 
     std::string name_;
 };
+
+enum class InvalidExactGitBranchReason {
+    Empty,
+    EmbeddedNul,
+    InputTooLong,
+    GitRejected,
+};
+
+struct InvalidExactGitBranch {
+    InvalidExactGitBranchReason reason;
+    std::optional<int> git_exit_code;
+
+    bool operator==(const InvalidExactGitBranch&) const = default;
+};
+
+enum class ExactGitBranchValidationProcessFailureReason {
+    LaunchOrSetup,
+    IoOrWait,
+    TimedOut,
+    CaptureLimitExceeded,
+    Signaled,
+    UnexpectedOutput,
+};
+
+struct ExactGitBranchValidationProcessFailure {
+    ExactGitBranchValidationProcessFailureReason reason;
+    std::optional<int> detail;
+
+    bool operator==(
+        const ExactGitBranchValidationProcessFailure&) const = default;
+};
+
+using ExactGitBranchValidationResult = std::variant<
+    ValidatedExactGitBranch,
+    InvalidExactGitBranch,
+    ExactGitBranchValidationProcessFailure>;
+
+// Git owns refname grammar. This producer performs only the empty/NUL/size
+// resource preflight, then delegates to fixed /usr/bin/git under the isolated
+// observer policy and accepts only an exact "<input>\n" success transcript.
+[[nodiscard]] ExactGitBranchValidationResult validate_exact_git_branch(
+    std::string_view branch_name);
 
 enum class ValidatedGitRemoteSelectorKind {
     DefaultHead,
@@ -203,10 +257,6 @@ private:
     AuthorityApprovedGitSourceIdentity source_;
     GitRemoteRevisionObservationKey key_;
 };
-
-namespace git_remote_revision_observer_detail {
-class ObservationResultFactory;
-}
 
 class ObservedGitRemoteRevision final {
 public:
@@ -331,4 +381,10 @@ make_authority_approved_git_source_identity_fixture_for_test(
 
 [[nodiscard]] ValidatedExactGitBranch
 make_validated_exact_git_branch_fixture_for_test(std::string branch_name);
+
+[[nodiscard]] ExactGitBranchValidationResult
+classify_exact_git_branch_exited_process_fixture_for_test(
+    std::string branch_name,
+    int exit_code,
+    std::string stdout_bytes);
 #endif

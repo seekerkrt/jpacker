@@ -104,6 +104,7 @@ _moguet_add_direct_ctest(
     separated-package-base-source-build-test
 )
 _moguet_add_direct_ctest(cpp.process_capture process-capture-test)
+_moguet_add_direct_ctest(cpp.bounded_process bounded-process-test)
 _moguet_add_direct_ctest(cpp.process_stdin_fd process-stdin-fd-test)
 _moguet_add_direct_ctest(cpp.aur_update_plan aur-update-plan-test)
 _moguet_add_direct_ctest(cpp.upgrade_all_plan upgrade-all-plan-test)
@@ -328,7 +329,7 @@ unset(_moguet_repository_query_case)
 
 # Existing shell and PTY drivers remain the behavioral authority.  TARGETS
 # lists only C++ test executables; the production `moguet` target used by the
-# runtime-identity driver is intentionally outside the 97-target test ledger.
+# runtime-identity driver is intentionally outside the 98-target test ledger.
 moguet_add_ctest(
     NAME localization.contract
     TARGETS

@@ -1,8 +1,10 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 // processのstdoutとdecode済み終了status。bounded captureでは超過分を保持しない。
@@ -33,6 +35,102 @@ struct ExplicitProcessInvocation {
     std::optional<int> parent_independent_lifetime_guard_fd = std::nullopt;
 };
 
+// The bounded companion requires an explicit cwd and stdin descriptor. It
+// owns only the child lifecycle; all descriptors in the invocation remain
+// borrowed from the caller for the duration of the call.
+struct BoundedProcessPolicy {
+    std::chrono::milliseconds hard_timeout;
+    std::chrono::milliseconds termination_grace;
+    std::size_t stdout_capture_limit;
+    bool suppress_standard_error = true;
+};
+
+enum class BoundedProcessLaunchStage {
+    InvocationValidation,
+    StandardOutputPipe,
+    ExecStatusPipe,
+    SignalMask,
+    SignalDescriptor,
+    Subreaper,
+    Fork,
+    ParentProcessGroup,
+    ChildProcessGroup,
+    ParentDeathSignal,
+    ChildSignalMask,
+    WorkingDirectory,
+    StandardInput,
+    StandardOutput,
+    StandardError,
+    DescriptorHygiene,
+    Execve,
+};
+
+enum class BoundedProcessIoStage {
+    StandardOutputNonblocking,
+    ExecStatusNonblocking,
+    Poll,
+    StandardOutputRead,
+    ExecStatusRead,
+    SignalRead,
+    Wait,
+    ProcessGroupSignal,
+    ProcessGroupObservation,
+    SignalMaskRestore,
+    SubreaperRestore,
+};
+
+struct BoundedProcessExited {
+    int exit_code;
+
+    bool operator==(const BoundedProcessExited&) const = default;
+};
+
+struct BoundedProcessSignaled {
+    int signal_number;
+
+    bool operator==(const BoundedProcessSignaled&) const = default;
+};
+
+struct BoundedProcessLaunchOrSetupFailure {
+    BoundedProcessLaunchStage stage;
+    int error_number;
+
+    bool operator==(
+        const BoundedProcessLaunchOrSetupFailure&) const = default;
+};
+
+struct BoundedProcessIoOrWaitFailure {
+    BoundedProcessIoStage stage;
+    int error_number;
+
+    bool operator==(
+        const BoundedProcessIoOrWaitFailure&) const = default;
+};
+
+struct BoundedProcessTimedOut {
+    bool operator==(const BoundedProcessTimedOut&) const = default;
+};
+
+struct BoundedProcessCaptureLimitExceeded {
+    std::size_t capture_limit;
+
+    bool operator==(
+        const BoundedProcessCaptureLimitExceeded&) const = default;
+};
+
+using BoundedProcessOutcome = std::variant<
+    BoundedProcessExited,
+    BoundedProcessSignaled,
+    BoundedProcessLaunchOrSetupFailure,
+    BoundedProcessIoOrWaitFailure,
+    BoundedProcessTimedOut,
+    BoundedProcessCaptureLimitExceeded>;
+
+struct BoundedCapturedProcessResult {
+    std::string output;
+    BoundedProcessOutcome outcome;
+};
+
 CapturedCommandResult capture_command_output(const char* cmd);
 
 // stdoutの境界whitespaceにも意味があるparser向け。exit statusのdecode契約は上と同じ。
@@ -41,6 +139,18 @@ CapturedCommandResult capture_command_output_raw(const char* cmd);
 CapturedCommandResult capture_explicit_process_output_raw(
     const ExplicitProcessInvocation& invocation,
     bool suppress_standard_error = false);
+
+// Runs one shell-free process in a dedicated process group. The monotonic hard
+// deadline is absolute for the whole child tree and is never extended by
+// stdout activity. Timeout and capture overflow terminate the group with
+// SIGTERM, wait only termination_grace, then escalate to SIGKILL. stderr is
+// either inherited or redirected to /dev/null and is never captured here.
+// The direct child also receives a Linux parent-death SIGKILL. Normal
+// same-group descendants are reaped/removed before return; an executable that
+// deliberately escapes with setsid() is outside this fixed-program contract.
+BoundedCapturedProcessResult capture_bounded_explicit_process_output_raw(
+    const ExplicitProcessInvocation& invocation,
+    const BoundedProcessPolicy& policy);
 
 int run_explicit_process(
     const ExplicitProcessInvocation& invocation,

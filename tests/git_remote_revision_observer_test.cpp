@@ -1,16 +1,28 @@
 #include "git_remote_revision_observer.hpp"
 
 #include "devel_package_classification.hpp"
+#include "process.hpp"
 #include "source_entry_parser.hpp"
 #include "srcinfo_source_metadata.hpp"
+#include "trusted_git_process_policy.hpp"
 
+#include <array>
+#include <cstdlib>
+#include <filesystem>
+#include <fcntl.h>
+#include <fstream>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unistd.h>
 #include <utility>
 #include <variant>
+#include <vector>
+
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -71,6 +83,7 @@ static_assert(!std::is_constructible_v<
               const SourceAwarePackageIdentity&>);
 static_assert(std::variant_size_v<
                   GitRemoteRevisionObservationResult> == 8);
+static_assert(std::variant_size_v<ExactGitBranchValidationResult> == 3);
 
 constexpr std::string_view SHA1 =
     "0123456789abcdef0123456789abcdef01234567";
@@ -80,6 +93,117 @@ constexpr std::string_view SHA256 =
 
 void require(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
+}
+
+class OwnedDescriptor final {
+public:
+    explicit OwnedDescriptor(int descriptor = -1) noexcept
+        : descriptor_(descriptor) {
+    }
+
+    OwnedDescriptor(const OwnedDescriptor&) = delete;
+    OwnedDescriptor& operator=(const OwnedDescriptor&) = delete;
+
+    ~OwnedDescriptor() noexcept {
+        if(descriptor_ >= 0) static_cast<void>(close(descriptor_));
+    }
+
+    [[nodiscard]] int get() const noexcept {
+        return descriptor_;
+    }
+
+private:
+    int descriptor_;
+};
+
+class TemporaryTree final {
+public:
+    TemporaryTree() {
+        std::string path_template =
+            "/tmp/moguet-git-observer-policy-XXXXXX";
+        std::vector<char> writable(
+            path_template.begin(), path_template.end());
+        writable.push_back('\0');
+        char* created = mkdtemp(writable.data());
+        require(created != nullptr,
+                "Failed to create observer policy fixture");
+        path_ = created;
+    }
+
+    TemporaryTree(const TemporaryTree&) = delete;
+    TemporaryTree& operator=(const TemporaryTree&) = delete;
+
+    ~TemporaryTree() noexcept {
+        std::error_code error;
+        fs::remove_all(path_, error);
+    }
+
+    [[nodiscard]] const fs::path& path() const noexcept {
+        return path_;
+    }
+
+private:
+    fs::path path_;
+};
+
+class ScopedEnvironment final {
+public:
+    explicit ScopedEnvironment(
+        const std::vector<std::string>& variable_names) {
+        for(const std::string& name : variable_names) {
+            const char* value = std::getenv(name.c_str());
+            saved_.push_back(
+                SavedEnvironment{name,
+                                 value == nullptr
+                                     ? std::nullopt
+                                     : std::optional<std::string>(value)});
+        }
+    }
+
+    ScopedEnvironment(const ScopedEnvironment&) = delete;
+    ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
+
+    ~ScopedEnvironment() noexcept {
+        for(const SavedEnvironment& saved : saved_) {
+            if(saved.value.has_value()) {
+                static_cast<void>(
+                    setenv(saved.name.c_str(), saved.value->c_str(), 1));
+            } else {
+                static_cast<void>(unsetenv(saved.name.c_str()));
+            }
+        }
+    }
+
+    void set(const std::string& name, const std::string& value) {
+        require(setenv(name.c_str(), value.c_str(), 1) == 0,
+                "Failed to set observer environment fixture " + name);
+    }
+
+    void unset(const std::string& name) {
+        require(unsetenv(name.c_str()) == 0,
+                "Failed to unset observer environment fixture " + name);
+    }
+
+private:
+    struct SavedEnvironment {
+        std::string name;
+        std::optional<std::string> value;
+    };
+
+    std::vector<SavedEnvironment> saved_;
+};
+
+template <typename Expected>
+const Expected& expect_branch_validation_result(
+    const ExactGitBranchValidationResult& result,
+    std::string_view context) {
+    const Expected* expected = std::get_if<Expected>(&result);
+    if(expected == nullptr) {
+        throw std::runtime_error(
+            std::string(context) + ": unexpected branch result arm " +
+            std::to_string(result.index()));
+    }
+    return *expected;
 }
 
 template <typename Function>
@@ -750,6 +874,389 @@ void test_exact_branch_rejections() {
         "Exact branch control byte");
 }
 
+bool environment_contains_name(
+    const std::vector<std::string>& environment,
+    std::string_view name) {
+    const std::string prefix = std::string(name) + "=";
+    for(const std::string& assignment : environment) {
+        if(assignment.starts_with(prefix)) return true;
+    }
+    return false;
+}
+
+void test_trusted_git_observer_environment() {
+    const std::vector<std::string> controlled_names{
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "GIT_SSL_CAINFO",
+        "GIT_SSL_CAPATH",
+        "HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_STATE_HOME",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_CONFIG",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_KEY_0",
+        "GIT_CONFIG_VALUE_0",
+        "GIT_EXEC_PATH",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        "GIT_TRACE",
+        "GIT_TRACE_CURL",
+        "GIT_PROXY_COMMAND",
+        "GIT_SSL_NO_VERIFY",
+        "CURL_CA_BUNDLE",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "BASH_ENV",
+        "ENV",
+        "SHELL",
+    };
+    ScopedEnvironment environment_guard(controlled_names);
+
+    const std::array<std::pair<std::string_view, std::string_view>, 8>
+        proxies{{
+            {"http_proxy", "http://lower-http.invalid/path with spaces"},
+            {"https_proxy", "http://lower-https.invalid:8443"},
+            {"all_proxy", "socks5://lower-all.invalid:1080"},
+            {"no_proxy", "127.0.0.1,localhost"},
+            {"HTTP_PROXY", "http://upper-http.invalid:8080"},
+            {"HTTPS_PROXY", "http://upper-https.invalid:9443"},
+            {"ALL_PROXY", "socks5://upper-all.invalid:1081"},
+            {"NO_PROXY", "localhost,127.0.0.1"},
+        }};
+    for(const auto& [name, value] : proxies) {
+        environment_guard.set(std::string(name), std::string(value));
+    }
+    environment_guard.set("SSL_CERT_FILE", "/tmp/observer-cert.pem");
+    environment_guard.set(
+        "SSL_CERT_DIR", "/tmp/observer-certs:/opt/observer-certs");
+    environment_guard.set("GIT_SSL_CAINFO", "/tmp/observer-git-ca.pem");
+    environment_guard.set("GIT_SSL_CAPATH", "/tmp/observer-git-ca");
+
+    for(std::string_view forbidden : {
+            "HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "GIT_DIR",
+            "GIT_WORK_TREE", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS",
+            "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
+            "GIT_EXEC_PATH", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_TRACE",
+            "GIT_TRACE_CURL", "GIT_PROXY_COMMAND", "GIT_SSL_NO_VERIFY",
+            "CURL_CA_BUNDLE", "LD_PRELOAD", "LD_LIBRARY_PATH", "BASH_ENV",
+            "ENV", "SHELL"}) {
+        environment_guard.set(
+            std::string(forbidden), "/tmp/forbidden-observer-value");
+    }
+
+    const std::vector<std::string> actual =
+        trusted_git_process_environment(
+            TrustedGitProcessEnvironmentMode::ReadOnlyObservation);
+    std::vector<std::string> expected{
+        "PATH=/usr/bin:/bin",
+        "LC_ALL=C",
+        "LANG=C",
+        "GIT_CONFIG_NOSYSTEM=1",
+        "GIT_CONFIG_SYSTEM=/dev/null",
+        "GIT_CONFIG_GLOBAL=/dev/null",
+        "GIT_TERMINAL_PROMPT=0",
+        "GIT_ASKPASS=/bin/false",
+        "SSH_ASKPASS=/bin/false",
+        "GIT_PAGER=cat",
+        "PAGER=cat",
+        "GIT_ATTR_NOSYSTEM=1",
+        "GIT_OPTIONAL_LOCKS=0",
+    };
+    for(const auto& [name, value] : proxies) {
+        expected.emplace_back(
+            std::string(name) + "=" + std::string(value));
+    }
+    expected.insert(
+        expected.end(),
+        {"SSL_CERT_FILE=/tmp/observer-cert.pem",
+         "SSL_CERT_DIR=/tmp/observer-certs:/opt/observer-certs",
+         "GIT_SSL_CAINFO=/tmp/observer-git-ca.pem",
+         "GIT_SSL_CAPATH=/tmp/observer-git-ca"});
+    require(actual == expected,
+            "Observer Git environment differs from the exact allowlist");
+    require(!environment_contains_name(actual, "HOME") &&
+                !environment_contains_name(actual, "XDG_CONFIG_HOME") &&
+                !environment_contains_name(actual, "GIT_CONFIG_COUNT") &&
+                !environment_contains_name(actual, "GIT_EXEC_PATH") &&
+                !environment_contains_name(actual, "CURL_CA_BUNDLE") &&
+                !environment_contains_name(actual, "LD_PRELOAD"),
+            "Forbidden ambient state reached observer Git envp");
+
+    const std::string relative_secret = "relative/secret-observer-ca.pem";
+    environment_guard.set("SSL_CERT_FILE", relative_secret);
+    try {
+        static_cast<void>(trusted_git_process_environment(
+            TrustedGitProcessEnvironmentMode::ReadOnlyObservation));
+    } catch(const std::runtime_error& error) {
+        require(
+            std::string_view(error.what()).find("SSL_CERT_FILE") !=
+                    std::string_view::npos &&
+                std::string_view(error.what()).find(relative_secret) ==
+                    std::string_view::npos,
+            "Relative CA rejection exposed the path value");
+        return;
+    }
+    throw std::runtime_error("Relative observer CA path was accepted");
+}
+
+void test_trusted_git_observer_fixed_arguments() {
+    const std::vector<std::string> expected{
+        "--no-pager",
+        "--git-dir=/dev/null",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.sshCommand=/bin/false",
+        "-c",
+        "credential.helper=",
+        "-c",
+        "credential.interactive=false",
+        "-c",
+        "credential.username=",
+        "-c",
+        "core.askPass=/bin/false",
+        "-c",
+        "http.emptyAuth=false",
+        "-c",
+        "http.proactiveAuth=none",
+        "-c",
+        "http.delegation=none",
+        "-c",
+        "http.extraHeader=",
+        "-c",
+        "http.cookieFile=",
+        "-c",
+        "http.saveCookies=false",
+        "-c",
+        "http.followRedirects=false",
+        "-c",
+        "http.sslVerify=true",
+        "-c",
+        "protocol.allow=never",
+        "-c",
+        "protocol.https.allow=always",
+        "-c",
+        "protocol.http.allow=never",
+        "-c",
+        "protocol.file.allow=never",
+        "-c",
+        "protocol.ext.allow=never",
+        "-c",
+        "protocol.ssh.allow=never",
+        "-c",
+        "protocol.git.allow=never",
+        "-c",
+        "submodule.recurse=false",
+    };
+    require(trusted_git_observer_process_arguments() == expected,
+            "Observer Git fixed argument profile changed");
+}
+
+void write_text_file(const fs::path& path, std::string_view contents) {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    require(static_cast<bool>(output),
+            "Failed to create observer config fixture");
+    output << contents;
+    require(static_cast<bool>(output),
+            "Failed to write observer config fixture");
+}
+
+void test_observer_git_config_isolation() {
+    TemporaryTree fixture;
+    const fs::path home = fixture.path() / "home";
+    const fs::path xdg = fixture.path() / "xdg";
+    const fs::path repository = fixture.path() / "repository";
+    fs::create_directories(home);
+    fs::create_directories(xdg / "git");
+    fs::create_directories(repository / ".git");
+    const std::string malicious_config =
+        "[url \"file:///tmp/observer-policy-escape\"]\n"
+        "    insteadOf = https://observer.invalid/repo\n"
+        "[credential]\n"
+        "    helper = /tmp/observer-credential-helper\n";
+    write_text_file(home / ".gitconfig", malicious_config);
+    write_text_file(xdg / "git" / "config", malicious_config);
+    write_text_file(repository / ".git" / "config", malicious_config);
+
+    const std::vector<std::string> names{
+        "HOME", "XDG_CONFIG_HOME", "GIT_DIR",
+        "GIT_WORK_TREE", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
+        "SSL_CERT_FILE", "SSL_CERT_DIR", "GIT_SSL_CAINFO",
+        "GIT_SSL_CAPATH"};
+    ScopedEnvironment environment_guard(names);
+    environment_guard.set("HOME", home.string());
+    environment_guard.set("XDG_CONFIG_HOME", xdg.string());
+    environment_guard.set("GIT_DIR", (repository / ".git").string());
+    environment_guard.set("GIT_WORK_TREE", repository.string());
+    environment_guard.set("GIT_CONFIG", (home / ".gitconfig").string());
+    environment_guard.set(
+        "GIT_CONFIG_PARAMETERS",
+        "'url.file:///tmp/parameters.insteadOf'='https://observer.invalid/repo'");
+    environment_guard.set("GIT_CONFIG_COUNT", "1");
+    environment_guard.set(
+        "GIT_CONFIG_KEY_0",
+        "url.file:///tmp/count.insteadOf");
+    environment_guard.set(
+        "GIT_CONFIG_VALUE_0", "https://observer.invalid/repo");
+    environment_guard.unset("SSL_CERT_FILE");
+    environment_guard.unset("SSL_CERT_DIR");
+    environment_guard.unset("GIT_SSL_CAINFO");
+    environment_guard.unset("GIT_SSL_CAPATH");
+
+    int directory_descriptor = open(
+        repository.c_str(),
+        O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    require(directory_descriptor >= 0,
+            "Failed to open observer config cwd");
+    OwnedDescriptor directory(directory_descriptor);
+    int input_descriptor = open(
+        "/dev/null", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    require(input_descriptor >= 0,
+            "Failed to open observer config stdin");
+    OwnedDescriptor input(input_descriptor);
+
+    std::vector<std::string> arguments =
+        trusted_git_observer_process_arguments();
+    arguments.insert(
+        arguments.end(), {"config", "--list", "--show-origin"});
+    ExplicitProcessInvocation invocation{
+        "/usr/bin/git", std::move(arguments),
+        trusted_git_process_environment(
+            TrustedGitProcessEnvironmentMode::ReadOnlyObservation)};
+    invocation.working_directory_fd = directory.get();
+    invocation.standard_input_fd = input.get();
+    const auto result = capture_bounded_explicit_process_output_raw(
+        invocation,
+        BoundedProcessPolicy{
+            std::chrono::seconds(5), std::chrono::milliseconds(500),
+            GIT_REMOTE_OBSERVER_STDOUT_CAPTURE_LIMIT, true});
+    const auto* exited = std::get_if<BoundedProcessExited>(&result.outcome);
+    require(exited != nullptr && exited->exit_code == 0,
+            "Isolated observer Git config characterization failed");
+    require(result.output.find("observer-policy-escape") == std::string::npos &&
+                result.output.find("observer-credential-helper") ==
+                    std::string::npos &&
+                result.output.find("parameters.insteadof") ==
+                    std::string::npos &&
+                result.output.find("count.insteadof") == std::string::npos,
+            "Ambient HOME/XDG/local/GIT_CONFIG state reached observer Git");
+    require(result.output.find("protocol.https.allow=always") !=
+                    std::string::npos &&
+                result.output.find("protocol.http.allow=never") !=
+                    std::string::npos &&
+                result.output.find("protocol.file.allow=never") !=
+                    std::string::npos &&
+                result.output.find("http.followredirects=false") !=
+                    std::string::npos,
+            "Observer Git did not receive the HTTPS-only fixed profile");
+}
+
+void test_exact_branch_production_validation() {
+    for(std::string_view accepted : {"main", "feature/x", "@"}) {
+        const auto result = validate_exact_git_branch(accepted);
+        const auto& branch =
+            expect_branch_validation_result<ValidatedExactGitBranch>(
+                result, accepted);
+        require(branch.name() == accepted,
+                "Git changed the accepted exact branch spelling");
+    }
+
+    for(std::string_view rejected : {
+            "-bad", "@{-1}", "foo.lock", "foo..bar", "a b", "HEAD"}) {
+        const auto result = validate_exact_git_branch(rejected);
+        const auto& invalid =
+            expect_branch_validation_result<InvalidExactGitBranch>(
+                result, rejected);
+        require(
+            invalid.reason == InvalidExactGitBranchReason::GitRejected &&
+                invalid.git_exit_code.has_value() &&
+                *invalid.git_exit_code != 0,
+            "Git syntax rejection was not kept as typed invalid input");
+    }
+
+    const auto empty = validate_exact_git_branch("");
+    require(
+        expect_branch_validation_result<InvalidExactGitBranch>(
+            empty, "empty branch")
+                .reason == InvalidExactGitBranchReason::Empty,
+        "Empty branch resource preflight changed");
+    const std::string embedded_nul{'m', 'a', 'i', 'n', '\0', 'x'};
+    const auto nul = validate_exact_git_branch(embedded_nul);
+    require(
+        expect_branch_validation_result<InvalidExactGitBranch>(
+            nul, "NUL branch")
+                .reason == InvalidExactGitBranchReason::EmbeddedNul,
+        "NUL branch resource preflight changed");
+    const auto oversized = validate_exact_git_branch(
+        std::string(VALIDATED_EXACT_GIT_BRANCH_MAX_INPUT_BYTES + 1U, 'a'));
+    require(
+        expect_branch_validation_result<InvalidExactGitBranch>(
+            oversized, "oversized branch")
+                .reason == InvalidExactGitBranchReason::InputTooLong,
+        "Branch input resource bound changed");
+    const std::string boundary_name(
+        VALIDATED_EXACT_GIT_BRANCH_MAX_INPUT_BYTES, 'a');
+    const auto boundary = validate_exact_git_branch(boundary_name);
+    require(
+        expect_branch_validation_result<ValidatedExactGitBranch>(
+            boundary, "boundary-sized branch")
+                .name()
+                .size() == VALIDATED_EXACT_GIT_BRANCH_MAX_INPUT_BYTES,
+        "Exact branch input/capture boundary was not inclusive");
+
+    const auto exact =
+        classify_exact_git_branch_exited_process_fixture_for_test(
+            "main", 0, "main\n");
+    require(
+        expect_branch_validation_result<ValidatedExactGitBranch>(
+            exact, "exact branch transcript")
+                .name() == "main",
+        "Exact branch success transcript was rejected");
+    const std::vector<std::string> malformed_transcripts{
+        "different\n",
+        "main\nextra\n",
+        "main",
+        "main\r\n",
+        std::string{'m', 'a', 'i', '\x01', 'n', '\n'},
+    };
+    for(std::string malformed : malformed_transcripts) {
+        const auto result =
+            classify_exact_git_branch_exited_process_fixture_for_test(
+                "main", 0, std::move(malformed));
+        require(
+            expect_branch_validation_result<
+                ExactGitBranchValidationProcessFailure>(
+                result, "malformed branch transcript")
+                    .reason ==
+                ExactGitBranchValidationProcessFailureReason::
+                    UnexpectedOutput,
+            "Status-zero malformed branch transcript was accepted");
+    }
+    const auto rejected_with_output =
+        classify_exact_git_branch_exited_process_fixture_for_test(
+            "main", 128, "different\n");
+    require(
+        expect_branch_validation_result<InvalidExactGitBranch>(
+            rejected_with_output, "nonzero branch transcript")
+                .reason == InvalidExactGitBranchReason::GitRejected,
+        "Nonzero Git status was classified from stderr/stdout text");
+}
+
 } // namespace
 
 int main() {
@@ -763,11 +1270,15 @@ int main() {
         test_default_head_ambiguous_transcripts();
         test_exact_branch_success();
         test_exact_branch_rejections();
+        test_trusted_git_observer_environment();
+        test_trusted_git_observer_fixed_arguments();
+        test_observer_git_config_isolation();
+        test_exact_branch_production_validation();
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
     }
 
-    std::cout << "Git remote revision observer Slice 1 tests: all checks passed\n";
+    std::cout << "Git remote revision observer tests: all checks passed\n";
     return 0;
 }

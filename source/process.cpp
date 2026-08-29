@@ -6,14 +6,20 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <climits>
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <fcntl.h>
+#include <limits>
 #include <memory>
+#include <poll.h>
+#include <sys/resource.h>
+#include <sys/signalfd.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
@@ -411,7 +417,7 @@ bool close_descriptor_range(
 #endif
 }
 
-bool close_supervisor_descriptors_except(int preserved_descriptor) noexcept {
+bool close_descriptors_except(int preserved_descriptor) noexcept {
     if(preserved_descriptor < 3) return false;
     if(preserved_descriptor > 3 &&
        !close_descriptor_range(
@@ -442,7 +448,7 @@ bool close_supervisor_descriptors_except(int preserved_descriptor) noexcept {
             fcntl(guard_descriptor, F_DUPFD_CLOEXEC, 3);
     } while(supervisor_guard == -1 && errno == EINTR);
     if(supervisor_guard == -1 ||
-       !close_supervisor_descriptors_except(supervisor_guard) ||
+       !close_descriptors_except(supervisor_guard) ||
        prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) == -1) {
         _exit(127);
     }
@@ -479,6 +485,876 @@ bool close_supervisor_descriptors_except(int preserved_descriptor) noexcept {
         _exit(127);
     }
     _exit(root_reaped ? decode_process_status(root_status) : 127);
+}
+
+constexpr std::uint32_t BOUNDED_CHILD_FAILURE_MAGIC = 0x4d475046U;
+constexpr std::chrono::milliseconds BOUNDED_PROCESS_POLL_SLICE{20};
+
+struct BoundedChildFailureRecord {
+    std::uint32_t magic;
+    std::uint32_t stage;
+    std::int32_t error_number;
+};
+
+static_assert(sizeof(BoundedChildFailureRecord) <= PIPE_BUF);
+
+class OwnedProcessDescriptor final {
+public:
+    OwnedProcessDescriptor() = default;
+    explicit OwnedProcessDescriptor(int descriptor) noexcept
+        : descriptor_(descriptor) {
+    }
+
+    OwnedProcessDescriptor(const OwnedProcessDescriptor&) = delete;
+    OwnedProcessDescriptor& operator=(const OwnedProcessDescriptor&) =
+        delete;
+
+    OwnedProcessDescriptor(OwnedProcessDescriptor&& other) noexcept
+        : descriptor_(std::exchange(other.descriptor_, -1)) {
+    }
+
+    OwnedProcessDescriptor& operator=(
+        OwnedProcessDescriptor&& other) noexcept {
+        if(this == &other) return *this;
+        reset(std::exchange(other.descriptor_, -1));
+        return *this;
+    }
+
+    ~OwnedProcessDescriptor() noexcept {
+        reset();
+    }
+
+    [[nodiscard]] int get() const noexcept {
+        return descriptor_;
+    }
+
+    [[nodiscard]] bool valid() const noexcept {
+        return descriptor_ >= 0;
+    }
+
+    int release() noexcept {
+        return std::exchange(descriptor_, -1);
+    }
+
+    void reset(int replacement = -1) noexcept {
+        if(descriptor_ >= 0) {
+            static_cast<void>(close(descriptor_));
+        }
+        descriptor_ = replacement;
+    }
+
+private:
+    int descriptor_ = -1;
+};
+
+BoundedCapturedProcessResult bounded_launch_failure(
+    BoundedProcessLaunchStage stage, int error_number) {
+    return BoundedCapturedProcessResult{
+        {}, BoundedProcessLaunchOrSetupFailure{stage, error_number}};
+}
+
+bool is_valid_bounded_invocation(
+    const ExplicitProcessInvocation& invocation,
+    const BoundedProcessPolicy& policy) noexcept {
+    if(invocation.executable.empty() ||
+       has_embedded_nul(invocation.executable) ||
+       invocation.stdout_capture_limit.has_value() ||
+       invocation.parent_independent_lifetime_guard_fd.has_value() ||
+       !invocation.working_directory_fd.has_value() ||
+       !invocation.standard_input_fd.has_value() ||
+       policy.hard_timeout <= std::chrono::milliseconds::zero() ||
+       policy.termination_grace < std::chrono::milliseconds::zero()) {
+        return false;
+    }
+    for(const std::string& argument : invocation.arguments) {
+        if(has_embedded_nul(argument)) return false;
+    }
+    for(const std::string& assignment : invocation.environment) {
+        const std::size_t separator = assignment.find('=');
+        if(separator == std::string::npos || separator == 0 ||
+           has_embedded_nul(assignment)) {
+            return false;
+        }
+    }
+    return fcntl(*invocation.working_directory_fd, F_GETFD) != -1 &&
+           fcntl(*invocation.standard_input_fd, F_GETFD) != -1;
+}
+
+bool promote_process_descriptor(int& descriptor) noexcept {
+    if(descriptor >= STDERR_FILENO + 1) return true;
+    int promoted;
+    do {
+        promoted = fcntl(descriptor, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+    } while(promoted == -1 && errno == EINTR);
+    if(promoted == -1) return false;
+    static_cast<void>(close(descriptor));
+    descriptor = promoted;
+    return true;
+}
+
+bool create_bounded_pipe(int descriptors[2]) noexcept {
+    if(pipe2(descriptors, O_CLOEXEC) == -1) return false;
+    if(promote_process_descriptor(descriptors[0]) &&
+       promote_process_descriptor(descriptors[1])) {
+        return true;
+    }
+    const int promotion_error = errno;
+    if(descriptors[0] >= 0) static_cast<void>(close(descriptors[0]));
+    if(descriptors[1] >= 0) static_cast<void>(close(descriptors[1]));
+    descriptors[0] = -1;
+    descriptors[1] = -1;
+    errno = promotion_error;
+    return false;
+}
+
+bool make_nonblocking(int descriptor) noexcept {
+    int flags;
+    do {
+        flags = fcntl(descriptor, F_GETFL);
+    } while(flags == -1 && errno == EINTR);
+    if(flags == -1) return false;
+    int result;
+    do {
+        result = fcntl(descriptor, F_SETFL, flags | O_NONBLOCK);
+    } while(result == -1 && errno == EINTR);
+    return result != -1;
+}
+
+[[noreturn]] void report_bounded_child_failure(
+    int status_descriptor,
+    BoundedProcessLaunchStage stage,
+    int error_number) noexcept {
+    const BoundedChildFailureRecord record{
+        BOUNDED_CHILD_FAILURE_MAGIC,
+        static_cast<std::uint32_t>(stage),
+        static_cast<std::int32_t>(error_number)};
+    ssize_t written;
+    do {
+        written = write(status_descriptor, &record, sizeof(record));
+    } while(written == -1 && errno == EINTR);
+    static_cast<void>(written);
+    _exit(127);
+}
+
+void require_child_operation(
+    bool succeeded,
+    int status_descriptor,
+    BoundedProcessLaunchStage stage) noexcept {
+    if(!succeeded) {
+        report_bounded_child_failure(status_descriptor, stage, errno);
+    }
+}
+
+void bind_bounded_child_descriptor(
+    int source_descriptor,
+    int target_descriptor,
+    int status_descriptor,
+    BoundedProcessLaunchStage stage) noexcept {
+    if(source_descriptor == target_descriptor) {
+        const int descriptor_flags = fcntl(target_descriptor, F_GETFD);
+        require_child_operation(
+            descriptor_flags != -1 &&
+                fcntl(
+                    target_descriptor, F_SETFD,
+                    descriptor_flags & ~FD_CLOEXEC) != -1,
+            status_descriptor, stage);
+        return;
+    }
+    require_child_operation(
+        dup2(source_descriptor, target_descriptor) != -1,
+        status_descriptor, stage);
+}
+
+[[noreturn]] void exec_bounded_explicit_process_child(
+    const ExplicitProcessInvocation& invocation,
+    std::vector<char*>& argument_vector,
+    std::vector<char*>& environment_vector,
+    int output_descriptor,
+    int exec_status_descriptor,
+    bool suppress_standard_error,
+    const sigset_t& original_signal_mask,
+    pid_t expected_parent_pid) noexcept {
+    int group_result;
+    do {
+        group_result = setpgid(0, 0);
+    } while(group_result == -1 && errno == EINTR);
+    require_child_operation(
+        group_result == 0, exec_status_descriptor,
+        BoundedProcessLaunchStage::ChildProcessGroup);
+
+    require_child_operation(
+        prctl(PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0) == 0,
+        exec_status_descriptor,
+        BoundedProcessLaunchStage::ParentDeathSignal);
+    if(getppid() != expected_parent_pid) {
+        static_cast<void>(kill(getpid(), SIGKILL));
+        _exit(127);
+    }
+
+    require_child_operation(
+        sigprocmask(SIG_SETMASK, &original_signal_mask, nullptr) == 0,
+        exec_status_descriptor,
+        BoundedProcessLaunchStage::ChildSignalMask);
+    require_child_operation(
+        fchdir(*invocation.working_directory_fd) == 0,
+        exec_status_descriptor,
+        BoundedProcessLaunchStage::WorkingDirectory);
+
+    bind_bounded_child_descriptor(
+        *invocation.standard_input_fd, STDIN_FILENO,
+        exec_status_descriptor, BoundedProcessLaunchStage::StandardInput);
+    bind_bounded_child_descriptor(
+        output_descriptor, STDOUT_FILENO,
+        exec_status_descriptor, BoundedProcessLaunchStage::StandardOutput);
+
+    if(suppress_standard_error) {
+        int null_descriptor;
+        do {
+            null_descriptor = open("/dev/null", O_WRONLY | O_CLOEXEC);
+        } while(null_descriptor == -1 && errno == EINTR);
+        require_child_operation(
+            null_descriptor != -1, exec_status_descriptor,
+            BoundedProcessLaunchStage::StandardError);
+        bind_bounded_child_descriptor(
+            null_descriptor, STDERR_FILENO, exec_status_descriptor,
+            BoundedProcessLaunchStage::StandardError);
+    }
+
+    if(!close_descriptors_except(exec_status_descriptor)) {
+        report_bounded_child_failure(
+            exec_status_descriptor,
+            BoundedProcessLaunchStage::DescriptorHygiene, errno);
+    }
+
+    execve(
+        invocation.executable.c_str(), argument_vector.data(),
+        environment_vector.data());
+    report_bounded_child_failure(
+        exec_status_descriptor, BoundedProcessLaunchStage::Execve, errno);
+}
+
+int bounded_poll_timeout_milliseconds(
+    std::chrono::steady_clock::time_point now,
+    std::chrono::steady_clock::time_point next_deadline) noexcept {
+    if(next_deadline <= now) return 0;
+    auto remaining = std::chrono::ceil<std::chrono::milliseconds>(
+        next_deadline - now);
+    remaining = std::min(remaining, BOUNDED_PROCESS_POLL_SLICE);
+    if(remaining.count() > std::numeric_limits<int>::max()) {
+        return std::numeric_limits<int>::max();
+    }
+    return static_cast<int>(remaining.count());
+}
+
+bool bounded_process_group_exists(
+    pid_t process_group, int& observation_error) noexcept {
+    if(kill(-process_group, 0) == 0) return true;
+    if(errno == ESRCH) return false;
+    if(errno == EPERM) return true;
+    observation_error = errno;
+    return true;
+}
+
+bool signal_bounded_process_group(
+    pid_t process_group, int signal_number,
+    int& signal_error) noexcept {
+    if(process_group <= 0 || process_group == getpgrp()) {
+        signal_error = EINVAL;
+        return false;
+    }
+    if(kill(-process_group, signal_number) == 0 || errno == ESRCH) {
+        return true;
+    }
+    signal_error = errno;
+    return false;
+}
+
+BoundedCapturedProcessResult execute_bounded_explicit_process(
+    const ExplicitProcessInvocation& invocation,
+    const BoundedProcessPolicy& policy) {
+    if(!is_valid_bounded_invocation(invocation, policy)) {
+        return bounded_launch_failure(
+            BoundedProcessLaunchStage::InvocationValidation, EINVAL);
+    }
+
+    std::vector<char*> argument_vector;
+    argument_vector.reserve(invocation.arguments.size() + 2);
+    argument_vector.push_back(
+        const_cast<char*>(invocation.executable.c_str()));
+    for(const std::string& argument : invocation.arguments) {
+        argument_vector.push_back(const_cast<char*>(argument.c_str()));
+    }
+    argument_vector.push_back(nullptr);
+
+    std::vector<char*> environment_vector;
+    environment_vector.reserve(invocation.environment.size() + 1);
+    for(const std::string& assignment : invocation.environment) {
+        environment_vector.push_back(const_cast<char*>(assignment.c_str()));
+    }
+    environment_vector.push_back(nullptr);
+
+    int output_pipe[2] = {-1, -1};
+    if(!create_bounded_pipe(output_pipe)) {
+        return bounded_launch_failure(
+            BoundedProcessLaunchStage::StandardOutputPipe, errno);
+    }
+    OwnedProcessDescriptor output_read(output_pipe[0]);
+    OwnedProcessDescriptor output_write(output_pipe[1]);
+    if(!make_nonblocking(output_read.get())) {
+        return BoundedCapturedProcessResult{
+            {}, BoundedProcessIoOrWaitFailure{BoundedProcessIoStage::StandardOutputNonblocking, errno}};
+    }
+
+    int exec_status_pipe[2] = {-1, -1};
+    if(!create_bounded_pipe(exec_status_pipe)) {
+        return bounded_launch_failure(
+            BoundedProcessLaunchStage::ExecStatusPipe, errno);
+    }
+    OwnedProcessDescriptor exec_status_read(exec_status_pipe[0]);
+    OwnedProcessDescriptor exec_status_write(exec_status_pipe[1]);
+    if(!make_nonblocking(exec_status_read.get())) {
+        return BoundedCapturedProcessResult{
+            {}, BoundedProcessIoOrWaitFailure{BoundedProcessIoStage::ExecStatusNonblocking, errno}};
+    }
+
+    sigset_t original_signal_mask;
+    if(sigprocmask(SIG_SETMASK, nullptr, &original_signal_mask) == -1) {
+        return bounded_launch_failure(
+            BoundedProcessLaunchStage::SignalMask, errno);
+    }
+    sigset_t observed_signals;
+    if(sigemptyset(&observed_signals) == -1) {
+        return bounded_launch_failure(
+            BoundedProcessLaunchStage::SignalMask, errno);
+    }
+    bool has_observed_signal = false;
+    constexpr std::array<int, 5> OBSERVED_SIGNALS{
+        SIGCHLD, SIGINT, SIGQUIT, SIGHUP, SIGTERM};
+    for(int signal_number : OBSERVED_SIGNALS) {
+        const int is_blocked =
+            sigismember(&original_signal_mask, signal_number);
+        if(is_blocked == -1) {
+            return bounded_launch_failure(
+                BoundedProcessLaunchStage::SignalMask, errno);
+        }
+        if(is_blocked == 0) {
+            if(sigaddset(&observed_signals, signal_number) == -1) {
+                return bounded_launch_failure(
+                    BoundedProcessLaunchStage::SignalMask, errno);
+            }
+            has_observed_signal = true;
+        }
+    }
+
+    bool signal_mask_changed = false;
+    if(has_observed_signal) {
+        if(sigprocmask(
+               SIG_BLOCK, &observed_signals, nullptr) == -1) {
+            return bounded_launch_failure(
+                BoundedProcessLaunchStage::SignalMask, errno);
+        }
+        signal_mask_changed = true;
+    }
+
+    OwnedProcessDescriptor signal_descriptor;
+    if(has_observed_signal) {
+        int descriptor = signalfd(
+            -1, &observed_signals, SFD_CLOEXEC | SFD_NONBLOCK);
+        if(descriptor == -1 || !promote_process_descriptor(descriptor)) {
+            const int setup_error = errno;
+            if(descriptor >= 0) static_cast<void>(close(descriptor));
+            if(signal_mask_changed &&
+               sigprocmask(
+                   SIG_SETMASK, &original_signal_mask, nullptr) == -1) {
+                return BoundedCapturedProcessResult{
+                    {}, BoundedProcessIoOrWaitFailure{BoundedProcessIoStage::SignalMaskRestore, errno}};
+            }
+            return bounded_launch_failure(
+                BoundedProcessLaunchStage::SignalDescriptor,
+                setup_error);
+        }
+        signal_descriptor.reset(descriptor);
+    }
+
+    int original_subreaper = 0;
+    bool subreaper_changed = false;
+    if(prctl(
+           PR_GET_CHILD_SUBREAPER, &original_subreaper, 0, 0, 0) == -1 ||
+       (original_subreaper == 0 &&
+        prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) == -1)) {
+        const int setup_error = errno;
+        signal_descriptor.reset();
+        if(signal_mask_changed &&
+           sigprocmask(
+               SIG_SETMASK, &original_signal_mask, nullptr) == -1) {
+            return BoundedCapturedProcessResult{
+                {}, BoundedProcessIoOrWaitFailure{BoundedProcessIoStage::SignalMaskRestore, errno}};
+        }
+        return bounded_launch_failure(
+            BoundedProcessLaunchStage::Subreaper, setup_error);
+    }
+    subreaper_changed = original_subreaper == 0;
+
+    const pid_t expected_parent_pid = getpid();
+    const pid_t child_pid = fork();
+    if(child_pid == -1) {
+        const int fork_error = errno;
+        int restore_error = 0;
+        BoundedProcessIoStage restore_stage =
+            BoundedProcessIoStage::SubreaperRestore;
+        if(subreaper_changed &&
+           prctl(
+               PR_SET_CHILD_SUBREAPER, original_subreaper,
+               0, 0, 0) == -1) {
+            restore_error = errno;
+        }
+        signal_descriptor.reset();
+        if(signal_mask_changed &&
+           sigprocmask(
+               SIG_SETMASK, &original_signal_mask, nullptr) == -1 &&
+           restore_error == 0) {
+            restore_error = errno;
+            restore_stage =
+                BoundedProcessIoStage::SignalMaskRestore;
+        }
+        if(restore_error != 0) {
+            return BoundedCapturedProcessResult{
+                {}, BoundedProcessIoOrWaitFailure{restore_stage, restore_error}};
+        }
+        return bounded_launch_failure(
+            BoundedProcessLaunchStage::Fork, fork_error);
+    }
+    if(child_pid == 0) {
+        exec_bounded_explicit_process_child(
+            invocation, argument_vector, environment_vector,
+            output_write.get(), exec_status_write.get(),
+            policy.suppress_standard_error, original_signal_mask,
+            expected_parent_pid);
+    }
+
+    const auto hard_deadline =
+        std::chrono::steady_clock::now() + policy.hard_timeout;
+    output_write.reset();
+    exec_status_write.reset();
+
+    bool process_group_is_dedicated = false;
+    int parent_group_result;
+    do {
+        parent_group_result = setpgid(child_pid, child_pid);
+    } while(parent_group_result == -1 && errno == EINTR);
+    if(parent_group_result == 0) {
+        process_group_is_dedicated = true;
+    } else {
+        const int group_error = errno;
+        const pid_t observed_group = getpgid(child_pid);
+        if(observed_group == child_pid ||
+           (observed_group == -1 && errno == ESRCH)) {
+            process_group_is_dedicated = true;
+        } else if(group_error != ESRCH) {
+            static_cast<void>(kill(child_pid, SIGKILL));
+            int child_status = 0;
+            while(waitpid(child_pid, &child_status, 0) == -1 &&
+                  errno == EINTR) {
+            }
+            int restore_error = 0;
+            BoundedProcessIoStage restore_stage =
+                BoundedProcessIoStage::SubreaperRestore;
+            if(subreaper_changed &&
+               prctl(
+                   PR_SET_CHILD_SUBREAPER, original_subreaper,
+                   0, 0, 0) == -1) {
+                restore_error = errno;
+            }
+            signal_descriptor.reset();
+            if(signal_mask_changed &&
+               sigprocmask(
+                   SIG_SETMASK, &original_signal_mask, nullptr) == -1 &&
+               restore_error == 0) {
+                restore_error = errno;
+                restore_stage =
+                    BoundedProcessIoStage::SignalMaskRestore;
+            }
+            if(restore_error != 0) {
+                return BoundedCapturedProcessResult{
+                    {}, BoundedProcessIoOrWaitFailure{restore_stage, restore_error}};
+            }
+            return bounded_launch_failure(
+                BoundedProcessLaunchStage::ParentProcessGroup,
+                group_error);
+        }
+    }
+
+    std::string output;
+    std::optional<BoundedProcessOutcome> forced_outcome;
+    std::exception_ptr pending_exception;
+    std::array<char, sizeof(BoundedChildFailureRecord)>
+        exec_status_bytes{};
+    std::size_t exec_status_size = 0;
+    bool exec_succeeded = false;
+    bool root_reaped = false;
+    int root_status = 0;
+    bool termination_started = false;
+    bool kill_sent = false;
+    auto termination_deadline = hard_deadline;
+
+    const auto force_io_failure = [&](BoundedProcessIoStage stage,
+                                      int error_number) {
+        forced_outcome = BoundedProcessIoOrWaitFailure{
+            stage, error_number};
+    };
+
+    const auto signal_tree = [&](int signal_number) {
+        int signal_error = 0;
+        bool signaled = false;
+        if(process_group_is_dedicated) {
+            signaled = signal_bounded_process_group(
+                child_pid, signal_number, signal_error);
+        } else if(kill(child_pid, signal_number) == 0 ||
+                  errno == ESRCH) {
+            signaled = true;
+        } else {
+            signal_error = errno;
+        }
+        if(!signaled) {
+            force_io_failure(
+                BoundedProcessIoStage::ProcessGroupSignal,
+                signal_error);
+        }
+    };
+
+    const auto begin_termination = [&](int first_signal) {
+        if(termination_started) return;
+        termination_started = true;
+        termination_deadline =
+            std::chrono::steady_clock::now() +
+            policy.termination_grace;
+        signal_tree(first_signal);
+    };
+
+    const auto close_output_after_terminal_cause = [&]() {
+        output_read.reset();
+    };
+
+    const auto observe_process_group = [&]() {
+        if(!process_group_is_dedicated) return !root_reaped;
+        int observation_error = 0;
+        const bool exists = bounded_process_group_exists(
+            child_pid, observation_error);
+        if(observation_error != 0) {
+            force_io_failure(
+                BoundedProcessIoStage::ProcessGroupObservation,
+                observation_error);
+        }
+        return exists;
+    };
+
+    while(true) {
+        auto now = std::chrono::steady_clock::now();
+        // POLICY: deadline observation precedes pipe readiness from the same
+        // poll wakeup. Once overflow is observed first, later deadline expiry
+        // cannot replace CaptureLimitExceeded during TERM/KILL cleanup.
+        if(!forced_outcome.has_value() && now >= hard_deadline) {
+            forced_outcome = BoundedProcessTimedOut{};
+            close_output_after_terminal_cause();
+            begin_termination(SIGTERM);
+        }
+
+        if(output_read.valid()) {
+            std::array<char, 4096> buffer;
+            while(true) {
+                const ssize_t bytes_read = read(
+                    output_read.get(), buffer.data(), buffer.size());
+                if(bytes_read > 0) {
+                    const std::size_t chunk_size =
+                        static_cast<std::size_t>(bytes_read);
+                    const std::size_t remaining =
+                        output.size() < policy.stdout_capture_limit
+                            ? policy.stdout_capture_limit - output.size()
+                            : 0;
+                    const std::size_t retained =
+                        std::min(chunk_size, remaining);
+                    if(retained > 0) {
+                        try {
+                            output.append(buffer.data(), retained);
+                        } catch(...) {
+                            pending_exception = std::current_exception();
+                            force_io_failure(
+                                BoundedProcessIoStage::StandardOutputRead,
+                                ENOMEM);
+                            close_output_after_terminal_cause();
+                            begin_termination(SIGTERM);
+                            break;
+                        }
+                    }
+                    if(retained < chunk_size) {
+                        if(!forced_outcome.has_value()) {
+                            forced_outcome =
+                                BoundedProcessCaptureLimitExceeded{
+                                    policy.stdout_capture_limit};
+                        }
+                        close_output_after_terminal_cause();
+                        begin_termination(SIGTERM);
+                        break;
+                    }
+                    continue;
+                }
+                if(bytes_read == 0) {
+                    output_read.reset();
+                    break;
+                }
+                if(errno == EINTR) continue;
+                if(errno == EAGAIN || errno == EWOULDBLOCK) break;
+                force_io_failure(
+                    BoundedProcessIoStage::StandardOutputRead, errno);
+                close_output_after_terminal_cause();
+                begin_termination(SIGTERM);
+                break;
+            }
+        }
+
+        if(exec_status_read.valid()) {
+            while(true) {
+                const ssize_t bytes_read = read(
+                    exec_status_read.get(),
+                    exec_status_bytes.data() + exec_status_size,
+                    exec_status_bytes.size() - exec_status_size);
+                if(bytes_read > 0) {
+                    exec_status_size +=
+                        static_cast<std::size_t>(bytes_read);
+                    if(exec_status_size == exec_status_bytes.size()) {
+                        BoundedChildFailureRecord record{};
+                        std::memcpy(
+                            &record, exec_status_bytes.data(),
+                            sizeof(record));
+                        if(record.magic != BOUNDED_CHILD_FAILURE_MAGIC ||
+                           record.stage > static_cast<std::uint32_t>(
+                                              BoundedProcessLaunchStage::
+                                                  Execve)) {
+                            force_io_failure(
+                                BoundedProcessIoStage::ExecStatusRead,
+                                EPROTO);
+                        } else {
+                            forced_outcome =
+                                BoundedProcessLaunchOrSetupFailure{
+                                    static_cast<BoundedProcessLaunchStage>(
+                                        record.stage),
+                                    record.error_number};
+                        }
+                        exec_status_read.reset();
+                        close_output_after_terminal_cause();
+                        begin_termination(SIGTERM);
+                        break;
+                    }
+                    continue;
+                }
+                if(bytes_read == 0) {
+                    if(exec_status_size == 0) {
+                        exec_succeeded = true;
+                    } else {
+                        force_io_failure(
+                            BoundedProcessIoStage::ExecStatusRead,
+                            EPROTO);
+                        close_output_after_terminal_cause();
+                        begin_termination(SIGTERM);
+                    }
+                    exec_status_read.reset();
+                    break;
+                }
+                if(errno == EINTR) continue;
+                if(errno == EAGAIN || errno == EWOULDBLOCK) break;
+                force_io_failure(
+                    BoundedProcessIoStage::ExecStatusRead, errno);
+                exec_status_read.reset();
+                close_output_after_terminal_cause();
+                begin_termination(SIGTERM);
+                break;
+            }
+        }
+
+        if(signal_descriptor.valid()) {
+            while(true) {
+                signalfd_siginfo signal_information{};
+                const ssize_t bytes_read = read(
+                    signal_descriptor.get(), &signal_information,
+                    sizeof(signal_information));
+                if(bytes_read == static_cast<ssize_t>(
+                                     sizeof(signal_information))) {
+                    const int signal_number = static_cast<int>(
+                        signal_information.ssi_signo);
+                    if(signal_number != SIGCHLD) {
+                        signal_tree(signal_number);
+                        if(!termination_started) {
+                            termination_started = true;
+                            termination_deadline =
+                                std::chrono::steady_clock::now() +
+                                policy.termination_grace;
+                        }
+                    }
+                    continue;
+                }
+                if(bytes_read == -1 && errno == EINTR) continue;
+                if(bytes_read == -1 &&
+                   (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                    break;
+                }
+                if(bytes_read == 0) break;
+                force_io_failure(
+                    BoundedProcessIoStage::SignalRead,
+                    bytes_read == -1 ? errno : EPROTO);
+                begin_termination(SIGTERM);
+                break;
+            }
+        }
+
+        if(!root_reaped) {
+            int status = 0;
+            const pid_t waited = waitpid(child_pid, &status, WNOHANG);
+            if(waited == child_pid) {
+                root_reaped = true;
+                root_status = status;
+            } else if(waited == -1 && errno != EINTR) {
+                const int wait_error = errno;
+                force_io_failure(
+                    BoundedProcessIoStage::Wait, wait_error);
+                if(wait_error == ECHILD) root_reaped = true;
+                begin_termination(SIGTERM);
+            }
+        }
+
+        if(root_reaped) {
+            while(true) {
+                int descendant_status = 0;
+                const pid_t waited = waitpid(
+                    -child_pid, &descendant_status, WNOHANG);
+                if(waited > 0) continue;
+                if(waited == 0 || (waited == -1 && errno == ECHILD)) {
+                    break;
+                }
+                if(waited == -1 && errno == EINTR) continue;
+                force_io_failure(
+                    BoundedProcessIoStage::Wait, errno);
+                begin_termination(SIGTERM);
+                break;
+            }
+        }
+
+        bool group_exists = observe_process_group();
+        if(root_reaped && group_exists && !termination_started) {
+            // A root that exits while a same-group descendant retains stdout
+            // cannot turn the old blocking EOF drain into an unbounded wait.
+            begin_termination(SIGTERM);
+        }
+
+        now = std::chrono::steady_clock::now();
+        if(termination_started && group_exists && !kill_sent &&
+           now >= termination_deadline) {
+            kill_sent = true;
+            signal_tree(SIGKILL);
+        }
+
+        group_exists = observe_process_group();
+        const bool normal_streams_complete =
+            !output_read.valid() && !exec_status_read.valid() &&
+            exec_succeeded;
+        if(root_reaped && !group_exists &&
+           (forced_outcome.has_value() || normal_streams_complete)) {
+            break;
+        }
+
+        std::array<pollfd, 3> poll_descriptors{};
+        nfds_t descriptor_count = 0;
+        const auto append_poll_descriptor = [&](int descriptor) {
+            poll_descriptors[descriptor_count] =
+                pollfd{descriptor, POLLIN | POLLHUP, 0};
+            ++descriptor_count;
+        };
+        if(output_read.valid()) append_poll_descriptor(output_read.get());
+        if(exec_status_read.valid()) {
+            append_poll_descriptor(exec_status_read.get());
+        }
+        if(signal_descriptor.valid()) {
+            append_poll_descriptor(signal_descriptor.get());
+        }
+
+        const auto poll_now = std::chrono::steady_clock::now();
+        auto next_deadline =
+            forced_outcome.has_value() || kill_sent
+                ? poll_now + BOUNDED_PROCESS_POLL_SLICE
+                : hard_deadline;
+        if(termination_started && !kill_sent) {
+            next_deadline = std::min(next_deadline, termination_deadline);
+        }
+        const int poll_timeout = bounded_poll_timeout_milliseconds(
+            poll_now, next_deadline);
+        int poll_result;
+        do {
+            poll_result = poll(
+                poll_descriptors.data(), descriptor_count,
+                poll_timeout);
+        } while(poll_result == -1 && errno == EINTR);
+        if(poll_result == -1) {
+            force_io_failure(BoundedProcessIoStage::Poll, errno);
+            close_output_after_terminal_cause();
+            begin_termination(SIGTERM);
+        } else if(poll_result > 0) {
+            for(nfds_t index = 0; index < descriptor_count; ++index) {
+                if((poll_descriptors[index].revents & POLLNVAL) != 0) {
+                    force_io_failure(BoundedProcessIoStage::Poll, EBADF);
+                    close_output_after_terminal_cause();
+                    begin_termination(SIGTERM);
+                    break;
+                }
+            }
+        }
+    }
+
+    // One final group-targeted reap closes the subreaper adoption race before
+    // restoring the caller's process-wide subreaper state.
+    while(true) {
+        int descendant_status = 0;
+        const pid_t waited = waitpid(-child_pid, &descendant_status, WNOHANG);
+        if(waited > 0) continue;
+        if(waited == -1 && errno == EINTR) continue;
+        break;
+    }
+
+    output_read.reset();
+    exec_status_read.reset();
+    signal_descriptor.reset();
+
+    if(subreaper_changed &&
+       prctl(
+           PR_SET_CHILD_SUBREAPER, original_subreaper,
+           0, 0, 0) == -1) {
+        force_io_failure(
+            BoundedProcessIoStage::SubreaperRestore, errno);
+    }
+    if(signal_mask_changed &&
+       sigprocmask(
+           SIG_SETMASK, &original_signal_mask, nullptr) == -1) {
+        force_io_failure(
+            BoundedProcessIoStage::SignalMaskRestore, errno);
+    }
+
+    if(pending_exception) std::rethrow_exception(pending_exception);
+    if(forced_outcome.has_value()) {
+        return BoundedCapturedProcessResult{
+            std::move(output), std::move(*forced_outcome)};
+    }
+    if(WIFEXITED(root_status)) {
+        return BoundedCapturedProcessResult{
+            std::move(output),
+            BoundedProcessExited{WEXITSTATUS(root_status)}};
+    }
+    if(WIFSIGNALED(root_status)) {
+        return BoundedCapturedProcessResult{
+            std::move(output),
+            BoundedProcessSignaled{WTERMSIG(root_status)}};
+    }
+    return BoundedCapturedProcessResult{
+        std::move(output),
+        BoundedProcessIoOrWaitFailure{
+            BoundedProcessIoStage::Wait, ECHILD}};
 }
 
 CapturedCommandResult execute_explicit_process(
@@ -640,6 +1516,12 @@ CapturedCommandResult capture_explicit_process_output_raw(
     bool suppress_standard_error) {
     return execute_explicit_process(
         invocation, true, false, suppress_standard_error);
+}
+
+BoundedCapturedProcessResult capture_bounded_explicit_process_output_raw(
+    const ExplicitProcessInvocation& invocation,
+    const BoundedProcessPolicy& policy) {
+    return execute_bounded_explicit_process(invocation, policy);
 }
 
 int run_explicit_process(

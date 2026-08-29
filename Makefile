@@ -92,6 +92,7 @@ CMAKE_FOCUSED_ALIASES := \
 	test-separated-package-base-source-build \
 	test-production-source-build \
 	test-process-capture \
+	test-bounded-process \
 	test-aur-update-plan \
 	test-upgrade-all-plan \
 	test-system-source-upgrade \
