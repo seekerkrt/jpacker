@@ -42,6 +42,7 @@ release操作は[`DEVELOPMENT.md`](DEVELOPMENT.md)を正とする。この文書
 | E: offline/current Arch Docker | `test-container` | image内clean/default build、offline runtimeのA–D + G |
 | F: actual provider / AUR / local | `test-container-live` | provider→AUR→localの独立containerを直列・fail-fast実行 |
 | security-specific installed ALPM receipt | `test-container-receipt` | networkなしのinstalled root helper、transaction-local hook、actual isolated Install / Upgrade / failure |
+| source-artifact installed receipt | `test-container-source-artifact-receipt` | production transport、write-sealed bytes、root-owned staging、fixed `pacman -U`、actual observation / causal evidenceとInstall / Upgrade / reinstall / downgrade / skip / failure |
 
 PR / mergeのcanonical host gateは`test-host-release`である。`test`と
 `release-check-exclusive`を同一candidateでそれぞれ1回実行したevidenceもcoverageは同等だが、
@@ -52,6 +53,8 @@ PR / mergeのcanonical host gateは`test-host-release`である。`test`と
 `test-container-live`がPASSした場合、同じcandidateに対する3つのindividual live targetの再実行は不要である。
 `test-container-receipt`はIssue #404のroot trust boundaryを変更したcandidateで必要な追加evidenceであり、
 E / Fやhost gateへ読み替えない。
+`test-container-source-artifact-receipt`はIssue #485の別owner boundaryを確認し、selected-provider
+`test-container-receipt`を上書きまたは代替しない。
 
 通常の`make`とpackage consumerは`build/cmake-production` / `BUILD_TESTING=OFF`、developer / host /
 release validationは`build/cmake-testing` / `BUILD_TESTING=ON`を使う。developerの`dev-debug` presetは

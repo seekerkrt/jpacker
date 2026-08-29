@@ -1,0 +1,20 @@
+pkgbase=moguet-source-receipt-multi
+pkgname=(
+    moguet-source-receipt-multi-a
+    moguet-source-receipt-multi-b
+)
+pkgver=1
+pkgrel=1
+pkgdesc='Moguet source-artifact receipt multi-artifact fixture'
+arch=('any')
+license=('GPL')
+
+package_moguet-source-receipt-multi-a() {
+    install -Dm644 /dev/null \
+        "$pkgdir/usr/share/moguet-source-receipt/multi-a"
+}
+
+package_moguet-source-receipt-multi-b() {
+    install -Dm644 /dev/null \
+        "$pkgdir/usr/share/moguet-source-receipt/multi-b"
+}

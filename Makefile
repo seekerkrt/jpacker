@@ -65,6 +65,7 @@ CMAKE_FOCUSED_ALIASES := \
 	test-source-package-identity-projection \
 	test-source-package-compatibility \
 	test-invocation-owned-cleanup-model \
+	test-source-artifact-install-trusted-transport \
 	test-reviewed-source-state \
 	test-reviewed-source-state-store \
 	test-reviewed-source-lifecycle \
@@ -290,7 +291,8 @@ export MOGUET_FRONTEND_USE_DEFAULT_COMPILE_OPTIONS
 	test-container-live-provider \
 	test-container-live-aur \
 	test-container-live-local \
-	test-container-receipt
+	test-container-receipt \
+	test-container-source-artifact-receipt
 .PHONY: check-reviewed-source-pinned-build-authority $(CMAKE_FOCUSED_ALIASES)
 
 all: $(TARGET) $(MANPAGES)
@@ -651,6 +653,19 @@ test-container-receipt:
 		printf '%s\n' ':: Running trusted ALPM receipt validation container'; \
 		$(DOCKER) run --rm --network=none \
 			"$(ARCH_RECEIPT_VALIDATION_IMAGE)"
+
+test-container-source-artifact-receipt:
+	@set -eu; \
+		printf '%s\n' ':: Building source-artifact receipt validation image'; \
+		$(DOCKER) build --network=none \
+			--tag "$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
+			--file containers/arch-receipt-validation/Dockerfile \
+			.; \
+		printf '%s\n' ':: Running source-artifact receipt validation container'; \
+		$(DOCKER) run --rm --network=none \
+			"$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
+			/usr/bin/python3 \
+			containers/arch-receipt-validation/run-installed-source-artifact-receipt.py
 
 test-container-live:
 	+@set -eu; \

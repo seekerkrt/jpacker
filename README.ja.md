@@ -223,11 +223,14 @@ find "$stage_dir" -type f -print
 同じCMake graphへmappingされます。
 
 current development packageはprivate implementation helper
-`/usr/libexec/moguet/moguet-alpm-receipt-helper`もinstallします。これはpackage-ownedな
-root transaction helperであり、public commandではありません。`PATH`外でman pageを持たず、
-executableやdestination pathを引数に取らず、source / build treeのhelperで置き換えては
-なりません。current public source-buildの`--rmdeps`は引き続きunsupported / fail-closedであり、
-helperのinstallによってdependency cleanupが有効になるわけではありません。
+`/usr/libexec/moguet/moguet-alpm-receipt-helper`と
+`/usr/libexec/moguet/moguet-source-artifact-install-helper`もinstallします。両者はowner / protocol /
+stateを分離したpackage-owned root transaction authorityで、public commandではありません。`PATH`外で
+man pageを持たず、executable、state root、destination pathを引数に取らず、source / build treeのhelperで
+置き換えてはなりません。source-artifact helperはwrite-sealedなvalidated artifact bytesだけをprivateな
+root-owned transaction stateへstageしてからfixed `pacman -U`へ渡します。current public source-buildの
+`--rmdeps`は引き続きunsupported / fail-closedであり、どちらのhelperのinstallもdependency cleanupを
+有効化しません。
 
 v2.0.0のpackage名と唯一のexecutableは`moguet`で、`/usr/bin/jpacker`をinstall
 しません。payloadはjpacker v1.16.0 packageと重複しないため、metadataには
@@ -265,8 +268,9 @@ makepkg -si
 `makepkg -si`は、そのtag付きreleaseをbuildし、同じ操作で`pacman -U`によってlive
 systemへinstallします。これは、development treeをその場でbuild・確認するだけで
 何もinstallしない、上記の`make`や`./moguet --help`とは異なります。`PKGBUILD`はcanonicalな
-production CMake build / install consumerとして`BUILD_TESTING=OFF`を指定し、98個のdeveloper
-C++ test executableと122件のCTest registrationはhost / CI / release validation側で扱います。
+production CMake build / install consumerとして`BUILD_TESTING=OFF`を指定し、99個のdeveloper
+C++ test-ledger executable、1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、123件のCTest
+registrationはhost / CI / release validation側で扱います。
 この`PKGBUILD`は
 repository同梱のpackaging経路であり、AUR submissionではありません。Moguetはまだ
 AUR pageを公開していません。

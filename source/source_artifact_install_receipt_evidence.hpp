@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+class SourceArtifactInstallTrustedTransport;
+
 // This identity separates invocation-local evidence sets. It is correlation
 // authority, not runtime authentication, a PID/timestamp, or a replacement for
 // Slice 2's root-backed transaction token.
@@ -118,6 +120,10 @@ private:
     std::vector<SourceArtifactInstallObservedSelectedArtifact>
         selected_artifacts_;
     InvocationDependencyTransactionLedger transaction_ledger_;
+
+    // Only the dedicated fixed-owner transport can construct a production
+    // observation. The test factory remains separately compile-gated.
+    friend class SourceArtifactInstallTrustedTransport;
 
 #ifdef MOGUET_ENABLE_SOURCE_ARTIFACT_INSTALL_RECEIPT_TEST_HOOKS
     friend SourceArtifactInstallReceiptObservation

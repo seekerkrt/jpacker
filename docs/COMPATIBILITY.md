@@ -305,6 +305,11 @@ selected childだけがinstall input、install reason、installed / skipped-as-n
 
 source-build routeでは`makepkg -r`、`pacman -Rns`、`pacman -Qdt`、独自orphan cleanup、automatic rollbackへ変換しない。`--noconfirm`でも拒否を突破しない。
 
+current internal treeには、validated source artifact bytesをwrite-sealed snapshotからroot-owned stagingへ移し、
+actual `pacman -U`のInstall-only receiptを取得する`SourceArtifactInstall`専用transportがある。ただし、
+policy protection、shared lifetime、route completeness、production candidate collectorへ未接続であり、
+このinternal foundationはpublic `--rmdeps` supportやcleanup candidate eligibilityを意味しない。
+
 pacman-only routeでは、Moguetがmakepkg dependency installation lifecycleを実行しない。そのためcleanup対象となるinvocation-owned dependency集合自体が発生せず、Moguetはoptionを消費するが作用させず、pacmanへ転送しない。このno-opはsource-build routeで意味のあるcleanupを黙って無視することとは異なる。pacman-onlyでは安全に作用させるcleanup lifecycleが存在しないからである。decision 1の「黙って無視せず、意味を安全に維持できない場合は停止する」とも矛盾しない。
 
 | Route | `--rmdeps` contract |

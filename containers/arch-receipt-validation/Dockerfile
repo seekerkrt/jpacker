@@ -22,10 +22,25 @@ RUN env -u MAKEFLAGS -u MFLAGS make clean \
     && env -u MAKEFLAGS -u MFLAGS make \
         PREFIX=/usr -j8 --output-sync=target
 
+# Build the owner-specific installed fixture with the same compiled helper
+# path as the package payload. It remains uninstalled and is run only as the
+# unprivileged validation user.
+RUN cmake -S . -B build/cmake-receipt-testing \
+        -DBUILD_TESTING=ON \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DMOGUET_INSTALL_INTERNAL_EXECUTABLE_DIRECTORY=/usr/libexec/moguet \
+    && cmake --build build/cmake-receipt-testing \
+        --target moguet-source-artifact-install-installed-fixture \
+        --parallel 8
+
 RUN for fixture in \
         dependency-v1 \
         dependency-v2 \
-        target; do \
+        target \
+        source-v1 \
+        source-v2 \
+        source-failure \
+        source-multi; do \
         ( \
             cd "containers/arch-receipt-validation/fixtures/$fixture" \
             && PKGDEST=/home/moguet-validation/receipt-packages \
@@ -35,11 +50,22 @@ RUN for fixture in \
 
 USER root:root
 
+# This authority exists only inside the disposable networkless fixture. The
+# production transport itself still supplies fixed helper/pacman argv.
+RUN printf '%s\n' \
+        'moguet-validation ALL=(root) NOPASSWD: /usr/libexec/moguet/moguet-source-artifact-install-helper *, /usr/bin/pacman -U *' \
+        > /etc/sudoers.d/moguet-source-artifact-receipt \
+    && chmod 0440 /etc/sudoers.d/moguet-source-artifact-receipt \
+    && visudo -cf /etc/sudoers.d/moguet-source-artifact-receipt
+
 # Install through the configured CMake graph. The hook will execute only this
 # root-owned installed payload; the build-tree helper remains unexecuted.
 RUN cmake --install build/cmake-production \
     && test "$(stat -c '%U:%G:%a:%F' \
         /usr/libexec/moguet/moguet-alpm-receipt-helper)" = \
+        'root:root:755:regular file' \
+    && test "$(stat -c '%U:%G:%a:%F' \
+        /usr/libexec/moguet/moguet-source-artifact-install-helper)" = \
         'root:root:755:regular file'
 
 CMD ["/bin/sh", "containers/arch-receipt-validation/run-installed-receipt.sh"]

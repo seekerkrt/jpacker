@@ -260,12 +260,16 @@ shown above are mapped into that graph rather than implemented by a separate
 Make install recipe.
 
 The current development package also installs the private implementation
-helper `/usr/libexec/moguet/moguet-alpm-receipt-helper`. It is a package-owned
-root transaction helper, not a public command: it is outside `PATH`, has no
-man page, does not accept an executable or destination path, and must never be
-replaced by a helper from a source or build tree. The current public
-source-build `--rmdeps` route remains unsupported and fail-closed; installing
-this helper does not enable dependency cleanup.
+helpers `/usr/libexec/moguet/moguet-alpm-receipt-helper` and
+`/usr/libexec/moguet/moguet-source-artifact-install-helper`. They are separate
+package-owned root transaction authorities, not public commands: they are
+outside `PATH`, have no man pages, do not accept an executable, state root, or
+destination path, and must never be replaced by a helper from a source or
+build tree. The source-artifact helper stages only write-sealed validated
+artifact bytes into its private root-owned transaction state before a fixed
+`pacman -U` hand-off. The current public source-build `--rmdeps` route remains
+unsupported and fail-closed; installing either helper does not enable
+dependency cleanup.
 
 The v2.0.0 package and its only executable are named `moguet`; it does not
 install `/usr/bin/jpacker`. Its payload is disjoint from the jpacker v1.16.0
@@ -308,9 +312,10 @@ makepkg -si
 system with `pacman -U` in the same step. This differs from `make` and
 `./moguet --help` above, which only build and inspect the development tree
 in place and install nothing. The `PKGBUILD` is the canonical production
-CMake build/install consumer and configures `BUILD_TESTING=OFF`; the 98
-developer C++ test executables and 122 CTest registrations remain in host,
-CI, and release validation. This `PKGBUILD` is a repository-provided
+CMake build/install consumer and configures `BUILD_TESTING=OFF`; the 99
+developer C++ test-ledger executables, one `EXCLUDE_FROM_ALL` installed
+transport fixture harness, and 123 CTest registrations remain in host, CI,
+and release validation. This `PKGBUILD` is a repository-provided
 packaging path, not an AUR submission; Moguet still has no published AUR
 page.
 

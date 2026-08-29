@@ -110,6 +110,10 @@ _moguet_add_direct_ctest(
     cpp.package_base_artifact_install_executor
     package-base-artifact-install-executor-test
 )
+_moguet_add_direct_ctest(
+    cpp.source_artifact_install_trusted_transport
+    source-artifact-install-trusted-transport-test
+)
 _moguet_add_direct_ctest(cpp.separated_source_build separated-source-build-test)
 _moguet_add_direct_ctest(
     cpp.separated_package_base_source_build
