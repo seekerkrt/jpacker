@@ -459,10 +459,15 @@ and keeps the existing precedence.
 dry-run, and the fresh AUR phase of `upgrade-all` block before AUR mutation;
 non-TTY use and `--noconfirm` do not add a prompt or approve a rebuild. v2.5.0
 does not query or compare the upstream VCS revision and does not publish devel
-build provenance. The read-only Git observer and installed-artifact-bound
-authoritative comparison remain follow-up work in
-[issue #475](https://github.com/seekerkrt/moguet/issues/475) and
-[issue #476](https://github.com/seekerkrt/moguet/issues/476).
+build provenance. The current development tree includes the trusted HTTPS Git
+remote revision observer foundation from
+[issue #475](https://github.com/seekerkrt/moguet/issues/475), limited to
+default HEAD and exact branches with strict complete SHA-1 / SHA-256 results.
+It has no production source-authority producer or caller and is not connected
+to AUR update assessment. Installed-artifact-bound provenance and authoritative
+`UpdateAvailable` / `UpToDate` comparison remain
+[issue #476](https://github.com/seekerkrt/moguet/issues/476); users still cannot
+automatically compare VCS package revisions through the current CLI.
 
 `--aur` limits supported `-S`, `-Ss`, and `-Si` forms to AUR. `--repo`
 limits them to official binary repositories. Combining the selectors is an

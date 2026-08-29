@@ -406,10 +406,13 @@ update candidate authorityを優先します。
 `RequiresCheck`はautomatic rebuild candidateではありません。`upgrade-aur`、そのdry-run、
 `upgrade-all`のfresh AUR phaseはAUR mutationより前にblockし、non-TTYや`--noconfirm`でも
 promptを追加せずrebuildを承認しません。v2.5.0ではupstream VCS revisionのquery / 比較や
-devel build provenanceのpublicationを行いません。read-only Git observerとinstalled artifactへ
-束縛したauthoritative comparisonはfollow-upの
-[Issue #475](https://github.com/seekerkrt/moguet/issues/475)と
-[Issue #476](https://github.com/seekerkrt/moguet/issues/476)が所有します。
+devel build provenanceのpublicationを行いません。current development treeには
+[Issue #475](https://github.com/seekerkrt/moguet/issues/475)のtrusted HTTPS Git remote revision
+observer foundationが入り、default HEAD / exact branchとcompleteなSHA-1 / SHA-256 resultだけへ
+限定されています。ただしproduction source-authority producer / callerはなく、AUR update assessmentへ
+未接続です。installed artifactへ束縛したprovenanceとauthoritativeな`UpdateAvailable` / `UpToDate`
+比較は引き続き[Issue #476](https://github.com/seekerkrt/moguet/issues/476)の責務であり、current CLIから
+VCS package revisionを自動比較することはまだできません。
 
 `--aur`は対応する`-S`、`-Ss`、`-Si`をAURへ限定し、`--repo`はofficial binary
 repositoryへ限定します。両selectorの併用はexternal commandやAUR queryより前に
