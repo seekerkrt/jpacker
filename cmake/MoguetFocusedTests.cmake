@@ -88,6 +88,11 @@ moguet_add_focused_ctest_alias(
 )
 
 moguet_add_focused_ctest_alias(
+    test-makepkg-syncdeps-adapter-state
+    TESTS cpp.makepkg_syncdeps_adapter_state
+)
+
+moguet_add_focused_ctest_alias(
     test-localization
     TESTS localization.contract
     TARGETS moguet_test_catalogs

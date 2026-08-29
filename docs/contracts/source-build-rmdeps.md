@@ -12,6 +12,8 @@ current production behaviorとstaged targetは混同しない。Issue #404 Slice
 - Related Issues: [#123](https://github.com/seekerkrt/moguet/issues/123)、[#152](https://github.com/seekerkrt/moguet/issues/152)、[#218](https://github.com/seekerkrt/moguet/issues/218)、[#242](https://github.com/seekerkrt/moguet/issues/242)、[#266](https://github.com/seekerkrt/moguet/issues/266)、[#267](https://github.com/seekerkrt/moguet/issues/267)、[#271](https://github.com/seekerkrt/moguet/issues/271)、[#350](https://github.com/seekerkrt/moguet/issues/350)
 - Related PRs: #298（#269 policy）、#241、#257〜#261（#242 separated lifecycle）
 - Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。Slice 3でinstall-reason付きfull local snapshotとproduction未接続のmetadata / lifecycle adapterを追加し、current causal authority不足をNO-GOとして固定。Slice 3.5でtransaction token、owner、command outcome、machine receipt completeness、package operation、invocation ledgerをpure typed contractとして追加した。Slice 3.6でpackage-installed root helper、root-owned transaction state、transaction-local Install hook、one-shot machine receipt、selected-provider typed transportを追加し、Slice 3.5 ledgerへactual `Install` setをprojectできるproduction-capable pathを成立させた。Slice 3.7でmakepkg syncdepsのpublic instrumentation authorityを監査し、安全なroot-owned adapter案は独立security redesignが必要なためDEFER、Issue #404はRETURN-HOMEと判定した。Issue #484 Slice 1でmakepkg専用session model、strict PACMAN argv grammar、custom `PACMAN` / `PACMAN_AUTH` policyをproduction未接続のstable boundaryとして追加し、C1〜C4をGOとした。public cleanup routeとprivileged adapter、他mutation ownerは未接続である。
+- Issue #484 Slice 2 update: disjointなroot-owned multi-session state、installed internal adapter、pidfdを保持するlauncher / child lifetime supervisor、synthetic 0〜2 transaction protocolを追加した。real pacman / ALPM receipt、actual makepkg `PACMAN`接続、production caller、public cleanupは未接続である。
+- Issue #484 Slice 2 security repair: normal-user process / ancestor treeをroot role authorityにせず、root-owned exact role channel、packet credential + retained pidfd、mutual response binding、supervisor failure時のbounded child reap、interrupted used retirement recoveryへ置き換えた。Synthetic firewallとselected-provider分離は維持する。
 - Related upper decisions: [decision 1](../DECISIONS.md#decision-1)、[decision 2](../DECISIONS.md#decision-2)、[decision 4](../DECISIONS.md#decision-4)、[decision 5](../DECISIONS.md#decision-5)、[decision 6](../DECISIONS.md#decision-6)、[decision 7](../DECISIONS.md#decision-7)
 
 ## Contract本文（日本語normative source of truth）
@@ -363,7 +365,12 @@ session receiptはraw / factualなordered transaction observationを保持する
 
 session identityは64文字lowercase hexのsession tokenとinvoking uidを保持し、ownerは`InvocationDependencyTransactionOwner::MakepkgSyncDependencies`へ固定する。session tokenはcorrelation dataであり、それ単独をbearer authorityとして扱わない。
 
-positive process bindingは、package-installed launcher identityとexact launcher / makepkg child lifetimeを一体で証明する`InstalledLauncherAndExactLauncherMakepkgLifetime`だけである。`PidOnly`、`TimestampOnly`、missing、incomplete、unknownはpositive authorityにならない。Slice 1はこのrequirementをtypedに固定するだけで、pidfd、root state、process handle自体はSlice 2へ残す。
+Slice 1のtyped requirementはpackage-installed codeとexact launcher / makepkg child lifetimeを一体で要求するが、
+normal-user processの`/proc/exe` identityだけをexecution integrityへ昇格しない。Slice 2のconcrete bindingは
+root-owned launcher、bound child、transaction adapter、root supervisorを別roleとし、rootがfork前後に発行した
+private channel、packetごとのkernel credential、保持中pidfdを一体で証明する
+`RootOwnedLauncherAndExactRoleChannels`である。`PidOnly`、`TimestampOnly`、ancestor tree、session token、
+installed inodeだけ、missing、incomplete、unknownはpositive authorityにならない。
 
 各transactionはsession token、1-based ordinal、独立transaction token、opaque dependency specification argv、command outcome、receiptを保持する。session factoryは全transaction ownerを`MakepkgSyncDependencies`に固定し、selected-provider ownerまたはmixed-owner ledgerを拒否する。selected-providerのowner constant、one-token state machine、protocol/APIは一般化しない。
 
@@ -399,6 +406,57 @@ supported armはinvocation-owned installed adapterとmakepkg default authの組�
 - C4 custom PACMAN / PACMAN_AUTH policy: **GO**。
 - Slice 2 readiness: **GO**。root-owned multi-session state / installed provenanceへ進める。
 - public `--rmdeps` / cleanup preview / removal: **NO-GO**のまま。
+
+### Issue #484 Slice 2 root-owned state / installed provenance
+
+Slice 2はpackage-installed internal executable
+`/usr/libexec/moguet/moguet-makepkg-syncdeps-adapter`と、selected-providerとはdisjointな
+`/run/moguet/makepkg-syncdeps/`を追加する。executableはmode `0755`のroot-owned non-setuid payloadで、
+`PATH` lookup、caller指定のexecutable / state root / output pathを受理しない。ownerは
+`makepkg-sync-dependencies`へ固定し、selected-provider helperのowner、verb、state namespace、receiptを
+受理またはconsumeしない。
+
+session tokenとtransaction tokenはLinux `getrandom(2)`だけから256 bitを取得して64文字lowercase hexへ
+変換する。失敗時にPRNG、timestamp、counterへfallbackしない。tokenだけをauthorityにしない。
+
+normal-user entryはroot verb authorityを持たず、unsafe `LD_*` / `GLIBC_TUNABLES`とtraced entryをsudo前に
+negative rejectionする。このcheckをnormal-user execution integrityのpositive proofには使わない。sudo後のinstalled
+root supervisorがroot-owned launcherをforkし、launcherがbarrier内でbound childとtransaction adapterをforkして
+invoking uidへdropする。drop前にenvironment/codeをroot processへ固定し、drop後はsupplementary groupをclear、
+`NO_NEW_PRIVS`、non-dumpable、parent-death policyを設定する。launcher、child、transaction adapter、supervisor / brokerを
+別roleとし、同じancestor treeにいるだけではroleを取得できない。
+
+control IPCはrebind可能なabstract/pathname listenerをauthority pathに使わず、root supervisorがrole fork前に作成した
+private `SOCK_SEQPACKET` channelだけを使う。request bytesと同時にkernelが付与する`SCM_CREDENTIALS`のpid / uid / gidを、
+rootが保持するそのroleのexact pidfdと照合し、request完了までhandleを保持する。numeric PIDを再openせず、`PPid` chainを
+authorizationへ使わない。root側はrequestごとにretained pidfd lifetime、installed executable identity、tracer不在も
+再検証する。drop-uid roleがroot responseを検証するときは、fork前から継承したexact supervisor pidfd、non-rebindable
+channel、packet credentialをauthorityとし、CAP_SYS_PTRACEをambient付与しない。root supervisor / required kernel
+primitiveを確認できない場合はfallbackせずfailureへ倒す。
+
+external `session-*` / `transaction-*` root verbは拒否し、private role channel以外からstate mutationへ到達させない。
+launcher死亡時はsupervisorがactive stateをpositive manifestなしでretireする。supervisor死亡時はlauncherがsupervisor
+pidfdとchild pidfdを同時pollし、adapter / childへSIGTERM、bounded grace後SIGKILLを送り、subreaperとしてreapする。
+pre-release failureはbarrierをreleaseしない。response manifestはsyntaxだけでなくsession token、invoking uid、supervisor /
+launcher / child / transaction-adapter pidfd identity、count、terminal、outcomeをretained root role stateと照合する。
+
+root stateはexplicit count `0`、ordered `1`、ordered `2`を別々に保持し、各entryは1-based ordinal、独立token、
+opaque dependency specification argv、command outcome、synthetic receipt observationを持つ。transactionは
+prepare / record / finalize / consume / abort、sessionはbind / finalize / consume / abortをone-shotで遷移する。
+third、ordinal mismatch、reentrant transactionは新しいtransaction slotを作る前に拒否し、session coverageを
+`Unsupported`へ固定する。terminal zeroはterminal file、coverage `Complete`、exact bound child outcome、explicit
+count `0`の組だけから生成し、empty directory、process disappearance、timestampから推測しない。
+
+session consume / abortはactive directory全体をusedへno-replace renameしてreplayを先にdenyする。rename後または
+各known unlink / final fsyncの途中でprocessが死んだ場合、次prepareはglobal lock下で全used entryのremaining shapeを
+先にpreflightし、owner/type/modeとknown fixed namesだけが残るentryをidempotentにempty tombstoneまで回復する。
+unknown entry、symlink、owner/mode driftはその回復attemptの最初のunlinkより前にfail closedとし、timestampやblind
+recursive removalを使わない。
+
+Slice 2 manifestのtransaction evidenceは`Synthetic`と明示し、actual ALPM `Install` receiptまたはpackage単位の
+`InvocationOwned`へ昇格しない。これはinstalled/root filesystemとprocess lifetime state machineのauthorityであり、
+real `/usr/bin/pacman`、transaction-local hook、actual makepkg `PACMAN` adapter、`ArtifactMakepkgContext`はSlice 3以降へ
+残す。public `--rmdeps`、cleanup preview / prompt / removalは引き続きNO-GOである。
 
 ### Slice 4 production cleanup readiness: NO-GO
 

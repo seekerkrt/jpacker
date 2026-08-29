@@ -59,6 +59,7 @@ CMAKE_FOCUSED_ALIASES := \
 	test-local-source-workspace \
 	test-local-source-build \
 	test-makepkg-syncdeps-receipt-model \
+	test-makepkg-syncdeps-adapter-state \
 	test-user-config \
 	test-package-identifier \
 	test-source-package-identity \
@@ -649,6 +650,9 @@ test-container-receipt:
 			.; \
 		printf '%s\n' ':: Running trusted ALPM receipt validation container'; \
 		$(DOCKER) run --rm --network=none \
+			--cap-add=SYS_PTRACE \
+			--cap-add=CHECKPOINT_RESTORE \
+			--security-opt seccomp=unconfined \
 			"$(ARCH_RECEIPT_VALIDATION_IMAGE)"
 
 test-container-live:

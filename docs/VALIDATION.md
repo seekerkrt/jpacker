@@ -41,7 +41,7 @@ release操作は[`DEVELOPMENT.md`](DEVELOPMENT.md)を正とする。この文書
 | standalone compatibility | `release-check` | 従来のA–D subsetの後にGを実行。full A–Dではない |
 | E: offline/current Arch Docker | `test-container` | image内clean/default build、offline runtimeのA–D + G |
 | F: actual provider / AUR / local | `test-container-live` | provider→AUR→localの独立containerを直列・fail-fast実行 |
-| security-specific installed ALPM receipt | `test-container-receipt` | networkなしのinstalled root helper、transaction-local hook、actual isolated Install / Upgrade / failure |
+| security-specific installed receipt/state | `test-container-receipt` | networkなしのinstalled selected-provider helperによるactual isolated Install / Upgrade / failureと、installed makepkg syncdeps adapterによるsynthetic root-owned 0〜2、exact role channel / retained pidfd、expected-role send後exit、deterministic numeric PID replacement、distinct live cross-session、loader / tracer / exec / role negative、mutual server binding、supervisor death reap、interrupted retirement recovery、replay / stale / concurrency |
 | makepkg syncdeps stable boundary | `test-makepkg-syncdeps-receipt-model`、`test-makepkg-assignment-precedence` | pure 0〜2 session / strict PACMAN contractとreal makepkg + normal-user fake PACMAN call shape。root provenanceやactual package transactionではない |
 
 PR / mergeのcanonical host gateは`test-host-release`である。`test`と

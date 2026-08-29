@@ -144,6 +144,10 @@ set(
     MOGUET_ALPM_RECEIPT_HELPER_INSTALL_PATH
     "${MOGUET_FULL_INTERNAL_EXECUTABLE_DIRECTORY}/moguet-alpm-receipt-helper"
 )
+set(
+    MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_INSTALL_PATH
+    "${MOGUET_FULL_INTERNAL_EXECUTABLE_DIRECTORY}/moguet-makepkg-syncdeps-adapter"
+)
 if(
     NOT IS_ABSOLUTE "${MOGUET_ALPM_RECEIPT_HELPER_INSTALL_PATH}"
     OR MOGUET_ALPM_RECEIPT_HELPER_INSTALL_PATH MATCHES "//"
@@ -156,6 +160,21 @@ if(
         FATAL_ERROR
         "MOGUET_INSTALL_INTERNAL_EXECUTABLE_DIRECTORY cannot be represented "
         "as a shell-free ALPM hook Exec path: "
+        "${MOGUET_INSTALL_INTERNAL_EXECUTABLE_DIRECTORY}"
+    )
+endif()
+if(
+    NOT IS_ABSOLUTE "${MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_INSTALL_PATH}"
+    OR MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_INSTALL_PATH MATCHES "//"
+    OR MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_INSTALL_PATH MATCHES "(^|/)\\.(/|$)"
+    OR MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_INSTALL_PATH MATCHES "(^|/)\\.\\.(/|$)"
+    OR NOT MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_INSTALL_PATH MATCHES
+        "^/[A-Za-z0-9_./+-]+$"
+)
+    message(
+        FATAL_ERROR
+        "MOGUET_INSTALL_INTERNAL_EXECUTABLE_DIRECTORY cannot represent the "
+        "fixed makepkg syncdeps adapter path: "
         "${MOGUET_INSTALL_INTERNAL_EXECUTABLE_DIRECTORY}"
     )
 endif()
@@ -360,6 +379,21 @@ function(
             )
         endif()
 
+        if(
+            _moguet_argument MATCHES
+                "^-DMOGUET_MAKEPKG_SYNCDEPS_ADAPTER_PATH($|[^A-Za-z0-9_])"
+            OR _moguet_argument MATCHES
+                "^-UMOGUET_MAKEPKG_SYNCDEPS_ADAPTER_PATH($|[^A-Za-z0-9_])"
+        )
+            message(
+                FATAL_ERROR
+                "External ${input_name} defines or undefines "
+                "MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_PATH, which is reserved "
+                "for the configured package install graph. Remove the "
+                "external adapter-path -D or -U option."
+            )
+        endif()
+
         if(NOT _moguet_pending_macro_option STREQUAL "")
             if(
                 _moguet_argument MATCHES
@@ -383,6 +417,18 @@ function(
                     "MOGUET_ALPM_RECEIPT_HELPER_PATH, which is reserved "
                     "for the configured package install graph. Remove the "
                     "external helper-path -D or -U option."
+                )
+            endif()
+            if(
+                _moguet_argument MATCHES
+                    "^MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_PATH($|[^A-Za-z0-9_])"
+            )
+                message(
+                    FATAL_ERROR
+                    "External ${input_name} defines or undefines "
+                    "MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_PATH, which is "
+                    "reserved for the configured package install graph. "
+                    "Remove the external adapter-path -D or -U option."
                 )
             endif()
             set(_moguet_pending_macro_option "")
@@ -516,6 +562,32 @@ endif()
 add_executable(
     moguet-alpm-receipt-helper
     ${MOGUET_ALPM_RECEIPT_HELPER_SOURCES}
+)
+add_executable(
+    moguet-makepkg-syncdeps-adapter
+    ${MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_SOURCES}
+)
+set_target_properties(
+    moguet-makepkg-syncdeps-adapter
+    PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED YES
+        CXX_EXTENSIONS NO
+)
+target_link_libraries(
+    moguet-makepkg-syncdeps-adapter
+    PRIVATE
+        moguet_external_cppflags
+        moguet_build_contract
+)
+target_compile_definitions(
+    moguet-makepkg-syncdeps-adapter
+    PRIVATE
+        "MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_PATH=\"${MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_INSTALL_PATH}\""
+)
+target_include_directories(
+    moguet-makepkg-syncdeps-adapter
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/source"
 )
 set_target_properties(
     moguet-alpm-receipt-helper
@@ -714,7 +786,12 @@ target_link_libraries(
         CURL::libcurl
         PkgConfig::ALPM
 )
-add_dependencies(moguet moguet_catalogs moguet-alpm-receipt-helper)
+add_dependencies(
+    moguet
+    moguet_catalogs
+    moguet-alpm-receipt-helper
+    moguet-makepkg-syncdeps-adapter
+)
 
 # Completion generation consumes a small C++ projection helper.  Keep its
 # compile/link graph in CMake and exclude it from ordinary production/package
@@ -770,6 +847,14 @@ install(
     TARGETS moguet-alpm-receipt-helper
     # The executable destination and compiled hook Exec path are one security
     # authority. An install-time --prefix must not relocate only the file.
+    RUNTIME DESTINATION "${MOGUET_FULL_INTERNAL_EXECUTABLE_DIRECTORY}"
+    PERMISSIONS
+        OWNER_READ OWNER_WRITE OWNER_EXECUTE
+        GROUP_READ GROUP_EXECUTE
+        WORLD_READ WORLD_EXECUTE
+)
+install(
+    TARGETS moguet-makepkg-syncdeps-adapter
     RUNTIME DESTINATION "${MOGUET_FULL_INTERNAL_EXECUTABLE_DIRECTORY}"
     PERMISSIONS
         OWNER_READ OWNER_WRITE OWNER_EXECUTE

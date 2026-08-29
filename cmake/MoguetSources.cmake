@@ -138,6 +138,58 @@ set(MOGUET_ALPM_RECEIPT_HELPER_SOURCES
     source/trusted_alpm_receipt_protocol.cpp
 )
 
+# The makepkg syncdeps adapter owns a disjoint installed executable and
+# root/session protocol. It intentionally does not reuse the selected-provider
+# helper source closure or owner constant.
+set(MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_SOURCES
+    source/makepkg_syncdeps_adapter_main.cpp
+    source/makepkg_syncdeps_adapter_state.cpp
+    source/makepkg_syncdeps_adapter_protocol.cpp
+)
+
+set(_moguet_unique_makepkg_syncdeps_adapter_sources
+    ${MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_SOURCES}
+)
+list(REMOVE_DUPLICATES _moguet_unique_makepkg_syncdeps_adapter_sources)
+list(
+    LENGTH
+    MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_SOURCES
+    _moguet_makepkg_syncdeps_adapter_source_count
+)
+list(
+    LENGTH
+    _moguet_unique_makepkg_syncdeps_adapter_sources
+    _moguet_unique_makepkg_syncdeps_adapter_source_count
+)
+if(
+    NOT _moguet_makepkg_syncdeps_adapter_source_count EQUAL
+        _moguet_unique_makepkg_syncdeps_adapter_source_count
+)
+    message(
+        FATAL_ERROR
+        "MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_SOURCES contains duplicate entries"
+    )
+endif()
+foreach(
+    _moguet_makepkg_syncdeps_adapter_source
+    IN LISTS MOGUET_MAKEPKG_SYNCDEPS_ADAPTER_SOURCES
+)
+    if(
+        NOT EXISTS
+            "${CMAKE_CURRENT_SOURCE_DIR}/${_moguet_makepkg_syncdeps_adapter_source}"
+    )
+        message(
+            FATAL_ERROR
+            "makepkg syncdeps adapter source does not exist: "
+            "${_moguet_makepkg_syncdeps_adapter_source}"
+        )
+    endif()
+endforeach()
+unset(_moguet_makepkg_syncdeps_adapter_source)
+unset(_moguet_makepkg_syncdeps_adapter_source_count)
+unset(_moguet_unique_makepkg_syncdeps_adapter_sources)
+unset(_moguet_unique_makepkg_syncdeps_adapter_source_count)
+
 set(_moguet_unique_alpm_receipt_helper_sources
     ${MOGUET_ALPM_RECEIPT_HELPER_SOURCES}
 )

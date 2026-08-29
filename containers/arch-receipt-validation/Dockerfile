@@ -40,6 +40,15 @@ USER root:root
 RUN cmake --install build/cmake-production \
     && test "$(stat -c '%U:%G:%a:%F' \
         /usr/libexec/moguet/moguet-alpm-receipt-helper)" = \
-        'root:root:755:regular file'
+        'root:root:755:regular file' \
+    && test "$(stat -c '%U:%G:%a:%F' \
+        /usr/libexec/moguet/moguet-makepkg-syncdeps-adapter)" = \
+        'root:root:755:regular file' \
+    && printf '%s\n' \
+        'moguet-validation ALL=(root) NOPASSWD: /usr/libexec/moguet/moguet-makepkg-syncdeps-adapter *' \
+        > /etc/sudoers.d/moguet-makepkg-syncdeps-validation \
+    && chown root:root /etc/sudoers.d/moguet-makepkg-syncdeps-validation \
+    && chmod 0440 /etc/sudoers.d/moguet-makepkg-syncdeps-validation \
+    && visudo -cf /etc/sudoers.d/moguet-makepkg-syncdeps-validation
 
 CMD ["/bin/sh", "containers/arch-receipt-validation/run-installed-receipt.sh"]

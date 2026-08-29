@@ -107,7 +107,7 @@ include / link graph、negative compile recipeを所有しない。
 | `build/cmake-production` | `BUILD_TESTING=OFF` | 通常の`make`、install / uninstall、production smoke |
 | `build/cmake-testing` | `BUILD_TESTING=ON` | developer、CTest、host / release validation、focused test |
 
-通常の`make`はproduction treeだけから`moguet`をbuildし、96個のC++ test executableや119件の
+通常の`make`はproduction treeだけから`moguet`をbuildし、97個のC++ test executableや120件の
 CTest registrationを不用意にbuildしない。`make test`はtesting treeをbuildし、CTestを実行してから
 gettext、shell、docs、packaging等のrepository-specific validationを実行する。`make test-<area>`は
 互換entrypointとして残るが、exact target / CTest selectionは
@@ -179,16 +179,16 @@ inventoryを所有する。
 
 | Inventory | Expected |
 | --- | ---: |
-| C++ test executables | 96 |
+| C++ test executables | 97 |
 | support / stub translation units | 29 |
 | link firewalls | 49 |
 | firewall descriptors | 49 |
-| CTest registrations | 119 |
+| CTest registrations | 120 |
 
 stub / real implementation exclusion、replacement ABI、ALPM stub、exact source closureをtarget-localに
 維持する。単一production libraryを全testへ無条件linkしない。negative compileはCTest registrationから
 effective CMake compiler / launcher / compile optionを取得し、GNU Make recursive compileへ戻さない。
-Make focused aliasとCMake focused targetは各100件で一致し、missing / unexpectedを0に保つ。
+Make focused aliasとCMake focused targetは各101件で一致し、missing / unexpectedを0に保つ。
 
 completion生成が使う`moguet-cli-authority-exporter`もCMake targetであり、Python generatorはcompilerを
 直接起動しない。このtargetは`EXCLUDE_FROM_ALL`なので通常のproduction/package buildへ混ざらず、
@@ -205,8 +205,10 @@ Makeの`PREFIX`、`BINDIR`、internal `LIBEXECDIR`、completion、man、license�
 mappingし、別のMake install graphを持たない。`PKGBUILD`はgenerator-neutralなCMake configure / build /
 install consumerで、`BUILD_TESTING=OFF`を指定する。package payload / permission / layout validationは
 repository validation側で維持し、通常のpackage buildへfull CTestを追加しない。current internal payloadには
-`/usr/libexec/moguet/moguet-alpm-receipt-helper` mode `0755`を含む。public commandとして扱わず、
-production root hookはconfigure / install graphが確定したabsolute helper pathだけを使用する。
+`/usr/libexec/moguet/moguet-alpm-receipt-helper`と
+`/usr/libexec/moguet/moguet-makepkg-syncdeps-adapter`をいずれもmode `0755`で含む。public commandとして
+扱わず、production root hookとmakepkg syncdeps state protocolはconfigure / install graphが確定した
+absolute executable pathだけを使用する。
 
 ### Host validation execution graph
 
@@ -263,9 +265,20 @@ Issue #404 Slice 3.6のroot trust / ALPM receipt boundaryは、追加のsecurity
 
 このtargetは既存のlocal `moguet-arch-validation:local` imageをdependency/toolchain baseとしてreuseし、
 current sourceをhost bindではなくstandalone Docker contextからcopyする。image buildとruntimeはいずれも
-`--network=none`で、CMake install graphが配置したroot-owned
-`/usr/libexec/moguet/moguet-alpm-receipt-helper`だけをhookから実行する。actual Install、Upgrade non-match、
-solver-introduced dependency、transaction failure / ABORTをephemeral container package databaseで確認し、
+`--network=none`で、runtimeはcross-UID `/proc/<pid>/exe` identity検証に必要な
+`CAP_SYS_PTRACE`と、isolated PID namespace内で`clone3(set_tid)`によるactual numeric PID replacementを
+決定的に作るtest-only `CAP_CHECKPOINT_RESTORE`を明示追加する。Docker default seccompが`clone3`を
+`ENOSYS`へ落とすため、このnetworkless / no-host-mount fixture runtimeだけはseccompをunconfinedにする。
+production executableへfile / ambient capabilityを付与せず、このtest-only replacement handleを
+request authorizationへ使わない。CMake install graphが配置したroot-owned
+`/usr/libexec/moguet/moguet-alpm-receipt-helper`だけをselected-provider hookから実行し、同じinstall graphの
+`/usr/libexec/moguet/moguet-makepkg-syncdeps-adapter`だけをowner専用synthetic session fixtureから実行する。
+前者はactual Install、Upgrade non-match、solver-introduced dependency、transaction failure / ABORT、後者は
+root-owned 0〜2 stateに加え、root-forked launcher / child / transaction-adapter role、private channelの
+packet credential + retained pidfd、expected role自身のsend後exit、old numeric PIDを再利用する別pidfd lifetime、
+distinct live Session A/Bのcross-channel / cross-token / replacement rejection、loader / tracer / exec-transition / role-crossing rejection、root supervisorだけの
+death後のbounded terminate / reap、nonroot fake abstract server非接続、interrupted used retirement recovery、
+replay / stale / concurrencyを確認し、
 host package database、host `/run`、development-tree helperを共有しない。このtargetはsecurity Slice evidenceであり、
 host A–D、offline E、actual provider / AUR / local Fを相互に代替しない。
 

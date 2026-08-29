@@ -773,6 +773,15 @@ moguet_add_cpp_test(
 )
 
 moguet_add_cpp_test(
+    makepkg-syncdeps-adapter-state-test
+    SOURCES
+        tests/makepkg_syncdeps_adapter_state_test.cpp
+        source/makepkg_syncdeps_adapter_protocol.cpp
+        source/makepkg_syncdeps_adapter_state.cpp
+    INCLUDE_DIRECTORIES "${_moguet_test_source_include_dir}"
+)
+
+moguet_add_cpp_test(
     reviewed-source-state-test
     SOURCES
         tests/reviewed_source_state_test.cpp
@@ -2341,6 +2350,7 @@ set(
     source-package-identity-projection-test
     source-package-compatibility-test
     invocation-owned-cleanup-model-test
+    makepkg-syncdeps-adapter-state-test
     reviewed-source-state-test
     reviewed-source-state-store-test
     reviewed-source-lifecycle-test

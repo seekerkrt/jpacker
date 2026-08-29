@@ -1175,9 +1175,29 @@ assert_contains "$receipt_runner" 'STATE'
 assert_contains "$receipt_runner" 'solver-introduced dependency'
 assert_contains "$receipt_runner" 'Upgrade transaction produced an Install receipt'
 assert_contains "$receipt_runner" 'failed transaction published a Complete receipt'
+assert_contains "$receipt_runner" 'synthetic-security "$security_scenario"'
+assert_contains "$receipt_runner" 'LD_PRELOAD="$user_loader"'
+assert_contains "$receipt_runner" 'LD_AUDIT="$user_loader"'
+assert_contains "$receipt_runner" 'pre-attached tracer was not rejected'
+assert_contains "$receipt_runner" 'root broker connected to nonroot fake server'
+assert_contains "$receipt_runner" 'launcher did not exit after root supervisor death'
+assert_contains "$receipt_runner" 'used symlink drift was partially deleted'
+assert_contains "$receipt_runner" 'used owner drift was mutated'
+assert_contains "$receipt_runner" 'PACKET_CREDENTIAL_MATCHED_EXPECTED_ROLE'
+assert_contains "$receipt_runner" 'PID_REPLACEMENT_OCCURRED'
+assert_contains "$receipt_runner" 'DISTINCT_LIVE_SESSIONS'
+assert_contains "$receipt_runner" 'DISTINCT_EXPECTED_ROLE_PIDS'
+assert_contains "$receipt_runner" 'B_ROLE_TO_A_CHANNEL'
+assert_contains "$receipt_runner" 'REPLACEMENT_WITH_STALE_A_REQUEST'
 receipt_target_body=$(make_target_body test-container-receipt)
 printf '%s\n' "$receipt_target_body" | grep -F -- '--network=none' >/dev/null ||
     fail 'trusted receipt target lost its network-none boundary'
+printf '%s\n' "$receipt_target_body" | grep -F -- '--cap-add=SYS_PTRACE' >/dev/null ||
+    fail 'trusted receipt target lost required cross-UID executable provenance capability'
+printf '%s\n' "$receipt_target_body" | grep -F -- '--cap-add=CHECKPOINT_RESTORE' >/dev/null ||
+    fail 'trusted receipt target lost deterministic PID replacement capability'
+printf '%s\n' "$receipt_target_body" | grep -F -- '--security-opt seccomp=unconfined' >/dev/null ||
+    fail 'trusted receipt target cannot execute clone3 set_tid replacement proof'
 printf '%s\n' "$receipt_target_body" | grep -F -- '--file containers/arch-receipt-validation/Dockerfile' >/dev/null ||
     fail 'trusted receipt target does not build its standalone installed fixture'
 

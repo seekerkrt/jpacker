@@ -222,12 +222,15 @@ find "$stage_dir" -type f -print
 `install_manifest.txt`へのfrontendです。上記destination overrideは別のMake install recipeではなく、
 同じCMake graphへmappingされます。
 
-current development packageはprivate implementation helper
-`/usr/libexec/moguet/moguet-alpm-receipt-helper`もinstallします。これはpackage-ownedな
-root transaction helperであり、public commandではありません。`PATH`外でman pageを持たず、
-executableやdestination pathを引数に取らず、source / build treeのhelperで置き換えては
-なりません。current public source-buildの`--rmdeps`は引き続きunsupported / fail-closedであり、
-helperのinstallによってdependency cleanupが有効になるわけではありません。
+current development packageはprivate implementation executableとして
+`/usr/libexec/moguet/moguet-alpm-receipt-helper`と
+`/usr/libexec/moguet/moguet-makepkg-syncdeps-adapter`もinstallします。どちらも
+package-ownedなinternal payloadであり、public commandではありません。`PATH`外でman pageを
+持たず、callerが選んだexecutable、destination、state root pathを引数に取らず、source / build
+treeのexecutableで置き換えてはなりません。makepkg syncdeps adapterがcurrent Sliceで成立させるのは
+installed root-owned session/stateとsynthetic process-binding protocolだけであり、real pacman
+transactionやproduction makepkg routeには接続しません。current public source-buildの`--rmdeps`は
+引き続きunsupported / fail-closedであり、これらのinstallはdependency cleanupを有効化しません。
 
 v2.0.0のpackage名と唯一のexecutableは`moguet`で、`/usr/bin/jpacker`をinstall
 しません。payloadはjpacker v1.16.0 packageと重複しないため、metadataには
@@ -265,8 +268,8 @@ makepkg -si
 `makepkg -si`は、そのtag付きreleaseをbuildし、同じ操作で`pacman -U`によってlive
 systemへinstallします。これは、development treeをその場でbuild・確認するだけで
 何もinstallしない、上記の`make`や`./moguet --help`とは異なります。`PKGBUILD`はcanonicalな
-production CMake build / install consumerとして`BUILD_TESTING=OFF`を指定し、96個のdeveloper
-C++ test executableと119件のCTest registrationはhost / CI / release validation側で扱います。
+production CMake build / install consumerとして`BUILD_TESTING=OFF`を指定し、97個のdeveloper
+C++ test executableと120件のCTest registrationはhost / CI / release validation側で扱います。
 この`PKGBUILD`は
 repository同梱のpackaging経路であり、AUR submissionではありません。Moguetはまだ
 AUR pageを公開していません。
