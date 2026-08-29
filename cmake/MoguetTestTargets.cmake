@@ -21,6 +21,7 @@ set(
 )
 list(
     REMOVE_ITEM _moguet_aur_update_command_test_sources
+    source/artifact_archive_metadata.cpp
     source/aur_update_query.cpp
     source/aur_update_execution_preflight.cpp
     source/aur_update_execution_preparation.cpp
@@ -31,6 +32,7 @@ list(
 )
 list(
     APPEND _moguet_aur_update_command_test_sources
+    tests/stubs/artifact-identity/archive_metadata_stub.cpp
     tests/stubs/aur-update-command/operation_stub.cpp
     tests/stubs/upgrade-all-command/operation_stub.cpp
     tests/stubs/package-metadata/alpm_stub.cpp
@@ -46,6 +48,7 @@ moguet_add_cpp_test(
     CURL
     SOURCES ${_moguet_aur_update_command_test_sources}
     DEFINITIONS
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
         MOGUET_ENABLE_TEST_OVERRIDES
         MOGUET_ENABLE_TEST_CONFIG_PATH
     INCLUDE_DIRECTORIES
@@ -60,10 +63,12 @@ set(
 )
 list(
     REMOVE_ITEM _moguet_upgrade_all_command_test_sources
+    source/artifact_archive_metadata.cpp
     source/upgrade_all_operation.cpp
 )
 list(
     APPEND _moguet_upgrade_all_command_test_sources
+    tests/stubs/artifact-identity/archive_metadata_stub.cpp
     tests/stubs/upgrade-all-command/operation_stub.cpp
     tests/stubs/package-metadata/alpm_stub.cpp
 )
@@ -78,6 +83,7 @@ moguet_add_cpp_test(
     CURL
     SOURCES ${_moguet_upgrade_all_command_test_sources}
     DEFINITIONS
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
         MOGUET_ENABLE_TEST_OVERRIDES
         MOGUET_ENABLE_TEST_CONFIG_PATH
         "MOGUET_LOCALE_DIRECTORY=\"${CMAKE_CURRENT_BINARY_DIR}/locale\""
@@ -90,11 +96,13 @@ moguet_add_cpp_test(
 set(_moguet_commands_sync_test_sources ${MOGUET_PRODUCTION_SOURCES})
 list(
     REMOVE_ITEM _moguet_commands_sync_test_sources
+    source/artifact_archive_metadata.cpp
     source/aur_rpc.cpp
     source/root_package_search.cpp
 )
 list(
     APPEND _moguet_commands_sync_test_sources
+    tests/stubs/artifact-identity/archive_metadata_stub.cpp
     tests/stubs/commands-sync/aur_rpc_stub.cpp
     tests/stubs/commands-sync/root_package_search_stub.cpp
     tests/stubs/package-metadata/alpm_stub.cpp
@@ -110,6 +118,7 @@ moguet_add_cpp_test(
     CURL
     SOURCES ${_moguet_commands_sync_test_sources}
     DEFINITIONS
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
         MOGUET_ENABLE_TEST_OVERRIDES
         MOGUET_ENABLE_TEST_CONFIG_PATH
     INCLUDE_DIRECTORIES
@@ -121,12 +130,14 @@ moguet_add_cpp_test(
 set(_moguet_commands_inspect_test_sources ${MOGUET_PRODUCTION_SOURCES})
 list(
     REMOVE_ITEM _moguet_commands_inspect_test_sources
+    source/artifact_archive_metadata.cpp
     source/aur_rpc.cpp
     source/repository_query.cpp
 )
 list(
     APPEND _moguet_commands_inspect_test_sources
     tests/commands_inspect_aur_stub.cpp
+    tests/stubs/artifact-identity/archive_metadata_stub.cpp
     tests/stubs/commands-inspect/repository_query_stub.cpp
     tests/stubs/package-metadata/alpm_stub.cpp
 )
@@ -141,6 +152,7 @@ moguet_add_cpp_test(
     CURL
     SOURCES ${_moguet_commands_inspect_test_sources}
     DEFINITIONS
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
         MOGUET_ENABLE_TEST_OVERRIDES
         "MOGUET_LOCALE_DIRECTORY=\"${CMAKE_CURRENT_BINARY_DIR}/locale\""
     INCLUDE_DIRECTORIES
@@ -149,14 +161,27 @@ moguet_add_cpp_test(
     FORBIDDEN_SOURCES ${_moguet_commands_inspect_forbidden_sources}
 )
 
+set(_moguet_full_cli_test_sources ${MOGUET_PRODUCTION_SOURCES})
+list(
+    REMOVE_ITEM _moguet_full_cli_test_sources
+    source/artifact_archive_metadata.cpp
+)
+list(
+    APPEND _moguet_full_cli_test_sources
+    tests/stubs/artifact-identity/archive_metadata_stub.cpp
+)
+
 moguet_add_cpp_test(
     moguet-test
     FIREWALL
     ALPM_COMPILE
     REAL_ALPM
     CURL
-    SOURCES ${MOGUET_PRODUCTION_SOURCES}
-    DEFINITIONS MOGUET_ENABLE_TEST_OVERRIDES
+    SOURCES ${_moguet_full_cli_test_sources}
+    DEFINITIONS
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
+        MOGUET_ENABLE_TEST_OVERRIDES
+    INCLUDE_DIRECTORIES "${_moguet_test_source_include_dir}"
 )
 
 moguet_add_cpp_test(
@@ -165,10 +190,12 @@ moguet_add_cpp_test(
     ALPM_COMPILE
     REAL_ALPM
     CURL
-    SOURCES ${MOGUET_PRODUCTION_SOURCES}
+    SOURCES ${_moguet_full_cli_test_sources}
     DEFINITIONS
         "MOGUET_LOCALE_DIRECTORY=\"${CMAKE_CURRENT_BINARY_DIR}/locale\""
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
         MOGUET_ENABLE_TEST_OVERRIDES
+    INCLUDE_DIRECTORIES "${_moguet_test_source_include_dir}"
 )
 
 moguet_add_cpp_test(
@@ -177,17 +204,27 @@ moguet_add_cpp_test(
     ALPM_COMPILE
     REAL_ALPM
     CURL
-    SOURCES ${MOGUET_PRODUCTION_SOURCES}
+    SOURCES ${_moguet_full_cli_test_sources}
     DEFINITIONS
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
         MOGUET_ENABLE_TEST_OVERRIDES
         MOGUET_ENABLE_TEST_CONFIG_PATH
         MOGUET_ENABLE_APP_CONFIG_TEST_HOOKS
+    INCLUDE_DIRECTORIES "${_moguet_test_source_include_dir}"
 )
 
 set(
     _moguet_aur_rpc_validation_test_sources
     ${MOGUET_PRODUCTION_SOURCES}
     tests/stubs/package-metadata/alpm_stub.cpp
+)
+list(
+    REMOVE_ITEM _moguet_aur_rpc_validation_test_sources
+    source/artifact_archive_metadata.cpp
+)
+list(
+    APPEND _moguet_aur_rpc_validation_test_sources
+    tests/stubs/artifact-identity/archive_metadata_stub.cpp
 )
 moguet_add_cpp_test(
     moguet-aur-rpc-validation-test
@@ -196,6 +233,7 @@ moguet_add_cpp_test(
     CURL
     SOURCES ${_moguet_aur_rpc_validation_test_sources}
     DEFINITIONS
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
         MOGUET_ENABLE_TEST_OVERRIDES
         MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
     INCLUDE_DIRECTORIES
@@ -209,11 +247,13 @@ set(
 )
 list(
     REMOVE_ITEM _moguet_source_install_characterization_test_sources
+    source/artifact_archive_metadata.cpp
     source/moguet.cpp
 )
 list(
     APPEND _moguet_source_install_characterization_test_sources
     tests/source_install_characterization.cpp
+    tests/stubs/artifact-identity/archive_metadata_stub.cpp
     tests/stubs/package-metadata/alpm_stub.cpp
 )
 _moguet_test_production_complement(
@@ -226,7 +266,9 @@ moguet_add_cpp_test(
     ALPM_COMPILE
     CURL
     SOURCES ${_moguet_source_install_characterization_test_sources}
-    DEFINITIONS MOGUET_ENABLE_TEST_OVERRIDES
+    DEFINITIONS
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
+        MOGUET_ENABLE_TEST_OVERRIDES
     INCLUDE_DIRECTORIES
         "${_moguet_test_source_include_dir}"
         "${_moguet_test_alpm_stub_include_dir}"
@@ -239,6 +281,14 @@ set(
     ${MOGUET_PRODUCTION_SOURCES}
     tests/stubs/package-metadata/alpm_stub.cpp
 )
+list(
+    REMOVE_ITEM _moguet_upgrade_baseline_metadata_test_sources
+    source/artifact_archive_metadata.cpp
+)
+list(
+    APPEND _moguet_upgrade_baseline_metadata_test_sources
+    tests/stubs/artifact-identity/archive_metadata_stub.cpp
+)
 moguet_add_cpp_test(
     moguet-upgrade-baseline-metadata-test
     FIREWALL
@@ -246,6 +296,7 @@ moguet_add_cpp_test(
     CURL
     SOURCES ${_moguet_upgrade_baseline_metadata_test_sources}
     DEFINITIONS
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
         MOGUET_ENABLE_TEST_OVERRIDES
         MOGUET_ENABLE_TEST_CONFIG_PATH
         MOGUET_ENABLE_APP_CONFIG_TEST_HOOKS
@@ -618,6 +669,7 @@ set(
     tests/stubs/build-plan-relation-assessment/assessment_stub.cpp
     tests/stubs/local-dependency-plan/aur_rpc_stub.cpp
     tests/stubs/local-dependency-plan/repository_query_stub.cpp
+    tests/stubs/artifact-identity/archive_metadata_stub.cpp
     tests/stubs/local-source-build/process_stub.cpp
 )
 _moguet_test_production_complement(
@@ -631,6 +683,7 @@ moguet_add_cpp_test(
     REAL_ALPM
     SOURCES ${_moguet_local_source_build_test_sources}
     DEFINITIONS
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
         MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
         MOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS
     INCLUDE_DIRECTORIES
@@ -724,6 +777,7 @@ set(
     tests/stubs/build-plan-relation-assessment/assessment_stub.cpp
     tests/stubs/local-dependency-plan/aur_rpc_stub.cpp
     tests/stubs/local-dependency-plan/repository_query_stub.cpp
+    tests/stubs/artifact-identity/archive_metadata_stub.cpp
     tests/stubs/local-source-build/process_stub.cpp
 )
 _moguet_test_production_complement(
@@ -736,6 +790,7 @@ moguet_add_cpp_test(
     ALPM_COMPILE
     REAL_ALPM
     SOURCES ${_moguet_source_package_identity_projection_test_sources}
+    DEFINITIONS MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
     INCLUDE_DIRECTORIES
         "${_moguet_test_source_include_dir}"
         "${_moguet_test_support_include_dir}"
@@ -762,9 +817,11 @@ moguet_add_cpp_test(
     SOURCES
         tests/invocation_owned_cleanup_model_test.cpp
         tests/invocation_owned_cleanup_adapter_test.cpp
+        tests/source_artifact_install_receipt_evidence_test.cpp
         tests/trusted_alpm_receipt_test.cpp
         source/invocation_owned_cleanup_adapter.cpp
         source/invocation_owned_cleanup_model.cpp
+        source/source_artifact_install_receipt_evidence.cpp
         source/build_plan_artifact_target_projection.cpp
         source/dependency_constraint_presentation.cpp
         source/dependency_plan_model.cpp
@@ -779,7 +836,10 @@ moguet_add_cpp_test(
         source/trusted_alpm_receipt_transport.cpp
         source/logging.cpp
         source/shell_words.cpp
-    DEFINITIONS MOGUET_ENABLE_TRUSTED_ALPM_RECEIPT_TEST_HOOKS
+    DEFINITIONS
+        MOGUET_ENABLE_INVOCATION_TRANSACTION_LEDGER_TEST_HOOKS
+        MOGUET_ENABLE_SOURCE_ARTIFACT_INSTALL_RECEIPT_TEST_HOOKS
+        MOGUET_ENABLE_TRUSTED_ALPM_RECEIPT_TEST_HOOKS
     INCLUDE_DIRECTORIES "${_moguet_test_source_include_dir}"
     COMPILE_OPTIONS -ffunction-sections -fdata-sections
     LINK_OPTIONS LINKER:--gc-sections
@@ -1127,10 +1187,15 @@ set(
 )
 moguet_add_cpp_test(
     artifact-identity-test
+    ALPM_COMPILE
+    REAL_ALPM
     SOURCES
         tests/artifact_identity_test.cpp
         ${_moguet_artifact_identity_production_sources}
+        source/artifact_archive_metadata.cpp
+        tests/stubs/artifact-identity/archive_metadata_stub.cpp
         tests/stubs/artifact-identity/process_stub.cpp
+    DEFINITIONS MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
     INCLUDE_DIRECTORIES "${_moguet_test_source_include_dir}"
 )
 
@@ -1138,6 +1203,7 @@ set(
     _moguet_multiple_artifact_identity_test_sources
     tests/multiple_artifact_identity_test.cpp
     ${_moguet_artifact_identity_production_sources}
+    tests/stubs/artifact-identity/archive_metadata_stub.cpp
     tests/stubs/artifact-identity/process_stub.cpp
 )
 _moguet_test_production_complement(
@@ -1148,6 +1214,7 @@ moguet_add_cpp_test(
     multiple-artifact-identity-test
     FIREWALL
     SOURCES ${_moguet_multiple_artifact_identity_test_sources}
+    DEFINITIONS MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
     INCLUDE_DIRECTORIES "${_moguet_test_source_include_dir}"
     FORBIDDEN_SOURCES ${_moguet_multiple_artifact_identity_forbidden_sources}
 )
@@ -1191,7 +1258,9 @@ moguet_add_cpp_test(
         source/shell_words.cpp
         source/logging.cpp
         tests/stubs/package-metadata/alpm_stub.cpp
+        tests/stubs/artifact-identity/archive_metadata_stub.cpp
         tests/stubs/artifact-install-executor/process_stub.cpp
+    DEFINITIONS MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
     INCLUDE_DIRECTORIES
         "${_moguet_test_source_include_dir}"
         "${_moguet_test_alpm_stub_include_dir}"
@@ -1217,6 +1286,7 @@ set(
     source/shell_words.cpp
     source/logging.cpp
     tests/stubs/package-metadata/alpm_stub.cpp
+    tests/stubs/artifact-identity/archive_metadata_stub.cpp
     tests/stubs/artifact-install-executor/process_stub.cpp
 )
 _moguet_test_production_complement(
@@ -1228,7 +1298,9 @@ moguet_add_cpp_test(
     FIREWALL
     ALPM_COMPILE
     SOURCES ${_moguet_package_base_artifact_install_executor_test_sources}
-    DEFINITIONS MOGUET_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS
+    DEFINITIONS
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
+        MOGUET_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS
     INCLUDE_DIRECTORIES
         "${_moguet_test_source_include_dir}"
         "${_moguet_test_alpm_stub_include_dir}"
@@ -1256,8 +1328,11 @@ moguet_add_cpp_test(
         source/shell_words.cpp
         source/logging.cpp
         tests/stubs/package-metadata/alpm_stub.cpp
+        tests/stubs/artifact-identity/archive_metadata_stub.cpp
         tests/stubs/artifact-install-executor/process_stub.cpp
-    DEFINITIONS MOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS
+    DEFINITIONS
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
+        MOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS
     INCLUDE_DIRECTORIES
         "${_moguet_test_source_include_dir}"
         "${_moguet_test_alpm_stub_include_dir}"
@@ -1284,6 +1359,7 @@ set(
     source/shell_words.cpp
     source/logging.cpp
     tests/stubs/package-metadata/alpm_stub.cpp
+    tests/stubs/artifact-identity/archive_metadata_stub.cpp
     tests/stubs/artifact-install-executor/process_stub.cpp
 )
 _moguet_test_production_complement(
@@ -1295,7 +1371,9 @@ moguet_add_cpp_test(
     FIREWALL
     ALPM_COMPILE
     SOURCES ${_moguet_separated_package_base_source_build_test_sources}
-    DEFINITIONS MOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
+    DEFINITIONS
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
+        MOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
     INCLUDE_DIRECTORIES
         "${_moguet_test_source_include_dir}"
         "${_moguet_test_alpm_stub_include_dir}"
@@ -1374,8 +1452,10 @@ moguet_add_cpp_test(
         source/shell_words.cpp
         source/logging.cpp
         tests/stubs/package-metadata/alpm_stub.cpp
+        tests/stubs/artifact-identity/archive_metadata_stub.cpp
         tests/stubs/artifact-install-executor/process_stub.cpp
     DEFINITIONS
+        MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
         MOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS
         MOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
         MOGUET_ENABLE_REVIEWED_SOURCE_PRODUCTION_TEST_HOOKS
@@ -2431,6 +2511,7 @@ set(
 set(
     MOGUET_EXPECTED_CPP_TEST_SUPPORT_SOURCES
     tests/commands_inspect_aur_stub.cpp
+    tests/stubs/artifact-identity/archive_metadata_stub.cpp
     tests/stubs/artifact-identity/process_stub.cpp
     tests/stubs/artifact-install-executor/process_stub.cpp
     tests/stubs/aur-update-command/operation_stub.cpp
@@ -2521,53 +2602,53 @@ set(
 # descriptors automatically.
 set(
     MOGUET_EXPECTED_CPP_TEST_FIREWALL_DESCRIPTORS
-    moguet-aur-update-command-test=d67ec54415c1adf866cdb54047831022f30f303b93705a835b1a5ba32d191381
-    moguet-upgrade-all-command-test=8e9f4157dd36b5c61b96a16c84830eb9f06ae2b56913d3cc28d6e6d26afc6ce1
-    moguet-commands-sync-test=b33dd0a0191f647f39e9f599f677523f9b626e0073da134856b29e1383563ea4
-    moguet-commands-inspect-test=e5cc1a4b0030379d4dfcc146cdadb0baa5674bbf71f89e2c691dfede68b73c6e
-    moguet-test=55650b0ba6a2828e01ba13cdd5f20d4aa53bbb7338070e9974b2b4616b67f964
-    moguet-cli-localization-test=ad64ba498908a87688e466d8b70ceeca20a0419fe0290f21014ef4e3c592da96
-    moguet-app-config-test=deca7c4476646e60b3677dc751d13c6fe06da5832994f26c4a01e6d093d3edec
-    moguet-aur-rpc-validation-test=1dd1c77ae18362a4c9ada881c47c8c183258696734bb999c9e20ea5ece8240e3
-    moguet-source-install-characterization-test=f997864af483c6cea669d4402be86bf4a11aa548113a56a51108382abc230829
-    moguet-upgrade-baseline-metadata-test=e0b0e7e4a9223126cf9b75822a575c856ea23dd8f07faadfadc17b5cae3b1c64
-    root-package-candidate-test=a4aa0042dd5e1166cc70bb637165ef687769c5bf1142e5c73e2fa6550f81647a
-    root-package-search-test=8c9ca9c30e553be54b0ac9433457330b670a6ca059bdc18f93f4f1916acaca2b
-    root-package-selection-test=bae6795e340d4959bea8b4bade1757276c40071f16d5f60bbf7726ef68bfaa29
-    root-package-route-projection-test=98dbd8474fc16c0064ce8f95d7e14146fe3abcbc9d6c4ffed145ffb35e54352c
-    local-package-metadata-test=b2480425dccdd9da57498da43c9b96bc1adba517bad742849da3f8a69ba8ea84
-    local-source-root-test=002eb2e94b391728719a172fbf43d68c40b262c84817b2f7321b9f8669e4eb8e
-    local-dependency-plan-projection-test=7f6b4e15ffff305a28afa2c5192e8eab0f33830e361eb9d21596f7f9ec3d5dbc
-    local-source-workspace-test=5572a7590a6b2d0cb76af826ab18f6dae4c0d24ee43f66cca087d4dc6fe372a2
-    local-source-build-test=e2010e7a5b38e6c42d09f669293c15a798c211b77b556cc8070c6cd8094434e1
-    source-package-identity-projection-test=6ed3d518e5a99af282bfa10ed0ef3b4a642b6d71f3ef6f29efe35d0bbd3a0915
-    multiple-artifact-workspace-test=827eb6ddf01746fb278a68077140428b9d66211f9ab57ed5a9ff4f4549ad0b96
-    makepkg-assignment-precedence-test=586b84637c60c9f44b424dce6353f88798964687f3a9fe137d243bd4c36efeaf
-    multiple-artifact-identity-test=90796cfd4a405fbb37fae00c3ae2b8011b946bfacfce0341b88515399f24faf3
-    package-base-artifact-install-plan-test=35809b95341521c51c62cae5eda755c629ad0646543b1b79e8c0b2860abe45a9
-    package-base-artifact-install-executor-test=81aa29a2a94963bd0f7104867942e9ebf6bfd51db751d21c3d2339a4db8a7820
-    separated-package-base-source-build-test=051dbca7217971ba27ea59288dbcb28fc599d0b3ba4c6b7b9d0e0119ec1dbd56
-    upgrade-all-plan-test=d2197e79976a7046d01a83f68bb04bc75a71c12f1a419fae33863ab691798045
-    system-source-upgrade-test=34dfaba52c7642aea8c6a5879a3a2e1f30eb053b2708ba48ae06c2d5ad9c018e
+    moguet-aur-update-command-test=136fa104082ad298c5008ef88e7b2a46af4168bb0c8e5ac8120f9e00ec9d3036
+    moguet-upgrade-all-command-test=a3cabda686583c4a63a87045ab24c11b4039ef4c573cc1dfccb5f24f50245dee
+    moguet-commands-sync-test=a27f1af1ea25933a1c9d688e825528b2ddf28f03d0392f8e35e5409fbca1eac8
+    moguet-commands-inspect-test=2d58e72113637c4aa473f66402f9ded053bca844f8972a40bae0026417c36a0d
+    moguet-test=8dcf06ebd4b53a3dc4cb1bdf205f4e76fed953b8a52bf981dc0a03e13000e33e
+    moguet-cli-localization-test=9d392ccce14d64c6339cc6c52a61559675f19e53c358d1592b3c7c63bf817da7
+    moguet-app-config-test=960b89095fada8f30cb8579c075ed0b4081b8ee8cc64c962cd880064a56803d1
+    moguet-aur-rpc-validation-test=ed819d57054c22f129c79874b79b1af2f5e7306bbf979e4840b9b69464ff7610
+    moguet-source-install-characterization-test=c80191cbb4870a16a06ae3fa45232e366e1877869deda28d2f71c5e64409bc72
+    moguet-upgrade-baseline-metadata-test=ae32429d545cfc8a68bac324a780209d78f5e8ba98043fbad14d23bf3794b895
+    root-package-candidate-test=2ad67f38314440215ee8b5997e7dffe4cb9b4f1995e283b68ff11e3b66613a59
+    root-package-search-test=6ae39d8830599334c035e888cfa287e883bd6c4f7863124ed27390bdff1c6d69
+    root-package-selection-test=b075e62bfb074a5c4183104c02838a5bbdc9b5df127ecce9d85e10648622196a
+    root-package-route-projection-test=3ad21b4ac04a426d3ab0e2a16f488ab7e9b7912110a6cc10d7577461186f09b6
+    local-package-metadata-test=494511ee3742b5cd6be72a6828c1d8cec7fab0ebc28cdfba5db482f8691239be
+    local-source-root-test=82758cc9cc798d22b8ad85668c99fb9cd064f8927423ed221f2a20029b5116b5
+    local-dependency-plan-projection-test=084ce2373810f6ac0270660244a619105a924ad4a300ab7995e007823b54ac5e
+    local-source-workspace-test=cd9a64f938d3fde9d1b6f3f36aff58f0fc08fc010ec95b5ebcb16608cb3d342b
+    local-source-build-test=5096c7e77ea6f55ff028a7639e5d3bf39bca992b320b4db5e4c5debbdc54da44
+    source-package-identity-projection-test=2424a7898f83ebd3a6fa70f6e6d38f24321915601eb3b9c9934bf1aff753cf38
+    multiple-artifact-workspace-test=770d03a46a52cfb83f221d1690c7ee4057b53eff13816e9961cd6cc38a67bb5d
+    makepkg-assignment-precedence-test=823a9a476d1abd83e4c394514b9438d7afc27d28421cb03b85eae39038c75361
+    multiple-artifact-identity-test=05b645d17cecc0e5097c70df36960aa5e1307dbc9025043925d9b1dd5c5c294a
+    package-base-artifact-install-plan-test=1b44673ef12c299c5df0c71285d3b3bd9ca4aef0c9494836e3664bd4717d5853
+    package-base-artifact-install-executor-test=9a3dadc672ec18a56a0f3a2835f053f3717590db6c7c4aac546dc494d402e515
+    separated-package-base-source-build-test=8a3200719a1073414c6f24729069f59ebbcf30c00dbce3b7d1dc70451693e994
+    upgrade-all-plan-test=96bef35659daa7ce6e8a723da1aac39df8ecba8cfc48d025645438ff19a7e7ad
+    system-source-upgrade-test=a912cac86bf7bfcd93bbed167694dbd77afcb2c97718daf3b2a8525769b5b719
     aur-update-execution-preflight-test=167eca6cef76a54712dd3281a015d38e406ae9fde1a264919d69b115a743cfd3
     aur-update-execution-runner-test=6bc5943cf6a1bdd3dacb4956d45aa9e670ae0467dc417176b9c4b9c0b2001818
     aur-update-operation-result-test=794c70c37241de19fa40d3e5369fadebe282fb321fd0e3771b8b3d89e0a369d2
     filtered-aur-update-operation-test=7fbff061914929873f29f271c3dc7608304895c6be1eb71817e5ad77d75d0372
-    upgrade-all-operation-test=34368675a3751e13eecfaa98a43bc120722cde9ddc9ddd5d34faafb0d5ce4df8
-    cli-diagnostic-model-test=8173878cec14632feaddc9f2061bb9e9f2cb0aee1b72d49c00cdff0f13804756
-    runtime-cli-connection-test=ea16790928344f14fd9d22decee9cfdd83c57a2e1b943c8661e78ac7006f4ce9
-    dependency-plan-model-test=85de42c5400f807c4e9dc95fe05658c08ed9fe48e4b5927cc981997d20162f1d
-    build-plan-artifact-target-projection-test=5865001808666ea99f03504ea63a8fe9a848043ff236b872af82f7ea0776981e
-    unified-plan-observation-test=24c75a4b2991960d7554d9655a8e4b64c38f10aff636d5e8b4995facbe5a009e
-    unified-plan-projection-test=d037aa7a2a93d13cc926fdeeb405f34e1d000744f3b5b737f837b1768adec0e0
-    unified-plan-renderer-test=e3e78a9d901fe72313a0de531f7d6d45ae97256061098a7dfca50e93f9390969
-    artifact-selection-model-test=6f727007a727745f2641f105ac5dd813ed2d00b5b429f58a57a7d93640069e14
-    artifact-identity-selection-test=801269bedfcfbf881fbbbb7700c591b7039cffc62987c4d8e8ba745ce8579140
-    provider-installed-state-test=8c16befd43a0377efd527b6193dded7068f8d15ffc24f0c5530eb4bec3f66c19
-    dependency-constraint-test=4e9546f30ef219ad77364a20044f4619b9fd77813d8f18850993962dc7834d78
-    package-relation-test=20b7def0d9229e85c4fe1d5a9d9d99b3741fb8613cabe522fc084981d9867546
-    package-relation-observation-test=928ab7730b242ab63658dde32981a50a278a07caae64f7f6d1724fe959441cba
-    package-relation-assessment-test=e08c84a454a7f120e30981b6d180e0a60a02d8697aa33e62d458555148ad90a3
-    package-constraint-metadata-test=07cc167b7dfc0c375bf6bcdb287ef00fe922994ec8bdf77304ba8fcdbca9c7a2
-    aur-constraint-metadata-test=e5c58db032bd339cdfc9d4d9198b77ae7ebae73d98857585775ddd1562b5ff4f
+    upgrade-all-operation-test=69192e9d3c74a16e97f8a30d7fddaa5a3c74c9ee13c067e1559cb499b2b2ddf4
+    cli-diagnostic-model-test=fd74cca0db24775a11fbea543c6ab28a49e943224865142a1ebbd58cbcbc3b7a
+    runtime-cli-connection-test=6ec8eb7e527846ec802fba2d486b2b8d0cde70a072bca059f5e1fe7d409140bd
+    dependency-plan-model-test=220b5ea7aaf9b82be4e718d44add3db130eb63981e5fe0f320374643ac1d1ecd
+    build-plan-artifact-target-projection-test=855ba6dff322e8d15a1eb99bb4039c4635592de4d204c6ef4a51a0094f35c6e4
+    unified-plan-observation-test=2416b469f086361f28647c84bfe86ef31e7274e375789435fca8b54bbf445531
+    unified-plan-projection-test=25be5dce609bf2855a9e9e3a2d19aad79bad50296ad6038357919868af262f5c
+    unified-plan-renderer-test=a287120571cbded4acf475f1d26754f00906c2eea29b3ba9801639778ff74aaf
+    artifact-selection-model-test=05834c4f98d299ff0186560008b4d48d30a9f216be78805c7f52311df17ceadf
+    artifact-identity-selection-test=51f84733b5fad392dbf648b9f906e0ae11e088c4f6de036fb7ae3f7bd43f42e2
+    provider-installed-state-test=95e90a01b3a247b10fbbc323195b2c702540c5abf256569d80cbc70e249c378c
+    dependency-constraint-test=ae4c94bcb4c891f454db1f218f279a6bdf2f5deebf15d7e27674b0a076b34808
+    package-relation-test=6cee7199e84af1f882c0dad4fc2d1a0f53a20d6d076ea0215a0369834033750e
+    package-relation-observation-test=de239d38f1093a6cc0af8d8a7ff5cb21408e56af163b599a5bdebb089d9cb781
+    package-relation-assessment-test=0b77f959c67d7706d12041f179dcda43ede08abb4fb229daeddb37f8a1130564
+    package-constraint-metadata-test=8547e84e4cb7fbb0871d973a9e6d704a600e7b562948027fbac6469c5d297d39
+    aur-constraint-metadata-test=bf66ead0bb0164d8ee7f4b3145520ff4a60b9a2298d07b6f57e2ee0369650191
 )

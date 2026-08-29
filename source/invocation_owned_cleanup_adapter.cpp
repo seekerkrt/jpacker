@@ -63,6 +63,7 @@ bool is_dependency_role(PackageRole role) noexcept {
            role == PackageRole::CheckDependency;
 }
 
+#ifdef MOGUET_ENABLE_INVOCATION_TRANSACTION_LEDGER_TEST_HOOKS
 bool transaction_requested_packages_are_valid(
     const std::vector<std::string>& requested_package_names) {
     if(requested_package_names.empty()) return false;
@@ -74,25 +75,7 @@ bool transaction_requested_packages_are_valid(
                    unique_names.insert(package_name).second;
         });
 }
-
-bool current_package_identity_supports_causal_projection(
-    const SourceAwarePackageIdentity& candidate,
-    const CleanupCurrentPackageEvidence& current_package) noexcept {
-    if(current_package.state != CleanupInstalledState::Present ||
-       current_package.verification !=
-           CleanupEvidenceVerification::Verified ||
-       !current_package.metadata.has_value() ||
-       current_package.metadata->name !=
-           candidate.package().package_name()) {
-        return false;
-    }
-
-    const PackageVersionIdentity& version = candidate.package_version();
-    if(version.state() != PackageVersionState::Known) return true;
-    const std::string* full_version = version.full_version();
-    return full_version != nullptr &&
-           *full_version == current_package.metadata->version;
-}
+#endif
 
 bool has_role(
     const std::vector<PackageRole>& roles, PackageRole expected) {
@@ -712,7 +695,9 @@ CleanupCausalOwnership project_cleanup_causal_ownership(
     return CleanupCausalOwnership::Unknown;
 }
 
-CleanupCausalOwnership project_cleanup_causal_ownership(
+#ifdef MOGUET_ENABLE_INVOCATION_TRANSACTION_LEDGER_TEST_HOOKS
+CleanupCausalOwnership
+project_cleanup_causal_ownership_from_raw_ledger_for_test(
     const std::string& package_name,
     CleanupBaselineObservation baseline,
     const CleanupCurrentPackageEvidence& current_package,
@@ -752,6 +737,7 @@ CleanupCausalOwnership project_cleanup_causal_ownership(
     // contain only an Upgrade for this package.
     return CleanupCausalOwnership::Unknown;
 }
+#endif
 
 CleanupPolicyProtection project_cleanup_policy_protection() noexcept {
     return CleanupPolicyProtection::Unknown;
@@ -765,8 +751,7 @@ project_invocation_owned_cleanup_candidate(
     const ResolvedDependencyCandidate& candidate_authority,
     const CleanupInvocationLifecycleEvidence& lifecycle,
     const std::vector<SelectedRepositoryProviderTransactionResult>&
-        provider_transactions,
-    const InvocationDependencyTransactionLedger& transaction_ledger) {
+        provider_transactions) {
     std::vector<CleanupLifecycleProjectionIssue> issues;
     retain_snapshot_failure(
         baseline_snapshot,
@@ -1055,12 +1040,10 @@ project_invocation_owned_cleanup_candidate(
     // Legacy lifecycle/provider success evidence remains intentionally inert.
     static_cast<void>(lifecycle);
     static_cast<void>(provider_transactions);
-    CleanupCausalOwnership causal = CleanupCausalOwnership::Unknown;
-    if(current_package_identity_supports_causal_projection(
-           projected_candidate.value(), current)) {
-        causal = project_cleanup_causal_ownership(
-            package_name, baseline, current, transaction_ledger);
-    }
+    // POLICY(#485): raw generic ledger values are factual records only. A
+    // production-positive owner-specific capability is intentionally not yet
+    // connected to this broader route/candidate adapter.
+    const CleanupCausalOwnership causal = CleanupCausalOwnership::Unknown;
     if(causal == CleanupCausalOwnership::Unknown) {
         add_issue(
             issues,

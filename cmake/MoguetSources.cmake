@@ -2,6 +2,7 @@
 # build-graph changes and must be explicit; do not replace this with a glob.
 set(MOGUET_PRODUCTION_SOURCES
     source/app_config.cpp
+    source/artifact_archive_metadata.cpp
     source/artifact_identity.cpp
     source/artifact_identity_selection.cpp
     source/artifact_identity_set.cpp
@@ -99,6 +100,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/separated_package_base_source_build.cpp
     source/separated_source_build.cpp
     source/shell_words.cpp
+    source/source_artifact_install_receipt_evidence.cpp
     source/source_build.cpp
     source/source_entry_parser.cpp
     source/source_environment.cpp

@@ -119,14 +119,17 @@ project_cleanup_current_package_evidence(
     const std::vector<SelectedRepositoryProviderTransactionResult>&
         provider_transactions) noexcept;
 
-// InvocationOwned requires a complete receipt for the exact transaction and
-// an actual Install record for this package. Omission, Upgrade, command
-// success alone, or malformed ledger data remains Unknown.
-[[nodiscard]] CleanupCausalOwnership project_cleanup_causal_ownership(
+// Raw generic ledger projection is deliberately test-only. Production
+// SourceArtifactInstall positive authority is the closed owner-specific model
+// in source_artifact_install_receipt_evidence.hpp.
+#ifdef MOGUET_ENABLE_INVOCATION_TRANSACTION_LEDGER_TEST_HOOKS
+[[nodiscard]] CleanupCausalOwnership
+project_cleanup_causal_ownership_from_raw_ledger_for_test(
     const std::string& package_name,
     CleanupBaselineObservation baseline,
     const CleanupCurrentPackageEvidence& current_package,
     const InvocationDependencyTransactionLedger& transaction_ledger);
+#endif
 
 // Slice 3.6 adds causal transport only; it still has no complete group/policy
 // inventory authority.
@@ -145,5 +148,4 @@ project_invocation_owned_cleanup_candidate(
     const ResolvedDependencyCandidate& candidate_authority,
     const CleanupInvocationLifecycleEvidence& lifecycle,
     const std::vector<SelectedRepositoryProviderTransactionResult>&
-        provider_transactions = {},
-    const InvocationDependencyTransactionLedger& transaction_ledger = {});
+        provider_transactions = {});

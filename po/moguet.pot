@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.5.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-29 17:03+0900\n"
+"POT-Creation-Date: 2026-08-30 04:29+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,25 +18,12 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
-#. TRANSLATORS: {} is the literal command name "pacman".
+#. TRANSLATORS: {} is the literal library name "libalpm".
 #, c++-format
-msgid "{} returned malformed package artifact identity."
+msgid "Failed to read package archive metadata with {}."
 msgstr ""
 
-#. TRANSLATORS: {} is the literal command name "pacman".
-#, c++-format
-msgid "{} returned no package artifact identity."
-msgstr ""
-
-#. TRANSLATORS: {} is the literal command name "pacman".
-#, c++-format
-msgid "{} returned an invalid package name for the artifact."
-msgstr ""
-
-#. TRANSLATORS: The first placeholder is the literal command
-#. name "pacman"; the second is its numeric exit code.
-#, c++-format
-msgid "{} failed to read package artifact identity with exit code {}."
+msgid "Package archive metadata contains an invalid name or version."
 msgstr ""
 
 msgid "Artifact package identity set must not be empty."

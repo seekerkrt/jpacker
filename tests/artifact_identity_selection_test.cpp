@@ -717,6 +717,53 @@ void test_unknown_install_reason() {
         "Unknown install reason diagnostic differs");
 }
 
+void test_actual_package_base_and_architecture_survive_selection() {
+    std::vector<ArtifactPackageIdentity> raw_identities = {
+        ArtifactPackageIdentity{
+            "foo-libs", "1.0-1",
+            ArtifactPackageBaseIdentity::known("foo"),
+            ArtifactPackageArchitectureIdentity::known("x86_64")},
+        ArtifactPackageIdentity{
+            "foo-debug", "1.0-1",
+            ArtifactPackageBaseIdentity::known("foo"),
+            ArtifactPackageArchitectureIdentity::known("any")},
+    };
+    ArtifactPackageIdentitySet identities =
+        make_artifact_package_identity_set_for_test(
+            std::move(raw_identities));
+    const PackageBaseArtifactIdentitySelectionResult result =
+        correlate_package_base_artifact_identities(
+            "foo",
+            {required_target(
+                "foo", "foo-libs",
+                DesiredInstallReason::Dependency)},
+            identities);
+    const auto& success = expect_success(
+        result, "actual PackageBase/architecture retention");
+    expect(
+        success.selected_artifacts.size() == 1 &&
+            success.unselected_artifacts.size() == 1 &&
+            success.selected_artifacts[0].artifact_index == 0 &&
+            success.unselected_artifacts[0].artifact_index == 1 &&
+            success.selected_artifacts[0].identity.package_base.value() !=
+                nullptr &&
+            *success.selected_artifacts[0].identity.package_base.value() ==
+                "foo" &&
+            success.selected_artifacts[0].identity.architecture.value() !=
+                nullptr &&
+            *success.selected_artifacts[0].identity.architecture.value() ==
+                "x86_64" &&
+            success.unselected_artifacts[0].identity.package_base.value() !=
+                nullptr &&
+            *success.unselected_artifacts[0].identity.package_base.value() ==
+                "foo" &&
+            success.unselected_artifacts[0].identity.architecture.value() !=
+                nullptr &&
+            *success.unselected_artifacts[0].identity.architecture.value() ==
+                "any",
+        "selected/unselected artifact metadata identity was flattened");
+}
+
 template <typename Callable>
 void run_case(const std::string& name, Callable callable) {
     callable();
@@ -754,11 +801,14 @@ int main() {
             "PackageBase attribution mismatch",
             test_package_base_attribution_mismatch);
         run_case("unknown install reason", test_unknown_install_reason);
+        run_case(
+            "actual PackageBase and architecture retention",
+            test_actual_package_base_and_architecture_survive_selection);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
     }
 
-    std::cout << "artifact identity selection tests: all 15 checks passed\n";
+    std::cout << "artifact identity selection tests: all 16 checks passed\n";
     return 0;
 }

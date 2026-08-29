@@ -619,16 +619,17 @@ void test_transport_complete_and_solver_introduced_projection() {
                     "solver-introduced"),
         "trusted transport did not preserve requested vs actual Install set");
 
-    const CleanupCausalOwnership causal = project_cleanup_causal_ownership(
-        "solver-introduced",
-        CleanupBaselineObservation::NewlyObserved,
-        CleanupCurrentPackageEvidence{
-            CleanupInstalledState::Present,
-            InstalledPackageMetadata{
-                "solver-introduced", "1-1",
-                InstalledPackageReason::Dependency},
-            CleanupEvidenceVerification::Verified},
-        result.transaction_ledger);
+    const CleanupCausalOwnership causal =
+        project_cleanup_causal_ownership_from_raw_ledger_for_test(
+            "solver-introduced",
+            CleanupBaselineObservation::NewlyObserved,
+            CleanupCurrentPackageEvidence{
+                CleanupInstalledState::Present,
+                InstalledPackageMetadata{
+                    "solver-introduced", "1-1",
+                    InstalledPackageReason::Dependency},
+                CleanupEvidenceVerification::Verified},
+            result.transaction_ledger);
     expect(
         causal == CleanupCausalOwnership::InvocationOwned,
         "complete trusted solver Install did not reach InvocationOwned");
@@ -668,7 +669,7 @@ void test_transport_external_race_and_failures() {
     require_processes_consumed();
     expect(
         missing.status == TrustedAlpmReceiptCaptureStatus::Missing &&
-            project_cleanup_causal_ownership(
+            project_cleanup_causal_ownership_from_raw_ledger_for_test(
                 "requested-target",
                 CleanupBaselineObservation::NewlyObserved,
                 CleanupCurrentPackageEvidence{
@@ -704,7 +705,7 @@ void test_transport_external_race_and_failures() {
                     .command_outcome ==
                 InvocationDependencyTransactionCommandOutcome::
                     Failed &&
-            project_cleanup_causal_ownership(
+            project_cleanup_causal_ownership_from_raw_ledger_for_test(
                 "requested-target",
                 CleanupBaselineObservation::NewlyObserved,
                 CleanupCurrentPackageEvidence{

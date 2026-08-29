@@ -180,7 +180,7 @@ inventoryを所有する。
 | Inventory | Expected |
 | --- | ---: |
 | C++ test executables | 98 |
-| support / stub translation units | 29 |
+| support / stub translation units | 30 |
 | link firewalls | 49 |
 | firewall descriptors | 49 |
 | CTest registrations | 122 |

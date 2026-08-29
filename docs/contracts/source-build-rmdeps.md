@@ -4,13 +4,13 @@
 
 この文書は、separated AUR / source-build lifecycleにおける`--rmdeps`の意味、拒否境界、pacman-only routeでの消費を定めるnormative production contractである。あわせてIssue #404で将来のsupportへ進むために必要なcleanup ownershipとinteractionのstaged authorityを定める。文書の規範上の正本は日本語本文である。
 
-current production behaviorとstaged targetは混同しない。Issue #404 Slice 3.6完了後も、production source-buildの`--rmdeps`はunsupportedかつfail closedであり、dependency removal、preview、promptは接続されていない。Slice 3.6はselected repository provider transactionだけにproduction-capableなtrusted receipt transportを追加する。`pacman -U`と`makepkg -s`は未対応であり、policy protection等の独立gateも残るためremovalへ進まない。
+current production behaviorとstaged targetは混同しない。Issue #485 Slice 1完了後も、production source-buildの`--rmdeps`はunsupportedかつfail closedであり、dependency removal、preview、promptは接続されていない。Issue #404 Slice 3.6はselected repository provider transactionだけにproduction-capableなtrusted receipt transportを追加した。Issue #485 Slice 1はactual archiveのname / version / PackageBase / architectureと、`SourceArtifactInstall`専用のinvocation / work-item / selected artifact / token / outcome / receipt causal evidence modelだけを追加し、observation producer、`pacman -U` trusted transport、policy protection、production callerへ接続しない。`makepkg -s`も未対応であり、独立gateが残るためremovalへ進まない。
 
 - Origin Issue: [#269](https://github.com/seekerkrt/moguet/issues/269)
 - Staged extension: [#404](https://github.com/seekerkrt/moguet/issues/404)
 - Related Issues: [#123](https://github.com/seekerkrt/moguet/issues/123)、[#152](https://github.com/seekerkrt/moguet/issues/152)、[#218](https://github.com/seekerkrt/moguet/issues/218)、[#242](https://github.com/seekerkrt/moguet/issues/242)、[#266](https://github.com/seekerkrt/moguet/issues/266)、[#267](https://github.com/seekerkrt/moguet/issues/267)、[#271](https://github.com/seekerkrt/moguet/issues/271)、[#350](https://github.com/seekerkrt/moguet/issues/350)
 - Related PRs: #298（#269 policy）、#241、#257〜#261（#242 separated lifecycle）
-- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。Slice 3でinstall-reason付きfull local snapshotとproduction未接続のmetadata / lifecycle adapterを追加し、current causal authority不足をNO-GOとして固定。Slice 3.5でtransaction token、owner、command outcome、machine receipt completeness、package operation、invocation ledgerをpure typed contractとして追加した。Slice 3.6でpackage-installed root helper、root-owned transaction state、transaction-local Install hook、one-shot machine receipt、selected-provider typed transportを追加し、Slice 3.5 ledgerへactual `Install` setをprojectできるproduction-capable pathを成立させた。Slice 3.7でmakepkg syncdepsのpublic instrumentation authorityを監査し、安全なroot-owned adapter案は独立security redesignが必要なためDEFER、Issue #404はRETURN-HOMEと判定した。public cleanup routeと他mutation ownerは未接続である。
+- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。Slice 3でinstall-reason付きfull local snapshotとproduction未接続のmetadata / lifecycle adapterを追加し、current causal authority不足をNO-GOとして固定。Slice 3.5でtransaction token、owner、command outcome、machine receipt completeness、package operation、invocation ledgerをpure typed contractとして追加した。Slice 3.6でpackage-installed root helper、root-owned transaction state、transaction-local Install hook、one-shot machine receipt、selected-provider typed transportを追加し、Slice 3.5 ledgerへactual `Install` setをprojectできるproduction-capable pathを成立させた。Slice 3.7でmakepkg syncdepsのpublic instrumentation authorityを監査し、安全なroot-owned adapter案は独立security redesignが必要なためDEFER、Issue #404はRETURN-HOMEと判定した。Issue #485 Slice 1でactual archive PackageBase / architectureと`SourceArtifactInstall` owner-specific closed evidenceを追加し、raw generic ledgerをproduction positive projectionから除外した。public cleanup route、source-artifact trusted transport、他mutation ownerは未接続である。
 - Related upper decisions: [decision 1](../DECISIONS.md#decision-1)、[decision 2](../DECISIONS.md#decision-2)、[decision 4](../DECISIONS.md#decision-4)、[decision 5](../DECISIONS.md#decision-5)、[decision 6](../DECISIONS.md#decision-6)、[decision 7](../DECISIONS.md#decision-7)
 
 ## Contract本文（日本語normative source of truth）
@@ -338,6 +338,22 @@ Slice 3.5のpure ledgerと`InvocationDependencyTransactionOwner::MakepkgSyncDepe
 - overall causal authority: **PARTIAL**。makepkg syncdepsとtyped dependency artifactの`pacman -U`はUnknownのままである。
 - Slice 4 production cleanup readiness: **NO-GO**。causal authorityに加えてpolicy protection、route / correlation completeness、shared lifetime、mutation直前revalidationが未成立である。
 - Issue #404 continuation recommendation: **RETURN-HOME**。v2.5.0では成立済みのmodel / adapter / selected-provider trusted receipt foundationを保持し、public source-build `--rmdeps`はunsupported / fail-closedのままとする。makepkg syncdeps authority、残るcleanup candidate authority、preview / confirmation / mutation executorは最大3件のfollow-up候補へ分離し、Issue #404内で新しいsecurity subsystemを開始しない。
+
+### Issue #485 Slice 1 source-artifact causal evidence（production未接続）
+
+actual package archive metadataは、validated path provenanceとは別にread-only `alpm_pkg_load()`と`alpm_pkg_get_name()` / `alpm_pkg_get_version()` / `alpm_pkg_get_base()` / `alpm_pkg_get_arch()`から取得する。`ArtifactPackageIdentity`はchild、exact full version、actual PackageBase、actual architectureを保持し、PackageBase / architectureの`Known` / `Missing` / `Malformed` / `Unavailable`を区別する。missing等をBuildPlanやupper source contextの値で補完せず、known expected child / version / PackageBase / architectureとのexact correlationだけをcompleteとする。`any`とknown other architectureもactual valueとして保持し、cleanup側でcompatibility solverを再実装しない。
+
+artifact path provenance、archive metadata identity、future actual ALPM Install receiptは別dimensionである。stable artifact indexはvalidated aggregate内のpathへ解決できるが、それ自体はpath capabilityでもreceiptでもない。同じinodeのcontent mutationをpath identityだけでは排除できないため、future transport / candidate integrationでもactual transaction receiptとcurrent installed identityを省略しない。
+
+`SourceArtifactInstall` evidenceは次を一つのclosed valueへ束縛する。
+
+- invocation-local identity、exact work-item index、PackageBase、requested root set。
+- selected artifact exact set。各artifactのstable index、expected source-aware child / version / PackageBase / exact architecture、actual archive identity、build / check role、`Dependency` desired reason、root attributionを保持する。
+- exact transaction token、hard-coded `InvocationDependencyTransactionOwner::SourceArtifactInstall`、requested package set、command outcome、receipt state / operation、actual Install setを保持する。
+
+positive causal capabilityは、bindingとselected setがexact、command `Succeeded`、receipt `Complete`、same token / fixed owner、全selected childがactual `Install`の場合だけ発行する。actual Install setのsolver-introduced / unselected entryはfactual resultへ残るがselected artifactへ昇格しない。`Upgrade`はversionの大小や同一性を問わず、normal upgrade、same-version reinstall、downgradeのすべてでpositive不可である。Root / Runtime role、Explicit desired reason、missing / incomplete / invalid receipt、command failure、token / owner / invocation / work item / PackageBase / selected set / name / version / architecture mismatchもpositive不可とする。
+
+generic `InvocationDependencyTransactionLedger`はfactual modelとして残すが、production candidate adapterはraw ledgerを受け取らない。raw ledgerからの旧causal projectionはreceipt model regression用test hookだけに限定し、selected-provider transport / helper / fixed owner / `/run` stateは変更しない。Slice 1の`SourceArtifactInstallReceiptObservation`にもproduction constructorはなく、actual trusted transport、prepare / consume / abort、`pacman -U` executor integrationはIssue #485 Slice 2の責務である。
 
 ### Slice 4 production cleanup readiness: NO-GO
 

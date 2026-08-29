@@ -347,12 +347,11 @@ InvocationOwnedCleanupCandidateProjectionSuccess project_basic_candidate(
         "build-tool", "1.0-1",
         InstalledPackageReason::Dependency),
     const std::vector<SelectedRepositoryProviderTransactionResult>&
-        provider_transactions = {},
-    const InvocationDependencyTransactionLedger& transaction_ledger = {}) {
+        provider_transactions = {}) {
     return require_projection(
         project_invocation_owned_cleanup_candidate(
             baseline, current, plan, candidate_authority, lifecycle,
-            provider_transactions, transaction_ledger),
+            provider_transactions),
         "basic cleanup candidate");
 }
 
@@ -483,21 +482,31 @@ void test_authoritative_install_receipt_projects_only_causal_dimension() {
             {{PacmanTransactionPackageOperation::Install,
               "build-tool"}}))}};
 
+    expect(
+        project_cleanup_causal_ownership_from_raw_ledger_for_test(
+            "build-tool", CleanupBaselineObservation::NewlyObserved,
+            project_cleanup_current_package_evidence(
+                present_snapshot(
+                    "build-tool", "1.0-1",
+                    InstalledPackageReason::Dependency),
+                "build-tool"),
+            ledger) == CleanupCausalOwnership::InvocationOwned,
+        "test-only factual ledger regression lost its Install semantics");
+
     InvocationOwnedCleanupCandidateProjectionSuccess projection =
         project_basic_candidate(
             plan, candidate, lifecycle, absent_snapshot(),
             present_snapshot(
                 "build-tool", "1.0-1",
-                InstalledPackageReason::Dependency),
-            {}, ledger);
+                InstalledPackageReason::Dependency));
     expect(
         projection.candidate.causal_ownership ==
-                CleanupCausalOwnership::InvocationOwned &&
-            !has_issue(
+                CleanupCausalOwnership::Unknown &&
+            has_issue(
                 projection,
                 CleanupLifecycleProjectionIssueKind::
                     CausalOwnershipUnavailable),
-        "complete transaction-local Install receipt did not project InvocationOwned");
+        "raw ledger remained reachable from production candidate projection");
 
     const CleanupClassificationResult classified =
         classify_invocation_owned_cleanup(projection.candidate);
@@ -509,8 +518,11 @@ void test_authoritative_install_receipt_projects_only_causal_dimension() {
             has_reason(
                 classified,
                 CleanupClassificationReason::
-                    PolicyProtectionUnknown),
-        "causal InvocationOwned bypassed Unknown policy authority");
+                    CausalOwnershipUnknown) &&
+            has_reason(
+                classified,
+                CleanupClassificationReason::PolicyProtectionUnknown),
+        "generic-ledger firewall bypassed Unknown candidate authority");
 }
 
 void test_upgrade_and_external_install_race_do_not_project_ownership() {
@@ -537,13 +549,23 @@ void test_upgrade_and_external_install_race_do_not_project_ownership() {
              {PacmanTransactionPackageOperation::Install,
               "solver-introduced-tool"}}))}};
 
+    expect(
+        project_cleanup_causal_ownership_from_raw_ledger_for_test(
+            "build-tool", CleanupBaselineObservation::NewlyObserved,
+            project_cleanup_current_package_evidence(
+                present_snapshot(
+                    "build-tool", "1.0-1",
+                    InstalledPackageReason::Dependency),
+                "build-tool"),
+            ledger) == CleanupCausalOwnership::Unknown,
+        "test-only Upgrade receipt became an Install");
+
     InvocationOwnedCleanupCandidateProjectionSuccess projection =
         project_basic_candidate(
             plan, candidate, lifecycle, absent_snapshot(),
             present_snapshot(
                 "build-tool", "1.0-1",
-                InstalledPackageReason::Dependency),
-            {}, ledger);
+                InstalledPackageReason::Dependency));
     expect(
         projection.candidate.causal_ownership ==
                 CleanupCausalOwnership::Unknown &&
@@ -555,16 +577,6 @@ void test_upgrade_and_external_install_race_do_not_project_ownership() {
 }
 
 void test_failed_missing_and_mismatched_receipts_remain_unknown() {
-    BuildPlan plan = basic_plan();
-    PreparedProductionSourceBuildInvocation invocation =
-        prepared_invocation(plan);
-    ProductionSourceBuildInvocationResult result =
-        successful_result(invocation);
-    CleanupInvocationLifecycleEvidence lifecycle =
-        CleanupInvocationLifecycleEvidence::after_successful_invocation(
-            invocation, result);
-    const ResolvedDependencyCandidate& candidate =
-        plan.dependency_edges.front().resolved_candidate.value();
     const std::string token = transaction_token();
     const auto owner = InvocationDependencyTransactionOwner::
         SelectedRepositoryProvider;
@@ -576,16 +588,15 @@ void test_failed_missing_and_mismatched_receipts_remain_unknown() {
                                     const std::string& context) {
         InvocationDependencyTransactionLedger ledger{
             {std::move(transaction)}};
-        InvocationOwnedCleanupCandidateProjectionSuccess projection =
-            project_basic_candidate(
-                plan, candidate, lifecycle, absent_snapshot(),
-                present_snapshot(
-                    "build-tool", "1.0-1",
-                    InstalledPackageReason::Dependency),
-                {}, ledger);
         expect(
-            projection.candidate.causal_ownership ==
-                CleanupCausalOwnership::Unknown,
+            project_cleanup_causal_ownership_from_raw_ledger_for_test(
+                "build-tool", CleanupBaselineObservation::NewlyObserved,
+                project_cleanup_current_package_evidence(
+                    present_snapshot(
+                        "build-tool", "1.0-1",
+                        InstalledPackageReason::Dependency),
+                    "build-tool"),
+                ledger) == CleanupCausalOwnership::Unknown,
             context);
     };
 
@@ -625,16 +636,6 @@ void test_failed_missing_and_mismatched_receipts_remain_unknown() {
 }
 
 void test_multiple_transaction_attribution_is_not_flattened() {
-    BuildPlan plan = basic_plan();
-    PreparedProductionSourceBuildInvocation invocation =
-        prepared_invocation(plan);
-    ProductionSourceBuildInvocationResult result =
-        successful_result(invocation);
-    CleanupInvocationLifecycleEvidence lifecycle =
-        CleanupInvocationLifecycleEvidence::after_successful_invocation(
-            invocation, result);
-    const ResolvedDependencyCandidate& candidate =
-        plan.dependency_edges.front().resolved_candidate.value();
     const auto owner = InvocationDependencyTransactionOwner::
         SourceArtifactInstall;
     const std::string install_token = transaction_token('a');
@@ -664,13 +665,15 @@ void test_multiple_transaction_attribution_is_not_flattened() {
                   "build-tool"}})),
     }};
 
-    InvocationOwnedCleanupCandidateProjectionSuccess projection =
-        project_basic_candidate(
-            plan, candidate, lifecycle, absent_snapshot(),
-            present_snapshot(
-                "build-tool", "1.0-1",
-                InstalledPackageReason::Dependency),
-            {}, ledger);
+    const CleanupCausalOwnership raw_projection =
+        project_cleanup_causal_ownership_from_raw_ledger_for_test(
+            "build-tool", CleanupBaselineObservation::NewlyObserved,
+            project_cleanup_current_package_evidence(
+                present_snapshot(
+                    "build-tool", "1.0-1",
+                    InstalledPackageReason::Dependency),
+                "build-tool"),
+            ledger);
     expect(
         ledger.transactions.size() == 3 &&
             ledger.transactions[0]
@@ -683,7 +686,7 @@ void test_multiple_transaction_attribution_is_not_flattened() {
                     .front()
                     .operation ==
                 PacmanTransactionPackageOperation::Upgrade &&
-            projection.candidate.causal_ownership ==
+            raw_projection ==
                 CleanupCausalOwnership::InvocationOwned,
         "Install and later Upgrade evidence was flattened or misattributed");
 }
@@ -709,6 +712,16 @@ void test_receipt_does_not_bypass_protection_precedence() {
             token, owner,
             {{PacmanTransactionPackageOperation::Install,
               "build-tool"}}))}};
+    expect(
+        project_cleanup_causal_ownership_from_raw_ledger_for_test(
+            "build-tool", CleanupBaselineObservation::NewlyObserved,
+            project_cleanup_current_package_evidence(
+                present_snapshot(
+                    "build-tool", "1.0-1",
+                    InstalledPackageReason::Dependency),
+                "build-tool"),
+            ledger) == CleanupCausalOwnership::InvocationOwned,
+        "test-only receipt control was not authoritative");
 
     InvocationOwnedCleanupCandidateProjectionSuccess preexisting =
         project_basic_candidate(
@@ -718,8 +731,7 @@ void test_receipt_does_not_bypass_protection_precedence() {
                 InstalledPackageReason::Dependency),
             present_snapshot(
                 "build-tool", "1.0-1",
-                InstalledPackageReason::Dependency),
-            {}, ledger);
+                InstalledPackageReason::Dependency));
     expect(
         preexisting.candidate.causal_ownership ==
                 CleanupCausalOwnership::Unknown &&
@@ -733,11 +745,10 @@ void test_receipt_does_not_bypass_protection_precedence() {
             plan, candidate, lifecycle, absent_snapshot(),
             present_snapshot(
                 "build-tool", "1.0-1",
-                InstalledPackageReason::Explicit),
-            {}, ledger);
+                InstalledPackageReason::Explicit));
     expect(
         explicit_package.candidate.causal_ownership ==
-                CleanupCausalOwnership::InvocationOwned &&
+                CleanupCausalOwnership::Unknown &&
             classify_invocation_owned_cleanup(
                 explicit_package.candidate)
                     .classification() ==
@@ -761,11 +772,10 @@ void test_receipt_does_not_bypass_protection_precedence() {
             absent_snapshot(),
             present_snapshot(
                 "build-tool", "1.0-1",
-                InstalledPackageReason::Dependency),
-            {}, ledger);
+                InstalledPackageReason::Dependency));
     expect(
         runtime.candidate.causal_ownership ==
-                CleanupCausalOwnership::InvocationOwned &&
+                CleanupCausalOwnership::Unknown &&
             classify_invocation_owned_cleanup(runtime.candidate)
                     .classification() ==
                 CleanupClassification::Protected,

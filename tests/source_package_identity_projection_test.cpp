@@ -139,6 +139,18 @@ SourceAwarePackageIdentity aur_context(
         PackageArchitectureIdentity::known({"x86_64"}));
 }
 
+ArtifactPackageIdentity archive_identity(
+    std::string package_name = "artifact-child",
+    std::string version = "1.0-1",
+    ArtifactPackageBaseIdentity package_base =
+        ArtifactPackageBaseIdentity::known("artifact-base"),
+    ArtifactPackageArchitectureIdentity architecture =
+        ArtifactPackageArchitectureIdentity::known("x86_64")) {
+    return ArtifactPackageIdentity{
+        std::move(package_name), std::move(version),
+        std::move(package_base), std::move(architecture)};
+}
+
 void test_root_projection() {
     const RootPackageIdentity aur_root =
         AurRootPackageIdentity{"root-child", "root-base"};
@@ -361,7 +373,7 @@ void test_dependency_projection() {
 }
 
 void test_artifact_projection() {
-    const ArtifactPackageIdentity artifact{"artifact-child", "1.1-2"};
+    const ArtifactPackageIdentity artifact = archive_identity();
     require_single_issue(
         project_artifact_source_package_identity(std::nullopt, artifact),
         SourcePackageIdentityProjectionIssueKind::MissingSourceContext,
@@ -381,8 +393,58 @@ void test_artifact_projection() {
                projected.source_revision() == context.source_revision() &&
                projected.architecture() == context.architecture() &&
                projected.package_version().full_version() != nullptr &&
-               *projected.package_version().full_version() == "1.1-2",
-           "Artifact projection did not preserve upper source context.");
+               *projected.package_version().full_version() == "1.0-1",
+           "Artifact projection did not retain exact archive identity.");
+
+    require_single_issue(
+        project_artifact_source_package_identity(
+            context, archive_identity("artifact-child", "1.1-2")),
+        SourcePackageIdentityProjectionIssueKind::PackageVersionMismatch,
+        "artifact version mismatch");
+    require_single_issue(
+        project_artifact_source_package_identity(
+            context,
+            archive_identity(
+                "artifact-child", "1.0-1",
+                ArtifactPackageBaseIdentity::known("other-base"))),
+        SourcePackageIdentityProjectionIssueKind::PackageBaseMismatch,
+        "artifact PackageBase mismatch");
+    require_single_issue(
+        project_artifact_source_package_identity(
+            context,
+            archive_identity(
+                "artifact-child", "1.0-1",
+                ArtifactPackageBaseIdentity::missing())),
+        SourcePackageIdentityProjectionIssueKind::ArtifactPackageBaseMissing,
+        "artifact PackageBase missing");
+    require_single_issue(
+        project_artifact_source_package_identity(
+            context,
+            archive_identity(
+                "artifact-child", "1.0-1",
+                ArtifactPackageBaseIdentity::unavailable())),
+        SourcePackageIdentityProjectionIssueKind::
+            ArtifactPackageBaseUnavailable,
+        "artifact PackageBase unavailable");
+    require_single_issue(
+        project_artifact_source_package_identity(
+            context,
+            archive_identity(
+                "artifact-child", "1.0-1",
+                ArtifactPackageBaseIdentity::known("artifact-base"),
+                ArtifactPackageArchitectureIdentity::known("armv7h"))),
+        SourcePackageIdentityProjectionIssueKind::ArchitectureMismatch,
+        "artifact architecture mismatch");
+    require_single_issue(
+        project_artifact_source_package_identity(
+            context,
+            archive_identity(
+                "artifact-child", "1.0-1",
+                ArtifactPackageBaseIdentity::known("artifact-base"),
+                ArtifactPackageArchitectureIdentity::missing())),
+        SourcePackageIdentityProjectionIssueKind::
+            ArtifactArchitectureMissing,
+        "artifact architecture missing");
 }
 
 void test_update_projection() {
@@ -534,8 +596,7 @@ void test_projection_compatibility_boundary() {
     const SourceAwarePackageIdentity context = aur_context();
     const SourcePackageIdentityProjectionResult artifact_projection =
         project_artifact_source_package_identity(
-            context,
-            ArtifactPackageIdentity{"artifact-child", "1.0-1"});
+            context, archive_identity());
     const SourceAwarePackageIdentity artifact = require_single(
         artifact_projection, "artifact compatibility boundary");
     const SourcePackageCompatibilityEvaluation artifact_evaluation =

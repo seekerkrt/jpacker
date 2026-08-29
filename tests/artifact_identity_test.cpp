@@ -1,5 +1,6 @@
 #include "artifact_identity.hpp"
 
+#include "artifact_archive_metadata.hpp"
 #include "artifact_workspace.hpp"
 #include "stubs/artifact-identity/process_stub.hpp"
 #include "trusted_cache.hpp"
@@ -18,11 +19,26 @@
 #include <utility>
 #include <vector>
 
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 using ArtifactIdentityQuery = ArtifactPackageIdentity (*)(
     const ValidatedPackageArtifactPath&);
 static_assert(!std::is_invocable_v<ArtifactIdentityQuery, const std::filesystem::path&>);
+using ArchiveMetadataQuery = ArtifactPackageIdentity (*)(
+    const artifact_archive_metadata::QueryAuthority&);
+static_assert(
+    !std::is_default_constructible_v<
+        artifact_archive_metadata::QueryAuthority>);
+static_assert(
+    !std::is_constructible_v<
+        artifact_archive_metadata::QueryAuthority,
+        const std::filesystem::path&>);
+static_assert(
+    !std::is_invocable_v<
+        ArchiveMetadataQuery,
+        const std::filesystem::path&>);
 
 namespace {
 
@@ -130,6 +146,115 @@ public:
 
     const fs::path& artifact_path() const {
         return artifact_->path();
+    }
+};
+
+class ActualArchiveFixture final {
+    fs::path root_;
+    std::size_t next_archive_index_ = 0;
+
+    static void run_bsdtar(
+        const fs::path& package_root,
+        const fs::path& archive_path) {
+        const pid_t child = fork();
+        if(child < 0) {
+            throw std::runtime_error(
+                "Failed to fork deterministic package archive fixture.");
+        }
+        if(child == 0) {
+            execl(
+                "/usr/bin/bsdtar", "bsdtar", "--zstd", "-cf",
+                archive_path.c_str(), "-C", package_root.c_str(),
+                ".PKGINFO", static_cast<char*>(nullptr));
+            _exit(127);
+        }
+
+        int status = 0;
+        if(waitpid(child, &status, 0) != child ||
+           !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+            throw std::runtime_error(
+                "Failed to create deterministic package archive fixture.");
+        }
+    }
+
+public:
+    ActualArchiveFixture() {
+        std::vector<char> path_template;
+        const std::string template_text =
+            (fs::temp_directory_path() /
+             "moguet-actual-archive-identity-XXXXXX")
+                .string();
+        path_template.assign(template_text.begin(), template_text.end());
+        path_template.push_back('\0');
+        char* created_path = mkdtemp(path_template.data());
+        if(created_path == nullptr) {
+            throw std::runtime_error(
+                "Failed to create actual archive identity fixture root.");
+        }
+        root_ = created_path;
+    }
+
+    ActualArchiveFixture(const ActualArchiveFixture&) = delete;
+    ActualArchiveFixture& operator=(const ActualArchiveFixture&) = delete;
+
+    ~ActualArchiveFixture() noexcept {
+        std::error_code error;
+        fs::remove_all(root_, error);
+    }
+
+    fs::path create_archive(
+        const std::string& package_name,
+        const std::string& full_version,
+        std::optional<std::string> package_base,
+        std::optional<std::string> architecture) {
+        const std::size_t index = next_archive_index_++;
+        const fs::path package_root =
+            root_ / ("package-" + std::to_string(index));
+        fs::create_directory(package_root);
+
+        std::ofstream pkginfo(package_root / ".PKGINFO");
+        if(!pkginfo) {
+            throw std::runtime_error(
+                "Failed to create deterministic .PKGINFO fixture.");
+        }
+        pkginfo << "pkgname = " << package_name << '\n';
+        if(package_base.has_value()) {
+            pkginfo << "pkgbase = " << package_base.value() << '\n';
+        }
+        pkginfo << "pkgver = " << full_version << '\n';
+        pkginfo << "pkgdesc = Moguet Issue 485 archive fixture\n";
+        pkginfo << "url = https://example.invalid/moguet-issue-485\n";
+        pkginfo << "builddate = 1\n";
+        pkginfo << "packager = Moguet tests\n";
+        pkginfo << "size = 0\n";
+        if(architecture.has_value()) {
+            pkginfo << "arch = " << architecture.value() << '\n';
+        }
+        pkginfo << "license = MIT\n";
+        pkginfo.close();
+        if(!pkginfo) {
+            throw std::runtime_error(
+                "Failed to finish deterministic .PKGINFO fixture.");
+        }
+
+        const fs::path archive_path =
+            root_ /
+            (package_name + "-" + std::to_string(index) +
+             ".pkg.tar.zst");
+        run_bsdtar(package_root, archive_path);
+        return archive_path;
+    }
+
+    fs::path create_invalid_archive() {
+        const fs::path archive_path = root_ / "invalid.pkg.tar.zst";
+        std::ofstream archive(archive_path, std::ios::binary);
+        archive << "not a package archive";
+        archive.close();
+        if(!archive) {
+            throw std::runtime_error(
+                "Failed to create invalid archive fixture.");
+        }
+        return archive_path;
     }
 };
 
@@ -326,6 +451,107 @@ void test_post_command_artifact_revalidation() {
     stub::reset_process_stub();
 }
 
+void test_actual_archive_metadata_is_lossless_and_read_only() {
+    ActualArchiveFixture fixture;
+    const fs::path single = fixture.create_archive(
+        "single-child", "2:1.4.0-3", "single-base", "x86_64");
+    const fs::path split_child = fixture.create_archive(
+        "foo-libs", "1.0-1", "foo", "any");
+    const fs::path split_sibling = fixture.create_archive(
+        "foo", "1.0-1", "foo", "armv7h");
+    const fs::path missing_base = fixture.create_archive(
+        "missing-base", "1.0-1", std::nullopt, "x86_64");
+    const fs::path missing_arch = fixture.create_archive(
+        "missing-arch", "1.0-1", "missing-arch", std::nullopt);
+    const fs::path malformed_base = fixture.create_archive(
+        "malformed-base", "1.0-1", "-invalid-base", "x86_64");
+    const fs::path malformed_arch = fixture.create_archive(
+        "malformed-arch", "1.0-1", "malformed-arch", "invalid arch");
+
+    struct stat before{};
+    struct stat after{};
+    expect(stat(single.c_str(), &before) == 0, "actual archive stat failed");
+    const ArtifactPackageIdentity single_identity =
+        artifact_archive_metadata::query_with_libalpm_for_test(single);
+    expect(stat(single.c_str(), &after) == 0, "actual archive restat failed");
+    expect(
+        single_identity.package_name == "single-child" &&
+            single_identity.full_version == "2:1.4.0-3" &&
+            single_identity.package_base.state() ==
+                ArtifactMetadataValueState::Known &&
+            single_identity.package_base.value() != nullptr &&
+            *single_identity.package_base.value() == "single-base" &&
+            single_identity.architecture.state() ==
+                ArtifactMetadataValueState::Known &&
+            single_identity.architecture.value() != nullptr &&
+            *single_identity.architecture.value() == "x86_64",
+        "single actual archive identity was not retained losslessly");
+    expect(
+        before.st_dev == after.st_dev && before.st_ino == after.st_ino &&
+            before.st_size == after.st_size &&
+            before.st_mtim.tv_sec == after.st_mtim.tv_sec &&
+            before.st_mtim.tv_nsec == after.st_mtim.tv_nsec,
+        "read-only archive metadata query mutated the archive");
+
+    const ArtifactPackageIdentity child_identity =
+        artifact_archive_metadata::query_with_libalpm_for_test(split_child);
+    const ArtifactPackageIdentity sibling_identity =
+        artifact_archive_metadata::query_with_libalpm_for_test(split_sibling);
+    expect(
+        child_identity.package_name == "foo-libs" &&
+            sibling_identity.package_name == "foo" &&
+            child_identity.package_base.value() != nullptr &&
+            sibling_identity.package_base.value() != nullptr &&
+            *child_identity.package_base.value() == "foo" &&
+            *sibling_identity.package_base.value() == "foo" &&
+            child_identity.architecture.value() != nullptr &&
+            *child_identity.architecture.value() == "any" &&
+            sibling_identity.architecture.value() != nullptr &&
+            *sibling_identity.architecture.value() == "armv7h",
+        "split PackageBase child/sibling or architecture identity collapsed");
+
+    const ArtifactPackageIdentity missing_base_identity =
+        artifact_archive_metadata::query_with_libalpm_for_test(missing_base);
+    expect(
+        missing_base_identity.package_base.state() ==
+                ArtifactMetadataValueState::Missing &&
+            missing_base_identity.package_base.value() == nullptr,
+        "missing actual PackageBase was filled from package name");
+
+    const ArtifactPackageIdentity missing_arch_identity =
+        artifact_archive_metadata::query_with_libalpm_for_test(missing_arch);
+    expect(
+        missing_arch_identity.architecture.state() ==
+                ArtifactMetadataValueState::Missing &&
+            missing_arch_identity.architecture.value() == nullptr,
+        "missing actual architecture was presented as known");
+
+    const ArtifactPackageIdentity malformed_base_identity =
+        artifact_archive_metadata::query_with_libalpm_for_test(malformed_base);
+    expect(
+        malformed_base_identity.package_base.state() ==
+                ArtifactMetadataValueState::Malformed &&
+            malformed_base_identity.package_base.value() == nullptr,
+        "malformed actual PackageBase was presented as known");
+
+    const ArtifactPackageIdentity malformed_arch_identity =
+        artifact_archive_metadata::query_with_libalpm_for_test(malformed_arch);
+    expect(
+        malformed_arch_identity.architecture.state() ==
+                ArtifactMetadataValueState::Malformed &&
+            malformed_arch_identity.architecture.value() == nullptr,
+        "malformed actual architecture was presented as known");
+
+    const fs::path invalid_archive = fixture.create_invalid_archive();
+    expect_runtime_error(
+        [&invalid_archive]() {
+            static_cast<void>(
+                artifact_archive_metadata::query_with_libalpm_for_test(
+                    invalid_archive));
+        },
+        "unavailable actual archive metadata");
+}
+
 } // namespace
 
 int main() {
@@ -347,6 +573,7 @@ int main() {
             "-sample-package-1-1-x86_64.pkg.tar.zst");
         test_pre_command_artifact_revalidation();
         test_post_command_artifact_revalidation();
+        test_actual_archive_metadata_is_lossless_and_read_only();
     } catch(const std::exception& error) {
         std::cerr << "artifact identity test failed: " << error.what() << '\n';
         return 1;
