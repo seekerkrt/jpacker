@@ -28,7 +28,6 @@ foreach(_moguet_direct_focus IN ITEMS
     local-source-build
     package-identifier
     source-package-identity
-    git-remote-revision-observer
     source-package-identity-projection
     source-package-compatibility
     invocation-owned-cleanup-model
@@ -83,6 +82,13 @@ foreach(_moguet_direct_focus IN ITEMS
         TESTS "cpp.${_moguet_direct_ctest}"
     )
 endforeach()
+
+moguet_add_focused_ctest_alias(
+    test-git-remote-revision-observer
+    TESTS
+        cpp.git_remote_revision_observer
+        cpp.git_remote_revision_observer_integration
+)
 
 moguet_add_focused_ctest_alias(
     test-localization

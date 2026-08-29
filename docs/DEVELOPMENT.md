@@ -107,7 +107,7 @@ include / link graph、negative compile recipeを所有しない。
 | `build/cmake-production` | `BUILD_TESTING=OFF` | 通常の`make`、install / uninstall、production smoke |
 | `build/cmake-testing` | `BUILD_TESTING=ON` | developer、CTest、host / release validation、focused test |
 
-通常の`make`はproduction treeだけから`moguet`をbuildし、98個のC++ test executableや121件の
+通常の`make`はproduction treeだけから`moguet`をbuildし、98個のC++ test executableや122件の
 CTest registrationを不用意にbuildしない。`make test`はtesting treeをbuildし、CTestを実行してから
 gettext、shell、docs、packaging等のrepository-specific validationを実行する。`make test-<area>`は
 互換entrypointとして残るが、exact target / CTest selectionは
@@ -183,7 +183,7 @@ inventoryを所有する。
 | support / stub translation units | 29 |
 | link firewalls | 49 |
 | firewall descriptors | 49 |
-| CTest registrations | 121 |
+| CTest registrations | 122 |
 
 stub / real implementation exclusion、replacement ABI、ALPM stub、exact source closureをtarget-localに
 維持する。単一production libraryを全testへ無条件linkしない。negative compileはCTest registrationから

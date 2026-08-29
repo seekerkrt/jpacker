@@ -266,7 +266,7 @@ makepkg -si
 systemへinstallします。これは、development treeをその場でbuild・確認するだけで
 何もinstallしない、上記の`make`や`./moguet --help`とは異なります。`PKGBUILD`はcanonicalな
 production CMake build / install consumerとして`BUILD_TESTING=OFF`を指定し、98個のdeveloper
-C++ test executableと121件のCTest registrationはhost / CI / release validation側で扱います。
+C++ test executableと122件のCTest registrationはhost / CI / release validation側で扱います。
 この`PKGBUILD`は
 repository同梱のpackaging経路であり、AUR submissionではありません。Moguetはまだ
 AUR pageを公開していません。

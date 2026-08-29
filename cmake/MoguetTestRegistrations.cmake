@@ -40,6 +40,18 @@ _moguet_add_direct_ctest(
     cpp.git_remote_revision_observer
     git-remote-revision-observer-test
 )
+moguet_add_ctest(
+    NAME cpp.git_remote_revision_observer_integration
+    TARGETS git-remote-revision-observer-test
+    COMMAND
+        sh
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test-git-remote-revision-observer-integration.sh"
+        "$<TARGET_FILE:git-remote-revision-observer-test>"
+)
+set_tests_properties(
+    cpp.git_remote_revision_observer_integration
+    PROPERTIES TIMEOUT 180
+)
 _moguet_add_direct_ctest(
     cpp.source_package_identity_projection
     source-package-identity-projection-test

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "process.hpp"
 #include "vcs_source_identity.hpp"
 
 #include <chrono>
@@ -8,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 inline constexpr std::size_t
     VALIDATED_HTTPS_GIT_REMOTE_MAX_INPUT_BYTES = 8U * 1024U;
@@ -301,6 +303,11 @@ struct GitRemoteRevisionTimeout {
 
 struct GitRemoteRevisionProcessFailure {
     GitRemoteRevisionObservationKey key;
+    std::variant<
+        BoundedProcessSignaled,
+        BoundedProcessLaunchOrSetupFailure,
+        BoundedProcessIoOrWaitFailure>
+        cause;
 
     bool operator==(const GitRemoteRevisionProcessFailure&) const = default;
 };
@@ -372,9 +379,17 @@ parse_git_remote_revision_observation(
     int exit_status,
     std::string_view stdout_bytes);
 
+// Executes one repositoryless observation with the fixed trusted Git profile.
+// The executable, argv shape, complete environment, cwd, stdin/stderr policy,
+// timeout, termination grace, and capture limit are owned by this function and
+// cannot be weakened by a caller.
+[[nodiscard]] GitRemoteRevisionObservationResult
+observe_git_remote_revision(
+    const ValidatedGitRemoteRevisionRequest& request);
+
 #ifdef MOGUET_ENABLE_GIT_REMOTE_REVISION_OBSERVER_TEST_HOOKS
-// These fixtures exist only in the focused Slice 1 target. They do not form a
-// production authority producer or a production branch validator.
+// These fixtures exist only in the focused observer target. They do not form
+// a production authority producer or a production branch validator.
 [[nodiscard]] AuthorityApprovedGitSourceIdentity
 make_authority_approved_git_source_identity_fixture_for_test(
     VcsSourceIdentity source);
@@ -387,4 +402,25 @@ classify_exact_git_branch_exited_process_fixture_for_test(
     std::string branch_name,
     int exit_code,
     std::string stdout_bytes);
+
+// The focused observer target may replace only the process executable and
+// child argv, plus shorten the lifecycle deadline. It still uses the trusted
+// observer env/cwd/fd profile and the production 16 KiB capture limit, then
+// enters the same mechanical-result-to-parser composition as production.
+[[nodiscard]] GitRemoteRevisionObservationResult
+observe_git_remote_revision_process_fixture_for_test(
+    const ValidatedGitRemoteRevisionRequest& request,
+    std::string executable,
+    std::vector<std::string> arguments,
+    std::chrono::milliseconds hard_timeout,
+    std::chrono::milliseconds termination_grace);
+
+[[nodiscard]] std::vector<std::string>
+git_remote_revision_observer_arguments_fixture_for_test(
+    const ValidatedGitRemoteRevisionRequest& request);
+
+[[nodiscard]] GitRemoteRevisionObservationResult
+classify_git_remote_revision_bounded_process_fixture_for_test(
+    const ValidatedGitRemoteRevisionRequest& request,
+    BoundedCapturedProcessResult process_result);
 #endif

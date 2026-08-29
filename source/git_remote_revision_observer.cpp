@@ -21,6 +21,9 @@
 
 namespace {
 
+constexpr std::string_view GIT_REMOTE_OBSERVER_EXECUTABLE =
+    "/usr/bin/git";
+
 class OwnedObserverDescriptor final {
 public:
     explicit OwnedObserverDescriptor(int descriptor = -1) noexcept
@@ -414,6 +417,157 @@ ExactGitBranchValidationResult classify_exact_branch_exited_process(
     }
     return git_remote_revision_observer_detail::ExactBranchFactory::make(
         std::string(branch_name));
+}
+
+std::vector<std::string> git_remote_revision_observer_arguments(
+    const ValidatedGitRemoteRevisionRequest& request) {
+    std::vector<std::string> arguments =
+        trusted_git_observer_process_arguments();
+    arguments.push_back("ls-remote");
+    arguments.push_back("--quiet");
+
+    switch(request.key().selector().kind()) {
+        case ValidatedGitRemoteSelectorKind::DefaultHead:
+            arguments.push_back("--symref");
+            arguments.push_back("--exit-code");
+            arguments.push_back(
+                request.key().remote().canonical_url());
+            arguments.push_back("HEAD");
+            return arguments;
+        case ValidatedGitRemoteSelectorKind::ExactBranch: {
+            const ValidatedExactGitBranch* branch =
+                request.key().selector().exact_branch();
+            if(branch == nullptr) {
+                throw std::logic_error(
+                    "Exact branch selector has no validated branch.");
+            }
+            arguments.push_back("--refs");
+            arguments.push_back("--branches");
+            arguments.push_back("--exit-code");
+            arguments.push_back(
+                request.key().remote().canonical_url());
+            arguments.push_back("refs/heads/" + branch->name());
+            return arguments;
+        }
+    }
+    throw std::logic_error("Unknown Git remote observer selector.");
+}
+
+GitRemoteRevisionProcessFailure observer_process_failure(
+    const ValidatedGitRemoteRevisionRequest& request,
+    BoundedProcessSignaled cause) {
+    return GitRemoteRevisionProcessFailure{
+        request.key(), std::move(cause)};
+}
+
+GitRemoteRevisionProcessFailure observer_process_failure(
+    const ValidatedGitRemoteRevisionRequest& request,
+    BoundedProcessLaunchOrSetupFailure cause) {
+    return GitRemoteRevisionProcessFailure{
+        request.key(), std::move(cause)};
+}
+
+GitRemoteRevisionProcessFailure observer_process_failure(
+    const ValidatedGitRemoteRevisionRequest& request,
+    BoundedProcessIoOrWaitFailure cause) {
+    return GitRemoteRevisionProcessFailure{
+        request.key(), std::move(cause)};
+}
+
+GitRemoteRevisionObservationResult classify_observer_process_result(
+    const ValidatedGitRemoteRevisionRequest& request,
+    const BoundedCapturedProcessResult& process_result) {
+    if(const auto* exited =
+           std::get_if<BoundedProcessExited>(&process_result.outcome)) {
+        return parse_git_remote_revision_observation(
+            request, exited->exit_code, process_result.output);
+    }
+    if(const auto* signaled =
+           std::get_if<BoundedProcessSignaled>(&process_result.outcome)) {
+        return observer_process_failure(request, *signaled);
+    }
+    if(const auto* launch_failure =
+           std::get_if<BoundedProcessLaunchOrSetupFailure>(
+               &process_result.outcome)) {
+        return observer_process_failure(request, *launch_failure);
+    }
+    if(const auto* io_failure =
+           std::get_if<BoundedProcessIoOrWaitFailure>(
+               &process_result.outcome)) {
+        return observer_process_failure(request, *io_failure);
+    }
+    if(std::holds_alternative<BoundedProcessTimedOut>(
+           process_result.outcome)) {
+        return GitRemoteRevisionTimeout{request.key()};
+    }
+    if(const auto* capture_failure =
+           std::get_if<BoundedProcessCaptureLimitExceeded>(
+               &process_result.outcome)) {
+        return GitRemoteRevisionCaptureLimitExceeded{
+            request.key(), capture_failure->capture_limit};
+    }
+    throw std::logic_error("Unknown Git remote observer process outcome.");
+}
+
+GitRemoteRevisionObservationResult execute_git_remote_revision_observer(
+    const ValidatedGitRemoteRevisionRequest& request,
+    std::string executable,
+    std::vector<std::string> arguments,
+    std::chrono::milliseconds hard_timeout,
+    std::chrono::milliseconds termination_grace) {
+    int directory_descriptor;
+    do {
+        directory_descriptor = open(
+            "/", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    } while(directory_descriptor == -1 && errno == EINTR);
+    if(directory_descriptor == -1) {
+        return observer_process_failure(
+            request,
+            BoundedProcessLaunchOrSetupFailure{
+                BoundedProcessLaunchStage::WorkingDirectory, errno});
+    }
+    OwnedObserverDescriptor directory(directory_descriptor);
+
+    int input_descriptor;
+    do {
+        input_descriptor = open(
+            "/dev/null", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    } while(input_descriptor == -1 && errno == EINTR);
+    if(input_descriptor == -1) {
+        return observer_process_failure(
+            request,
+            BoundedProcessLaunchOrSetupFailure{
+                BoundedProcessLaunchStage::StandardInput, errno});
+    }
+    OwnedObserverDescriptor input(input_descriptor);
+
+    std::vector<std::string> environment;
+    try {
+        environment = trusted_git_process_environment(
+            TrustedGitProcessEnvironmentMode::ReadOnlyObservation);
+    } catch(const std::runtime_error&) {
+        // The trusted environment owner supplies a value-free failure. Keep
+        // observer control flow typed without retaining a
+        // CA/proxy value or converting setup failure into a Git exit.
+        return observer_process_failure(
+            request,
+            BoundedProcessLaunchOrSetupFailure{
+                BoundedProcessLaunchStage::InvocationValidation, EINVAL});
+    }
+
+    ExplicitProcessInvocation invocation{
+        std::move(executable), std::move(arguments),
+        std::move(environment)};
+    invocation.working_directory_fd = directory.get();
+    invocation.standard_input_fd = input.get();
+    const BoundedProcessPolicy policy{
+        hard_timeout,
+        termination_grace,
+        GIT_REMOTE_OBSERVER_STDOUT_CAPTURE_LIMIT,
+        true};
+    return classify_observer_process_result(
+        request,
+        capture_bounded_explicit_process_output_raw(invocation, policy));
 }
 
 } // namespace
@@ -832,6 +986,16 @@ GitRemoteRevisionObservationResult parse_git_remote_revision_observation(
         request, GitRemoteRevisionMalformedOutputReason::WrongRef);
 }
 
+GitRemoteRevisionObservationResult observe_git_remote_revision(
+    const ValidatedGitRemoteRevisionRequest& request) {
+    return execute_git_remote_revision_observer(
+        request,
+        std::string(GIT_REMOTE_OBSERVER_EXECUTABLE),
+        git_remote_revision_observer_arguments(request),
+        GIT_REMOTE_OBSERVER_PROCESS_HARD_TIMEOUT,
+        GIT_REMOTE_OBSERVER_PROCESS_TERMINATION_GRACE);
+}
+
 #ifdef MOGUET_ENABLE_GIT_REMOTE_REVISION_OBSERVER_TEST_HOOKS
 AuthorityApprovedGitSourceIdentity
 make_authority_approved_git_source_identity_fixture_for_test(
@@ -858,5 +1022,33 @@ classify_exact_git_branch_exited_process_fixture_for_test(
     std::string stdout_bytes) {
     return classify_exact_branch_exited_process(
         branch_name, exit_code, stdout_bytes);
+}
+
+GitRemoteRevisionObservationResult
+observe_git_remote_revision_process_fixture_for_test(
+    const ValidatedGitRemoteRevisionRequest& request,
+    std::string executable,
+    std::vector<std::string> arguments,
+    std::chrono::milliseconds hard_timeout,
+    std::chrono::milliseconds termination_grace) {
+    return execute_git_remote_revision_observer(
+        request,
+        std::move(executable),
+        std::move(arguments),
+        hard_timeout,
+        termination_grace);
+}
+
+std::vector<std::string>
+git_remote_revision_observer_arguments_fixture_for_test(
+    const ValidatedGitRemoteRevisionRequest& request) {
+    return git_remote_revision_observer_arguments(request);
+}
+
+GitRemoteRevisionObservationResult
+classify_git_remote_revision_bounded_process_fixture_for_test(
+    const ValidatedGitRemoteRevisionRequest& request,
+    BoundedCapturedProcessResult process_result) {
+    return classify_observer_process_result(request, process_result);
 }
 #endif

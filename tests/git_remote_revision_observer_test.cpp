@@ -7,6 +7,9 @@
 #include "trusted_git_process_policy.hpp"
 
 #include <array>
+#include <cerrno>
+#include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <fcntl.h>
@@ -25,6 +28,8 @@
 namespace fs = std::filesystem;
 
 namespace {
+
+using namespace std::chrono_literals;
 
 static_assert(!std::is_default_constructible_v<
               AuthorityApprovedGitSourceIdentity>);
@@ -83,6 +88,8 @@ static_assert(!std::is_constructible_v<
               const SourceAwarePackageIdentity&>);
 static_assert(std::variant_size_v<
                   GitRemoteRevisionObservationResult> == 8);
+static_assert(std::variant_size_v<decltype(std::declval<GitRemoteRevisionProcessFailure>().cause)> ==
+              3);
 static_assert(std::variant_size_v<ExactGitBranchValidationResult> == 3);
 
 constexpr std::string_view SHA1 =
@@ -90,9 +97,32 @@ constexpr std::string_view SHA1 =
 constexpr std::string_view SHA256 =
     "0123456789abcdef0123456789abcdef"
     "0123456789abcdef0123456789abcdef";
+constexpr std::string_view PROCESS_FIXTURE_MARKER =
+    "--git-remote-revision-observer-process-fixture";
 
 void require(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
+}
+
+bool write_all(int descriptor, std::string_view bytes) {
+    std::size_t offset = 0;
+    while(offset < bytes.size()) {
+        const ssize_t written = write(
+            descriptor, bytes.data() + offset, bytes.size() - offset);
+        if(written == -1 && errno == EINTR) continue;
+        if(written <= 0) return false;
+        offset += static_cast<std::size_t>(written);
+    }
+    return true;
+}
+
+void ignore_signal(int signal_number) {
+    struct sigaction action{};
+    action.sa_handler = SIG_IGN;
+    require(sigemptyset(&action.sa_mask) == 0,
+            "Failed to initialize observer fixture signal mask");
+    require(sigaction(signal_number, &action, nullptr) == 0,
+            "Failed to ignore observer fixture signal");
 }
 
 class OwnedDescriptor final {
@@ -219,11 +249,11 @@ void expect_invalid_argument(Function&& function, const std::string& context) {
 template <typename Expected>
 const Expected& expect_result(
     const GitRemoteRevisionObservationResult& result,
-    const std::string& context) {
+    std::string_view context) {
     const Expected* expected = std::get_if<Expected>(&result);
     if(expected == nullptr) {
         throw std::runtime_error(
-            context + ": unexpected result arm " +
+            std::string(context) + ": unexpected result arm " +
             std::to_string(result.index()));
     }
     return *expected;
@@ -269,6 +299,39 @@ ValidatedGitRemoteRevisionRequest exact_request(
         exact_key(remote, std::move(branch_name)));
 }
 
+ValidatedGitRemoteRevisionRequest production_exact_request(
+    std::string remote,
+    std::string branch_name) {
+    const ExactGitBranchValidationResult validation =
+        validate_exact_git_branch(branch_name);
+    const auto* validated =
+        std::get_if<ValidatedExactGitBranch>(&validation);
+    require(validated != nullptr,
+            "Production exact branch validation failed in fixture driver");
+
+    VcsSourceIdentity source = VcsSourceIdentity::make(
+        VcsKind::Git, remote, VcsSelector::branch(branch_name));
+    return ValidatedGitRemoteRevisionRequest::make(
+        make_authority_approved_git_source_identity_fixture_for_test(
+            std::move(source)),
+        GitRemoteRevisionObservationKey::make(
+            ValidatedHttpsGitRemote::make(remote),
+            ValidatedGitRemoteSelector::exact_branch(*validated)));
+}
+
+GitRemoteRevisionObservationResult run_process_fixture(
+    const fs::path& executable,
+    std::string mode,
+    std::chrono::milliseconds hard_timeout = 2s,
+    std::chrono::milliseconds termination_grace = 150ms) {
+    return observe_git_remote_revision_process_fixture_for_test(
+        default_request(),
+        executable.string(),
+        {std::string(PROCESS_FIXTURE_MARKER), std::move(mode)},
+        hard_timeout,
+        termination_grace);
+}
+
 std::string oid_record(std::string_view oid, std::string_view ref) {
     return std::string(oid) + '\t' + std::string(ref) + '\n';
 }
@@ -276,6 +339,76 @@ std::string oid_record(std::string_view oid, std::string_view ref) {
 std::string symref_record(
     std::string_view target, std::string_view ref = "HEAD") {
     return "ref: " + std::string(target) + '\t' + std::string(ref) + '\n';
+}
+
+int run_observer_process_fixture_child(int argc, char* argv[]) {
+    require(argc == 3, "Observer process fixture requires one mode");
+    const std::string_view mode(argv[2]);
+    if(mode == "observed") {
+        return write_all(STDOUT_FILENO, oid_record(SHA1, "HEAD")) ? 0 : 125;
+    }
+    if(mode == "bad-oid") {
+        return write_all(STDOUT_FILENO, "bad-oid\tHEAD\n") ? 0 : 125;
+    }
+    if(mode == "wrong-ref") {
+        return write_all(
+                   STDOUT_FILENO,
+                   oid_record(SHA1, "refs/heads/wrong"))
+                   ? 0
+                   : 125;
+    }
+    if(mode == "duplicate") {
+        const std::string output =
+            oid_record(SHA1, "HEAD") + oid_record(SHA1, "HEAD");
+        return write_all(STDOUT_FILENO, output) ? 0 : 125;
+    }
+    if(mode == "extra-ref") {
+        const std::string output =
+            oid_record(SHA1, "HEAD") +
+            oid_record(SHA1, "refs/archive/HEAD");
+        return write_all(STDOUT_FILENO, output) ? 0 : 125;
+    }
+    if(mode == "control-byte") {
+        std::string output = std::string(SHA1) + "\tHE";
+        output.push_back('\x01');
+        output += "AD\n";
+        return write_all(STDOUT_FILENO, output) ? 0 : 125;
+    }
+    if(mode == "partial-output") {
+        return write_all(
+                   STDOUT_FILENO, std::string(SHA1) + "\tHEAD")
+                   ? 0
+                   : 125;
+    }
+    if(mode == "status-2-empty") return 2;
+    if(mode == "status-2-output") {
+        require(write_all(STDOUT_FILENO, oid_record(SHA1, "HEAD")),
+                "Failed to write status-2 observer fixture");
+        return 2;
+    }
+    if(mode == "git-exit") return 128;
+    if(mode == "signaled") {
+        raise(SIGTERM);
+        return 125;
+    }
+    if(mode == "timeout") {
+        ignore_signal(SIGTERM);
+        while(true)
+            pause();
+    }
+    if(mode == "capture-overflow") {
+        ignore_signal(SIGTERM);
+        require(
+            write_all(
+                STDOUT_FILENO,
+                std::string(
+                    GIT_REMOTE_OBSERVER_STDOUT_CAPTURE_LIMIT + 1U,
+                    'x')),
+            "Failed to write observer overflow fixture");
+        while(true)
+            pause();
+    }
+    throw std::runtime_error("Unknown observer process fixture mode");
 }
 
 ObservedGitRemoteRevision expect_observed(
@@ -574,7 +707,8 @@ void test_result_arms_are_distinct() {
     const GitRemoteRevisionObservationResult timeout =
         GitRemoteRevisionTimeout{key};
     const GitRemoteRevisionObservationResult process_failure =
-        GitRemoteRevisionProcessFailure{key};
+        GitRemoteRevisionProcessFailure{
+            key, BoundedProcessSignaled{SIGTERM}};
     const GitRemoteRevisionObservationResult git_exit_failure =
         GitRemoteRevisionGitExitFailure{key, 128};
     const GitRemoteRevisionObservationResult capture_failure =
@@ -582,8 +716,12 @@ void test_result_arms_are_distinct() {
 
     static_cast<void>(
         expect_result<GitRemoteRevisionTimeout>(timeout, "Timeout arm"));
-    static_cast<void>(expect_result<GitRemoteRevisionProcessFailure>(
-        process_failure, "ProcessFailure arm"));
+    const auto& process = expect_result<GitRemoteRevisionProcessFailure>(
+        process_failure, "ProcessFailure arm");
+    require(
+        std::get<BoundedProcessSignaled>(process.cause).signal_number ==
+            SIGTERM,
+        "Process failure cause was not retained.");
     require(expect_result<GitRemoteRevisionGitExitFailure>(
                 git_exit_failure, "GitExitFailure arm")
                     .exit_code == 128,
@@ -1011,6 +1149,28 @@ void test_trusted_git_observer_environment() {
     throw std::runtime_error("Relative observer CA path was accepted");
 }
 
+void test_observer_environment_setup_failure_mapping() {
+    const std::vector<std::string> ca_names{
+        "SSL_CERT_FILE", "SSL_CERT_DIR", "GIT_SSL_CAINFO",
+        "GIT_SSL_CAPATH"};
+    ScopedEnvironment environment_guard(ca_names);
+    for(const std::string& name : ca_names)
+        environment_guard.unset(name);
+    environment_guard.set(
+        "GIT_SSL_CAINFO", "relative/observer-fixture-secret-ca.pem");
+
+    const auto result = observe_git_remote_revision(default_request());
+    const auto& process_failure =
+        expect_result<GitRemoteRevisionProcessFailure>(
+            result, "Observer trusted environment setup failure");
+    const auto& cause = std::get<BoundedProcessLaunchOrSetupFailure>(
+        process_failure.cause);
+    require(
+        cause.stage == BoundedProcessLaunchStage::InvocationValidation &&
+            cause.error_number == EINVAL,
+        "Trusted environment failure was flattened to a Git exit");
+}
+
 void test_trusted_git_observer_fixed_arguments() {
     const std::vector<std::string> expected{
         "--no-pager",
@@ -1064,6 +1224,163 @@ void test_trusted_git_observer_fixed_arguments() {
     };
     require(trusted_git_observer_process_arguments() == expected,
             "Observer Git fixed argument profile changed");
+}
+
+void test_observer_closed_argv() {
+    std::vector<std::string> expected_default =
+        trusted_git_observer_process_arguments();
+    expected_default.insert(
+        expected_default.end(),
+        {"ls-remote", "--quiet", "--symref", "--exit-code",
+         "https://example.com/repo.git", "HEAD"});
+    const auto canonical_request = default_request(
+        "HTTPS://EXAMPLE.COM:443/a/../repo.git");
+    require(
+        git_remote_revision_observer_arguments_fixture_for_test(
+            canonical_request) == expected_default,
+        "Default HEAD observer argv is not closed over the canonical URL");
+
+    std::vector<std::string> expected_branch =
+        trusted_git_observer_process_arguments();
+    expected_branch.insert(
+        expected_branch.end(),
+        {"ls-remote", "--quiet", "--refs", "--branches",
+         "--exit-code", "https://example.com:444/repo.git",
+         "refs/heads/feature/exact"});
+    require(
+        git_remote_revision_observer_arguments_fixture_for_test(
+            exact_request(
+                "feature/exact",
+                "HTTPS://EXAMPLE.COM:444/repo.git")) ==
+            expected_branch,
+        "Exact branch observer argv changed or reused raw URL spelling");
+}
+
+void test_observer_execution_composition(const fs::path& executable) {
+    const auto request = default_request();
+
+    const auto observed = run_process_fixture(executable, "observed");
+    const auto& observed_value =
+        expect_result<ObservedGitRemoteRevision>(
+            observed, "Executed observed transcript");
+    require(observed_value.revision().value().git_commit() != nullptr &&
+                *observed_value.revision().value().git_commit() == SHA1,
+            "Executed observer transcript lost its OID");
+
+    const auto missing = run_process_fixture(
+        executable, "status-2-empty");
+    static_cast<void>(expect_result<GitRemoteRevisionRefNotFound>(
+        missing, "Executed status 2 empty transcript"));
+    const auto status_two_output = run_process_fixture(
+        executable, "status-2-output");
+    require(
+        expect_result<GitRemoteRevisionMalformedOutput>(
+            status_two_output, "Executed status 2 nonempty transcript")
+                .reason ==
+            GitRemoteRevisionMalformedOutputReason::
+                RefNotFoundStatusWithOutput,
+        "Status 2 with stdout was flattened to RefNotFound");
+    const auto git_exit = run_process_fixture(executable, "git-exit");
+    require(
+        expect_result<GitRemoteRevisionGitExitFailure>(
+            git_exit, "Executed Git exit failure")
+                .exit_code == 128,
+        "Executed Git exit code was not retained");
+
+    const std::array<
+        std::pair<
+            std::string_view,
+            GitRemoteRevisionMalformedOutputReason>,
+        4>
+        malformed_fixtures{{{"bad-oid",
+                             GitRemoteRevisionMalformedOutputReason::InvalidRecord},
+                            {"wrong-ref",
+                             GitRemoteRevisionMalformedOutputReason::WrongRef},
+                            {"control-byte",
+                             GitRemoteRevisionMalformedOutputReason::
+                                 UnexpectedControlByte},
+                            {"partial-output",
+                             GitRemoteRevisionMalformedOutputReason::
+                                 MissingFinalLineFeed}}};
+    for(const auto& [mode, reason] : malformed_fixtures) {
+        const auto result = run_process_fixture(
+            executable, std::string(mode));
+        require(
+            expect_result<GitRemoteRevisionMalformedOutput>(
+                result, std::string("Executed malformed fixture ") +
+                            std::string(mode))
+                    .reason == reason,
+            "Executed malformed transcript classification differs");
+    }
+
+    for(std::string_view mode : {"duplicate", "extra-ref"}) {
+        const auto result = run_process_fixture(
+            executable, std::string(mode));
+        static_cast<void>(expect_result<GitRemoteRevisionAmbiguousOutput>(
+            result, std::string("Executed ambiguous fixture ") +
+                        std::string(mode)));
+    }
+
+    const auto signaled = run_process_fixture(executable, "signaled");
+    const auto& signal_failure =
+        expect_result<GitRemoteRevisionProcessFailure>(
+            signaled, "Executed signal failure");
+    require(
+        std::get<BoundedProcessSignaled>(signal_failure.cause)
+                .signal_number == SIGTERM,
+        "Observer signal failure lost its signal number");
+
+    const auto launch_failure =
+        observe_git_remote_revision_process_fixture_for_test(
+            request,
+            "/definitely/not/a/moguet-git-fixture",
+            {},
+            2s,
+            150ms);
+    const auto& launch_cause = std::get<
+        BoundedProcessLaunchOrSetupFailure>(
+        expect_result<GitRemoteRevisionProcessFailure>(
+            launch_failure, "Executed launch failure")
+            .cause);
+    require(
+        launch_cause.stage == BoundedProcessLaunchStage::Execve &&
+            launch_cause.error_number == ENOENT,
+        "Observer launch failure lost its stage or errno");
+
+    const auto io_failure =
+        classify_git_remote_revision_bounded_process_fixture_for_test(
+            request,
+            BoundedCapturedProcessResult{
+                {},
+                BoundedProcessIoOrWaitFailure{
+                    BoundedProcessIoStage::Poll, EIO}});
+    const auto& io_cause = std::get<BoundedProcessIoOrWaitFailure>(
+        expect_result<GitRemoteRevisionProcessFailure>(
+            io_failure, "Mechanical I/O failure mapping")
+            .cause);
+    require(
+        io_cause.stage == BoundedProcessIoStage::Poll &&
+            io_cause.error_number == EIO,
+        "Observer I/O failure lost its stage or errno");
+
+    const auto timeout_started = std::chrono::steady_clock::now();
+    const auto timeout = run_process_fixture(
+        executable, "timeout", 300ms, 100ms);
+    require(
+        std::holds_alternative<GitRemoteRevisionTimeout>(timeout),
+        "Mechanical timeout was flattened to another observer result");
+    require(
+        std::chrono::steady_clock::now() - timeout_started < 2s,
+        "Observer timeout fixture waited for the production deadline");
+
+    const auto overflow = run_process_fixture(
+        executable, "capture-overflow", 2s, 100ms);
+    require(
+        expect_result<GitRemoteRevisionCaptureLimitExceeded>(
+            overflow, "Executed capture overflow")
+                .capture_limit ==
+            GIT_REMOTE_OBSERVER_STDOUT_CAPTURE_LIMIT,
+        "Observer capture overflow was flattened or changed its limit");
 }
 
 void write_text_file(const fs::path& path, std::string_view contents) {
@@ -1257,10 +1574,94 @@ void test_exact_branch_production_validation() {
         "Nonzero Git status was classified from stderr/stdout text");
 }
 
+void print_observation_result(
+    const GitRemoteRevisionObservationResult& result) {
+    if(const auto* observed =
+           std::get_if<ObservedGitRemoteRevision>(&result)) {
+        const std::string* object_id =
+            observed->revision().value().git_commit();
+        require(object_id != nullptr,
+                "Observed result has no Git commit identity");
+        std::cout << "Observed\t" << *object_id << '\n';
+        return;
+    }
+    if(std::holds_alternative<GitRemoteRevisionRefNotFound>(result)) {
+        std::cout << "RefNotFound\n";
+        return;
+    }
+    if(std::holds_alternative<GitRemoteRevisionTimeout>(result)) {
+        std::cout << "Timeout\n";
+        return;
+    }
+    if(std::holds_alternative<GitRemoteRevisionProcessFailure>(result)) {
+        std::cout << "ProcessFailure\n";
+        return;
+    }
+    if(const auto* git_failure =
+           std::get_if<GitRemoteRevisionGitExitFailure>(&result)) {
+        std::cout << "GitExitFailure\t" << git_failure->exit_code << '\n';
+        return;
+    }
+    if(std::holds_alternative<
+           GitRemoteRevisionCaptureLimitExceeded>(result)) {
+        std::cout << "CaptureLimitExceeded\n";
+        return;
+    }
+    if(std::holds_alternative<GitRemoteRevisionMalformedOutput>(result)) {
+        std::cout << "MalformedOutput\n";
+        return;
+    }
+    if(std::holds_alternative<GitRemoteRevisionAmbiguousOutput>(result)) {
+        std::cout << "AmbiguousOutput\n";
+        return;
+    }
+    throw std::logic_error("Unknown observer result in fixture driver");
+}
+
+int run_observer_fixture_driver(
+    int argc,
+    char* argv[],
+    const fs::path& executable) {
+    require(argc >= 2, "Missing observer fixture driver operation");
+    const std::string_view operation(argv[1]);
+    if(operation == "--observe-default") {
+        require(argc == 3, "Default observer fixture requires one URL");
+        print_observation_result(
+            observe_git_remote_revision(default_request(argv[2])));
+        return 0;
+    }
+    if(operation == "--observe-branch") {
+        require(argc == 4,
+                "Branch observer fixture requires URL and branch");
+        print_observation_result(observe_git_remote_revision(
+            production_exact_request(argv[2], argv[3])));
+        return 0;
+    }
+    if(operation == "--observe-process-fixture") {
+        require(argc == 3,
+                "Process observer fixture requires one mode");
+        const std::string_view mode(argv[2]);
+        const auto hard_timeout =
+            mode == "timeout" ? 300ms : 2s;
+        print_observation_result(run_process_fixture(
+            executable, std::string(mode), hard_timeout, 100ms));
+        return 0;
+    }
+    throw std::runtime_error("Unknown observer fixture driver operation");
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char* argv[]) {
     try {
+        if(argc >= 2 && argv[1] == PROCESS_FIXTURE_MARKER) {
+            return run_observer_process_fixture_child(argc, argv);
+        }
+        const fs::path executable = fs::canonical(argv[0]);
+        if(argc >= 2) {
+            return run_observer_fixture_driver(argc, argv, executable);
+        }
+
         test_https_remote_canonicalization();
         test_https_remote_rejections();
         test_selector_key_and_request_model();
@@ -1271,7 +1672,10 @@ int main() {
         test_exact_branch_success();
         test_exact_branch_rejections();
         test_trusted_git_observer_environment();
+        test_observer_environment_setup_failure_mapping();
         test_trusted_git_observer_fixed_arguments();
+        test_observer_closed_argv();
+        test_observer_execution_composition(executable);
         test_observer_git_config_isolation();
         test_exact_branch_production_validation();
     } catch(const std::exception& error) {
