@@ -81,6 +81,89 @@ struct PackageMetadataFailure {
     std::string diagnostic;
 };
 
+// Cleanup policy metadata remains factual evidence until the pure policy
+// reducer projects it to CleanupPolicyProtection.  Completeness is explicit
+// so a failed/partial inventory cannot be represented as a negative match.
+enum class CleanupPolicyMetadataCompleteness {
+    Complete,
+    Incomplete,
+    Failed,
+};
+
+enum class CleanupPolicyAuthorityKind {
+    InstalledBaseDevelMetaPackage,
+    ConfiguredSyncBaseDevelMetaPackage,
+    BaseDevelGroupCompatibility,
+};
+
+enum class CleanupPolicyAuthorityObservation {
+    Present,
+    Absent,
+    NotObserved,
+    Unavailable,
+};
+
+enum class CleanupPolicyCandidateEvaluation {
+    Protected,
+    NotProtected,
+    NotEvaluated,
+};
+
+enum class CleanupPolicyEvidenceConsistency {
+    Consistent,
+    Contradictory,
+};
+
+struct CleanupPolicyCandidatePackageMetadata {
+    std::string package_name;
+    std::string version;
+    std::vector<std::string> provides;
+    std::vector<std::string> groups;
+};
+
+struct CleanupPolicyMetaPackageMetadata {
+    CleanupPolicyAuthorityKind authority_kind;
+    std::optional<std::size_t> configured_repository_order;
+    std::optional<std::string> repository_name;
+    std::string package_name;
+    std::string version;
+    std::vector<std::string> dependencies;
+};
+
+struct CleanupPolicyGroupMemberMetadata {
+    std::size_t configured_repository_order;
+    std::string repository_name;
+    std::string package_name;
+};
+
+struct CleanupPolicyGroupMetadata {
+    std::string group_name;
+    std::vector<std::string> repository_order;
+    std::vector<std::string> repositories_with_group;
+    std::vector<CleanupPolicyGroupMemberMetadata> members;
+};
+
+struct CleanupPolicyAuthorityEvidence {
+    CleanupPolicyAuthorityKind authority_kind;
+    CleanupPolicyAuthorityObservation observation;
+    CleanupPolicyMetadataCompleteness inventory_completeness;
+    CleanupPolicyCandidateEvaluation candidate_evaluation;
+    CleanupPolicyMetadataCompleteness evaluation_completeness;
+    std::vector<CleanupPolicyMetaPackageMetadata> meta_packages;
+    std::optional<CleanupPolicyGroupMetadata> group;
+};
+
+struct CleanupPolicyProtectionEvidence {
+    CleanupPolicyMetadataCompleteness local_database_completeness;
+    CleanupPolicyMetadataCompleteness candidate_metadata_completeness;
+    std::optional<CleanupPolicyCandidatePackageMetadata> candidate;
+    CleanupPolicyAuthorityEvidence installed_base_devel;
+    CleanupPolicyAuthorityEvidence configured_sync_base_devel;
+    CleanupPolicyAuthorityEvidence base_devel_group;
+    CleanupPolicyEvidenceConsistency consistency;
+    std::vector<PackageMetadataFailure> failures;
+};
+
 // Slice 3 adapterへ渡すlibalpm read-phaseのowned snapshot。
 // libalpmのrelation enumやborrowed pointerはこの境界より外へ出さない。
 enum class RepositoryProvidedPackageRelation {
@@ -280,6 +363,14 @@ query_configured_repository_provider_package_metadata(
     const PacmanRepositoryConfiguration& configuration,
     const std::string& dependency_name);
 
+// Read-only cleanup-policy authority.  The local database is observed first;
+// configured sync databases are opened only when the exact installed
+// base-devel meta package is authoritatively absent.  Expected metadata
+// failures are retained in the returned evidence and never thrown as absence.
+CleanupPolicyProtectionEvidence query_cleanup_policy_protection_evidence(
+    const PacmanRepositoryConfiguration& configuration,
+    const std::string& candidate_package_name);
+
 // local DBと全sync DBを1 handleで照合し、borrowを残さないowned inventoryを返す。
 ForeignPackageInventoryResult query_foreign_package_inventory(
     const PacmanRepositoryConfiguration& configuration);
@@ -317,6 +408,11 @@ public:
 
 private:
     struct Impl;
+
+    friend CleanupPolicyProtectionEvidence
+    query_cleanup_policy_protection_evidence(
+        const PacmanRepositoryConfiguration& configuration,
+        const std::string& candidate_package_name);
 
     explicit PackageMetadataSession(std::unique_ptr<Impl> impl) noexcept;
 
@@ -364,6 +460,11 @@ public:
 
 private:
     struct Impl;
+
+    friend CleanupPolicyProtectionEvidence
+    query_cleanup_policy_protection_evidence(
+        const PacmanRepositoryConfiguration& configuration,
+        const std::string& candidate_package_name);
 
     explicit RepositoryPackageMetadataSession(std::unique_ptr<Impl> impl) noexcept;
 

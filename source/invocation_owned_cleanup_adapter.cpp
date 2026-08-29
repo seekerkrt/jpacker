@@ -579,6 +579,208 @@ void downgrade_complete_coverage(
     }
 }
 
+bool is_valid_cleanup_policy_completeness(
+    CleanupPolicyMetadataCompleteness completeness) noexcept {
+    switch(completeness) {
+        case CleanupPolicyMetadataCompleteness::Complete:
+        case CleanupPolicyMetadataCompleteness::Incomplete:
+        case CleanupPolicyMetadataCompleteness::Failed:
+            return true;
+    }
+    return false;
+}
+
+bool is_valid_cleanup_policy_observation(
+    CleanupPolicyAuthorityObservation observation) noexcept {
+    switch(observation) {
+        case CleanupPolicyAuthorityObservation::Present:
+        case CleanupPolicyAuthorityObservation::Absent:
+        case CleanupPolicyAuthorityObservation::NotObserved:
+        case CleanupPolicyAuthorityObservation::Unavailable:
+            return true;
+    }
+    return false;
+}
+
+bool is_valid_cleanup_policy_evaluation(
+    CleanupPolicyCandidateEvaluation evaluation) noexcept {
+    switch(evaluation) {
+        case CleanupPolicyCandidateEvaluation::Protected:
+        case CleanupPolicyCandidateEvaluation::NotProtected:
+        case CleanupPolicyCandidateEvaluation::NotEvaluated:
+            return true;
+    }
+    return false;
+}
+
+bool cleanup_policy_strings_are_unique_and_nonempty(
+    const std::vector<std::string>& values) {
+    std::set<std::string> observed;
+    return std::all_of(
+        values.begin(), values.end(),
+        [&observed](const std::string& value) {
+            return !value.empty() && observed.insert(value).second;
+        });
+}
+
+bool cleanup_policy_meta_package_shape_is_valid(
+    const CleanupPolicyMetaPackageMetadata& metadata,
+    CleanupPolicyAuthorityKind expected_kind) {
+    if(metadata.authority_kind != expected_kind ||
+       metadata.package_name != "base-devel" ||
+       metadata.version.empty() || metadata.dependencies.empty() ||
+       !cleanup_policy_strings_are_unique_and_nonempty(
+           metadata.dependencies)) {
+        return false;
+    }
+
+    if(expected_kind ==
+       CleanupPolicyAuthorityKind::InstalledBaseDevelMetaPackage) {
+        return !metadata.configured_repository_order.has_value() &&
+               !metadata.repository_name.has_value();
+    }
+    return metadata.configured_repository_order.has_value() &&
+           metadata.repository_name.has_value() &&
+           !metadata.repository_name->empty();
+}
+
+bool cleanup_policy_group_shape_is_valid(
+    const CleanupPolicyGroupMetadata& group) {
+    if(group.group_name != "base-devel" ||
+       group.repository_order.empty() ||
+       group.repositories_with_group.empty() || group.members.empty() ||
+       !cleanup_policy_strings_are_unique_and_nonempty(
+           group.repository_order) ||
+       !cleanup_policy_strings_are_unique_and_nonempty(
+           group.repositories_with_group)) {
+        return false;
+    }
+
+    for(const std::string& repository : group.repositories_with_group) {
+        if(std::find(
+               group.repository_order.begin(),
+               group.repository_order.end(), repository) ==
+           group.repository_order.end()) {
+            return false;
+        }
+    }
+
+    std::set<std::string> observed_members;
+    for(const CleanupPolicyGroupMemberMetadata& member : group.members) {
+        if(member.configured_repository_order >=
+               group.repository_order.size() ||
+           member.repository_name !=
+               group.repository_order[member.configured_repository_order] ||
+           !is_valid_package_name(member.package_name) ||
+           !observed_members.insert(member.package_name).second) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool cleanup_policy_authority_shape_is_valid(
+    const CleanupPolicyAuthorityEvidence& authority,
+    CleanupPolicyAuthorityKind expected_kind) noexcept {
+    if(authority.authority_kind != expected_kind ||
+       !is_valid_cleanup_policy_observation(authority.observation) ||
+       !is_valid_cleanup_policy_completeness(
+           authority.inventory_completeness) ||
+       !is_valid_cleanup_policy_evaluation(
+           authority.candidate_evaluation) ||
+       !is_valid_cleanup_policy_completeness(
+           authority.evaluation_completeness)) {
+        return false;
+    }
+    if((authority.candidate_evaluation ==
+        CleanupPolicyCandidateEvaluation::NotEvaluated) ==
+       (authority.evaluation_completeness ==
+        CleanupPolicyMetadataCompleteness::Complete)) {
+        return false;
+    }
+    if(authority.observation != CleanupPolicyAuthorityObservation::Present &&
+       authority.candidate_evaluation !=
+           CleanupPolicyCandidateEvaluation::NotEvaluated) {
+        return false;
+    }
+
+    const bool is_group_authority =
+        expected_kind ==
+        CleanupPolicyAuthorityKind::BaseDevelGroupCompatibility;
+    if(authority.observation == CleanupPolicyAuthorityObservation::Present &&
+       authority.inventory_completeness ==
+           CleanupPolicyMetadataCompleteness::Complete) {
+        if(is_group_authority) {
+            return authority.group.has_value() &&
+                   authority.meta_packages.empty() &&
+                   cleanup_policy_group_shape_is_valid(
+                       authority.group.value());
+        }
+        return !authority.meta_packages.empty() &&
+               !authority.group.has_value() &&
+               std::all_of(
+                   authority.meta_packages.begin(),
+                   authority.meta_packages.end(),
+                   [expected_kind](
+                       const CleanupPolicyMetaPackageMetadata& metadata) {
+                       return cleanup_policy_meta_package_shape_is_valid(
+                           metadata, expected_kind);
+                   });
+    }
+
+    if(authority.observation != CleanupPolicyAuthorityObservation::Present) {
+        return authority.meta_packages.empty() &&
+               !authority.group.has_value();
+    }
+    if(is_group_authority) {
+        return authority.meta_packages.empty() &&
+               (!authority.group.has_value() ||
+                cleanup_policy_group_shape_is_valid(
+                    authority.group.value()));
+    }
+    return !authority.group.has_value() &&
+           std::all_of(
+               authority.meta_packages.begin(),
+               authority.meta_packages.end(),
+               [expected_kind](
+                   const CleanupPolicyMetaPackageMetadata& metadata) {
+                   return cleanup_policy_meta_package_shape_is_valid(
+                       metadata, expected_kind);
+               });
+}
+
+bool cleanup_policy_authority_is_complete_absence(
+    const CleanupPolicyAuthorityEvidence& authority) noexcept {
+    return authority.observation ==
+               CleanupPolicyAuthorityObservation::Absent &&
+           authority.inventory_completeness ==
+               CleanupPolicyMetadataCompleteness::Complete &&
+           authority.candidate_evaluation ==
+               CleanupPolicyCandidateEvaluation::NotEvaluated;
+}
+
+bool cleanup_policy_authority_has_complete_protection(
+    const CleanupPolicyAuthorityEvidence& authority) noexcept {
+    return authority.observation ==
+               CleanupPolicyAuthorityObservation::Present &&
+           authority.candidate_evaluation ==
+               CleanupPolicyCandidateEvaluation::Protected &&
+           authority.evaluation_completeness ==
+               CleanupPolicyMetadataCompleteness::Complete;
+}
+
+bool cleanup_policy_authority_has_complete_negative(
+    const CleanupPolicyAuthorityEvidence& authority) noexcept {
+    return authority.observation ==
+               CleanupPolicyAuthorityObservation::Present &&
+           authority.inventory_completeness ==
+               CleanupPolicyMetadataCompleteness::Complete &&
+           authority.candidate_evaluation ==
+               CleanupPolicyCandidateEvaluation::NotProtected &&
+           authority.evaluation_completeness ==
+               CleanupPolicyMetadataCompleteness::Complete;
+}
+
 } // namespace
 
 CleanupInvocationLifecycleEvidence::CleanupInvocationLifecycleEvidence(
@@ -739,7 +941,82 @@ project_cleanup_causal_ownership_from_raw_ledger_for_test(
 }
 #endif
 
-CleanupPolicyProtection project_cleanup_policy_protection() noexcept {
+CleanupPolicyProtection project_cleanup_policy_protection(
+    const CleanupPolicyProtectionEvidence& evidence) noexcept {
+    if(!is_valid_cleanup_policy_completeness(
+           evidence.local_database_completeness) ||
+       !is_valid_cleanup_policy_completeness(
+           evidence.candidate_metadata_completeness) ||
+       !cleanup_policy_authority_shape_is_valid(
+           evidence.installed_base_devel,
+           CleanupPolicyAuthorityKind::InstalledBaseDevelMetaPackage) ||
+       !cleanup_policy_authority_shape_is_valid(
+           evidence.configured_sync_base_devel,
+           CleanupPolicyAuthorityKind::
+               ConfiguredSyncBaseDevelMetaPackage) ||
+       !cleanup_policy_authority_shape_is_valid(
+           evidence.base_devel_group,
+           CleanupPolicyAuthorityKind::BaseDevelGroupCompatibility) ||
+       evidence.consistency !=
+           CleanupPolicyEvidenceConsistency::Consistent ||
+       evidence.local_database_completeness !=
+           CleanupPolicyMetadataCompleteness::Complete ||
+       evidence.candidate_metadata_completeness !=
+           CleanupPolicyMetadataCompleteness::Complete ||
+       !evidence.candidate.has_value() ||
+       !is_valid_package_name(evidence.candidate->package_name) ||
+       evidence.candidate->version.empty() ||
+       !cleanup_policy_strings_are_unique_and_nonempty(
+           evidence.candidate->provides) ||
+       !cleanup_policy_strings_are_unique_and_nonempty(
+           evidence.candidate->groups)) {
+        return CleanupPolicyProtection::Unknown;
+    }
+
+    const CleanupPolicyAuthorityEvidence* selected_authority = nullptr;
+    if(evidence.installed_base_devel.observation ==
+       CleanupPolicyAuthorityObservation::Present) {
+        selected_authority = &evidence.installed_base_devel;
+    } else if(cleanup_policy_authority_is_complete_absence(
+                  evidence.installed_base_devel)) {
+        if(evidence.configured_sync_base_devel.observation ==
+           CleanupPolicyAuthorityObservation::Present) {
+            selected_authority = &evidence.configured_sync_base_devel;
+        } else if(cleanup_policy_authority_is_complete_absence(
+                      evidence.configured_sync_base_devel) &&
+                  evidence.base_devel_group.observation ==
+                      CleanupPolicyAuthorityObservation::Present) {
+            selected_authority = &evidence.base_devel_group;
+        }
+    }
+
+    if(selected_authority == nullptr) {
+        return CleanupPolicyProtection::Unknown;
+    }
+    if(selected_authority == &evidence.base_devel_group) {
+        const bool candidate_declares_exact_group =
+            std::find(
+                evidence.candidate->groups.begin(),
+                evidence.candidate->groups.end(), "base-devel") !=
+            evidence.candidate->groups.end();
+        if((selected_authority->candidate_evaluation ==
+                CleanupPolicyCandidateEvaluation::Protected &&
+            !candidate_declares_exact_group) ||
+           (selected_authority->candidate_evaluation ==
+                CleanupPolicyCandidateEvaluation::NotProtected &&
+            candidate_declares_exact_group)) {
+            return CleanupPolicyProtection::Unknown;
+        }
+    }
+    if(cleanup_policy_authority_has_complete_protection(
+           *selected_authority)) {
+        return CleanupPolicyProtection::Protected;
+    }
+    if(evidence.failures.empty() &&
+       cleanup_policy_authority_has_complete_negative(
+           *selected_authority)) {
+        return CleanupPolicyProtection::NotProtected;
+    }
     return CleanupPolicyProtection::Unknown;
 }
 
@@ -1056,8 +1333,11 @@ project_invocation_owned_cleanup_candidate(
         project_shared_requirement(
             plan, relevant_edge_indices, observed_roles, coverage,
             lifecycle, prepared_projection.complete);
+    // Slice 3 completes the standalone factual query and pure policy reducer,
+    // but this broader production candidate lifecycle remains intentionally
+    // unconnected until route/correlation authority is closed in Slice 4.
     const CleanupPolicyProtection policy =
-        project_cleanup_policy_protection();
+        CleanupPolicyProtection::Unknown;
     add_issue(
         issues,
         CleanupLifecycleProjectionIssueKind::

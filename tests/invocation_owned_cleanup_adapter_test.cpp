@@ -16,6 +16,96 @@ void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
 }
 
+CleanupPolicyAuthorityEvidence unobserved_policy_authority(
+    CleanupPolicyAuthorityKind kind) {
+    return CleanupPolicyAuthorityEvidence{
+        kind,
+        CleanupPolicyAuthorityObservation::NotObserved,
+        CleanupPolicyMetadataCompleteness::Incomplete,
+        CleanupPolicyCandidateEvaluation::NotEvaluated,
+        CleanupPolicyMetadataCompleteness::Incomplete,
+        {},
+        std::nullopt};
+}
+
+CleanupPolicyAuthorityEvidence absent_policy_authority(
+    CleanupPolicyAuthorityKind kind) {
+    return CleanupPolicyAuthorityEvidence{
+        kind,
+        CleanupPolicyAuthorityObservation::Absent,
+        CleanupPolicyMetadataCompleteness::Complete,
+        CleanupPolicyCandidateEvaluation::NotEvaluated,
+        CleanupPolicyMetadataCompleteness::Incomplete,
+        {},
+        std::nullopt};
+}
+
+CleanupPolicyAuthorityEvidence meta_policy_authority(
+    CleanupPolicyAuthorityKind kind,
+    CleanupPolicyCandidateEvaluation evaluation,
+    CleanupPolicyMetadataCompleteness inventory_completeness =
+        CleanupPolicyMetadataCompleteness::Complete,
+    CleanupPolicyMetadataCompleteness evaluation_completeness =
+        CleanupPolicyMetadataCompleteness::Complete) {
+    return CleanupPolicyAuthorityEvidence{
+        kind,
+        CleanupPolicyAuthorityObservation::Present,
+        inventory_completeness,
+        evaluation,
+        evaluation_completeness,
+        {CleanupPolicyMetaPackageMetadata{
+            kind,
+            kind == CleanupPolicyAuthorityKind::
+                        ConfiguredSyncBaseDevelMetaPackage
+                ? std::optional<std::size_t>(0)
+                : std::nullopt,
+            kind == CleanupPolicyAuthorityKind::
+                        ConfiguredSyncBaseDevelMetaPackage
+                ? std::optional<std::string>("core")
+                : std::nullopt,
+            "base-devel",
+            "1-2",
+            {"toolchain"}}},
+        std::nullopt};
+}
+
+CleanupPolicyAuthorityEvidence group_policy_authority(
+    CleanupPolicyCandidateEvaluation evaluation,
+    CleanupPolicyMetadataCompleteness inventory_completeness =
+        CleanupPolicyMetadataCompleteness::Complete,
+    CleanupPolicyMetadataCompleteness evaluation_completeness =
+        CleanupPolicyMetadataCompleteness::Complete) {
+    return CleanupPolicyAuthorityEvidence{
+        CleanupPolicyAuthorityKind::BaseDevelGroupCompatibility,
+        CleanupPolicyAuthorityObservation::Present,
+        inventory_completeness,
+        evaluation,
+        evaluation_completeness,
+        {},
+        CleanupPolicyGroupMetadata{
+            "base-devel",
+            {"core"},
+            {"core"},
+            {CleanupPolicyGroupMemberMetadata{0, "core", "toolchain"}}}};
+}
+
+CleanupPolicyProtectionEvidence base_policy_evidence() {
+    return CleanupPolicyProtectionEvidence{
+        CleanupPolicyMetadataCompleteness::Complete,
+        CleanupPolicyMetadataCompleteness::Complete,
+        CleanupPolicyCandidatePackageMetadata{
+            "candidate", "1-1", {}, {}},
+        absent_policy_authority(
+            CleanupPolicyAuthorityKind::InstalledBaseDevelMetaPackage),
+        absent_policy_authority(
+            CleanupPolicyAuthorityKind::
+                ConfiguredSyncBaseDevelMetaPackage),
+        absent_policy_authority(
+            CleanupPolicyAuthorityKind::BaseDevelGroupCompatibility),
+        CleanupPolicyEvidenceConsistency::Consistent,
+        {}};
+}
+
 bool has_reason(
     const CleanupClassificationResult& result,
     CleanupClassificationReason reason) {
@@ -1173,6 +1263,199 @@ void test_newly_observed_dependency_with_success_is_never_eligible() {
         "pre absent + post Dependency + verified plan + success became Eligible");
 }
 
+void test_cleanup_policy_reducer_authority_priority() {
+    CleanupPolicyProtectionEvidence installed = base_policy_evidence();
+    installed.installed_base_devel = meta_policy_authority(
+        CleanupPolicyAuthorityKind::InstalledBaseDevelMetaPackage,
+        CleanupPolicyCandidateEvaluation::Protected);
+    installed.configured_sync_base_devel = meta_policy_authority(
+        CleanupPolicyAuthorityKind::ConfiguredSyncBaseDevelMetaPackage,
+        CleanupPolicyCandidateEvaluation::NotProtected);
+    expect(
+        project_cleanup_policy_protection(installed) ==
+            CleanupPolicyProtection::Protected,
+        "installed exact base-devel meta authority was not primary");
+
+    installed.installed_base_devel = meta_policy_authority(
+        CleanupPolicyAuthorityKind::InstalledBaseDevelMetaPackage,
+        CleanupPolicyCandidateEvaluation::NotProtected);
+    installed.configured_sync_base_devel = meta_policy_authority(
+        CleanupPolicyAuthorityKind::ConfiguredSyncBaseDevelMetaPackage,
+        CleanupPolicyCandidateEvaluation::Protected);
+    installed.base_devel_group = group_policy_authority(
+        CleanupPolicyCandidateEvaluation::Protected);
+    expect(
+        project_cleanup_policy_protection(installed) ==
+            CleanupPolicyProtection::NotProtected,
+        "lower-priority sync/group evidence overrode installed meta authority");
+
+    CleanupPolicyProtectionEvidence sync = base_policy_evidence();
+    sync.configured_sync_base_devel = meta_policy_authority(
+        CleanupPolicyAuthorityKind::ConfiguredSyncBaseDevelMetaPackage,
+        CleanupPolicyCandidateEvaluation::Protected);
+    expect(
+        project_cleanup_policy_protection(sync) ==
+            CleanupPolicyProtection::Protected,
+        "configured sync exact base-devel meta authority did not protect");
+
+    sync.configured_sync_base_devel = meta_policy_authority(
+        CleanupPolicyAuthorityKind::ConfiguredSyncBaseDevelMetaPackage,
+        CleanupPolicyCandidateEvaluation::NotProtected);
+    sync.base_devel_group = group_policy_authority(
+        CleanupPolicyCandidateEvaluation::Protected);
+    expect(
+        project_cleanup_policy_protection(sync) ==
+            CleanupPolicyProtection::NotProtected,
+        "compatibility group overrode present sync meta authority");
+}
+
+void test_cleanup_policy_reducer_group_fallback() {
+    CleanupPolicyProtectionEvidence protected_group =
+        base_policy_evidence();
+    protected_group.candidate->groups = {"other", "base-devel"};
+    protected_group.base_devel_group = group_policy_authority(
+        CleanupPolicyCandidateEvaluation::Protected);
+    expect(
+        project_cleanup_policy_protection(protected_group) ==
+            CleanupPolicyProtection::Protected,
+        "exact complete base-devel group fallback did not protect");
+
+    CleanupPolicyProtectionEvidence not_protected_group =
+        base_policy_evidence();
+    not_protected_group.base_devel_group = group_policy_authority(
+        CleanupPolicyCandidateEvaluation::NotProtected);
+    expect(
+        project_cleanup_policy_protection(not_protected_group) ==
+            CleanupPolicyProtection::NotProtected,
+        "complete exact group non-membership did not produce NotProtected");
+
+    CleanupPolicyProtectionEvidence missing_group = base_policy_evidence();
+    expect(
+        project_cleanup_policy_protection(missing_group) ==
+            CleanupPolicyProtection::Unknown,
+        "missing exact compatibility group became NotProtected");
+}
+
+void test_cleanup_policy_reducer_failure_matrix() {
+    CleanupPolicyProtectionEvidence local_failure = base_policy_evidence();
+    local_failure.local_database_completeness =
+        CleanupPolicyMetadataCompleteness::Failed;
+    expect(
+        project_cleanup_policy_protection(local_failure) ==
+            CleanupPolicyProtection::Unknown,
+        "local DB failure became a policy decision");
+
+    CleanupPolicyProtectionEvidence candidate_incomplete =
+        base_policy_evidence();
+    candidate_incomplete.candidate_metadata_completeness =
+        CleanupPolicyMetadataCompleteness::Incomplete;
+    candidate_incomplete.candidate.reset();
+    expect(
+        project_cleanup_policy_protection(candidate_incomplete) ==
+            CleanupPolicyProtection::Unknown,
+        "incomplete candidate metadata became NotProtected");
+
+    CleanupPolicyProtectionEvidence sync_unavailable =
+        base_policy_evidence();
+    sync_unavailable.configured_sync_base_devel =
+        unobserved_policy_authority(
+            CleanupPolicyAuthorityKind::
+                ConfiguredSyncBaseDevelMetaPackage);
+    sync_unavailable.configured_sync_base_devel.observation =
+        CleanupPolicyAuthorityObservation::Unavailable;
+    sync_unavailable.configured_sync_base_devel.inventory_completeness =
+        CleanupPolicyMetadataCompleteness::Failed;
+    sync_unavailable.configured_sync_base_devel.evaluation_completeness =
+        CleanupPolicyMetadataCompleteness::Failed;
+    expect(
+        project_cleanup_policy_protection(sync_unavailable) ==
+            CleanupPolicyProtection::Unknown,
+        "required sync DB failure became NotProtected");
+
+    CleanupPolicyProtectionEvidence partial_inventory =
+        base_policy_evidence();
+    partial_inventory.configured_sync_base_devel = meta_policy_authority(
+        CleanupPolicyAuthorityKind::ConfiguredSyncBaseDevelMetaPackage,
+        CleanupPolicyCandidateEvaluation::NotProtected,
+        CleanupPolicyMetadataCompleteness::Incomplete);
+    expect(
+        project_cleanup_policy_protection(partial_inventory) ==
+            CleanupPolicyProtection::Unknown,
+        "partial protected inventory became NotProtected");
+
+    CleanupPolicyProtectionEvidence evaluation_failure =
+        base_policy_evidence();
+    evaluation_failure.configured_sync_base_devel = meta_policy_authority(
+        CleanupPolicyAuthorityKind::ConfiguredSyncBaseDevelMetaPackage,
+        CleanupPolicyCandidateEvaluation::NotEvaluated,
+        CleanupPolicyMetadataCompleteness::Complete,
+        CleanupPolicyMetadataCompleteness::Failed);
+    expect(
+        project_cleanup_policy_protection(evaluation_failure) ==
+            CleanupPolicyProtection::Unknown,
+        "satisfier evaluation failure became NotProtected");
+
+    CleanupPolicyProtectionEvidence contradictory = base_policy_evidence();
+    contradictory.configured_sync_base_devel = meta_policy_authority(
+        CleanupPolicyAuthorityKind::ConfiguredSyncBaseDevelMetaPackage,
+        CleanupPolicyCandidateEvaluation::Protected);
+    contradictory.consistency =
+        CleanupPolicyEvidenceConsistency::Contradictory;
+    expect(
+        project_cleanup_policy_protection(contradictory) ==
+            CleanupPolicyProtection::Unknown,
+        "contradictory policy evidence became Protected");
+
+    CleanupPolicyProtectionEvidence failed_negative = base_policy_evidence();
+    failed_negative.configured_sync_base_devel = meta_policy_authority(
+        CleanupPolicyAuthorityKind::ConfiguredSyncBaseDevelMetaPackage,
+        CleanupPolicyCandidateEvaluation::NotProtected);
+    failed_negative.failures.push_back(PackageMetadataFailure{
+        PackageMetadataErrorCode::QueryFailed, "injected failure"});
+    expect(
+        project_cleanup_policy_protection(failed_negative) ==
+            CleanupPolicyProtection::Unknown,
+        "query failure plus negative evidence became NotProtected");
+
+    CleanupPolicyProtectionEvidence invalid_typed_state =
+        base_policy_evidence();
+    invalid_typed_state.configured_sync_base_devel.observation =
+        static_cast<CleanupPolicyAuthorityObservation>(999);
+    expect(
+        project_cleanup_policy_protection(invalid_typed_state) ==
+            CleanupPolicyProtection::Unknown,
+        "invalid policy evidence enum became a policy decision");
+
+    CleanupPolicyProtectionEvidence malformed_authority =
+        base_policy_evidence();
+    malformed_authority.configured_sync_base_devel = meta_policy_authority(
+        CleanupPolicyAuthorityKind::ConfiguredSyncBaseDevelMetaPackage,
+        CleanupPolicyCandidateEvaluation::NotProtected);
+    malformed_authority.configured_sync_base_devel
+        .meta_packages.front()
+        .dependencies.clear();
+    expect(
+        project_cleanup_policy_protection(malformed_authority) ==
+            CleanupPolicyProtection::Unknown,
+        "malformed complete meta evidence became NotProtected");
+}
+
+void test_cleanup_policy_reducer_complete_positive_survives_other_failure() {
+    CleanupPolicyProtectionEvidence evidence = base_policy_evidence();
+    evidence.configured_sync_base_devel = meta_policy_authority(
+        CleanupPolicyAuthorityKind::ConfiguredSyncBaseDevelMetaPackage,
+        CleanupPolicyCandidateEvaluation::Protected,
+        CleanupPolicyMetadataCompleteness::Incomplete,
+        CleanupPolicyMetadataCompleteness::Complete);
+    evidence.failures.push_back(PackageMetadataFailure{
+        PackageMetadataErrorCode::QueryFailed,
+        "separate configured source failed"});
+    expect(
+        project_cleanup_policy_protection(evidence) ==
+            CleanupPolicyProtection::Protected,
+        "complete positive protection was lost to a separate query failure");
+}
+
 } // namespace
 
 void run_invocation_owned_cleanup_adapter_tests() {
@@ -1192,4 +1475,8 @@ void run_invocation_owned_cleanup_adapter_tests() {
     test_metadata_and_source_failures_remain_typed_unknown_evidence();
     test_version_mismatch_and_unknown_policy_fail_closed();
     test_newly_observed_dependency_with_success_is_never_eligible();
+    test_cleanup_policy_reducer_authority_priority();
+    test_cleanup_policy_reducer_group_fallback();
+    test_cleanup_policy_reducer_failure_matrix();
+    test_cleanup_policy_reducer_complete_positive_survives_other_failure();
 }

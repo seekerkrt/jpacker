@@ -131,10 +131,9 @@ project_cleanup_causal_ownership_from_raw_ledger_for_test(
     const InvocationDependencyTransactionLedger& transaction_ledger);
 #endif
 
-// Slice 3.6 adds causal transport only; it still has no complete group/policy
-// inventory authority.
 [[nodiscard]] CleanupPolicyProtection
-project_cleanup_policy_protection() noexcept;
+project_cleanup_policy_protection(
+    const CleanupPolicyProtectionEvidence& evidence) noexcept;
 
 // candidate_authority must be a typed BuildPlan/exact-metadata observation.
 // Installed-only or otherwise source-incomplete authority returns a typed

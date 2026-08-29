@@ -1810,6 +1810,10 @@ alpm_list_t* alpm_pkg_get_provides(alpm_pkg_t* package) {
     return package_state->provide_nodes.data();
 }
 
+alpm_list_t* alpm_pkg_get_groups(alpm_pkg_t*) {
+    return nullptr;
+}
+
 alpm_list_t* alpm_pkg_get_depends(alpm_pkg_t* package) {
     if(package == nullptr || package->kind != AlpmStubDatabaseKind::Local) {
         return nullptr;
@@ -1819,6 +1823,10 @@ alpm_list_t* alpm_pkg_get_depends(alpm_pkg_t* package) {
         return nullptr;
     }
     return package_state->dependency_nodes.data();
+}
+
+alpm_pkg_t* alpm_find_satisfier(alpm_list_t*, const char*) {
+    return nullptr;
 }
 
 char* alpm_dep_compute_string(const alpm_depend_t* dependency) {

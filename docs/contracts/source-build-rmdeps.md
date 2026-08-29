@@ -4,13 +4,13 @@
 
 この文書は、separated AUR / source-build lifecycleにおける`--rmdeps`の意味、拒否境界、pacman-only routeでの消費を定めるnormative production contractである。あわせてIssue #404で将来のsupportへ進むために必要なcleanup ownershipとinteractionのstaged authorityを定める。文書の規範上の正本は日本語本文である。
 
-current production behaviorとstaged targetは混同しない。Issue #485 Slice 2完了後も、production source-buildの`--rmdeps`はunsupportedかつfail closedであり、dependency removal、preview、promptは接続されていない。Issue #404 Slice 3.6のselected repository provider transportと、Issue #485 Slice 2の`SourceArtifactInstall` transportは、installed helper、fixed protocol、root stateをownerごとに分離する。Slice 2はwrite-sealed artifact bytesからroot-owned stagingを作るproduction-capableな`pacman -U` receipt transportと、Slice 1のclosed observation / causal evidenceへのprojectionだけを追加する。policy protection、shared lifetime、route completeness、production candidate collectorへは接続しない。`makepkg -s`も未対応であり、独立gateが残るためremovalへ進まない。
+current production behaviorとstaged targetは混同しない。Issue #485 Slice 3完了後も、production source-buildの`--rmdeps`はunsupportedかつfail closedであり、dependency removal、preview、promptは接続されていない。Issue #404 Slice 3.6のselected repository provider transportと、Issue #485 Slice 2の`SourceArtifactInstall` transportは、installed helper、fixed protocol、root stateをownerごとに分離する。Slice 2はwrite-sealed artifact bytesからroot-owned stagingを作るproduction-capableな`pacman -U` receipt transportと、Slice 1のclosed observation / causal evidenceへのprojectionだけを追加する。Slice 3はread-only local / configured sync libalpm metadataからexact `base-devel` meta-package dependency authority、strict compatibility group fallback、pure policy reducerを追加するが、production candidate lifecycleへは接続しない。shared lifetime、route completeness、production candidate collectorも未接続である。`makepkg -s`も未対応であり、独立gateが残るためremovalへ進まない。
 
 - Origin Issue: [#269](https://github.com/seekerkrt/moguet/issues/269)
 - Staged extension: [#404](https://github.com/seekerkrt/moguet/issues/404)
 - Related Issues: [#123](https://github.com/seekerkrt/moguet/issues/123)、[#152](https://github.com/seekerkrt/moguet/issues/152)、[#218](https://github.com/seekerkrt/moguet/issues/218)、[#242](https://github.com/seekerkrt/moguet/issues/242)、[#266](https://github.com/seekerkrt/moguet/issues/266)、[#267](https://github.com/seekerkrt/moguet/issues/267)、[#271](https://github.com/seekerkrt/moguet/issues/271)、[#350](https://github.com/seekerkrt/moguet/issues/350)
 - Related PRs: #298（#269 policy）、#241、#257〜#261（#242 separated lifecycle）
-- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。Slice 3でinstall-reason付きfull local snapshotとproduction未接続のmetadata / lifecycle adapterを追加し、current causal authority不足をNO-GOとして固定。Slice 3.5でtransaction token、owner、command outcome、machine receipt completeness、package operation、invocation ledgerをpure typed contractとして追加した。Slice 3.6でpackage-installed root helper、root-owned transaction state、transaction-local Install hook、one-shot machine receipt、selected-provider typed transportを追加し、Slice 3.5 ledgerへactual `Install` setをprojectできるproduction-capable pathを成立させた。Slice 3.7でmakepkg syncdepsのpublic instrumentation authorityを監査し、安全なroot-owned adapter案は独立security redesignが必要なためDEFER、Issue #404はRETURN-HOMEと判定した。Issue #485 Slice 1でactual archive PackageBase / architectureと`SourceArtifactInstall` owner-specific closed evidenceを追加し、raw generic ledgerをproduction positive projectionから除外した。Issue #485 Slice 2で別installed helper、別`/run` namespace、sealed-bytes root staging、fixed `pacman -U`、Install-only receipt、production observation producerを追加した。public cleanup routeとcandidate collectorは未接続である。
+- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。Slice 3でinstall-reason付きfull local snapshotとproduction未接続のmetadata / lifecycle adapterを追加し、current causal authority不足をNO-GOとして固定。Slice 3.5でtransaction token、owner、command outcome、machine receipt completeness、package operation、invocation ledgerをpure typed contractとして追加した。Slice 3.6でpackage-installed root helper、root-owned transaction state、transaction-local Install hook、one-shot machine receipt、selected-provider typed transportを追加し、Slice 3.5 ledgerへactual `Install` setをprojectできるproduction-capable pathを成立させた。Slice 3.7でmakepkg syncdepsのpublic instrumentation authorityを監査し、安全なroot-owned adapter案は独立security redesignが必要なためDEFER、Issue #404はRETURN-HOMEと判定した。Issue #485 Slice 1でactual archive PackageBase / architectureと`SourceArtifactInstall` owner-specific closed evidenceを追加し、raw generic ledgerをproduction positive projectionから除外した。Issue #485 Slice 2で別installed helper、別`/run` namespace、sealed-bytes root staging、fixed `pacman -U`、Install-only receipt、production observation producerを追加した。Issue #485 Slice 3でexact installed / configured sync `base-devel` meta-package dependencyをprimary authorityとし、libalpm satisfier semantics、exact group compatibility fallback、losslessな`Protected` / `NotProtected` / `Unknown` reducerを追加した。public cleanup routeとcandidate collectorは未接続である。
 - Related upper decisions: [decision 1](../DECISIONS.md#decision-1)、[decision 2](../DECISIONS.md#decision-2)、[decision 4](../DECISIONS.md#decision-4)、[decision 5](../DECISIONS.md#decision-5)、[decision 6](../DECISIONS.md#decision-6)、[decision 7](../DECISIONS.md#decision-7)
 
 ## Contract本文（日本語normative source of truth）
@@ -400,9 +400,39 @@ selected cleanup authorityへ自動昇格しない。transport resultからSlice
 capabilityを作れるが、`project_invocation_owned_cleanup_candidate()`、policy、shared lifetime、route completeness、
 public `--rmdeps`へは接続しない。
 
+### Issue #485 Slice 3 protected build environment policy（candidate未接続）
+
+initial protected build environment policyはexact `base-devel`だけである。current Archでは`base-devel`は
+groupではなくmeta packageであり、installed exact meta-package dependency metadataをprimary、完全な
+configured sync exact meta-package metadataを次のauthorityとする。両方がauthoritatively absentで、全configured
+sync databaseとexact group inventoryがcompleteな場合だけ、exact `base-devel` groupをcompatibility fallbackとして
+使う。arbitrary group、all groups、設定追加、`gcc` / `make`等のhard-coded member listは導入しない。
+
+candidateはread-only local libalpm metadataからexact name / version / provides / groupsをowned snapshotへ保持する。
+meta dependencyとのsatisfactionは`alpm_pkg_get_depends()`と`alpm_find_satisfier()`を使い、dependency parser / solverを
+Moguet側へ追加しない。local-only packageもlocal objectのname / versioned providesがdependencyをsatisfyする場合は
+`Protected`であり、repository identityをpackage名から補完しない。group fallbackのmembershipもcandidate local metadataの
+exact group declarationを使い、sync group memberとのpackage-name-only相関をprovenanceへ昇格しない。
+
+factual `CleanupPolicyProtectionEvidence`はlocal DB、candidate metadata、installed meta、configured sync meta、group
+inventory、satisfier evaluation、source consistency、failureを別stateで保持する。pure
+`project_cleanup_policy_protection()`は次を固定する。
+
+- selected authorityのcomplete positive satisfier / exact group evidenceだけを`Protected`へprojectする。
+- `NotProtected`はcandidate、selected protected authority、inventory、satisfier evaluationがすべてcompleteで、failure / contradictionがない場合だけ生成する。
+- local DB / required sync DB failure、candidate incomplete、meta / group malformed、partial inventory、evaluation failure、authority unresolved、contradictionは`Unknown`とする。
+- missing exact group、package-name listへの非membership、query failureを`NotProtected`へ変換しない。
+- installed metaはsync / groupより、sync metaはgroupより優先する。group fallbackはexact metaがpresentまたはunresolvedなら選択しない。
+
+standalone query / reducerはproduction buildへ含まれるが、current
+`project_invocation_owned_cleanup_candidate()`はSlice 4のroute / correlation authorityが未成立のためpolicyを
+`Unknown`に保つ。Explicit、PreExisting、Root、RuntimeDependency、shared lifetime、receipt、routeはpolicy reducerへ
+混ぜず、既存classifierの独立dimensionを維持する。public behavior、cleanup candidate collector、preview / prompt /
+removalは変更しない。
+
 ### Slice 4 production cleanup readiness: NO-GO
 
-causal authorityとは別に、Slice 3.6でもgroup / `base-devel`等のcomplete policy inventory authorityはなく、`CleanupPolicyProtection::Unknown`を維持する。source / correlation completeness、local routeのcomplete ownership、shared lifetime、current identity / reason / state、future mutation-time revalidationもそれぞれ独立したgateである。selected-provider causal transportがGOでも、policyが`Unknown`のままならclassifierは`Eligible`を生成せず、Slice 4 GOにはしない。
+standalone protected build environment query / reducerはSlice 3で成立したが、production candidate lifecycleへの接続はSlice 4まで行わない。source / PackageBase / dependency-edge correlation completeness、local / upgrade route authority、invocation-wide shared lifetime、current identity / reason / stateのclosed aggregation、future mutation-time revalidationはそれぞれ独立したgateである。causal transportとpolicy authorityの両方がGOでも、これらを省略してclassifierへ`NotProtected`を渡さず、Slice 4 GOにはしない。
 
 ### Source-build route
 

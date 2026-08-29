@@ -633,10 +633,6 @@ void test_transport_complete_and_solver_introduced_projection() {
     expect(
         causal == CleanupCausalOwnership::InvocationOwned,
         "complete trusted solver Install did not reach InvocationOwned");
-    expect(
-        project_cleanup_policy_protection() ==
-            CleanupPolicyProtection::Unknown,
-        "trusted receipt incorrectly completed policy authority");
 }
 
 void test_transport_external_race_and_failures() {

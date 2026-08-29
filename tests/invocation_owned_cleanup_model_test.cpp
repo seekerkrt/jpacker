@@ -704,6 +704,14 @@ void test_absent_and_policy_states_fail_safe() {
     expect_classification(
         policy_unknown, CleanupClassification::Unknown,
         "Unknown policy evidence became Eligible.");
+
+    InvocationOwnedCleanupCandidate policy_not_protected_only =
+        eligible_candidate();
+    policy_not_protected_only.causal_ownership =
+        CleanupCausalOwnership::Unknown;
+    expect_classification(
+        policy_not_protected_only, CleanupClassification::Unknown,
+        "NotProtected policy alone bypassed missing causal authority.");
 }
 
 void test_structural_contradiction_is_invalid() {
