@@ -37,6 +37,10 @@ _moguet_add_direct_ctest(
     source-package-identity-test
 )
 _moguet_add_direct_ctest(
+    cpp.git_remote_revision_observer
+    git-remote-revision-observer-test
+)
+_moguet_add_direct_ctest(
     cpp.source_package_identity_projection
     source-package-identity-projection-test
 )
@@ -324,7 +328,7 @@ unset(_moguet_repository_query_case)
 
 # Existing shell and PTY drivers remain the behavioral authority.  TARGETS
 # lists only C++ test executables; the production `moguet` target used by the
-# runtime-identity driver is intentionally outside the 96-target test ledger.
+# runtime-identity driver is intentionally outside the 97-target test ledger.
 moguet_add_ctest(
     NAME localization.contract
     TARGETS

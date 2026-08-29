@@ -179,16 +179,16 @@ inventoryを所有する。
 
 | Inventory | Expected |
 | --- | ---: |
-| C++ test executables | 96 |
+| C++ test executables | 97 |
 | support / stub translation units | 29 |
 | link firewalls | 49 |
 | firewall descriptors | 49 |
-| CTest registrations | 119 |
+| CTest registrations | 120 |
 
 stub / real implementation exclusion、replacement ABI、ALPM stub、exact source closureをtarget-localに
 維持する。単一production libraryを全testへ無条件linkしない。negative compileはCTest registrationから
 effective CMake compiler / launcher / compile optionを取得し、GNU Make recursive compileへ戻さない。
-Make focused aliasとCMake focused targetは各99件で一致し、missing / unexpectedを0に保つ。
+Make focused aliasとCMake focused targetは各100件で一致し、missing / unexpectedを0に保つ。
 
 completion生成が使う`moguet-cli-authority-exporter`もCMake targetであり、Python generatorはcompilerを
 直接起動しない。このtargetは`EXCLUDE_FROM_ALL`なので通常のproduction/package buildへ混ざらず、

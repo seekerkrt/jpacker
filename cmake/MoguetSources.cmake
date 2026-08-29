@@ -42,6 +42,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/diagnostic_projection.cpp
     source/dry_run.cpp
     source/filtered_aur_update_operation.cpp
+    source/git_remote_revision_observer.cpp
     source/installed_package_relation_inventory.cpp
     source/interactive_confirmation.cpp
     source/invocation_owned_cleanup_adapter.cpp

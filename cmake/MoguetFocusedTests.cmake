@@ -28,6 +28,7 @@ foreach(_moguet_direct_focus IN ITEMS
     local-source-build
     package-identifier
     source-package-identity
+    git-remote-revision-observer
     source-package-identity-projection
     source-package-compatibility
     invocation-owned-cleanup-model

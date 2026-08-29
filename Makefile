@@ -61,6 +61,7 @@ CMAKE_FOCUSED_ALIASES := \
 	test-user-config \
 	test-package-identifier \
 	test-source-package-identity \
+	test-git-remote-revision-observer \
 	test-source-package-identity-projection \
 	test-source-package-compatibility \
 	test-invocation-owned-cleanup-model \
