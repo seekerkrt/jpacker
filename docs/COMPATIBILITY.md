@@ -110,9 +110,35 @@ normal AUR `UpdateAvailable`はdevel assessmentより優先し、suffix候補や
 
 `RequiresCheck`はautomatic update / rebuild candidateへ昇格しない。`upgrade-aur`はcurrent all-target contractに従い、1件でもあればoperation全体をAUR mutation前にblockする。dry-runは同じ状態を`Blocked`とnon-zeroへ投影し、`upgrade-all`はsystem、registered source、fresh foreign inventoryまでの完了済みphaseを保持したままfresh AUR phaseをblockする。non-TTYと`--noconfirm`はmanual rebuild promptやimplicit approvalを追加しない。query、recursive plan、provider selection、conflicts / replaces metadata、preparationを全targetについて確認してからexecutionへ進み、blocking targetが1件でもあればcache作成、git checkout、makepkg、`pacman -U`、sudoを開始しない。
 
-v2.5.0のconservative connectionはupstream VCS revisionをquery / 比較せず、`.SRCINFO` / PKGBUILDをproduction detection authorityとして評価せず、devel build provenanceやbaselineを保存しない。trusted Git remoteのread-only observerはIssue #475、installed artifactへ束縛したprovenanceとauthoritative `UpdateAvailable` / `UpToDate`比較はIssue #476のfollow-up contractであり、v2.5.0がfull VCS update trackingを実装済みであるとは扱わない。
+v2.5.0のconservative connectionはupstream VCS revisionをquery / 比較せず、`.SRCINFO` / PKGBUILDをproduction detection authorityとして評価せず、devel build provenanceやbaselineを保存しない。current development treeにはIssue #475のtrusted Git remote read-only observer foundationがあるが、production authority producer / callerを持たず、このAUR update routeへ未接続である。installed artifactへ束縛したprovenanceとauthoritative `UpdateAvailable` / `UpToDate`比較はIssue #476のfollow-up contractであり、v2.5.0またはcurrent CLIがfull VCS update trackingを実装済みであるとは扱わない。
 
 official repository package、AURに存在しないforeign package、source preferenceだけで選ばれるpackageはautomatic AUR update対象にしない。
+
+<a id="compat-git-remote-revision-observer"></a>
+## Trusted Git remote revision observer foundation compatibility
+
+Issue #475のobserverはproduction buildへ含まれるinternal foundationだが、current CLI、AUR update
+assessment、build / install lifecycleへ接続していない。raw `ParsedSourceEntry` /
+`ParsedSrcinfoSourceMetadata`、bare VCS identity、suffix classificationをnetwork authorityへ昇格せず、
+future #476 producerが作るauthority-approved source capabilityだけをrequest前段として要求する。
+
+current supported subsetはGit、HTTPS、default HEAD、exact branch、canonical lowercase SHA-1 40 hex / SHA-256
+64 hexである。HTTP、SSH、file / local path、`git://`、ext、tag / annotated tag / peeling、fixed commit、
+other VCSはunsupportedである。HTTPS remoteはcredential / userinfo、query、fragment、IPv6 zoneを拒否し、
+raw Unicode IDNはunsupportedとする。ASCII punycode spelling、IPv6 literal、default `:443`除去、
+non-default portはcurrent canonicalization contractに従う。
+
+observerはfixed `/usr/bin/git`、HTTPS-only config / protocol profile、complete environment allowlist、
+30 s hard timeout、500 ms termination grace、16 KiB stdout capture、strict full-transcript parserを使う。
+`Observed`、`RefNotFound`、`Timeout`、`ProcessFailure`、`GitExitFailure`、`CaptureLimitExceeded`、
+`MalformedOutput`、`AmbiguousOutput`を区別し、stderr textから`TransportFailure`を捏造しない。HOME / XDG /
+cache / current repository / credential / cookie / traceのno-mutationはloopback HTTPS sentinelで検証する。
+
+SHA-1 / SHA-256はOID bytesとactual fixture capabilityで判定し、Git version stringだけから推測しない。
+current Arch hostとoffline/current Arch containerではactual SHA-256 HTTPS fixtureがPASSしているが、Git
+2.55.0をproject minimumへ固定したものではない。observer foundationの存在はproduction source metadata、
+installed provenance、remote comparison、`UpdateAvailable` / `UpToDate`、automatic rebuildを意味しない。
+詳細は[trusted Git remote revision observer contract](contracts/git-remote-revision-observer.md)を正本とする。
 
 `upgrade-all`はsystem upgrade、registered source package、remaining installed AUR packageを`system → registered source → fresh foreign inventory → filtered AUR`のphase順で扱う。single atomic transactionやautomatic rollbackではなく、先行phaseの成功、現在のfailure、後続phaseの`NotAttempted`を区別する。`upgrade-aur`と`upgrade-all`の`--rmdeps`、package target、`--needed`、`--aur`、`--repo`はunsupportedであり、queryやcache mutationより前に停止する。
 
@@ -180,6 +206,7 @@ PackageBaseはclone / fetch / build repositoryの単位であり、package name�
 | --- | --- | --- |
 | common source-aware identity | package child、PackageBase、source、revision、release、architectureを別fieldで保持するinternal foundation。既存routeを置換せず、incomplete evidenceをcomplete identityへ推測しない | [source-aware package identity](contracts/source-package-identity.md) |
 | reviewed AUR source state | AUR PackageBaseごとにexplicit accept済みexact revisionを保持し、previous reviewed revisionからexact targetまでをreviewする。skipではstateを進めず、accepted targetだけをpinned build authorityにする | [reviewed AUR source state](contracts/reviewed-source-state.md) |
+| trusted Git remote revision observer | authority-approved sourceだけを受けるHTTPS Git read-only observer foundation。default HEAD / exact branchとstrict SHA-1 / SHA-256 resultに限定し、production update comparisonへ未接続 | [trusted Git remote revision observer](contracts/git-remote-revision-observer.md) |
 | PackageBase / child selection | PackageBase単位でbuildするが、installするのはsource-build upper projectionが要求しmetadata identityで選択したchildだけ。sibling / debugは暗黙installしない | [PackageBase / required-child selection](contracts/packagebase-child-selection.md) |
 | separated source-build `--rmdeps` | source-buildではownershipを証明できないためmutation前に拒否。pacman-onlyではMoguetが消費するが作用させず、pacmanへ転送しない | [source-build `--rmdeps`](contracts/source-build-rmdeps.md) |
 | XDG cache cutover | trusted root、filesystem identity、symlink、root escape、legacy cache非変更を守る。implementation moduleは固定しない | [XDG cache safety](contracts/xdg-cache-safety.md) |

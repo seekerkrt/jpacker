@@ -308,8 +308,8 @@ makepkg -si
 system with `pacman -U` in the same step. This differs from `make` and
 `./moguet --help` above, which only build and inspect the development tree
 in place and install nothing. The `PKGBUILD` is the canonical production
-CMake build/install consumer and configures `BUILD_TESTING=OFF`; the 96
-developer C++ test executables and 119 CTest registrations remain in host,
+CMake build/install consumer and configures `BUILD_TESTING=OFF`; the 98
+developer C++ test executables and 122 CTest registrations remain in host,
 CI, and release validation. This `PKGBUILD` is a repository-provided
 packaging path, not an AUR submission; Moguet still has no published AUR
 page.
@@ -459,10 +459,15 @@ and keeps the existing precedence.
 dry-run, and the fresh AUR phase of `upgrade-all` block before AUR mutation;
 non-TTY use and `--noconfirm` do not add a prompt or approve a rebuild. v2.5.0
 does not query or compare the upstream VCS revision and does not publish devel
-build provenance. The read-only Git observer and installed-artifact-bound
-authoritative comparison remain follow-up work in
-[issue #475](https://github.com/seekerkrt/moguet/issues/475) and
-[issue #476](https://github.com/seekerkrt/moguet/issues/476).
+build provenance. The current development tree includes the trusted HTTPS Git
+remote revision observer foundation from
+[issue #475](https://github.com/seekerkrt/moguet/issues/475), limited to
+default HEAD and exact branches with strict complete SHA-1 / SHA-256 results.
+It has no production source-authority producer or caller and is not connected
+to AUR update assessment. Installed-artifact-bound provenance and authoritative
+`UpdateAvailable` / `UpToDate` comparison remain
+[issue #476](https://github.com/seekerkrt/moguet/issues/476); users still cannot
+automatically compare VCS package revisions through the current CLI.
 
 `--aur` limits supported `-S`, `-Ss`, and `-Si` forms to AUR. `--repo`
 limits them to official binary repositories. Combining the selectors is an

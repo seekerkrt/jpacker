@@ -57,6 +57,7 @@ foreach(_moguet_direct_focus IN ITEMS
     separated-package-base-source-build
     production-source-build
     process-capture
+    bounded-process
     aur-update-plan
     upgrade-all-plan
     system-source-upgrade
@@ -81,6 +82,13 @@ foreach(_moguet_direct_focus IN ITEMS
         TESTS "cpp.${_moguet_direct_ctest}"
     )
 endforeach()
+
+moguet_add_focused_ctest_alias(
+    test-git-remote-revision-observer
+    TESTS
+        cpp.git_remote_revision_observer
+        cpp.git_remote_revision_observer_integration
+)
 
 moguet_add_focused_ctest_alias(
     test-localization
