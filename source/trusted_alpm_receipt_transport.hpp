@@ -31,6 +31,7 @@ enum class TrustedAlpmReceiptCaptureStatus {
     TokenGenerationFailed,
     PrepareFailed,
     PacmanFailed,
+    OutcomeUnknown,
     AbortFailed,
     ConsumeFailed,
     MalformedReceipt,

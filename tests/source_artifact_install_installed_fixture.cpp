@@ -4,12 +4,13 @@
 #include "invocation_owned_cleanup_adapter.hpp"
 #include "package_base_artifact_install_executor.hpp"
 #include "source_artifact_install_trusted_transport.hpp"
+#include "source_build.hpp"
+#include "source_install.hpp"
 #include "source_package_identity.hpp"
 #include "trusted_cache.hpp"
 #include "xdg_directory_safety.hpp"
 #include "xdg_paths.hpp"
 
-#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -19,21 +20,6 @@
 #include <utility>
 
 namespace fs = std::filesystem;
-
-bool ProductionSourceBuildInvocationResult::is_success() const noexcept {
-    return std::all_of(
-        work_items.begin(), work_items.end(),
-        [](const ProductionSourceBuildWorkItemOutcome& outcome) {
-            return outcome.status ==
-                   ProductionSourceBuildWorkItemStatus::Succeeded;
-        });
-}
-
-const std::optional<SelectedRepositoryProviderTrustedExecutionEvidence>&
-SelectedRepositoryProviderTrustedReceiptExecutionResult::
-    trusted_execution_evidence() const noexcept {
-    return trusted_execution_evidence_;
-}
 
 namespace {
 
@@ -106,7 +92,14 @@ std::string completeness_name(
     return "InvalidCompleteness";
 }
 
+enum class CleanupLifecycleScenario {
+    Positive,
+    LaterFailed,
+    LaterNotAttempted,
+};
+
 struct CleanupLifecycleFixtureInput {
+    CleanupLifecycleScenario scenario;
     fs::path archive;
     std::string package_name;
     std::string package_base;
@@ -147,6 +140,20 @@ BuildPlan cleanup_lifecycle_plan(
     plan.order.push_back(BuildPlanEntry{
         "moguet-cleanup-fixture-root-base",
         {"moguet-cleanup-fixture-root"}});
+    if(input.scenario ==
+       CleanupLifecycleScenario::LaterNotAttempted) {
+        const RootTargetIdentity later_root{
+            1, "moguet-cleanup-fixture-later"};
+        plan.root_targets.push_back(later_root);
+        plan.package_targets.push_back(PlannedPackageTarget{
+            "moguet-cleanup-fixture-later",
+            "moguet-cleanup-fixture-later-base",
+            {PackageRole::Root},
+            {later_root}});
+        plan.order.push_back(BuildPlanEntry{
+            "moguet-cleanup-fixture-later-base",
+            {"moguet-cleanup-fixture-later"}});
+    }
 
     BuildPlanDependencyEdge edge;
     edge.parent_package_name = "moguet-cleanup-fixture-root";
@@ -216,8 +223,38 @@ PreparedRemoteSourceBuild cleanup_lifecycle_prepared(
     root_work_item.artifact_lifecycle_intent =
         ArtifactLifecycleIntent::PackageBaseSet;
 
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(std::move(dependency));
+    work_items.push_back(std::move(root_work_item));
+    if(input.scenario ==
+       CleanupLifecycleScenario::LaterNotAttempted) {
+        ProductionSourceBuildWorkItem later_work_item;
+        later_work_item.request.checkout_name =
+            "moguet-cleanup-fixture-later-base";
+        later_work_item.request.package_name =
+            "moguet-cleanup-fixture-later";
+        later_work_item.request.git_url =
+            "https://aur.archlinux.org/moguet-cleanup-fixture-later-base.git";
+        later_work_item.request.aur_review_identity =
+            PackageBaseIdentity::make(
+                PackageSourceIdentity::aur(
+                    SourceLocationIdentity::known_git_remote(
+                        later_work_item.request.git_url)),
+                later_work_item.request.checkout_name);
+        later_work_item.required_targets.push_back(
+            RequiredPackageArtifactTarget{
+                later_work_item.request.checkout_name,
+                later_work_item.request.package_name,
+                DesiredInstallReason::Explicit});
+        later_work_item.required_target_provenance =
+            RequiredTargetProvenance::AurBuildPlanProjection;
+        later_work_item.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::PackageBaseSet;
+        work_items.push_back(std::move(later_work_item));
+    }
+
     PreparedProductionSourceBuildInvocation invocation{
-        {std::move(dependency), std::move(root_work_item)},
+        std::move(work_items),
         {},
         PacmanDatabasePaths{"/", "/var/lib/pacman"},
         std::nullopt,
@@ -229,70 +266,96 @@ PreparedRemoteSourceBuild cleanup_lifecycle_prepared(
         std::move(plan), std::move(invocation)};
 }
 
-ProductionSourceBuildInvocationResult cleanup_success_result(
-    const PreparedProductionSourceBuildInvocation& invocation) {
-    ProductionSourceBuildInvocationResult result;
-    for(const ProductionSourceBuildWorkItem& work_item :
-        invocation.work_items) {
-        ProductionSourceBuildWorkItemOutcome outcome;
-        outcome.package_base = work_item.request.checkout_name;
-        outcome.status = ProductionSourceBuildWorkItemStatus::Succeeded;
-        outcome.production_outcome = ProductionSourceBuildStagedOutcome{
-            .source_provenance = {},
-            .build_outcome =
-                ProductionSourceBuildCommandOutcome::Succeeded,
-            .install_outcome =
-                ProductionSourceInstallOutcome::Succeeded};
-        result.work_items.push_back(std::move(outcome));
-    }
-    return result;
-}
-
 int run_cleanup_lifecycle_fixture(int argc, char* argv[]) {
-    if(argc != 7) {
+    if(argc != 8) {
         std::cerr
-            << "usage: source-artifact-install-installed-fixture --cleanup-lifecycle <archive> <package> <PackageBase> <version> <arch>\n";
+            << "usage: source-artifact-install-installed-fixture --cleanup-lifecycle <positive|later-failed|later-not-attempted> <archive> <package> <PackageBase> <version> <arch>\n";
         return 2;
     }
+    const std::string scenario_name = argv[2];
+    const CleanupLifecycleScenario scenario =
+        scenario_name == "positive"
+            ? CleanupLifecycleScenario::Positive
+        : scenario_name == "later-failed"
+            ? CleanupLifecycleScenario::LaterFailed
+        : scenario_name == "later-not-attempted"
+            ? CleanupLifecycleScenario::LaterNotAttempted
+            : throw std::invalid_argument(
+                  "unknown cleanup lifecycle scenario");
     CleanupLifecycleFixtureInput input{
-        fs::path(argv[2]), argv[3], argv[4], argv[5], argv[6]};
+        scenario, fs::path(argv[3]), argv[4], argv[5], argv[6], argv[7]};
     if(!input.archive.is_absolute() ||
        !fs::is_regular_file(input.archive)) {
         fail("cleanup lifecycle archive is unavailable");
     }
     g_cleanup_lifecycle_input = input;
     AppConfig config;
-    RemoteAurCleanupCollectionResult result =
-        collect_remote_aur_cleanup_candidates(
-            cleanup_lifecycle_prepared(input), config);
-    g_cleanup_lifecycle_input.reset();
-
-    if(result.assessments().size() != 1) {
-        fail("cleanup lifecycle assessment cardinality changed");
+    try {
+        RemoteAurCleanupCollectionResult result =
+            collect_remote_aur_cleanup_candidates(
+                cleanup_lifecycle_prepared(input), config);
+        g_cleanup_lifecycle_input.reset();
+        if(scenario != CleanupLifecycleScenario::Positive) {
+            fail("negative cleanup lifecycle unexpectedly completed");
+        }
+        if(!result.invocation_result().is_success() ||
+           result.invocation_result().work_items.size() != 2 ||
+           result.assessments().size() != 1) {
+            fail("cleanup lifecycle success aggregate changed");
+        }
+        const RemoteAurCleanupCandidateAssessment& assessment =
+            result.assessments().front();
+        std::cout << "LIFECYCLE\t"
+                  << (result.completeness() ==
+                              CleanupEvidenceCompleteness::Complete
+                          ? "Complete"
+                          : "Incomplete")
+                  << '\n';
+        std::cout << "CLASSIFICATION\t"
+                  << (assessment.classification ==
+                              CleanupClassification::Eligible
+                          ? "Eligible"
+                          : "NonEligible")
+                  << '\n';
+        std::cout << "PACKAGE\t"
+                  << assessment.package.package().package_name() << '\n';
+        std::cout << "WORK_ITEMS\tSucceeded,Succeeded\nEND\n";
+        return result.completeness() ==
+                           CleanupEvidenceCompleteness::Complete &&
+                       assessment.classification ==
+                           CleanupClassification::Eligible
+                   ? 0
+                   : 1;
+    } catch(const ProductionSourceBuildInvocationError& error) {
+        g_cleanup_lifecycle_input.reset();
+        if(scenario == CleanupLifecycleScenario::Positive) throw;
+        const ProductionSourceBuildInvocationResult& result =
+            error.result();
+        const bool expects_unattempted =
+            scenario ==
+            CleanupLifecycleScenario::LaterNotAttempted;
+        const std::size_t expected_size = expects_unattempted ? 3 : 2;
+        if(error.failed_work_item_index() != 1 ||
+           result.work_items.size() != expected_size ||
+           result.work_items[0].status !=
+               ProductionSourceBuildWorkItemStatus::Succeeded ||
+           result.work_items[1].status !=
+               ProductionSourceBuildWorkItemStatus::Failed ||
+           (expects_unattempted &&
+            result.work_items[2].status !=
+                ProductionSourceBuildWorkItemStatus::NotAttempted) ||
+           result.is_success()) {
+            fail("cleanup lifecycle failure aggregate was not lossless");
+        }
+        std::cout
+            << "LIFECYCLE\tNotCompleted\n"
+            << "CLASSIFICATION\tNotProduced\n"
+            << "PACKAGE\t" << input.package_name << '\n'
+            << "WORK_ITEMS\tSucceeded,Failed";
+        if(expects_unattempted) std::cout << ",NotAttempted";
+        std::cout << "\nEND\n";
+        return 0;
     }
-    const RemoteAurCleanupCandidateAssessment& assessment =
-        result.assessments().front();
-    std::cout << "LIFECYCLE\t"
-              << (result.completeness() ==
-                          CleanupEvidenceCompleteness::Complete
-                      ? "Complete"
-                      : "Incomplete")
-              << '\n';
-    std::cout << "CLASSIFICATION\t"
-              << (assessment.classification ==
-                          CleanupClassification::Eligible
-                      ? "Eligible"
-                      : "NonEligible")
-              << '\n';
-    std::cout << "PACKAGE\t"
-              << assessment.package.package().package_name() << '\n';
-    std::cout << "END\n";
-    return result.completeness() ==
-                       CleanupEvidenceCompleteness::Complete &&
-                   assessment.classification ==
-                       CleanupClassification::Eligible
-               ? 0
-               : 1;
 }
 
 int run_fixture(int argc, char* argv[]) {
@@ -404,18 +467,57 @@ int run_fixture(int argc, char* argv[]) {
     return 0;
 }
 
-} // namespace
-
-ProductionSourceBuildInvocationResult
-execute_prepared_remote_aur_cleanup_invocation(
-    RemoteAurCleanupCandidateCollector& collector,
-    const AppConfig&) {
+const CleanupLifecycleFixtureInput& cleanup_lifecycle_input() {
     if(!g_cleanup_lifecycle_input.has_value()) {
         throw std::logic_error(
             "cleanup lifecycle fixture input is unavailable");
     }
+    return g_cleanup_lifecycle_input.value();
+}
+
+PackageBaseSourceBuildExecutionResult controlled_lower_success(
+    const SourceBuildRequest& request,
+    const std::vector<RequiredPackageArtifactTarget>& required_targets,
+    std::vector<PackageBaseSourceBuildSelectedResult> selected_children) {
+    if(selected_children.empty()) {
+        selected_children.reserve(required_targets.size());
+        for(const RequiredPackageArtifactTarget& required :
+            required_targets) {
+            selected_children.push_back(
+                PackageBaseSourceBuildSelectedResult{
+                    ArtifactPackageIdentity{
+                        required.package_name, "1-1",
+                        ArtifactPackageBaseIdentity::known(
+                            required.package_base),
+                        ArtifactPackageArchitectureIdentity::known(
+                            "any")},
+                    required.desired_reason,
+                    ArtifactInstallExecutionOutcome::Installed});
+        }
+    }
+    return PackageBaseSourceBuildExecutionResult::
+        make_for_remote_aur_cleanup_runner_test(
+            request.checkout_name, std::move(selected_children), {});
+}
+
+PackageBaseSourceBuildExecutionResult
+execute_cleanup_dependency_lower(
+    const SourceBuildRequest& request,
+    const std::vector<RequiredPackageArtifactTarget>& required_targets,
+    const PacmanDatabasePaths& database_paths,
+    RemoteAurCleanupCandidateCollector& collector,
+    std::size_t work_item_index) {
     const CleanupLifecycleFixtureInput& input =
-        g_cleanup_lifecycle_input.value();
+        cleanup_lifecycle_input();
+    if(work_item_index != 0 ||
+       request.checkout_name != input.package_base ||
+       required_targets.size() != 1 ||
+       required_targets.front().package_name != input.package_name ||
+       required_targets.front().desired_reason !=
+           DesiredInstallReason::Dependency) {
+        throw std::logic_error(
+            "production runner selected the wrong trusted dependency work item");
+    }
     xdg_paths::CachePaths cache_paths =
         xdg_paths::resolve_cache_process_environment();
     xdg_directory_safety::PreparedDirectory cache_directory =
@@ -435,12 +537,9 @@ execute_prepared_remote_aur_cleanup_invocation(
             std::move(workspace), expected_paths);
     PackageBaseArtifactInstallPreparationResult preparation =
         prepare_package_base_artifact_install(
-            artifacts, input.package_base,
-            {{input.package_base,
-              input.package_name,
-              DesiredInstallReason::Dependency}},
+            artifacts, input.package_base, required_targets,
             ArtifactInstallPreparationOptions{false, false},
-            PacmanDatabasePaths{"/", "/var/lib/pacman"});
+            database_paths);
     PreparedPackageBaseArtifactInstall* install = preparation.prepared();
     if(!preparation.is_prepared() || install == nullptr) {
         throw std::runtime_error(
@@ -448,7 +547,8 @@ execute_prepared_remote_aur_cleanup_invocation(
     }
     PackageBaseArtifactInstallExecutionResult operation =
         collector.execute_source_artifact_install_transaction(
-            *install, 0, ArtifactInstallExecutionOptions{true});
+            *install, work_item_index,
+            ArtifactInstallExecutionOptions{true});
     if(!operation.is_success() ||
        operation.selected_artifacts().size() != 1 ||
        operation.selected_artifacts().front().identity.package_name !=
@@ -456,9 +556,73 @@ execute_prepared_remote_aur_cleanup_invocation(
         throw std::runtime_error(
             "cleanup lifecycle actual dependency transaction was incoherent");
     }
+    std::vector<PackageBaseSourceBuildSelectedResult> selected_children;
+    selected_children.reserve(operation.selected_artifacts().size());
+    for(const PackageBaseArtifactInstallExecutionArtifactResult& selected :
+        operation.selected_artifacts()) {
+        selected_children.push_back(
+            PackageBaseSourceBuildSelectedResult{
+                selected.identity, selected.desired_reason,
+                selected.outcome ==
+                        PackageBaseArtifactInstallExpectedOutcome::Installed
+                    ? ArtifactInstallExecutionOutcome::Installed
+                    : ArtifactInstallExecutionOutcome::SkippedAsNeeded});
+    }
     install->cleanup_workspace();
-    return cleanup_success_result(
-        collector.prepared_invocation_for_execution());
+    return controlled_lower_success(
+        request, required_targets, std::move(selected_children));
+}
+
+} // namespace
+
+PackageBaseSourceBuildExecutionResult
+execute_source_build_package_base_with_cleanup_authority(
+    const SourceBuildRequest& request,
+    const std::vector<RequiredPackageArtifactTarget>& required_targets,
+    const ValidatedCacheRoot&,
+    const PacmanDatabasePaths& database_paths,
+    const AppConfig&,
+    RemoteAurCleanupCandidateCollector& collector,
+    std::size_t work_item_index) {
+    return execute_cleanup_dependency_lower(
+        request, required_targets, database_paths, collector,
+        work_item_index);
+}
+
+PackageBaseSourceBuildExecutionResult
+execute_source_build_package_base_typed(
+    const SourceBuildRequest& request,
+    const std::vector<RequiredPackageArtifactTarget>& required_targets,
+    const ValidatedCacheRoot&,
+    const PacmanDatabasePaths&,
+    const AppConfig&) {
+    const CleanupLifecycleFixtureInput& input =
+        cleanup_lifecycle_input();
+    if(request.checkout_name ==
+       "moguet-cleanup-fixture-later-base") {
+        throw std::logic_error(
+            "production runner executed a work item after failure");
+    }
+    if(request.checkout_name !=
+       "moguet-cleanup-fixture-root-base") {
+        throw std::logic_error(
+            "production runner bypassed trusted dependency routing");
+    }
+    if(input.scenario != CleanupLifecycleScenario::Positive) {
+        throw std::runtime_error(
+            "synthetic later root source-build failure");
+    }
+    return controlled_lower_success(request, required_targets, {});
+}
+
+SourceBuildExecutionResult execute_source_build_typed(
+    const SourceBuildRequest&,
+    const ValidatedCacheRoot&,
+    DesiredInstallReason,
+    const PacmanDatabasePaths&,
+    const AppConfig&) {
+    throw std::logic_error(
+        "cleanup composition reached singular source-build execution");
 }
 
 int main(int argc, char* argv[]) {

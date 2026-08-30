@@ -22,10 +22,77 @@ bool ProductionSourceBuildInvocationResult::is_success() const noexcept {
         });
 }
 
+SelectedRepositoryProviderTrustedReceiptExecutionResult::
+    SelectedRepositoryProviderTrustedReceiptExecutionResult(
+        SelectedRepositoryProviderTransactionResult transaction_value,
+        std::optional<TrustedAlpmReceiptCaptureResult>
+            receipt_capture_value) noexcept
+    : transaction(std::move(transaction_value)),
+      receipt_capture(std::move(receipt_capture_value)) {
+}
+
 const std::optional<SelectedRepositoryProviderTrustedExecutionEvidence>&
 SelectedRepositoryProviderTrustedReceiptExecutionResult::
     trusted_execution_evidence() const noexcept {
     return trusted_execution_evidence_;
+}
+
+namespace selected_provider_fallback_stub {
+
+std::optional<SelectedRepositoryProviderTrustedReceiptExecutionResult>
+    trusted_result;
+SelectedRepositoryProviderTransactionResult legacy_result;
+std::optional<SelectedRepositoryProviderTransactionResult>
+    observed_operation;
+std::size_t trusted_call_count = 0;
+std::size_t legacy_call_count = 0;
+
+void reset(
+    SelectedRepositoryProviderTrustedReceiptExecutionResult execution,
+    SelectedRepositoryProviderTransactionResult fallback) {
+    trusted_result = std::move(execution);
+    legacy_result = std::move(fallback);
+    observed_operation.reset();
+    trusted_call_count = 0;
+    legacy_call_count = 0;
+}
+
+} // namespace selected_provider_fallback_stub
+
+SelectedRepositoryProviderTrustedReceiptExecutionResult
+execute_selected_repository_provider_transaction(
+    const PreparedProductionSourceBuildInvocation& invocation,
+    const AppConfig&,
+    SelectedRepositoryProviderTrustedReceiptRequest) {
+    using namespace selected_provider_fallback_stub;
+    ++trusted_call_count;
+    if(!trusted_result.has_value()) {
+        throw std::logic_error(
+            "selected-provider trusted fallback stub has no result");
+    }
+    if(trusted_result->transaction.selected_providers !=
+       invocation.selected_repository_providers) {
+        throw std::logic_error(
+            "selected-provider trusted fallback stub received an incoherent invocation");
+    }
+    SelectedRepositoryProviderTrustedReceiptExecutionResult result =
+        std::move(trusted_result.value());
+    trusted_result.reset();
+    return result;
+}
+
+SelectedRepositoryProviderTransactionResult
+execute_selected_repository_provider_transaction(
+    const PreparedProductionSourceBuildInvocation& invocation,
+    const AppConfig&) {
+    using namespace selected_provider_fallback_stub;
+    ++legacy_call_count;
+    if(legacy_result.selected_providers !=
+       invocation.selected_repository_providers) {
+        throw std::logic_error(
+            "selected-provider legacy fallback stub received an incoherent invocation");
+    }
+    return legacy_result;
 }
 
 namespace {
@@ -48,6 +115,8 @@ enum class CollectorScenario {
     ReceiptMissing,
     FailedLaterWorkItem,
     UnattemptedLaterWorkItem,
+    SelectedProviderPostLaunchUnknown,
+    SelectedProviderPreLaunchFailure,
 };
 
 CollectorScenario g_scenario = CollectorScenario::Positive;
@@ -71,6 +140,24 @@ PackageBaseIdentity aur_package_base(const std::string& package_base) {
             SourceLocationIdentity::known_git_remote(
                 "https://aur.archlinux.org/" + package_base + ".git")),
         package_base);
+}
+
+ProvidedDependency selected_repository_provider() {
+    ProviderCapability capability(
+        "collector-selected-api", "collector-selected-api",
+        std::nullopt);
+    return ProvidedDependency::from_repository_constraint_metadata(
+        "core", 0, "collector-selected-provider",
+        "collector-selected-provider", "x86_64",
+        ProviderConstraintMetadata{
+            capability,
+            ObservedVersion::available(
+                ObservedVersionSource::RepositoryExactPackage,
+                "1.0-1"),
+            ObservedVersion::unknown(
+                ObservedVersionSource::RepositoryProviderCapability,
+                ObservedVersionUnknownReason::
+                    UnversionedProviderCapability)});
 }
 
 BuildPlan collector_plan(bool with_later_work_item = false) {
@@ -124,6 +211,35 @@ BuildPlan collector_plan(bool with_later_work_item = false) {
             ObservedVersionSource::AurExactPackage, "1.0-1")};
     edge.constraint_evaluation = ConstraintEvaluation::satisfied();
     plan.dependency_edges.push_back(std::move(edge));
+    if(g_scenario ==
+           CollectorScenario::SelectedProviderPostLaunchUnknown ||
+       g_scenario ==
+           CollectorScenario::SelectedProviderPreLaunchFailure) {
+        const ProvidedDependency provider =
+            selected_repository_provider();
+        BuildPlanDependencyEdge provider_edge;
+        provider_edge.parent_package_name = "collector-root";
+        provider_edge.parent_package_base = "collector-root-base";
+        provider_edge.dependency_spec = "collector-selected-api";
+        provider_edge.role = PackageRole::BuildDependency;
+        provider_edge.kind = DependencyKind::Provided;
+        provider_edge.resolved_package_name = provider.package_name;
+        provider_edge.resolved_provider = provider;
+        provider_edge.provider_resolution =
+            ProviderResolutionKind::UserSelected;
+        provider_edge.requirement =
+            requirement("collector-selected-api");
+        provider_edge.resolved_candidate =
+            ProviderResolvedDependencyCandidate{
+                provider,
+                provider.constraint_metadata->provided_version};
+        provider_edge.constraint_evaluation =
+            ConstraintEvaluation::satisfied();
+        plan.dependency_edges.push_back(std::move(provider_edge));
+        plan.provided.push_back(BuildPlanProvidedDependency{
+            "collector-selected-api", provider,
+            ProviderResolutionKind::UserSelected});
+    }
     return plan;
 }
 
@@ -159,6 +275,18 @@ PreparedProductionSourceBuildInvocation prepared_invocation(
             edge_index < plan.dependency_edges.size(); ++edge_index) {
             const BuildPlanDependencyEdge& edge =
                 plan.dependency_edges[edge_index];
+            if(edge.kind == DependencyKind::Provided &&
+               edge.provider_resolution ==
+                   ProviderResolutionKind::UserSelected &&
+               edge.parent_package_base == unit.package_base &&
+               edge.resolved_provider.has_value() &&
+               std::holds_alternative<RepositoryProviderOrigin>(
+                   edge.resolved_provider->origin)) {
+                work_item.selected_repository_providers.push_back(
+                    edge.resolved_provider.value());
+                work_item.selected_repository_provider_edge_indices
+                    .push_back(edge_index);
+            }
             if(edge.resolved_package_name ==
                    "collector-dependency" &&
                unit.package_base == "collector-dependency-base") {
@@ -168,8 +296,18 @@ PreparedProductionSourceBuildInvocation prepared_invocation(
         }
         work_items.push_back(std::move(work_item));
     }
+    std::vector<ProvidedDependency> selected_providers;
+    if(g_scenario ==
+           CollectorScenario::SelectedProviderPostLaunchUnknown ||
+       g_scenario ==
+           CollectorScenario::SelectedProviderPreLaunchFailure) {
+        selected_providers.push_back(
+            selected_repository_provider());
+    }
     return PreparedProductionSourceBuildInvocation{
-        std::move(work_items), {}, PacmanDatabasePaths{"/", "/var/lib/pacman"}, std::nullopt, std::nullopt};
+        std::move(work_items), std::move(selected_providers),
+        PacmanDatabasePaths{"/", "/var/lib/pacman"},
+        std::nullopt, std::nullopt};
 }
 
 PreparedRemoteSourceBuild prepared_remote(bool with_later_work_item = false) {
@@ -447,12 +585,128 @@ void test_authoritative_projection_positive_and_uniqueness() {
     }
 }
 
+TrustedAlpmReceiptCaptureResult selected_provider_failure_capture(
+    TrustedAlpmReceiptCaptureStatus status,
+    InvocationDependencyTransactionCommandOutcome command_outcome,
+    char token_character) {
+    const std::string transaction_token = token(token_character);
+    const auto owner = InvocationDependencyTransactionOwner::
+        SelectedRepositoryProvider;
+    const bool outcome_unknown =
+        command_outcome ==
+        InvocationDependencyTransactionCommandOutcome::Unknown;
+    PacmanTransactionReceipt receipt =
+        validate_pacman_transaction_receipt(
+            transaction_token, owner,
+            PacmanTransactionReceiptObservation{
+                outcome_unknown
+                    ? PacmanTransactionReceiptObservationState::Incomplete
+                    : PacmanTransactionReceiptObservationState::Missing,
+                outcome_unknown
+                    ? std::optional<std::string>{transaction_token}
+                    : std::nullopt,
+                outcome_unknown
+                    ? std::optional<InvocationDependencyTransactionOwner>{
+                          owner}
+                    : std::nullopt,
+                {}});
+    InvocationDependencyTransactionLedger ledger;
+    ledger.transactions.push_back(
+        InvocationDependencyTransaction{
+            transaction_token, owner, {"collector-selected-provider"}, command_outcome, std::move(receipt)});
+    return TrustedAlpmReceiptCaptureResult{
+        status, std::nullopt, std::move(ledger),
+        "synthetic selected-provider transport failure"};
+}
+
+void test_selected_provider_retry_boundary() {
+    using namespace selected_provider_fallback_stub;
+
+    SelectedRepositoryProviderTransactionResult unknown_operation;
+    unknown_operation.status =
+        SelectedRepositoryProviderTransactionStatus::OutcomeUnknown;
+    unknown_operation.selected_providers.push_back(
+        selected_repository_provider());
+    unknown_operation.package_state_change = PackageStateChange::Unknown;
+    unknown_operation.diagnostic =
+        "selected-provider outcome unknown after launch";
+    TrustedAlpmReceiptCaptureResult unknown_capture =
+        selected_provider_failure_capture(
+            TrustedAlpmReceiptCaptureStatus::OutcomeUnknown,
+            InvocationDependencyTransactionCommandOutcome::Unknown, 'u');
+    reset(
+        SelectedRepositoryProviderTrustedReceiptExecutionResult{
+            unknown_operation, unknown_capture},
+        SelectedRepositoryProviderTransactionResult{});
+    const RemoteAurCleanupCollectionResult unknown_result =
+        run_scenario(
+            CollectorScenario::SelectedProviderPostLaunchUnknown);
+    expect(
+        trusted_call_count == 1 && legacy_call_count == 0 &&
+            observed_operation.has_value() &&
+            observed_operation->status ==
+                SelectedRepositoryProviderTransactionStatus::
+                    OutcomeUnknown &&
+            !observed_operation->command_exit_status.has_value() &&
+            !unknown_result.has_eligible_candidate() &&
+            unknown_result.completeness() !=
+                CleanupEvidenceCompleteness::Complete,
+        "post-launch selected-provider outcome retried or became positive");
+
+    SelectedRepositoryProviderTransactionResult blocked_operation;
+    blocked_operation.status =
+        SelectedRepositoryProviderTransactionStatus::
+            BlockedBeforeExecution;
+    blocked_operation.selected_providers.push_back(
+        selected_repository_provider());
+    blocked_operation.package_state_change = PackageStateChange::Unknown;
+    blocked_operation.diagnostic =
+        "selected-provider process definitely did not start";
+    TrustedAlpmReceiptCaptureResult blocked_capture =
+        selected_provider_failure_capture(
+            TrustedAlpmReceiptCaptureStatus::PrepareFailed,
+            InvocationDependencyTransactionCommandOutcome::NotAttempted,
+            'n');
+    SelectedRepositoryProviderTransactionResult fallback_success;
+    fallback_success.status =
+        SelectedRepositoryProviderTransactionStatus::Succeeded;
+    fallback_success.selected_providers =
+        blocked_operation.selected_providers;
+    fallback_success.package_state_change = PackageStateChange::Unknown;
+    fallback_success.command_exit_status = 0;
+    reset(
+        SelectedRepositoryProviderTrustedReceiptExecutionResult{
+            blocked_operation, blocked_capture},
+        fallback_success);
+    const RemoteAurCleanupCollectionResult pre_launch_result =
+        run_scenario(
+            CollectorScenario::SelectedProviderPreLaunchFailure);
+    expect(
+        trusted_call_count == 1 && legacy_call_count == 1 &&
+            observed_operation.has_value() &&
+            observed_operation->status ==
+                SelectedRepositoryProviderTransactionStatus::Succeeded &&
+            !pre_launch_result.has_eligible_candidate(),
+        "confirmed pre-launch selected-provider failure lost compatibility fallback");
+}
+
 } // namespace
 
 ProductionSourceBuildInvocationResult
 execute_prepared_remote_aur_cleanup_invocation(
     RemoteAurCleanupCandidateCollector& collector,
     const AppConfig&) {
+    if(g_scenario ==
+           CollectorScenario::SelectedProviderPostLaunchUnknown ||
+       g_scenario ==
+           CollectorScenario::SelectedProviderPreLaunchFailure) {
+        selected_provider_fallback_stub::observed_operation =
+            collector.execute_selected_repository_provider_transaction(
+                AppConfig{});
+        set_current_metadata();
+        return successful_result(
+            collector.prepared_for_test().invocation);
+    }
     CleanupInvocationSession& session = collector.session_for_test();
     ProductionSourceBuildInvocationResult result = successful_result(
         collector.prepared_for_test().invocation);
@@ -517,4 +771,5 @@ execute_prepared_remote_aur_cleanup_invocation(
 
 void run_remote_aur_cleanup_candidate_collector_tests() {
     test_authoritative_projection_positive_and_uniqueness();
+    test_selected_provider_retry_boundary();
 }

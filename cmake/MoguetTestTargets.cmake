@@ -902,6 +902,13 @@ moguet_add_cpp_test(
 set(
     _moguet_source_artifact_install_installed_fixture_sources
     tests/source_artifact_install_installed_fixture.cpp
+    source/source_install.cpp
+    source/source_install_preparation.cpp
+    source/cache_authority.cpp
+    source/separated_package_base_source_build.cpp
+    source/separated_source_build.cpp
+    source/reviewed_source_production_failure.cpp
+    source/reviewed_source_production_outcome.cpp
     source/build_plan_artifact_target_projection.cpp
     source/dependency_constraint.cpp
     source/dependency_constraint_presentation.cpp
@@ -960,6 +967,10 @@ target_link_libraries(
 target_include_directories(
     moguet-source-artifact-install-installed-fixture
     PRIVATE "${_moguet_test_source_include_dir}"
+)
+target_compile_definitions(
+    moguet-source-artifact-install-installed-fixture
+    PRIVATE MOGUET_ENABLE_REMOTE_AUR_CLEANUP_RUNNER_TEST_HOOKS
 )
 target_compile_options(
     moguet-source-artifact-install-installed-fixture
@@ -1604,6 +1615,7 @@ moguet_add_cpp_test(
         source/process.cpp
         source/shell_words.cpp
         source/logging.cpp
+    DEFINITIONS MOGUET_ENABLE_PROCESS_TEST_HOOKS
     INCLUDE_DIRECTORIES "${_moguet_test_source_include_dir}"
 )
 

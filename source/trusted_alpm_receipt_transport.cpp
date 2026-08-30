@@ -230,6 +230,20 @@ int run_explicit(const ExplicitProcessInvocation& invocation) {
     return run_explicit_process(invocation);
 }
 
+ExplicitProcessExecutionResult run_explicit_with_outcome(
+    const ExplicitProcessInvocation& invocation) noexcept {
+    try {
+        log_explicit_invocation(invocation);
+    } catch(...) {
+        // A display/logging failure before the process boundary is the only
+        // logging failure that can still prove the mutator never started.
+        return ExplicitProcessExecutionResult{
+            ExplicitProcessExecutionStatus::NotStarted,
+            std::nullopt};
+    }
+    return run_explicit_process_with_outcome(invocation);
+}
+
 ExplicitProcessInvocation helper_invocation(
     const std::string& command, const std::string& transaction_token,
     const std::vector<std::string>& trailing_arguments = {}) {
@@ -394,11 +408,19 @@ TrustedAlpmReceiptCaptureResult execute_with_token(
                 : "trusted ALPM receipt preparation and exact abort failed");
     }
 
-    int pacman_status;
+    ExplicitProcessExecutionResult pacman_execution;
     try {
-        pacman_status = run_explicit(
+        pacman_execution = run_explicit_with_outcome(
             pacman_invocation(request, prepared->hook_directory));
-    } catch(const std::exception&) {
+    } catch(...) {
+        // argv construction happens before the process boundary and therefore
+        // still proves that the pacman child was never started.
+        pacman_execution = ExplicitProcessExecutionResult{
+            ExplicitProcessExecutionStatus::NotStarted,
+            std::nullopt};
+    }
+    if(pacman_execution.status ==
+       ExplicitProcessExecutionStatus::NotStarted) {
         const int abort_status =
             abort_prepared_state_noexcept(transaction_token);
         return result_with_transaction(
@@ -415,6 +437,25 @@ TrustedAlpmReceiptCaptureResult execute_with_token(
                 ? "selected-provider pacman invocation failed before execution"
                 : "selected-provider pacman invocation and exact receipt abort failed");
     }
+    if(pacman_execution.status ==
+           ExplicitProcessExecutionStatus::StartedOutcomeUnknown ||
+       !pacman_execution.exit_code.has_value()) {
+        const int abort_status =
+            abort_prepared_state_noexcept(transaction_token);
+        return result_with_transaction(
+            abort_status == 0
+                ? TrustedAlpmReceiptCaptureStatus::OutcomeUnknown
+                : TrustedAlpmReceiptCaptureStatus::AbortFailed,
+            std::nullopt,
+            make_transaction(
+                transaction_token, std::move(package_names),
+                InvocationDependencyTransactionCommandOutcome::Unknown,
+                incomplete_observation(transaction_token)),
+            abort_status == 0
+                ? "selected-provider pacman outcome is unknown after process launch"
+                : "selected-provider pacman outcome is unknown and exact receipt abort failed");
+    }
+    const int pacman_status = pacman_execution.exit_code.value();
     if(pacman_status != 0) {
         const int abort_status =
             abort_prepared_state_noexcept(transaction_token);

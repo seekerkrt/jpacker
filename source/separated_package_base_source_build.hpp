@@ -53,11 +53,12 @@ class PackageBaseSourceBuildExecutionResult final {
         std::vector<ArtifactPackageIdentity> unselected_artifacts) noexcept;
 
 #if defined(MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS) || \
-    defined(MOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS)
-    struct AurUpdateRunnerTestTag {};
+    defined(MOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS) ||       \
+    defined(MOGUET_ENABLE_REMOTE_AUR_CLEANUP_RUNNER_TEST_HOOKS)
+    struct RunnerTestTag {};
 
     PackageBaseSourceBuildExecutionResult(
-        AurUpdateRunnerTestTag,
+        RunnerTestTag,
         std::string package_base,
         std::vector<PackageBaseSourceBuildSelectedResult>
             selected_children,
@@ -129,7 +130,24 @@ public:
             selected_children,
         std::vector<ArtifactPackageIdentity> unselected_artifacts) {
         return PackageBaseSourceBuildExecutionResult(
-            AurUpdateRunnerTestTag{}, std::move(package_base),
+            RunnerTestTag{}, std::move(package_base),
+            std::move(selected_children),
+            std::move(unselected_artifacts));
+    }
+#endif
+
+#ifdef MOGUET_ENABLE_REMOTE_AUR_CLEANUP_RUNNER_TEST_HOOKS
+    // The installed composition fixture replaces only checkout/review/build
+    // orchestration below the production ordered runner. It cannot construct
+    // collector/session authority or a full invocation result.
+    static PackageBaseSourceBuildExecutionResult
+    make_for_remote_aur_cleanup_runner_test(
+        std::string package_base,
+        std::vector<PackageBaseSourceBuildSelectedResult>
+            selected_children,
+        std::vector<ArtifactPackageIdentity> unselected_artifacts) {
+        return PackageBaseSourceBuildExecutionResult(
+            RunnerTestTag{}, std::move(package_base),
             std::move(selected_children),
             std::move(unselected_artifacts));
     }

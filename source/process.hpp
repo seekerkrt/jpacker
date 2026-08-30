@@ -35,6 +35,21 @@ struct ExplicitProcessInvocation {
     std::optional<int> parent_independent_lifetime_guard_fd = std::nullopt;
 };
 
+enum class ExplicitProcessExecutionStatus {
+    NotStarted,
+    StartedKnownOutcome,
+    StartedOutcomeUnknown,
+};
+
+// A caller that may retry a mutator must not infer launch state from an exit
+// code or exception. exit_code is populated only when the child started and
+// the complete parent-side wait/restore path produced a known outcome.
+struct ExplicitProcessExecutionResult {
+    ExplicitProcessExecutionStatus status =
+        ExplicitProcessExecutionStatus::NotStarted;
+    std::optional<int> exit_code;
+};
+
 // The bounded companion requires an explicit cwd and stdin descriptor. It
 // owns only the child lifecycle; all descriptors in the invocation remain
 // borrowed from the caller for the duration of the call.
@@ -156,6 +171,24 @@ int run_explicit_process(
     const ExplicitProcessInvocation& invocation,
     bool suppress_standard_output = false,
     bool suppress_standard_error = false);
+
+// Lossless mutator companion for retry decisions. It catches failures from
+// the process boundary and distinguishes a confirmed pre-launch failure from
+// any failure after fork. StartedOutcomeUnknown never authorizes a retry.
+[[nodiscard]] ExplicitProcessExecutionResult
+run_explicit_process_with_outcome(
+    const ExplicitProcessInvocation& invocation,
+    bool suppress_standard_output = false,
+    bool suppress_standard_error = false) noexcept;
+
+#ifdef MOGUET_ENABLE_PROCESS_TEST_HOOKS
+using ExplicitProcessPostWaitHookForTest = void (*)();
+
+// Deterministic fault injection after child wait and signal-state restore.
+// This is defined only in the focused process test target.
+void set_explicit_process_post_wait_hook_for_test(
+    ExplicitProcessPostWaitHookForTest hook) noexcept;
+#endif
 
 std::string exec_command(const char* cmd);
 int command_status(const std::string& cmd);

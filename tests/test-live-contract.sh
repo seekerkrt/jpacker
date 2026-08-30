@@ -47,6 +47,10 @@ source_receipt_runner=$receipt_root/run-installed-source-artifact-receipt.py
 receipt_dependency_v1=$receipt_root/fixtures/dependency-v1/PKGBUILD
 receipt_dependency_v2=$receipt_root/fixtures/dependency-v2/PKGBUILD
 receipt_target=$receipt_root/fixtures/target/PKGBUILD
+test_targets_file=$repo_root/cmake/MoguetTestTargets.cmake
+production_cmake_file=$repo_root/CMakeLists.txt
+installed_source_fixture=$repo_root/tests/source_artifact_install_installed_fixture.cpp
+production_source_runner=$repo_root/source/source_install.cpp
 
 fail() {
     printf '%s\n' "$*" >&2
@@ -1195,7 +1199,9 @@ assert_contains "$source_receipt_runner" 'moguet-source-artifact-install-helper'
 assert_contains "$source_receipt_runner" 'TRANSPORT_FIXTURE'
 assert_contains "$source_receipt_runner" 'run_production_transport'
 assert_contains "$source_receipt_runner" 'run_cleanup_lifecycle'
-assert_contains "$source_receipt_runner" 'authoritative installed cleanup lifecycle was not uniquely Eligible'
+assert_contains "$source_receipt_runner" 'run_cleanup_authority_scenario'
+assert_contains "$source_receipt_runner" 'later-failed'
+assert_contains "$source_receipt_runner" 'later-not-attempted'
 assert_contains "$source_receipt_runner" 'CAUSAL'
 assert_contains "$source_receipt_runner" 'same-version reinstall became Install'
 assert_contains "$source_receipt_runner" 'downgrade became Install'
@@ -1213,6 +1219,23 @@ printf '%s\n' "$cleanup_authority_target_body" | grep -F -- '--network=none' >/d
 printf '%s\n' "$cleanup_authority_target_body" | grep -F -- \
     'run-installed-source-artifact-receipt.py' >/dev/null ||
     fail 'cleanup-authority target does not run its installed lifecycle fixture'
+printf '%s\n' "$cleanup_authority_target_body" | grep -F -- \
+    'later-failed later-not-attempted' >/dev/null ||
+    fail 'cleanup-authority target lost its production-runner scenario matrix'
+printf '%s\n' "$cleanup_authority_target_body" | grep -F -- \
+    'positive and installed transport matrix' >/dev/null ||
+    fail 'cleanup-authority target lost its existing installed transport matrix'
+assert_contains "$test_targets_file" 'source/source_install.cpp'
+assert_contains "$test_targets_file" \
+    'MOGUET_ENABLE_REMOTE_AUR_CLEANUP_RUNNER_TEST_HOOKS'
+assert_not_contains "$production_cmake_file" \
+    'MOGUET_ENABLE_REMOTE_AUR_CLEANUP_RUNNER_TEST_HOOKS'
+assert_contains "$production_source_runner" \
+    'execute_prepared_remote_aur_cleanup_invocation('
+assert_not_contains "$installed_source_fixture" \
+    'execute_prepared_remote_aur_cleanup_invocation('
+assert_contains "$installed_source_fixture" \
+    'execute_source_build_package_base_with_cleanup_authority('
 
 # The tracked fixture remains the Docker build input. Runtime cases consume its
 # pre-build root-owned authority and keep generated metadata case-local.

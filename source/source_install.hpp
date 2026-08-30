@@ -431,6 +431,7 @@ enum class SelectedRepositoryProviderTransactionStatus {
     BlockedBeforeExecution,
     Succeeded,
     Failed,
+    OutcomeUnknown,
 };
 
 // provider transactionをsource work-itemへ誤帰属させず、selected identityと
@@ -451,6 +452,7 @@ struct SelectedRepositoryProviderTransactionResult {
             case SelectedRepositoryProviderTransactionStatus::
                 BlockedBeforeExecution:
             case SelectedRepositoryProviderTransactionStatus::Failed:
+            case SelectedRepositoryProviderTransactionStatus::OutcomeUnknown:
                 return false;
         }
         return false;

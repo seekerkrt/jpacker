@@ -1354,9 +1354,32 @@ execute_selected_repository_provider_transaction(
         execution.receipt_capture.value();
     execution.transaction.command_exit_status = capture.pacman_exit_status;
     if(!capture.pacman_exit_status.has_value()) {
+        const bool pre_transaction_transport_failure =
+            capture.status ==
+                TrustedAlpmReceiptCaptureStatus::InvalidRequest ||
+            capture.status == TrustedAlpmReceiptCaptureStatus::
+                                  TrustedExecutableUnavailable ||
+            capture.status == TrustedAlpmReceiptCaptureStatus::
+                                  TokenGenerationFailed;
+        const bool transaction_pre_launch_failure =
+            capture.status ==
+                TrustedAlpmReceiptCaptureStatus::PrepareFailed ||
+            capture.status ==
+                TrustedAlpmReceiptCaptureStatus::AbortFailed;
+        const bool transaction_definitely_not_started =
+            transaction_pre_launch_failure &&
+            capture.transaction_ledger.transactions.size() == 1 &&
+            capture.transaction_ledger.transactions.front()
+                    .command_outcome ==
+                InvocationDependencyTransactionCommandOutcome::
+                    NotAttempted;
         execution.transaction.status =
-            SelectedRepositoryProviderTransactionStatus::
-                BlockedBeforeExecution;
+            pre_transaction_transport_failure ||
+                    transaction_definitely_not_started
+                ? SelectedRepositoryProviderTransactionStatus::
+                      BlockedBeforeExecution
+                : SelectedRepositoryProviderTransactionStatus::
+                      OutcomeUnknown;
         execution.transaction.diagnostic = capture.diagnostic.value_or(
             localization::translate_message(
                 "Failed to install selected repository providers."));

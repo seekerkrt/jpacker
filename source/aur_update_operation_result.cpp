@@ -969,6 +969,16 @@ bool invocation_result_is_consistent(
                 return false;
             }
             break;
+        case SelectedRepositoryProviderTransactionStatus::OutcomeUnknown:
+            if(provider_transaction.selected_providers.empty() ||
+               provider_transaction.package_state_change !=
+                   PackageStateChange::Unknown ||
+               provider_transaction.command_exit_status.has_value() ||
+               !provider_transaction.diagnostic.has_value() ||
+               provider_transaction.diagnostic->empty()) {
+                return false;
+            }
+            break;
         default:
             return false;
     }
@@ -1021,8 +1031,11 @@ bool invocation_result_is_consistent(
                    });
         case AurUpdateInvocationExecutionStatus::
             StoppedOnProviderTransactionFailure:
-            return execution.selected_repository_provider_transaction.status ==
-                       SelectedRepositoryProviderTransactionStatus::Failed &&
+            return (execution.selected_repository_provider_transaction.status ==
+                        SelectedRepositoryProviderTransactionStatus::Failed ||
+                    execution.selected_repository_provider_transaction.status ==
+                        SelectedRepositoryProviderTransactionStatus::
+                            OutcomeUnknown) &&
                    terminal_count == 0 && std::all_of(execution.work_item_results.begin(), execution.work_item_results.end(), [](const AurUpdateWorkItemExecutionResult& work_item) {
                        return work_item.status ==
                               AurUpdateWorkItemExecutionStatus::

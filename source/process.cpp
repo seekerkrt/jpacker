@@ -31,6 +31,16 @@ extern char** environ;
 
 namespace {
 
+#ifdef MOGUET_ENABLE_PROCESS_TEST_HOOKS
+ExplicitProcessPostWaitHookForTest g_explicit_process_post_wait_hook =
+    nullptr;
+#endif
+
+struct ExplicitProcessExecutionObservation {
+    bool child_started = false;
+    bool outcome_known = false;
+};
+
 struct CommandSignalState {
     struct sigaction original_sigint{};
     struct sigaction original_sigquit{};
@@ -1361,7 +1371,11 @@ CapturedCommandResult execute_explicit_process(
     const ExplicitProcessInvocation& invocation,
     bool capture_standard_output,
     bool suppress_standard_output,
-    bool suppress_standard_error) {
+    bool suppress_standard_error,
+    ExplicitProcessExecutionObservation* execution_observation = nullptr) {
+    if(execution_observation != nullptr) {
+        *execution_observation = ExplicitProcessExecutionObservation{};
+    }
     if(invocation.executable.empty() ||
        has_embedded_nul(invocation.executable)) {
         return CapturedCommandResult{};
@@ -1439,6 +1453,9 @@ CapturedCommandResult execute_explicit_process(
             suppress_standard_output, suppress_standard_error,
             signal_state);
     }
+    if(execution_observation != nullptr) {
+        execution_observation->child_started = true;
+    }
 
     if(output_pipe[1] >= 0) static_cast<void>(close(output_pipe[1]));
     std::string output;
@@ -1490,10 +1507,18 @@ CapturedCommandResult execute_explicit_process(
     } while(wait_result == -1 && errno == EINTR);
     const bool signal_state_restored = restore_parent_signal_state(
         signal_state, SignalRestoreContext::ExplicitProcessWait);
+#ifdef MOGUET_ENABLE_PROCESS_TEST_HOOKS
+    if(g_explicit_process_post_wait_hook != nullptr) {
+        g_explicit_process_post_wait_hook();
+    }
+#endif
     if(pending_exception) std::rethrow_exception(pending_exception);
     if(wait_result == -1 || !signal_state_restored) {
         return CapturedCommandResult{
             std::move(output), 127, stdout_capture_limit_exceeded};
+    }
+    if(execution_observation != nullptr) {
+        execution_observation->outcome_known = true;
     }
     return CapturedCommandResult{
         std::move(output),
@@ -1533,6 +1558,44 @@ int run_explicit_process(
                suppress_standard_error)
         .exit_code;
 }
+
+ExplicitProcessExecutionResult run_explicit_process_with_outcome(
+    const ExplicitProcessInvocation& invocation,
+    bool suppress_standard_output,
+    bool suppress_standard_error) noexcept {
+    ExplicitProcessExecutionObservation observation;
+    try {
+        const CapturedCommandResult result = execute_explicit_process(
+            invocation, false, suppress_standard_output,
+            suppress_standard_error, &observation);
+        if(!observation.child_started) {
+            return ExplicitProcessExecutionResult{
+                ExplicitProcessExecutionStatus::NotStarted,
+                std::nullopt};
+        }
+        if(!observation.outcome_known) {
+            return ExplicitProcessExecutionResult{
+                ExplicitProcessExecutionStatus::StartedOutcomeUnknown,
+                std::nullopt};
+        }
+        return ExplicitProcessExecutionResult{
+            ExplicitProcessExecutionStatus::StartedKnownOutcome,
+            result.exit_code};
+    } catch(...) {
+        return ExplicitProcessExecutionResult{
+            observation.child_started
+                ? ExplicitProcessExecutionStatus::StartedOutcomeUnknown
+                : ExplicitProcessExecutionStatus::NotStarted,
+            std::nullopt};
+    }
+}
+
+#ifdef MOGUET_ENABLE_PROCESS_TEST_HOOKS
+void set_explicit_process_post_wait_hook_for_test(
+    ExplicitProcessPostWaitHookForTest hook) noexcept {
+    g_explicit_process_post_wait_hook = hook;
+}
+#endif
 
 std::string exec_command(const char* cmd) {
     return capture_command_output(cmd).output;

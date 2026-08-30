@@ -2620,6 +2620,118 @@ void test_selected_repository_provider_trusted_executor_closes_evidence(
         !raw_rewrap.trusted_execution_evidence().has_value(),
         "raw selected-provider execution rewrap gained closed evidence");
 
+    const auto incomplete_capture =
+        [&provider, owner](
+            const std::string& capture_token,
+            TrustedAlpmReceiptCaptureStatus capture_status,
+            InvocationDependencyTransactionCommandOutcome command_outcome) {
+            PacmanTransactionReceipt receipt =
+                validate_pacman_transaction_receipt(
+                    capture_token, owner,
+                    PacmanTransactionReceiptObservation{
+                        command_outcome ==
+                                InvocationDependencyTransactionCommandOutcome::
+                                    Unknown
+                            ? PacmanTransactionReceiptObservationState::
+                                  Incomplete
+                            : PacmanTransactionReceiptObservationState::
+                                  Missing,
+                        command_outcome ==
+                                InvocationDependencyTransactionCommandOutcome::
+                                    Unknown
+                            ? std::optional<std::string>{capture_token}
+                            : std::nullopt,
+                        command_outcome ==
+                                InvocationDependencyTransactionCommandOutcome::
+                                    Unknown
+                            ? std::optional<
+                                  InvocationDependencyTransactionOwner>{owner}
+                            : std::nullopt,
+                        {}});
+            InvocationDependencyTransactionLedger ledger;
+            ledger.transactions.push_back(
+                InvocationDependencyTransaction{
+                    capture_token, owner, {provider.package_name}, command_outcome, std::move(receipt)});
+            return TrustedAlpmReceiptCaptureResult{
+                capture_status, std::nullopt, std::move(ledger),
+                "synthetic trusted transport failure"};
+        };
+
+    trusted_receipt_transport_stub::set_result(incomplete_capture(
+        std::string(64, 'c'),
+        TrustedAlpmReceiptCaptureStatus::OutcomeUnknown,
+        InvocationDependencyTransactionCommandOutcome::Unknown));
+    const SelectedRepositoryProviderTrustedReceiptExecutionResult
+        post_launch_unknown_execution =
+            execute_selected_repository_provider_transaction(
+                invocation, config,
+                SelectedRepositoryProviderTrustedReceiptRequest::
+                    capture_actual_installs());
+    expect(
+        post_launch_unknown_execution.transaction.status ==
+                SelectedRepositoryProviderTransactionStatus::
+                    OutcomeUnknown &&
+            !post_launch_unknown_execution.transaction.command_exit_status
+                 .has_value() &&
+            post_launch_unknown_execution.receipt_capture.has_value() &&
+            post_launch_unknown_execution.receipt_capture
+                    ->transaction_ledger.transactions.front()
+                    .command_outcome ==
+                InvocationDependencyTransactionCommandOutcome::Unknown &&
+            !post_launch_unknown_execution.trusted_execution_evidence()
+                 .has_value(),
+        "post-launch trusted outcome became BlockedBeforeExecution");
+
+    trusted_receipt_transport_stub::set_result(incomplete_capture(
+        std::string(64, 'd'),
+        TrustedAlpmReceiptCaptureStatus::PrepareFailed,
+        InvocationDependencyTransactionCommandOutcome::NotAttempted));
+    const SelectedRepositoryProviderTrustedReceiptExecutionResult
+        pre_launch_failure_execution =
+            execute_selected_repository_provider_transaction(
+                invocation, config,
+                SelectedRepositoryProviderTrustedReceiptRequest::
+                    capture_actual_installs());
+    expect(
+        pre_launch_failure_execution.transaction.status ==
+                SelectedRepositoryProviderTransactionStatus::
+                    BlockedBeforeExecution &&
+            !pre_launch_failure_execution.transaction.command_exit_status
+                 .has_value() &&
+            pre_launch_failure_execution.receipt_capture.has_value() &&
+            pre_launch_failure_execution.receipt_capture
+                    ->transaction_ledger.transactions.front()
+                    .command_outcome ==
+                InvocationDependencyTransactionCommandOutcome::
+                    NotAttempted &&
+            !pre_launch_failure_execution.trusted_execution_evidence()
+                 .has_value(),
+        "confirmed pre-launch failure lost BlockedBeforeExecution compatibility");
+
+    trusted_receipt_transport_stub::set_result(
+        TrustedAlpmReceiptCaptureResult{
+            TrustedAlpmReceiptCaptureStatus::
+                TrustedExecutableUnavailable,
+            std::nullopt,
+            {},
+            "synthetic trusted executable preflight failure"});
+    const SelectedRepositoryProviderTrustedReceiptExecutionResult
+        transport_preflight_execution =
+            execute_selected_repository_provider_transaction(
+                invocation, config,
+                SelectedRepositoryProviderTrustedReceiptRequest::
+                    capture_actual_installs());
+    expect(
+        transport_preflight_execution.transaction.status ==
+                SelectedRepositoryProviderTransactionStatus::
+                    BlockedBeforeExecution &&
+            !transport_preflight_execution.transaction.command_exit_status
+                 .has_value() &&
+            transport_preflight_execution.receipt_capture.has_value() &&
+            transport_preflight_execution.receipt_capture
+                ->transaction_ledger.transactions.empty(),
+        "trusted executable preflight failure lost compatibility fallback eligibility");
+
     CleanupInvocationAuthority moved_from_authority = session.authority();
     [[maybe_unused]] CleanupInvocationAuthority retained_authority =
         std::move(moved_from_authority);

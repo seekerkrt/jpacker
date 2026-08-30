@@ -676,11 +676,19 @@ test-container-cleanup-authority:
 			--tag "$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
 			--file containers/arch-receipt-validation/Dockerfile \
 			.; \
-		printf '%s\n' ':: Running closed cleanup-authority validation container'; \
+		printf '%s\n' ':: Running closed cleanup-authority positive and installed transport matrix'; \
 		$(DOCKER) run --rm --network=none \
 			"$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
 			/usr/bin/python3 \
-			containers/arch-receipt-validation/run-installed-source-artifact-receipt.py
+			containers/arch-receipt-validation/run-installed-source-artifact-receipt.py; \
+		for scenario in later-failed later-not-attempted; do \
+			printf '%s\n' ":: Running closed cleanup-authority validation container: $$scenario"; \
+			$(DOCKER) run --rm --network=none \
+				"$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
+				/usr/bin/python3 \
+				containers/arch-receipt-validation/run-installed-source-artifact-receipt.py \
+				--cleanup-authority-scenario "$$scenario"; \
+		done
 
 test-container-live:
 	+@set -eu; \

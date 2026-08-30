@@ -4111,11 +4111,8 @@ RemoteAurCleanupCandidateCollector::
         execution.transaction;
     const bool trusted_transaction_not_started =
         operation.status ==
-            SelectedRepositoryProviderTransactionStatus::
-                BlockedBeforeExecution &&
-        !operation.command_exit_status.has_value() &&
-        (!execution.receipt_capture.has_value() ||
-         !execution.receipt_capture->pacman_exit_status.has_value());
+        SelectedRepositoryProviderTransactionStatus::
+            BlockedBeforeExecution;
     selected_provider_execution_ = std::move(execution);
     if(trusted_transaction_not_started) {
         // Compatibility fallback owns only the package operation. It never

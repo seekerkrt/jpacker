@@ -504,7 +504,8 @@ struct ExpectedProcess {
     ExpectedProcessKind kind;
     ExplicitProcessInvocation invocation;
     CapturedCommandResult capture_result;
-    int run_status = 0;
+    ExplicitProcessExecutionResult run_result{
+        ExplicitProcessExecutionStatus::StartedKnownOutcome, 0};
 };
 
 std::deque<ExpectedProcess> expected_processes;
@@ -558,13 +559,19 @@ void expect_capture(
     ExplicitProcessInvocation invocation,
     CapturedCommandResult result) {
     expected_processes.push_back(ExpectedProcess{
-        ExpectedProcessKind::Capture, std::move(invocation),
-        std::move(result), 0});
+        ExpectedProcessKind::Capture, std::move(invocation), std::move(result), {}});
 }
 
 void expect_run(ExplicitProcessInvocation invocation, int status) {
     expected_processes.push_back(ExpectedProcess{
-        ExpectedProcessKind::Run, std::move(invocation), {}, status});
+        ExpectedProcessKind::Run, std::move(invocation), {}, {ExplicitProcessExecutionStatus::StartedKnownOutcome, status}});
+}
+
+void expect_run_outcome(
+    ExplicitProcessInvocation invocation,
+    ExplicitProcessExecutionStatus status) {
+    expected_processes.push_back(ExpectedProcess{
+        ExpectedProcessKind::Run, std::move(invocation), {}, {status, std::nullopt}});
 }
 
 TrustedAlpmReceiptSelectedProviderRequest selected_provider_request() {
@@ -714,6 +721,71 @@ void test_transport_external_race_and_failures() {
                 failed.transaction_ledger) ==
                 CleanupCausalOwnership::Unknown,
         "failed command produced InvocationOwned evidence");
+
+    expected_processes.clear();
+    const std::string post_launch_unknown_token = transaction_token('0');
+    expect_capture(
+        expected_helper(
+            "prepare", post_launch_unknown_token,
+            {"--", "requested-target"}, 4096),
+        {serialize_trusted_alpm_receipt_prepare_response(
+             {post_launch_unknown_token,
+              trusted_alpm_receipt_hook_directory(
+                  post_launch_unknown_token)}),
+         0, false});
+    expect_run_outcome(
+        expected_pacman(post_launch_unknown_token),
+        ExplicitProcessExecutionStatus::StartedOutcomeUnknown);
+    expect_run(
+        expected_helper("abort", post_launch_unknown_token), 0);
+    const auto post_launch_unknown =
+        execute_trusted_alpm_receipt_selected_provider_transaction_for_test(
+            request, post_launch_unknown_token);
+    require_processes_consumed();
+    expect(
+        post_launch_unknown.status ==
+                TrustedAlpmReceiptCaptureStatus::OutcomeUnknown &&
+            !post_launch_unknown.pacman_exit_status.has_value() &&
+            post_launch_unknown.transaction_ledger.transactions.size() ==
+                1 &&
+            post_launch_unknown.transaction_ledger.transactions.front()
+                    .command_outcome ==
+                InvocationDependencyTransactionCommandOutcome::Unknown &&
+            post_launch_unknown.transaction_ledger.transactions.front()
+                    .receipt.state() !=
+                PacmanTransactionReceiptState::Complete,
+        "post-launch unknown outcome was flattened into NotAttempted");
+
+    expected_processes.clear();
+    const std::string pre_launch_failure_token = transaction_token('3');
+    expect_capture(
+        expected_helper(
+            "prepare", pre_launch_failure_token,
+            {"--", "requested-target"}, 4096),
+        {serialize_trusted_alpm_receipt_prepare_response(
+             {pre_launch_failure_token,
+              trusted_alpm_receipt_hook_directory(
+                  pre_launch_failure_token)}),
+         0, false});
+    expect_run_outcome(
+        expected_pacman(pre_launch_failure_token),
+        ExplicitProcessExecutionStatus::NotStarted);
+    expect_run(expected_helper("abort", pre_launch_failure_token), 0);
+    const auto pre_launch_failure =
+        execute_trusted_alpm_receipt_selected_provider_transaction_for_test(
+            request, pre_launch_failure_token);
+    require_processes_consumed();
+    expect(
+        pre_launch_failure.status ==
+                TrustedAlpmReceiptCaptureStatus::PrepareFailed &&
+            !pre_launch_failure.pacman_exit_status.has_value() &&
+            pre_launch_failure.transaction_ledger.transactions.size() ==
+                1 &&
+            pre_launch_failure.transaction_ledger.transactions.front()
+                    .command_outcome ==
+                InvocationDependencyTransactionCommandOutcome::
+                    NotAttempted,
+        "confirmed pre-launch failure did not remain NotAttempted");
 
     expected_processes.clear();
     const std::string malformed_token = transaction_token('c');
@@ -892,7 +964,36 @@ int run_explicit_process(
         "unexpected trusted transport run argv/environment");
     ExpectedProcess expected = std::move(expected_processes.front());
     expected_processes.pop_front();
-    return expected.run_status;
+    expect(
+        expected.run_result.status ==
+                ExplicitProcessExecutionStatus::StartedKnownOutcome &&
+            expected.run_result.exit_code.has_value(),
+        "legacy run stub received a non-known process outcome");
+    return expected.run_result.exit_code.value();
+}
+
+ExplicitProcessExecutionResult run_explicit_process_with_outcome(
+    const ExplicitProcessInvocation& invocation,
+    bool suppress_standard_output,
+    bool suppress_standard_error) noexcept {
+    try {
+        expect(
+            !suppress_standard_output && !suppress_standard_error &&
+                !expected_processes.empty() &&
+                expected_processes.front().kind ==
+                    ExpectedProcessKind::Run &&
+                same_invocation(
+                    expected_processes.front().invocation,
+                    invocation),
+            "unexpected trusted transport outcome-aware run argv/environment");
+        ExpectedProcess expected = std::move(expected_processes.front());
+        expected_processes.pop_front();
+        return expected.run_result;
+    } catch(...) {
+        return ExplicitProcessExecutionResult{
+            ExplicitProcessExecutionStatus::NotStarted,
+            std::nullopt};
+    }
 }
 
 void run_trusted_alpm_receipt_tests() {

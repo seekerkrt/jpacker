@@ -311,7 +311,8 @@ def run_production_transport(
 
 def run_cleanup_lifecycle(
     artifact: tuple[int, str, str, str, str, pathlib.Path],
-) -> tuple[str, str, str]:
+    scenario: str = "positive",
+) -> tuple[str, str, str, str]:
     _, name, version, package_base, architecture, path = artifact
     result = subprocess.run(
         [
@@ -321,6 +322,7 @@ def run_cleanup_lifecycle(
             "--",
             TRANSPORT_FIXTURE,
             "--cleanup-lifecycle",
+            scenario,
             str(path),
             name,
             package_base,
@@ -359,7 +361,61 @@ def run_cleanup_lifecycle(
         return values[0]
 
     require(lines[-1] == "END", "cleanup lifecycle fixture has no END record")
-    return one("LIFECYCLE\t"), one("CLASSIFICATION\t"), one("PACKAGE\t")
+    return (
+        one("LIFECYCLE\t"),
+        one("CLASSIFICATION\t"),
+        one("PACKAGE\t"),
+        one("WORK_ITEMS\t"),
+    )
+
+
+def run_cleanup_authority_scenario(
+    scenario: str,
+    lifecycle_dependency: pathlib.Path,
+) -> None:
+    require(
+        scenario in {"positive", "later-failed", "later-not-attempted"},
+        f"unknown cleanup-authority scenario: {scenario}",
+    )
+    require(
+        package_version("moguet-receipt-dependency") is None,
+        "cleanup lifecycle dependency was pre-existing",
+    )
+    lifecycle, classification, lifecycle_package, work_items = (
+        run_cleanup_lifecycle(
+            (
+                0,
+                "moguet-receipt-dependency",
+                "1-1",
+                "moguet-receipt-dependency",
+                "any",
+                lifecycle_dependency,
+            ),
+            scenario,
+        )
+    )
+    expected = {
+        "positive": ("Complete", "Eligible", "Succeeded,Succeeded"),
+        "later-failed": (
+            "NotCompleted",
+            "NotProduced",
+            "Succeeded,Failed",
+        ),
+        "later-not-attempted": (
+            "NotCompleted",
+            "NotProduced",
+            "Succeeded,Failed,NotAttempted",
+        ),
+    }[scenario]
+    require(
+        (lifecycle, classification, work_items) == expected
+        and lifecycle_package == "moguet-receipt-dependency",
+        f"cleanup-authority {scenario} composition result changed",
+    )
+    require(
+        package_version("moguet-receipt-dependency") == "1-1",
+        f"cleanup-authority {scenario} actual dependency Install did not persist",
+    )
 
 
 def expect_rejection(arguments: list[str], label: str) -> None:
@@ -389,33 +445,16 @@ def main() -> None:
         "moguet-receipt-dependency-1-1-any.pkg.tar.zst"
     )
 
+    if len(sys.argv) == 3 and sys.argv[1] == "--cleanup-authority-scenario":
+        run_cleanup_authority_scenario(sys.argv[2], lifecycle_dependency)
+        print(f"cleanup-authority {sys.argv[2]} composition checks passed")
+        return
+    require(len(sys.argv) == 1, "unexpected source-artifact fixture arguments")
+
     single_v1 = [(0, "moguet-source-receipt-single", "1-1", "moguet-source-receipt-single", "any", v1)]
     single_v2 = [(0, "moguet-source-receipt-single", "2-1", "moguet-source-receipt-single", "any", v2)]
 
-    require(
-        package_version("moguet-receipt-dependency") is None,
-        "cleanup lifecycle dependency was pre-existing",
-    )
-    lifecycle, classification, lifecycle_package = run_cleanup_lifecycle(
-        (
-            0,
-            "moguet-receipt-dependency",
-            "1-1",
-            "moguet-receipt-dependency",
-            "any",
-            lifecycle_dependency,
-        )
-    )
-    require(
-        lifecycle == "Complete"
-        and classification == "Eligible"
-        and lifecycle_package == "moguet-receipt-dependency",
-        "authoritative installed cleanup lifecycle was not uniquely Eligible",
-    )
-    require(
-        package_version("moguet-receipt-dependency") == "1-1",
-        "cleanup lifecycle actual dependency Install did not persist",
-    )
+    run_cleanup_authority_scenario("positive", lifecycle_dependency)
 
     mismatch_token = token("a")
     prepare(

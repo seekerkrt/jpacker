@@ -64,6 +64,12 @@ std::optional<std::string> read_stdin() {
     }
 }
 
+#ifdef MOGUET_ENABLE_PROCESS_TEST_HOOKS
+void throw_after_explicit_process_wait() {
+    throw std::runtime_error("synthetic post-wait failure");
+}
+#endif
+
 std::size_t parse_output_size(std::string_view value) {
     std::size_t output_size = 0;
     auto [end, error] = std::from_chars(
@@ -351,6 +357,43 @@ void test_explicit_standard_input_descriptor(
         "explicit standard input descriptor", result, input, 0);
 }
 
+void test_explicit_process_launch_outcome(
+    const fs::path& executable_path) {
+    ExplicitProcessInvocation invocation;
+    invocation.executable = executable_path.string();
+    invocation.arguments = {
+        std::string(CHILD_MARKER), "exit-23"};
+
+    const ExplicitProcessExecutionResult known =
+        run_explicit_process_with_outcome(invocation);
+    require(
+        known.status ==
+                ExplicitProcessExecutionStatus::StartedKnownOutcome &&
+            known.exit_code == std::optional<int>{23},
+        "completed explicit process did not preserve its known outcome");
+
+#ifdef MOGUET_ENABLE_PROCESS_TEST_HOOKS
+    set_explicit_process_post_wait_hook_for_test(
+        throw_after_explicit_process_wait);
+    const ExplicitProcessExecutionResult post_wait_failure =
+        run_explicit_process_with_outcome(invocation);
+    set_explicit_process_post_wait_hook_for_test(nullptr);
+    require(
+        post_wait_failure.status ==
+                ExplicitProcessExecutionStatus::StartedOutcomeUnknown &&
+            !post_wait_failure.exit_code.has_value(),
+        "post-wait exception was flattened into a pre-launch failure");
+#endif
+
+    const ExplicitProcessExecutionResult not_started =
+        run_explicit_process_with_outcome(ExplicitProcessInvocation{});
+    require(
+        not_started.status ==
+                ExplicitProcessExecutionStatus::NotStarted &&
+            !not_started.exit_code.has_value(),
+        "invalid pre-launch invocation did not remain NotStarted");
+}
+
 void run_tests(const fs::path& executable_path) {
     test_raw_chunk_boundaries(executable_path);
     test_raw_byte_preservation(executable_path);
@@ -360,6 +403,7 @@ void run_tests(const fs::path& executable_path) {
     test_unbounded_explicit_capture_compatibility(executable_path);
     test_explicit_working_directory_descriptor(executable_path);
     test_explicit_standard_input_descriptor(executable_path);
+    test_explicit_process_launch_outcome(executable_path);
 }
 
 } // namespace
