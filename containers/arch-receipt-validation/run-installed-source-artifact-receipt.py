@@ -288,6 +288,7 @@ def run_production_transport(
         return values[0]
 
     status = one("STATUS\t")
+    operation = one("OPERATION\t")
     evidence = one("EVIDENCE\t")
     causal = one("CAUSAL\t")
     installs = [line.removeprefix("INSTALL\t") for line in lines if line.startswith("INSTALL\t")]
@@ -295,7 +296,70 @@ def run_production_transport(
     require(len(pacman_values) <= 1, "production fixture PACMAN cardinality changed")
     pacman_status = int(pacman_values[0]) if pacman_values else None
     require(lines[-1] == "END", "production fixture has no END record")
+    if pacman_status == 0:
+        require(
+            operation == "Succeeded",
+            "successful pacman transaction lost its independent operation result",
+        )
+    else:
+        require(
+            operation == "Unavailable",
+            "failed or unknown transaction published operation success",
+        )
     return status, evidence, causal, installs, pacman_status
+
+
+def run_cleanup_lifecycle(
+    artifact: tuple[int, str, str, str, str, pathlib.Path],
+) -> tuple[str, str, str]:
+    _, name, version, package_base, architecture, path = artifact
+    result = subprocess.run(
+        [
+            "/usr/bin/runuser",
+            "-u",
+            "moguet-validation",
+            "--",
+            TRANSPORT_FIXTURE,
+            "--cleanup-lifecycle",
+            str(path),
+            name,
+            package_base,
+            version,
+            architecture,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+        env={
+            "PATH": "/usr/bin",
+            "LC_ALL": "C",
+            "HOME": "/home/moguet-validation",
+            "XDG_CACHE_HOME": "/home/moguet-validation/.cache",
+            "XDG_CONFIG_HOME": "/home/moguet-validation/.config",
+            "XDG_STATE_HOME": "/home/moguet-validation/.local/state",
+        },
+    )
+    require(
+        result.returncode == 0,
+        f"cleanup lifecycle fixture failed: {result.stderr.strip()}",
+    )
+    lines = result.stdout.splitlines()
+
+    def one(prefix: str) -> str:
+        values = [
+            line.removeprefix(prefix)
+            for line in lines
+            if line.startswith(prefix)
+        ]
+        require(
+            len(values) == 1,
+            f"cleanup lifecycle {prefix!r} cardinality changed",
+        )
+        return values[0]
+
+    require(lines[-1] == "END", "cleanup lifecycle fixture has no END record")
+    return one("LIFECYCLE\t"), one("CLASSIFICATION\t"), one("PACKAGE\t")
 
 
 def expect_rejection(arguments: list[str], label: str) -> None:
@@ -321,9 +385,37 @@ def main() -> None:
     failure = package_path("moguet-source-receipt-failure-1-1-any.pkg.tar.zst")
     multi_a = package_path("moguet-source-receipt-multi-a-1-1-any.pkg.tar.zst")
     multi_b = package_path("moguet-source-receipt-multi-b-1-1-any.pkg.tar.zst")
+    lifecycle_dependency = package_path(
+        "moguet-receipt-dependency-1-1-any.pkg.tar.zst"
+    )
 
     single_v1 = [(0, "moguet-source-receipt-single", "1-1", "moguet-source-receipt-single", "any", v1)]
     single_v2 = [(0, "moguet-source-receipt-single", "2-1", "moguet-source-receipt-single", "any", v2)]
+
+    require(
+        package_version("moguet-receipt-dependency") is None,
+        "cleanup lifecycle dependency was pre-existing",
+    )
+    lifecycle, classification, lifecycle_package = run_cleanup_lifecycle(
+        (
+            0,
+            "moguet-receipt-dependency",
+            "1-1",
+            "moguet-receipt-dependency",
+            "any",
+            lifecycle_dependency,
+        )
+    )
+    require(
+        lifecycle == "Complete"
+        and classification == "Eligible"
+        and lifecycle_package == "moguet-receipt-dependency",
+        "authoritative installed cleanup lifecycle was not uniquely Eligible",
+    )
+    require(
+        package_version("moguet-receipt-dependency") == "1-1",
+        "cleanup lifecycle actual dependency Install did not persist",
+    )
 
     mismatch_token = token("a")
     prepare(
@@ -429,7 +521,7 @@ def main() -> None:
     runtime_mode = stat.S_IMODE(os.stat(STATE_ROOT, follow_symlinks=False).st_mode)
     require(runtime_mode == 0o700, "source state root mode changed")
     print(
-        "source-artifact-receipt-installed-validation: Install/Upgrade/reinstall/downgrade/needed/failure/multi/isolation checks passed"
+        "source-artifact-receipt-installed-validation: cleanup lifecycle Eligible and Install/Upgrade/reinstall/downgrade/needed/failure/multi/isolation checks passed"
     )
 
 

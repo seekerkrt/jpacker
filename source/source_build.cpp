@@ -12,6 +12,7 @@
 #include "reviewed_source_lifecycle.hpp"
 #include "reviewed_source_pinned_build.hpp"
 #include "reviewed_source_trusted_review.hpp"
+#include "invocation_owned_cleanup_adapter.hpp"
 #include "runtime_diagnostic.hpp"
 #include "separated_package_base_source_build.hpp"
 #include "separated_source_build.hpp"
@@ -2037,12 +2038,49 @@ execute_prepared_source_build_package_base_typed(
 }
 
 PackageBaseSourceBuildExecutionResult
-execute_source_build_package_base_typed(
+execute_prepared_source_build_package_base_with_cleanup_authority(
+    const SourceBuildRequest& request,
+    const std::vector<RequiredPackageArtifactTarget>& required_targets,
+    PreparedSourceBuildNeedsBuild prepared,
+    const PacmanDatabasePaths& database_paths,
+    const AppConfig& config,
+    RemoteAurCleanupCandidateCollector& collector,
+    std::size_t work_item_index) {
+    require_package_base_source_build_request(request, required_targets);
+    require_supported_separated_install_options(config.rm_deps);
+    require_unclaimed_artifact_pkgdest(request.custom_environment);
+    PreparedSourceBuildExecutionCapabilities capabilities =
+        SourceBuildPreparedExecutionAccess::consume(std::move(prepared));
+
+    return execute_separated_package_base_source_build_with_cleanup_authority(
+        SeparatedPackageBaseSourceBuildRequest{
+            std::move(capabilities.source_tree),
+            std::move(capabilities.artifact_root),
+            request.checkout_name,
+            required_targets,
+            request.custom_environment,
+            request.empty_value_policy,
+            database_paths},
+        SeparatedSourceBuildUnitOptions{
+            .no_confirm = config.no_confirm,
+            .needed = request.needed,
+            .rm_deps = config.rm_deps,
+            .rebuild = capabilities.rebuild,
+            .clean_build = capabilities.clean_build},
+        collector, work_item_index);
+}
+
+namespace {
+
+PackageBaseSourceBuildExecutionResult
+execute_source_build_package_base_typed_impl(
     const SourceBuildRequest& request,
     const std::vector<RequiredPackageArtifactTarget>& required_targets,
     const ValidatedCacheRoot& cache_root,
     const PacmanDatabasePaths& database_paths,
-    const AppConfig& config) {
+    const AppConfig& config,
+    RemoteAurCleanupCandidateCollector* collector,
+    std::optional<std::size_t> work_item_index) {
     // request/target correlationはcheckout/cache mutationより前に再証明する。
     require_package_base_source_build_request(request, required_targets);
     require_supported_separated_install_options(config.rm_deps);
@@ -2092,10 +2130,49 @@ execute_source_build_package_base_typed(
                 "{} set source-build unexpectedly produced an update-status result.",
                 "PackageBase"));
     }
+    PreparedSourceBuildNeedsBuild prepared = std::move(
+        std::get<PreparedSourceBuildNeedsBuild>(preparation));
+    if(collector != nullptr) {
+        if(!work_item_index.has_value()) {
+            throw std::logic_error(
+                "Remote AUR cleanup source-build has no work-item attribution.");
+        }
+        return execute_prepared_source_build_package_base_with_cleanup_authority(
+            request, required_targets, std::move(prepared),
+            database_paths, config, *collector,
+            work_item_index.value());
+    }
     return execute_prepared_source_build_package_base_typed(
-        request, required_targets,
-        std::move(std::get<PreparedSourceBuildNeedsBuild>(preparation)),
+        request, required_targets, std::move(prepared),
         database_paths, config);
+}
+
+} // namespace
+
+PackageBaseSourceBuildExecutionResult
+execute_source_build_package_base_typed(
+    const SourceBuildRequest& request,
+    const std::vector<RequiredPackageArtifactTarget>& required_targets,
+    const ValidatedCacheRoot& cache_root,
+    const PacmanDatabasePaths& database_paths,
+    const AppConfig& config) {
+    return execute_source_build_package_base_typed_impl(
+        request, required_targets, cache_root, database_paths,
+        config, nullptr, std::nullopt);
+}
+
+PackageBaseSourceBuildExecutionResult
+execute_source_build_package_base_with_cleanup_authority(
+    const SourceBuildRequest& request,
+    const std::vector<RequiredPackageArtifactTarget>& required_targets,
+    const ValidatedCacheRoot& cache_root,
+    const PacmanDatabasePaths& database_paths,
+    const AppConfig& config,
+    RemoteAurCleanupCandidateCollector& collector,
+    std::size_t work_item_index) {
+    return execute_source_build_package_base_typed_impl(
+        request, required_targets, cache_root, database_paths,
+        config, &collector, work_item_index);
 }
 
 std::optional<ArtifactInstallExecutionOutcome> execute_source_build(

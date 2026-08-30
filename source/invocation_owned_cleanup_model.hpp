@@ -14,6 +14,7 @@ struct PreparedRemoteSourceBuild;
 class CleanupInvocationSession;
 class CleanupInvocationSessionInspector;
 class CleanupPhaseObservationProducer;
+class RemoteAurCleanupCandidateCollector;
 class SelectedRepositoryProviderTrustedReceiptExecutor;
 class SourceArtifactInstallTrustedTransport;
 struct CleanupInvocationSessionState;
@@ -88,8 +89,8 @@ private:
 
 // One move-only owner binds the immutable remote-AUR preparation, phase
 // observations, trusted transaction inventory, correlations, and aggregate.
-// begin() consumes the preparation so another session cannot be reconstructed
-// from the same caller-selected textual identity.
+// The collector-only production factory consumes the preparation so another
+// session cannot be reconstructed from the same caller-selected identity.
 class CleanupInvocationSession final {
 public:
     CleanupInvocationSession() = delete;
@@ -110,10 +111,13 @@ public:
         const noexcept;
 
 private:
+    [[nodiscard]] static CleanupInvocationSession begin_for_collector(
+        PreparedRemoteSourceBuild prepared);
     explicit CleanupInvocationSession(
         std::shared_ptr<CleanupInvocationSessionState> state) noexcept;
 
     [[nodiscard]] const PreparedRemoteSourceBuild& prepared() const noexcept;
+    [[nodiscard]] PreparedRemoteSourceBuild& prepared_for_execution() noexcept;
     [[nodiscard]] bool is_active() const noexcept;
     [[nodiscard]] bool record_baseline_observation() const;
     [[nodiscard]] std::optional<std::size_t>
@@ -130,6 +134,7 @@ private:
 
     friend class CleanupInvocationSessionInspector;
     friend class CleanupPhaseObservationProducer;
+    friend class RemoteAurCleanupCandidateCollector;
 #ifdef MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
     friend void mark_cleanup_invocation_baseline_observed_for_test(
         CleanupInvocationSession& session);
@@ -382,6 +387,8 @@ struct CleanupCurrentPackageEvidence {
 struct CleanupProviderCorrelation {
     ProvidedDependency provider;
     ProviderResolutionKind resolution;
+
+    bool operator==(const CleanupProviderCorrelation&) const = default;
 };
 
 // This is the minimal pure projection of a BuildPlan dependency edge. It
@@ -392,6 +399,9 @@ struct CleanupDependencyEdgeCorrelation {
     PackageChildIdentity requiring_package;
     DependencyRequirement requirement;
     std::optional<CleanupProviderCorrelation> provider;
+
+    bool operator==(const CleanupDependencyEdgeCorrelation&) const =
+        default;
 };
 
 // One package may retain several root, PackageBase, role, and edge

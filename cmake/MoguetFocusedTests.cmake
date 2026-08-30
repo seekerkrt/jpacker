@@ -90,6 +90,10 @@ moguet_add_focused_ctest_alias(
         cpp.git_remote_revision_observer
         cpp.git_remote_revision_observer_integration
 )
+moguet_add_focused_ctest_alias(
+    test-remote-aur-cleanup-collector
+    TESTS cpp.remote_aur_cleanup_collector
+)
 
 moguet_add_focused_ctest_alias(
     test-localization

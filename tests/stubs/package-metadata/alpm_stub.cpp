@@ -285,6 +285,9 @@ LocalPackageState* local_package_state(alpm_pkg_t* package) {
     throw std::logic_error(diagnostic);
 }
 
+void rebuild_local_provides(LocalPackageState& package_state);
+void rebuild_local_dependencies(LocalPackageState& package_state);
+
 alpm_pkg_t* consume_local_package_query_expectation(
     alpm_db_t* database,
     const std::string& package_name) {
@@ -327,6 +330,10 @@ alpm_pkg_t* consume_local_package_query_expectation(
                         package_index,
                         true}});
             record->strict_local_packages.push_back(std::move(package));
+            rebuild_local_provides(
+                record->strict_local_packages.back()->state);
+            rebuild_local_dependencies(
+                record->strict_local_packages.back()->state);
             g_state.local_package_query_expectations.pop_front();
             return &record->strict_local_packages.back()->package;
         }
@@ -844,6 +851,33 @@ void enqueue_local_package_query_present(
                 {},
                 {},
                 std::move(returned_name),
+                "x86_64",
+                false,
+                false},
+            ALPM_ERR_OK});
+    g_state.local_package_query_strict_mode = true;
+}
+
+void enqueue_local_package_query_present_metadata(
+    std::string expected_package_name,
+    LocalPackageMetadata returned_package) {
+    g_state.local_package_query_expectations.push_back(
+        LocalPackageQueryExpectation{
+            std::move(expected_package_name),
+            PackageLookupMode::Present,
+            LocalPackageState{
+                returned_package.name,
+                returned_package.version,
+                returned_package.reason,
+                false,
+                false,
+                std::move(returned_package.provides),
+                {},
+                {},
+                std::move(returned_package.dependencies),
+                {},
+                {},
+                returned_package.name,
                 "x86_64",
                 false,
                 false},
@@ -1915,7 +1949,24 @@ alpm_list_t* alpm_pkg_get_depends(alpm_pkg_t* package) {
     return package_state->dependency_nodes.data();
 }
 
-alpm_pkg_t* alpm_find_satisfier(alpm_list_t*, const char*) {
+alpm_pkg_t* alpm_find_satisfier(
+    alpm_list_t* packages,
+    const char* dependency_specification) {
+    if(dependency_specification == nullptr ||
+       dependency_specification[0] == '\0') {
+        return nullptr;
+    }
+    const std::string specification(dependency_specification);
+    const std::size_t relation = specification.find_first_of("<>=");
+    const std::string required_name = specification.substr(0, relation);
+    if(required_name.empty()) return nullptr;
+    for(alpm_list_t* node = packages; node != nullptr; node = node->next) {
+        auto* package = static_cast<alpm_pkg_t*>(node->data);
+        const char* package_name = alpm_pkg_get_name(package);
+        if(package_name != nullptr && required_name == package_name) {
+            return package;
+        }
+    }
     return nullptr;
 }
 

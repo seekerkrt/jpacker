@@ -108,7 +108,7 @@ include / link graph、negative compile recipeを所有しない。
 | `build/cmake-testing` | `BUILD_TESTING=ON` | developer、CTest、host / release validation、focused test |
 
 通常の`make`はproduction treeだけから`moguet`をbuildし、99個のC++ test-ledger executable、
-1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、123件のCTest registrationを不用意にbuildしない。
+1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、124件のCTest registrationを不用意にbuildしない。
 `make test`はtesting treeをbuildし、CTestを実行してから
 gettext、shell、docs、packaging等のrepository-specific validationを実行する。`make test-<area>`は
 互換entrypointとして残るが、exact target / CTest selectionは
@@ -185,12 +185,12 @@ inventoryを所有する。
 | support / stub translation units | 30 |
 | link firewalls | 49 |
 | firewall descriptors | 49 |
-| CTest registrations | 123 |
+| CTest registrations | 124 |
 
 stub / real implementation exclusion、replacement ABI、ALPM stub、exact source closureをtarget-localに
 維持する。単一production libraryを全testへ無条件linkしない。negative compileはCTest registrationから
 effective CMake compiler / launcher / compile optionを取得し、GNU Make recursive compileへ戻さない。
-Make focused aliasとCMake focused targetは各102件で一致し、missing / unexpectedを0に保つ。
+Make focused aliasとCMake focused targetは各103件で一致し、missing / unexpectedを0に保つ。
 
 completion生成が使う`moguet-cli-authority-exporter`もCMake targetであり、Python generatorはcompilerを
 直接起動しない。このtargetは`EXCLUDE_FROM_ALL`なので通常のproduction/package buildへ混ざらず、
@@ -283,6 +283,17 @@ Issue #485 Slice 2のSourceArtifactInstall boundaryは、selected-provider lane�
 multi-artifact、replay / cross-owner isolationをephemeral container package databaseで確認する。単一artifact
 matrixはproduction C++ transportから`SourceArtifactInstallReceiptObservation`とcausal evidenceまで通す。
 `test-container-receipt`のselected-provider evidenceとは相互に代替しない。
+
+Issue #485 Slice 5のclosed lifecycle / authoritative candidate gateは、同じnetworkless installed imageを
+使う専用targetで確認する。
+
+    make test-container-cleanup-authority
+
+このtargetはsynthetic remote AUR rootとproduction collectorを使い、session mint、mutation前baseline、
+actual `SourceArtifactInstall` dependency transaction、Install-only receipt、full successful invocation、
+post-success current / policy query、correlation、aggregate、classifierまでを通してexact candidateが
+`Eligible`になることを確認する。同じrunner内のUpgrade / reinstall / downgrade / `--needed` / failure / multi / owner isolation
+matrixはnegative authorityを維持する。public `--rmdeps`、preview、prompt、removalを実行せず、host package DB / `/run`を共有しない。
 
 Issue #372のlive aggregate gateは、provider selection、real AUR install、real local
 PKGBUILD build / installを単一のfail-fast recipeから別containerで順に実行する。parallel makeの

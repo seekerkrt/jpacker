@@ -817,10 +817,12 @@ moguet_add_cpp_test(
     SOURCES
         tests/invocation_owned_cleanup_model_test.cpp
         tests/invocation_owned_cleanup_adapter_test.cpp
+        tests/remote_aur_cleanup_candidate_collector_test.cpp
         tests/source_artifact_install_receipt_evidence_test.cpp
         tests/trusted_alpm_receipt_test.cpp
         source/invocation_owned_cleanup_adapter.cpp
         source/invocation_owned_cleanup_model.cpp
+        source/package_metadata.cpp
         source/source_artifact_install_receipt_evidence.cpp
         source/build_plan_artifact_target_projection.cpp
         source/dependency_constraint_presentation.cpp
@@ -836,9 +838,11 @@ moguet_add_cpp_test(
         source/trusted_alpm_receipt_transport.cpp
         source/logging.cpp
         source/shell_words.cpp
+        tests/stubs/package-metadata/alpm_stub.cpp
     DEFINITIONS
         MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
         MOGUET_ENABLE_INVOCATION_TRANSACTION_LEDGER_TEST_HOOKS
+        MOGUET_ENABLE_REMOTE_AUR_CLEANUP_COLLECTOR_TEST_HOOKS
         MOGUET_ENABLE_SOURCE_ARTIFACT_INSTALL_RECEIPT_TEST_HOOKS
         MOGUET_ENABLE_TRUSTED_ALPM_RECEIPT_TEST_HOOKS
     INCLUDE_DIRECTORIES "${_moguet_test_source_include_dir}"
@@ -898,6 +902,13 @@ moguet_add_cpp_test(
 set(
     _moguet_source_artifact_install_installed_fixture_sources
     tests/source_artifact_install_installed_fixture.cpp
+    source/build_plan_artifact_target_projection.cpp
+    source/dependency_constraint.cpp
+    source/dependency_constraint_presentation.cpp
+    source/dependency_plan_model.cpp
+    source/invocation_owned_cleanup_adapter.cpp
+    source/package_relation.cpp
+    source/package_relation_presentation.cpp
     source/source_artifact_install_trusted_protocol.cpp
     source/source_artifact_install_trusted_transport.cpp
     source/source_artifact_install_receipt_evidence.cpp
@@ -1575,6 +1586,7 @@ moguet_add_cpp_test(
         MOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS
         MOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
         MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
+        MOGUET_ENABLE_REMOTE_AUR_CLEANUP_COLLECTOR_STUB
         MOGUET_ENABLE_REVIEWED_SOURCE_PRODUCTION_TEST_HOOKS
         MOGUET_ENABLE_TEST_OVERRIDES
     INCLUDE_DIRECTORIES

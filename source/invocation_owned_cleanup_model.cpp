@@ -710,8 +710,7 @@ CleanupInvocationSession::CleanupInvocationSession(
     : state_(std::move(state)), authority_(state_) {
 }
 
-#ifdef MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
-CleanupInvocationSession CleanupInvocationSession::begin(
+CleanupInvocationSession CleanupInvocationSession::begin_for_collector(
     PreparedRemoteSourceBuild prepared) {
     if(prepared.source.source_kind() != SourceBuildSourceKind::Aur ||
        !prepared.aur_build_plan.has_value()) {
@@ -722,6 +721,12 @@ CleanupInvocationSession CleanupInvocationSession::begin(
         std::make_shared<CleanupInvocationSessionState>(
             std::move(prepared)));
 }
+
+#ifdef MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
+CleanupInvocationSession CleanupInvocationSession::begin(
+    PreparedRemoteSourceBuild prepared) {
+    return begin_for_collector(std::move(prepared));
+}
 #endif
 
 const CleanupInvocationAuthority& CleanupInvocationSession::authority()
@@ -731,6 +736,11 @@ const CleanupInvocationAuthority& CleanupInvocationSession::authority()
 
 const PreparedRemoteSourceBuild& CleanupInvocationSession::prepared()
     const noexcept {
+    return state_->prepared;
+}
+
+PreparedRemoteSourceBuild&
+CleanupInvocationSession::prepared_for_execution() noexcept {
     return state_->prepared;
 }
 

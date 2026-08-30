@@ -381,6 +381,7 @@ private:
     execute_prepared_package_base_artifact_install(
         PreparedPackageBaseArtifactInstall& install,
         const ArtifactInstallExecutionOptions& options);
+    friend class SourceArtifactInstallTrustedTransport;
 };
 
 // POLICY(#268): raw path executorは公開せず、correlated one-shot capabilityだけを受ける。

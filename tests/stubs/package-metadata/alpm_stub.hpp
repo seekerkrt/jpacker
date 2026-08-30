@@ -75,6 +75,9 @@ void enqueue_local_package_query_present(
     std::string returned_name,
     std::string version,
     alpm_pkgreason_t reason);
+void enqueue_local_package_query_present_metadata(
+    std::string expected_package_name,
+    LocalPackageMetadata returned_package);
 void enqueue_local_package_query_absent(std::string expected_package_name);
 void enqueue_local_package_query_failure(
     std::string expected_package_name,

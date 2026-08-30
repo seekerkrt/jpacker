@@ -1194,6 +1194,8 @@ assert_contains "$source_receipt_runner" 'F_SEAL_WRITE'
 assert_contains "$source_receipt_runner" 'moguet-source-artifact-install-helper'
 assert_contains "$source_receipt_runner" 'TRANSPORT_FIXTURE'
 assert_contains "$source_receipt_runner" 'run_production_transport'
+assert_contains "$source_receipt_runner" 'run_cleanup_lifecycle'
+assert_contains "$source_receipt_runner" 'authoritative installed cleanup lifecycle was not uniquely Eligible'
 assert_contains "$source_receipt_runner" 'CAUSAL'
 assert_contains "$source_receipt_runner" 'same-version reinstall became Install'
 assert_contains "$source_receipt_runner" 'downgrade became Install'
@@ -1205,6 +1207,12 @@ printf '%s\n' "$source_receipt_target_body" | grep -F -- '--network=none' >/dev/
 printf '%s\n' "$source_receipt_target_body" | grep -F -- \
     'run-installed-source-artifact-receipt.py' >/dev/null ||
     fail 'source-artifact receipt target does not run its owner-specific fixture'
+cleanup_authority_target_body=$(make_target_body test-container-cleanup-authority)
+printf '%s\n' "$cleanup_authority_target_body" | grep -F -- '--network=none' >/dev/null ||
+    fail 'cleanup-authority target lost its network-none boundary'
+printf '%s\n' "$cleanup_authority_target_body" | grep -F -- \
+    'run-installed-source-artifact-receipt.py' >/dev/null ||
+    fail 'cleanup-authority target does not run its installed lifecycle fixture'
 
 # The tracked fixture remains the Docker build input. Runtime cases consume its
 # pre-build root-owned authority and keep generated metadata case-local.

@@ -2,6 +2,7 @@
 
 #include "localization.hpp"
 #include "package_identifier.hpp"
+#include "invocation_owned_cleanup_adapter.hpp"
 
 #include <algorithm>
 #include <exception>
@@ -330,10 +331,55 @@ SeparatedPackageBaseSourceBuildCleanupError::release_result() && noexcept {
     return std::move(result_);
 }
 
+class SeparatedPackageBaseSourceBuildExecutionOwner final {
+public:
+    using InstallExecutor = PackageBaseArtifactInstallExecutionResult (*)(
+        PreparedPackageBaseArtifactInstall& install,
+        const ArtifactInstallExecutionOptions& options,
+        void* context);
+
+    static PackageBaseSourceBuildExecutionResult execute(
+        SeparatedPackageBaseSourceBuildRequest request,
+        const SeparatedSourceBuildUnitOptions& options,
+        InstallExecutor install_executor,
+        void* install_context);
+};
+
+namespace {
+
+PackageBaseArtifactInstallExecutionResult execute_legacy_install(
+    PreparedPackageBaseArtifactInstall& install,
+    const ArtifactInstallExecutionOptions& options,
+    void*) {
+    return execute_prepared_package_base_artifact_install(install, options);
+}
+
+struct CleanupInstallContext {
+    RemoteAurCleanupCandidateCollector* collector;
+    std::size_t work_item_index;
+};
+
+PackageBaseArtifactInstallExecutionResult execute_cleanup_authority_install(
+    PreparedPackageBaseArtifactInstall& install,
+    const ArtifactInstallExecutionOptions& options,
+    void* raw_context) {
+    auto* context = static_cast<CleanupInstallContext*>(raw_context);
+    if(context == nullptr || context->collector == nullptr) {
+        throw std::logic_error(
+            "Remote AUR cleanup source-artifact execution has no work-item attribution.");
+    }
+    return context->collector->execute_source_artifact_install_transaction(
+        install, context->work_item_index, options);
+}
+
+} // namespace
+
 PackageBaseSourceBuildExecutionResult
-execute_separated_package_base_source_build(
+SeparatedPackageBaseSourceBuildExecutionOwner::execute(
     SeparatedPackageBaseSourceBuildRequest request,
-    const SeparatedSourceBuildUnitOptions& options) {
+    const SeparatedSourceBuildUnitOptions& options,
+    InstallExecutor install_executor,
+    void* install_context) {
     // POLICY(#268): caller-controlled policy/identityを最初のworkspace mutation前に
     // 全件確定し、duplicate/mismatch/unknown reasonをselectionまで遅らせない。
     require_supported_separated_install_options(options.rm_deps);
@@ -564,9 +610,14 @@ execute_separated_package_base_source_build(
     }();
     PackageBaseArtifactInstallExecutionResult execution_result = [&]() {
         try {
-            return execute_prepared_package_base_artifact_install(
+            if(install_executor == nullptr) {
+                throw std::logic_error(
+                    "PackageBase source-build install executor is unavailable.");
+            }
+            return install_executor(
                 prepared,
-                ArtifactInstallExecutionOptions{options.no_confirm});
+                ArtifactInstallExecutionOptions{options.no_confirm},
+                install_context);
         } catch(PackageBaseArtifactInstallTransactionError& error) {
             production_outcome.install_outcome =
                 ProductionSourceInstallOutcome::Failed;
@@ -619,6 +670,26 @@ execute_separated_package_base_source_build(
                 "Package installation succeeded, but artifact workspace cleanup failed with an unknown error."));
     }
     return result;
+}
+
+PackageBaseSourceBuildExecutionResult
+execute_separated_package_base_source_build(
+    SeparatedPackageBaseSourceBuildRequest request,
+    const SeparatedSourceBuildUnitOptions& options) {
+    return SeparatedPackageBaseSourceBuildExecutionOwner::execute(
+        std::move(request), options, execute_legacy_install, nullptr);
+}
+
+PackageBaseSourceBuildExecutionResult
+execute_separated_package_base_source_build_with_cleanup_authority(
+    SeparatedPackageBaseSourceBuildRequest request,
+    const SeparatedSourceBuildUnitOptions& options,
+    RemoteAurCleanupCandidateCollector& collector,
+    std::size_t work_item_index) {
+    CleanupInstallContext context{&collector, work_item_index};
+    return SeparatedPackageBaseSourceBuildExecutionOwner::execute(
+        std::move(request), options, execute_cleanup_authority_install,
+        &context);
 }
 
 #ifdef MOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS

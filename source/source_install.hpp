@@ -21,6 +21,7 @@
 struct AppConfig;
 class LocalBuildPlan;
 class LocalSourceBuildDependencyPreparation;
+class RemoteAurCleanupCandidateCollector;
 struct PreparedProductionSourceBuildInvocation;
 
 PreparedProductionSourceBuildInvocation
@@ -1002,4 +1003,11 @@ execute_prepared_source_build_work_item(
 // 検証済みのsingular compatibilityへroutingする。DB snapshotを再queryしない。
 ProductionSourceBuildInvocationResult execute_prepared_source_build_invocation(
     PreparedProductionSourceBuildInvocation invocation,
+    const AppConfig& config);
+
+// Closed remote-AUR collector entry. The collector owns the invocation/session
+// and this function cannot mint or accept independent cleanup evidence.
+ProductionSourceBuildInvocationResult
+execute_prepared_remote_aur_cleanup_invocation(
+    RemoteAurCleanupCandidateCollector& collector,
     const AppConfig& config);

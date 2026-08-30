@@ -14,14 +14,17 @@
 void run_invocation_owned_cleanup_adapter_tests();
 void run_trusted_alpm_receipt_tests();
 void run_source_artifact_install_receipt_evidence_tests();
+void run_remote_aur_cleanup_candidate_collector_tests();
 
 // The focused target compiles the existing typed dependency requirement
 // implementation but never evaluates a version constraint. Keeping this
 // deterministic stub local proves that the cleanup classifier has no libalpm
 // runtime dependency.
+#ifndef MOGUET_ENABLE_REMOTE_AUR_CLEANUP_COLLECTOR_TEST_HOOKS
 extern "C" int alpm_pkg_vercmp(const char* lhs, const char* rhs) {
     return std::strcmp(lhs, rhs);
 }
+#endif
 
 namespace {
 
@@ -890,8 +893,17 @@ void test_precedence_and_reason_ordering() {
 
 } // namespace
 
-int main() {
+int main(int argc, char* argv[]) {
     try {
+        if(argc == 2 &&
+           std::string(argv[1]) == "--collector-only") {
+            run_remote_aur_cleanup_candidate_collector_tests();
+            return 0;
+        }
+        if(argc != 1) {
+            throw std::runtime_error(
+                "unknown invocation-owned cleanup test mode");
+        }
         test_complete_transaction_receipt_tracks_actual_installs();
         test_malformed_transaction_receipts_are_invalid();
         test_missing_incomplete_and_mismatched_receipts_fail_closed();
@@ -915,6 +927,7 @@ int main() {
         run_invocation_owned_cleanup_adapter_tests();
         run_trusted_alpm_receipt_tests();
         run_source_artifact_install_receipt_evidence_tests();
+        run_remote_aur_cleanup_candidate_collector_tests();
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

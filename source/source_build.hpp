@@ -14,6 +14,7 @@
 #include <vector>
 
 struct AppConfig;
+class RemoteAurCleanupCandidateCollector;
 class ReviewedSourceFatalStatePreflightSlot;
 
 enum class SourceBuildExecutionStatus {
@@ -170,6 +171,16 @@ execute_prepared_source_build_package_base_typed(
     const PacmanDatabasePaths& database_paths,
     const AppConfig& config);
 
+PackageBaseSourceBuildExecutionResult
+execute_prepared_source_build_package_base_with_cleanup_authority(
+    const SourceBuildRequest& request,
+    const std::vector<RequiredPackageArtifactTarget>& required_targets,
+    PreparedSourceBuildNeedsBuild prepared,
+    const PacmanDatabasePaths& database_paths,
+    const AppConfig& config,
+    RemoteAurCleanupCandidateCollector& collector,
+    std::size_t work_item_index);
+
 SourceBuildExecutionResult execute_source_build_typed(
     const SourceBuildRequest& request,
     const ValidatedCacheRoot& cache_root,
@@ -186,6 +197,16 @@ execute_source_build_package_base_typed(
     const ValidatedCacheRoot& cache_root,
     const PacmanDatabasePaths& database_paths,
     const AppConfig& config);
+
+PackageBaseSourceBuildExecutionResult
+execute_source_build_package_base_with_cleanup_authority(
+    const SourceBuildRequest& request,
+    const std::vector<RequiredPackageArtifactTarget>& required_targets,
+    const ValidatedCacheRoot& cache_root,
+    const PacmanDatabasePaths& database_paths,
+    const AppConfig& config,
+    RemoteAurCleanupCandidateCollector& collector,
+    std::size_t work_item_index);
 
 // generic only-if-updated経路がinstall前に正常skipした場合だけnulloptを返す。
 // artifact transaction成功後はpackage stateのtyped outcomeを返すlegacy wrapper。

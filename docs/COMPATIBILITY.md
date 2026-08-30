@@ -306,12 +306,17 @@ selected childだけがinstall input、install reason、installed / skipped-as-n
 source-build routeでは`makepkg -r`、`pacman -Rns`、`pacman -Qdt`、独自orphan cleanup、automatic rollbackへ変換しない。`--noconfirm`でも拒否を突破しない。
 
 current internal treeには、validated source artifact bytesをwrite-sealed snapshotからroot-owned stagingへ移し、
-actual `pacman -U`のInstall-only receiptを取得する`SourceArtifactInstall`専用transportがある。ただし、
+actual `pacman -U`のInstall-only receiptを取得する`SourceArtifactInstall`専用transportがある。Issue #485 Slice 5は、
 trusted executor-issued selected-provider evidence、non-reconstructible invocation session、owner/work-item別token inventory、
 全BuildPlan edgeのexhaustive classification、nonempty completeness、exact current PackageBase / architecture、
-phase-bound baseline/current/policyを含むinternal authorityまでがproduction未接続で成立している一方、
-これらをfinal candidateへ束ねるproduction collectorへは未接続であり、
-このinternal foundationはpublic `--rmdeps` supportやcleanup candidate eligibilityを意味しない。
+phase-bound baseline/current/policyを、remote AUR専用の単一closed production collector内部でfinal candidate assessmentまで
+一方向に接続した。candidate originはowner-specific actual selected `Install`だけであり、solver-introduced package、
+snapshot差分、orphan state、makepkg syncdepsはcandidate化しない。authoritative installed fixtureはcompleteな1 candidateだけが
+`Eligible`へ到達することと、各authorityを崩したnegativeがnon-Eligibleであることを確認する。
+
+このinternal completionはpublic `--rmdeps` supportではない。assessmentをpreview、prompt、confirmation、removeへ
+公開せず、public source-buildは引き続きexternal mutation前に`--rmdeps`を拒否する。makepkg syncdeps authorityは
+#484 / #501、mutation直前revalidationとremovalは#486の独立scopeであり、Issue #485だけでcleanup executionをGOにしない。
 
 pacman-only routeでは、Moguetがmakepkg dependency installation lifecycleを実行しない。そのためcleanup対象となるinvocation-owned dependency集合自体が発生せず、Moguetはoptionを消費するが作用させず、pacmanへ転送しない。このno-opはsource-build routeで意味のあるcleanupを黙って無視することとは異なる。pacman-onlyでは安全に作用させるcleanup lifecycleが存在しないからである。decision 1の「黙って無視せず、意味を安全に維持できない場合は停止する」とも矛盾しない。
 

@@ -102,6 +102,50 @@ execute_trusted_alpm_receipt_selected_provider_transaction(
     return result;
 }
 
+namespace remote_cleanup_collector_stub {
+
+std::size_t call_count = 0;
+
+void reset() {
+    call_count = 0;
+}
+
+} // namespace remote_cleanup_collector_stub
+
+RemoteAurCleanupCollectionResult collect_remote_aur_cleanup_candidates(
+    PreparedRemoteSourceBuild prepared,
+    const AppConfig& config) {
+    ++remote_cleanup_collector_stub::call_count;
+    ProductionSourceBuildInvocationResult result =
+        execute_prepared_source_build_invocation(
+            std::move(prepared.invocation), config);
+    return RemoteAurCleanupCollectionResult(
+        std::move(result), CleanupEvidenceCompleteness::Incomplete,
+        {}, {RemoteAurCleanupCollectionIssueKind::CandidateOriginMissing});
+}
+
+bool RemoteAurCleanupCandidateCollector::
+    should_use_trusted_source_artifact_install(std::size_t) const noexcept {
+    return false;
+}
+
+SelectedRepositoryProviderTransactionResult
+RemoteAurCleanupCandidateCollector::
+    execute_selected_repository_provider_transaction(const AppConfig&) {
+    throw std::logic_error(
+        "production-source-build collector stub was used as an executor");
+}
+
+PackageBaseArtifactInstallExecutionResult
+RemoteAurCleanupCandidateCollector::
+    execute_source_artifact_install_transaction(
+        PreparedPackageBaseArtifactInstall&,
+        std::size_t,
+        const ArtifactInstallExecutionOptions&) {
+    throw std::logic_error(
+        "production-source-build collector stub was used as a source-artifact executor");
+}
+
 namespace {
 
 namespace fs = std::filesystem;

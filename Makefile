@@ -65,6 +65,7 @@ CMAKE_FOCUSED_ALIASES := \
 	test-source-package-identity-projection \
 	test-source-package-compatibility \
 	test-invocation-owned-cleanup-model \
+	test-remote-aur-cleanup-collector \
 	test-source-artifact-install-trusted-transport \
 	test-reviewed-source-state \
 	test-reviewed-source-state-store \
@@ -292,6 +293,7 @@ export MOGUET_FRONTEND_USE_DEFAULT_COMPILE_OPTIONS
 	test-container-live-aur \
 	test-container-live-local \
 	test-container-receipt \
+	test-container-cleanup-authority \
 	test-container-source-artifact-receipt
 .PHONY: check-reviewed-source-pinned-build-authority $(CMAKE_FOCUSED_ALIASES)
 
@@ -662,6 +664,19 @@ test-container-source-artifact-receipt:
 			--file containers/arch-receipt-validation/Dockerfile \
 			.; \
 		printf '%s\n' ':: Running source-artifact receipt validation container'; \
+		$(DOCKER) run --rm --network=none \
+			"$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
+			/usr/bin/python3 \
+			containers/arch-receipt-validation/run-installed-source-artifact-receipt.py
+
+test-container-cleanup-authority:
+	@set -eu; \
+		printf '%s\n' ':: Building closed cleanup-authority validation image'; \
+		$(DOCKER) build --network=none \
+			--tag "$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
+			--file containers/arch-receipt-validation/Dockerfile \
+			.; \
+		printf '%s\n' ':: Running closed cleanup-authority validation container'; \
 		$(DOCKER) run --rm --network=none \
 			"$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
 			/usr/bin/python3 \

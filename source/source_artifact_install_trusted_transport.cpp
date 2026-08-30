@@ -571,7 +571,205 @@ class SourceArtifactInstallTrustedTransport final {
         return true;
     }
 
+    static const PlannedPackageTarget* find_unique_target(
+        const BuildPlan& plan,
+        const std::string& package_name,
+        const std::string& package_base) noexcept {
+        const PlannedPackageTarget* match = nullptr;
+        for(const PlannedPackageTarget& target : plan.package_targets) {
+            if(target.package_name != package_name ||
+               target.package_base != package_base) {
+                continue;
+            }
+            if(match != nullptr) return nullptr;
+            match = &target;
+        }
+        return match;
+    }
+
+    static bool edge_identity_matches_artifact(
+        const BuildPlanDependencyEdge& edge,
+        const ArtifactPackageIdentity& artifact) {
+        if(!edge.resolved_candidate.has_value() ||
+           !edge.requirement.has_value() ||
+           !edge.constraint_evaluation.has_value()) {
+            return false;
+        }
+        const ConstraintSatisfaction satisfaction =
+            edge.constraint_evaluation->satisfaction();
+        if(satisfaction != ConstraintSatisfaction::Satisfied &&
+           satisfaction != ConstraintSatisfaction::Unconstrained) {
+            return false;
+        }
+        SourcePackageIdentityProjectionResult projection =
+            project_dependency_source_package_identity(
+                edge.resolved_candidate.value());
+        const SourcePackageIdentityProjectionSuccess* success =
+            projection.success();
+        if(success == nullptr || success->identities.size() != 1) {
+            return false;
+        }
+        const SourceAwarePackageIdentity& identity =
+            success->identities.front();
+        const std::string* version =
+            identity.package_version().full_version();
+        return identity.package()
+                       .package_base()
+                       .source()
+                       .kind() == PackageSourceKind::Aur &&
+               identity.package().package_name() == artifact.package_name &&
+               identity.package().package_base().package_base() ==
+                   (artifact.package_base.value() == nullptr
+                        ? std::string{}
+                        : *artifact.package_base.value()) &&
+               identity.package_version().state() ==
+                   PackageVersionState::Known &&
+               version != nullptr && *version == artifact.full_version;
+    }
+
 public:
+    static std::optional<SourceArtifactInstallTrustedBinding>
+    project_session_binding(
+        const PreparedPackageBaseArtifactInstall& install,
+        const CleanupInvocationAuthority& authority,
+        std::size_t work_item_index) {
+        if(!authority.is_active() || !authority.baseline_was_observed()) {
+            return std::nullopt;
+        }
+        const PreparedRemoteSourceBuild& prepared = authority.prepared();
+        if(prepared.source.source_kind() != SourceBuildSourceKind::Aur ||
+           !prepared.aur_build_plan.has_value() ||
+           work_item_index >= prepared.invocation.work_items.size()) {
+            return std::nullopt;
+        }
+        const BuildPlan& plan = prepared.aur_build_plan.value();
+        const ProductionSourceBuildWorkItem& work_item =
+            prepared.invocation.work_items[work_item_index];
+        if(work_item.request.checkout_name != install.package_base_ ||
+           work_item.required_target_provenance !=
+               RequiredTargetProvenance::AurBuildPlanProjection ||
+           !work_item.request.aur_review_identity.has_value() ||
+           work_item.request.aur_review_identity->package_base() !=
+               install.package_base_ ||
+           work_item.request.aur_review_identity->source().kind() !=
+               PackageSourceKind::Aur ||
+           install.selected_artifacts_.empty()) {
+            return std::nullopt;
+        }
+
+        SourceArtifactInstallTrustedBinding binding;
+        binding.work_item = SourceArtifactInstallWorkItemBinding{
+            authority, work_item_index, install.package_base_, {}};
+        binding.selected_artifacts.reserve(
+            install.selected_artifacts_.size());
+        for(const PreparedPackageBaseArtifactInstallSelectedArtifact&
+                selected : install.selected_artifacts_) {
+            const std::string* package_base =
+                selected.identity.package_base.value();
+            const std::string* architecture =
+                selected.identity.architecture.value();
+            if(selected.desired_reason !=
+                   DesiredInstallReason::Dependency ||
+               package_base == nullptr || architecture == nullptr ||
+               *package_base != install.package_base_) {
+                return std::nullopt;
+            }
+
+            const auto required = std::find_if(
+                work_item.required_targets.begin(),
+                work_item.required_targets.end(),
+                [&selected, &install](
+                    const RequiredPackageArtifactTarget& target) {
+                    return target.package_base == install.package_base_ &&
+                           target.package_name ==
+                               selected.identity.package_name &&
+                           target.desired_reason ==
+                               DesiredInstallReason::Dependency;
+                });
+            if(required == work_item.required_targets.end() ||
+               std::count_if(
+                   work_item.required_targets.begin(),
+                   work_item.required_targets.end(),
+                   [&selected, &install](
+                       const RequiredPackageArtifactTarget& target) {
+                       return target.package_base == install.package_base_ &&
+                              target.package_name ==
+                                  selected.identity.package_name;
+                   }) != 1) {
+                return std::nullopt;
+            }
+
+            const PlannedPackageTarget* target = find_unique_target(
+                plan, selected.identity.package_name, install.package_base_);
+            if(target == nullptr || target->roots.empty() ||
+               !roots_are_valid_and_unique(target->roots) ||
+               !roles_are_valid_and_unique(target->roles)) {
+                return std::nullopt;
+            }
+
+            std::vector<std::size_t> edge_indices;
+            std::vector<PackageRole> roles;
+            for(const std::size_t edge_index :
+                work_item.build_plan_dependency_edge_indices) {
+                if(edge_index >= plan.dependency_edges.size()) {
+                    return std::nullopt;
+                }
+                const BuildPlanDependencyEdge& edge =
+                    plan.dependency_edges[edge_index];
+                if(!edge_identity_matches_artifact(
+                       edge, selected.identity)) {
+                    continue;
+                }
+                if(edge.role != PackageRole::BuildDependency &&
+                   edge.role != PackageRole::CheckDependency) {
+                    return std::nullopt;
+                }
+                edge_indices.push_back(edge_index);
+                if(std::find(roles.begin(), roles.end(), edge.role) ==
+                   roles.end()) {
+                    roles.push_back(edge.role);
+                }
+            }
+            if(edge_indices.empty() || roles.size() != target->roles.size() ||
+               std::any_of(
+                   target->roles.begin(), target->roles.end(),
+                   [&roles](PackageRole role) {
+                       return std::find(roles.begin(), roles.end(), role) ==
+                              roles.end();
+                   })) {
+                return std::nullopt;
+            }
+
+            SourceAwarePackageIdentity expected_identity =
+                SourceAwarePackageIdentity::make(
+                    PackageChildIdentity::make(
+                        work_item.request.aur_review_identity.value(),
+                        selected.identity.package_name),
+                    SourceRevisionIdentity::unknown(),
+                    PackageVersionIdentity::composite(
+                        selected.identity.full_version),
+                    PackageArchitectureIdentity::known({*architecture}));
+            binding.selected_artifacts.push_back(
+                SourceArtifactInstallExpectedSelectedArtifact{
+                    selected.artifact_index,
+                    std::move(expected_identity),
+                    DesiredInstallReason::Dependency,
+                    std::move(roles),
+                    target->roots,
+                    std::move(edge_indices)});
+            for(const RootTargetIdentity& root : target->roots) {
+                if(std::find(
+                       binding.work_item.requested_roots.begin(),
+                       binding.work_item.requested_roots.end(), root) ==
+                   binding.work_item.requested_roots.end()) {
+                    binding.work_item.requested_roots.push_back(root);
+                }
+            }
+        }
+        if(!binding_is_coherent(install, binding)) return std::nullopt;
+        return binding;
+    }
+
     static bool register_transaction_token(
         const SourceArtifactInstallTrustedBinding& binding,
         const std::string& transaction_token) {
@@ -585,6 +783,24 @@ public:
     }
 
 private:
+    static PackageBaseArtifactInstallExecutionResult make_operation_result(
+        const PreparedPackageBaseArtifactInstall& install) {
+        std::vector<PackageBaseArtifactInstallExecutionArtifactResult>
+            artifacts;
+        artifacts.reserve(install.selected_artifacts_.size());
+        for(const PreparedPackageBaseArtifactInstallSelectedArtifact&
+                artifact : install.selected_artifacts_) {
+            artifacts.push_back(
+                PackageBaseArtifactInstallExecutionArtifactResult{
+                    artifact.artifact_index,
+                    artifact.identity,
+                    artifact.desired_reason,
+                    artifact.expected_outcome});
+        }
+        return PackageBaseArtifactInstallExecutionResult(
+            install.package_base_, std::move(artifacts));
+    }
+
     static PreparedTransportInput snapshot_selected_artifacts(
         PreparedPackageBaseArtifactInstall& install,
         const SourceArtifactInstallTrustedBinding& binding,
@@ -887,6 +1103,12 @@ public:
                     : "source-artifact pacman transaction and exact abort failed");
         }
 
+        // Operation success is fixed immediately after pacman exits 0. The
+        // later receipt/consume path may fail closed for cleanup authority,
+        // but it must not rewrite this completed installation as failure.
+        PackageBaseArtifactInstallExecutionResult operation_result =
+            make_operation_result(install);
+
         ExplicitProcessInvocation consume =
             helper_invocation("consume", transaction_token);
         consume.stdout_capture_limit =
@@ -913,7 +1135,8 @@ public:
                 0, std::move(expectation), std::move(observation),
                 abort_status == 0
                     ? "source-artifact receipt consume observation failed"
-                    : "source-artifact receipt consume observation and exact abort failed");
+                    : "source-artifact receipt consume observation and exact abort failed",
+                std::move(operation_result));
         }
         if(consume_result.exit_code != 0) {
             const int abort_status =
@@ -934,7 +1157,8 @@ public:
                 0, std::move(expectation), std::move(observation),
                 abort_status == 0
                     ? "source-artifact receipt consume failed"
-                    : "source-artifact receipt consume and exact abort failed");
+                    : "source-artifact receipt consume and exact abort failed",
+                std::move(operation_result));
         }
         if(consume_result.stdout_capture_limit_exceeded) {
             auto observation = make_observation(
@@ -947,7 +1171,8 @@ public:
             return SourceArtifactInstallTrustedExecutionResult(
                 SourceArtifactInstallTrustedExecutionStatus::MalformedReceipt,
                 0, std::move(expectation), std::move(observation),
-                "source-artifact receipt exceeded its capture limit");
+                "source-artifact receipt exceeded its capture limit",
+                std::move(operation_result));
         }
 
         const SourceArtifactInstallRootReceiptResult parsed_receipt =
@@ -967,7 +1192,8 @@ public:
             return SourceArtifactInstallTrustedExecutionResult(
                 SourceArtifactInstallTrustedExecutionStatus::MalformedReceipt,
                 0, std::move(expectation), std::move(observation),
-                "source-artifact receipt protocol was malformed or mismatched");
+                "source-artifact receipt protocol was malformed or mismatched",
+                std::move(operation_result));
         }
         if(receipt->state ==
            SourceArtifactInstallRootReceiptState::Missing) {
@@ -981,7 +1207,7 @@ public:
             return SourceArtifactInstallTrustedExecutionResult(
                 SourceArtifactInstallTrustedExecutionStatus::Missing, 0,
                 std::move(expectation), std::move(observation),
-                std::nullopt);
+                std::nullopt, std::move(operation_result));
         }
 
         std::vector<PacmanTransactionPackageObservation> operations;
@@ -1020,7 +1246,8 @@ public:
             session_completion_recorded
                 ? std::nullopt
                 : std::optional<std::string>{
-                      "source-artifact cleanup session rejected transaction completion"});
+                      "source-artifact cleanup session rejected transaction completion"},
+            std::move(operation_result));
     }
 };
 
@@ -1030,11 +1257,14 @@ SourceArtifactInstallTrustedExecutionResult::
         std::optional<int> pacman_exit_status,
         std::optional<SourceArtifactInstallReceiptExpectation> expectation,
         std::optional<SourceArtifactInstallReceiptObservation> observation,
-        std::optional<std::string> diagnostic) noexcept
+        std::optional<std::string> diagnostic,
+        std::optional<PackageBaseArtifactInstallExecutionResult>
+            operation_result) noexcept
     : status_(status), pacman_exit_status_(pacman_exit_status),
       expectation_(std::move(expectation)),
       observation_(std::move(observation)),
-      diagnostic_(std::move(diagnostic)) {
+      diagnostic_(std::move(diagnostic)),
+      operation_result_(std::move(operation_result)) {
 }
 
 SourceArtifactInstallTrustedExecutionStatus
@@ -1056,6 +1286,12 @@ SourceArtifactInstallTrustedExecutionResult::expectation() const noexcept {
 const std::optional<SourceArtifactInstallReceiptObservation>&
 SourceArtifactInstallTrustedExecutionResult::observation() const noexcept {
     return observation_;
+}
+
+const std::optional<PackageBaseArtifactInstallExecutionResult>&
+SourceArtifactInstallTrustedExecutionResult::operation_result()
+    const noexcept {
+    return operation_result_;
 }
 
 const std::optional<std::string>&
@@ -1109,6 +1345,29 @@ execute_source_artifact_install_trusted_transaction(
                 ArtifactSnapshotFailed,
             "source-artifact immutable snapshot failed before root preparation");
     }
+}
+
+SourceArtifactInstallTrustedExecutionResult
+execute_source_artifact_install_trusted_transaction(
+    PreparedPackageBaseArtifactInstall& install,
+    CleanupInvocationAuthority invocation_authority,
+    std::size_t work_item_index,
+    const ArtifactInstallExecutionOptions& options) {
+    std::optional<SourceArtifactInstallTrustedBinding> binding;
+    try {
+        binding = SourceArtifactInstallTrustedTransport::
+            project_session_binding(
+                install, invocation_authority, work_item_index);
+    } catch(...) {
+        binding.reset();
+    }
+    if(!binding.has_value()) {
+        return SourceArtifactInstallTrustedTransport::invalid_result(
+            SourceArtifactInstallTrustedExecutionStatus::InvalidRequest,
+            "source-artifact cleanup session binding is invalid");
+    }
+    return execute_source_artifact_install_trusted_transaction(
+        install, *binding, options);
 }
 
 #ifdef MOGUET_ENABLE_SOURCE_ARTIFACT_INSTALL_TRUSTED_TRANSPORT_TEST_HOOKS

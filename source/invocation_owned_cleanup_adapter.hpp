@@ -3,6 +3,7 @@
 #include "invocation_owned_cleanup_model.hpp"
 #include "package_metadata.hpp"
 #include "source_artifact_install_receipt_evidence.hpp"
+#include "source_artifact_install_trusted_transport.hpp"
 #include "source_install.hpp"
 
 #include <cstddef>
@@ -11,6 +12,8 @@
 #include <string>
 #include <variant>
 #include <vector>
+
+struct AppConfig;
 
 enum class CleanupLifecycleBoundary {
     BeforeBuildCompletion,
@@ -687,3 +690,153 @@ project_invocation_owned_cleanup_candidate(
     const CleanupInvocationLifecycleEvidence& lifecycle,
     const std::vector<SelectedRepositoryProviderTransactionResult>&
         provider_transactions = {});
+
+enum class RemoteAurCleanupCollectionIssueKind {
+    InvalidRemoteAurPreparation,
+    CurrentObservationUnavailable,
+    CandidateOriginMissing,
+    CandidateIdentityConflict,
+    CandidateCorrelationIncomplete,
+    PolicyObservationUnavailable,
+    InvocationAggregateIncomplete,
+};
+
+struct RemoteAurCleanupCandidateAssessment {
+    SourceAwarePackageIdentity package;
+    CleanupClassification classification;
+    std::vector<CleanupClassificationReason> reasons;
+};
+
+// A selected-provider failure happens before any PackageBase work item. Keep
+// the complete preinitialized ordered result without falsely attributing that
+// invocation-level failure to one work item.
+class RemoteAurCleanupInvocationExecutionError final
+    : public std::runtime_error {
+public:
+    RemoteAurCleanupInvocationExecutionError(
+        ProductionSourceBuildInvocationResult result,
+        SelectedRepositoryProviderTransactionResult provider_transaction,
+        const std::string& diagnostic);
+
+    [[nodiscard]] const ProductionSourceBuildInvocationResult& result()
+        const noexcept;
+    [[nodiscard]] const SelectedRepositoryProviderTransactionResult&
+    provider_transaction() const noexcept;
+
+private:
+    ProductionSourceBuildInvocationResult result_;
+    SelectedRepositoryProviderTransactionResult provider_transaction_;
+};
+
+// This result deliberately contains no session authority, raw aggregate, or
+// candidate input. It reports the already-completed build/install operation
+// independently from the internal cleanup assessment.
+class RemoteAurCleanupCollectionResult final {
+public:
+    RemoteAurCleanupCollectionResult() = delete;
+    RemoteAurCleanupCollectionResult(
+        const RemoteAurCleanupCollectionResult&) = default;
+    RemoteAurCleanupCollectionResult(
+        RemoteAurCleanupCollectionResult&&) noexcept = default;
+    RemoteAurCleanupCollectionResult& operator=(
+        const RemoteAurCleanupCollectionResult&) = default;
+    RemoteAurCleanupCollectionResult& operator=(
+        RemoteAurCleanupCollectionResult&&) noexcept = default;
+    ~RemoteAurCleanupCollectionResult() = default;
+
+    [[nodiscard]] const ProductionSourceBuildInvocationResult&
+    invocation_result() const noexcept;
+    [[nodiscard]] CleanupEvidenceCompleteness completeness() const noexcept;
+    [[nodiscard]] const std::vector<RemoteAurCleanupCandidateAssessment>&
+    assessments() const noexcept;
+    [[nodiscard]] const std::vector<RemoteAurCleanupCollectionIssueKind>&
+    issues() const noexcept;
+    [[nodiscard]] bool has_eligible_candidate() const noexcept;
+
+private:
+    RemoteAurCleanupCollectionResult(
+        ProductionSourceBuildInvocationResult invocation_result,
+        CleanupEvidenceCompleteness completeness,
+        std::vector<RemoteAurCleanupCandidateAssessment> assessments,
+        std::vector<RemoteAurCleanupCollectionIssueKind> issues) noexcept;
+
+    ProductionSourceBuildInvocationResult invocation_result_;
+    CleanupEvidenceCompleteness completeness_;
+    std::vector<RemoteAurCleanupCandidateAssessment> assessments_;
+    std::vector<RemoteAurCleanupCollectionIssueKind> issues_;
+
+    friend class RemoteAurCleanupCandidateCollector;
+    friend RemoteAurCleanupCollectionResult
+    collect_remote_aur_cleanup_candidates(
+        PreparedRemoteSourceBuild prepared,
+        const AppConfig& config);
+};
+
+// The only production owner that mints CleanupInvocationSession. Construction
+// is private, one collector consumes one PreparedRemoteSourceBuild, and no
+// session or aggregate escapes in the public result.
+class RemoteAurCleanupCandidateCollector final {
+public:
+    RemoteAurCleanupCandidateCollector() = delete;
+    RemoteAurCleanupCandidateCollector(
+        const RemoteAurCleanupCandidateCollector&) = delete;
+    RemoteAurCleanupCandidateCollector& operator=(
+        const RemoteAurCleanupCandidateCollector&) = delete;
+    RemoteAurCleanupCandidateCollector(
+        RemoteAurCleanupCandidateCollector&&) = delete;
+    RemoteAurCleanupCandidateCollector& operator=(
+        RemoteAurCleanupCandidateCollector&&) = delete;
+    ~RemoteAurCleanupCandidateCollector() = default;
+
+    // Orchestration-only methods. A collector reference is never exposed by
+    // collect_remote_aur_cleanup_candidates(), so another production caller
+    // cannot use these as a session or approval-token factory.
+    [[nodiscard]] PreparedProductionSourceBuildInvocation&
+    prepared_invocation_for_execution() noexcept;
+    [[nodiscard]] bool should_use_trusted_source_artifact_install(
+        std::size_t work_item_index) const noexcept;
+    [[nodiscard]] SelectedRepositoryProviderTransactionResult
+    execute_selected_repository_provider_transaction(
+        const AppConfig& config);
+    [[nodiscard]] PackageBaseArtifactInstallExecutionResult
+    execute_source_artifact_install_transaction(
+        PreparedPackageBaseArtifactInstall& install,
+        std::size_t work_item_index,
+        const ArtifactInstallExecutionOptions& options);
+
+#ifdef MOGUET_ENABLE_REMOTE_AUR_CLEANUP_COLLECTOR_TEST_HOOKS
+    [[nodiscard]] CleanupInvocationSession& session_for_test() noexcept;
+    [[nodiscard]] const PreparedRemoteSourceBuild& prepared_for_test()
+        const noexcept;
+    void retain_source_artifact_causal_evidence_for_test(
+        SourceArtifactInstallCausalEvidence evidence);
+    void retain_selected_provider_execution_for_test(
+        SelectedRepositoryProviderTrustedReceiptExecutionResult execution);
+#endif
+
+private:
+    explicit RemoteAurCleanupCandidateCollector(
+        PreparedRemoteSourceBuild prepared);
+
+    [[nodiscard]] RemoteAurCleanupCollectionResult finish(
+        ProductionSourceBuildInvocationResult result);
+
+    CleanupInvocationSession session_;
+    std::optional<CleanupBaselineSnapshotObservation> baseline_;
+    std::optional<SelectedRepositoryProviderTrustedReceiptExecutionResult>
+        selected_provider_execution_;
+    std::vector<SourceArtifactInstallTrustedExecutionResult>
+        source_artifact_executions_;
+    std::vector<SourceArtifactInstallCausalEvidence>
+        source_artifact_causal_evidence_;
+
+    friend RemoteAurCleanupCollectionResult
+    collect_remote_aur_cleanup_candidates(
+        PreparedRemoteSourceBuild prepared,
+        const AppConfig& config);
+};
+
+[[nodiscard]] RemoteAurCleanupCollectionResult
+collect_remote_aur_cleanup_candidates(
+    PreparedRemoteSourceBuild prepared,
+    const AppConfig& config);

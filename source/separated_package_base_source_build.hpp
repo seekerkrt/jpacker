@@ -11,6 +11,9 @@
 #include <utility>
 #include <vector>
 
+class RemoteAurCleanupCandidateCollector;
+class SeparatedPackageBaseSourceBuildExecutionOwner;
+
 #ifdef MOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
 #include <filesystem>
 #endif
@@ -74,6 +77,13 @@ class PackageBaseSourceBuildExecutionResult final {
     execute_separated_package_base_source_build(
         SeparatedPackageBaseSourceBuildRequest request,
         const SeparatedSourceBuildUnitOptions& options);
+    friend PackageBaseSourceBuildExecutionResult
+    execute_separated_package_base_source_build_with_cleanup_authority(
+        SeparatedPackageBaseSourceBuildRequest request,
+        const SeparatedSourceBuildUnitOptions& options,
+        RemoteAurCleanupCandidateCollector& collector,
+        std::size_t work_item_index);
+    friend class SeparatedPackageBaseSourceBuildExecutionOwner;
     friend class LocalSourceInstallAccess;
 
 public:
@@ -322,6 +332,13 @@ PackageBaseSourceBuildExecutionResult
 execute_separated_package_base_source_build(
     SeparatedPackageBaseSourceBuildRequest request,
     const SeparatedSourceBuildUnitOptions& options);
+
+PackageBaseSourceBuildExecutionResult
+execute_separated_package_base_source_build_with_cleanup_authority(
+    SeparatedPackageBaseSourceBuildRequest request,
+    const SeparatedSourceBuildUnitOptions& options,
+    RemoteAurCleanupCandidateCollector& collector,
+    std::size_t work_item_index);
 
 #ifdef MOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
 using SeparatedPackageBaseSourceBuildWorkspaceObserverForTest =

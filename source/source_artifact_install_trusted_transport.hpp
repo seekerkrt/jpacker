@@ -55,6 +55,11 @@ public:
     [[nodiscard]] const std::optional<
         SourceArtifactInstallReceiptObservation>&
     observation() const noexcept;
+    // A successful pacman transaction remains an operation success even when
+    // the separate cleanup receipt is missing, malformed, or unavailable.
+    [[nodiscard]] const std::optional<
+        PackageBaseArtifactInstallExecutionResult>&
+    operation_result() const noexcept;
     [[nodiscard]] const std::optional<std::string>& diagnostic()
         const noexcept;
 
@@ -64,13 +69,17 @@ private:
         std::optional<int> pacman_exit_status,
         std::optional<SourceArtifactInstallReceiptExpectation> expectation,
         std::optional<SourceArtifactInstallReceiptObservation> observation,
-        std::optional<std::string> diagnostic) noexcept;
+        std::optional<std::string> diagnostic,
+        std::optional<PackageBaseArtifactInstallExecutionResult>
+            operation_result = std::nullopt) noexcept;
 
     SourceArtifactInstallTrustedExecutionStatus status_;
     std::optional<int> pacman_exit_status_;
     std::optional<SourceArtifactInstallReceiptExpectation> expectation_;
     std::optional<SourceArtifactInstallReceiptObservation> observation_;
     std::optional<std::string> diagnostic_;
+    std::optional<PackageBaseArtifactInstallExecutionResult>
+        operation_result_;
 
     friend class SourceArtifactInstallTrustedTransport;
 };
@@ -83,6 +92,16 @@ private:
 execute_source_artifact_install_trusted_transaction(
     PreparedPackageBaseArtifactInstall& install,
     const SourceArtifactInstallTrustedBinding& binding,
+    const ArtifactInstallExecutionOptions& options);
+
+// Production cleanup collection derives roots, roles, edge indices, source,
+// version, and architecture from the exact session-owned preparation and the
+// prepared artifact set. Callers cannot provide a parallel positive binding.
+[[nodiscard]] SourceArtifactInstallTrustedExecutionResult
+execute_source_artifact_install_trusted_transaction(
+    PreparedPackageBaseArtifactInstall& install,
+    CleanupInvocationAuthority invocation_authority,
+    std::size_t work_item_index,
     const ArtifactInstallExecutionOptions& options);
 
 #ifdef MOGUET_ENABLE_SOURCE_ARTIFACT_INSTALL_TRUSTED_TRANSPORT_TEST_HOOKS

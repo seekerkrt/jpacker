@@ -232,6 +232,12 @@ root-owned transaction stateへstageしてからfixed `pacman -U`へ渡します
 `--rmdeps`は引き続きunsupported / fail-closedであり、どちらのhelperのinstallもdependency cleanupを
 有効化しません。
 
+current development treeは、これらowner-specific helperを単一のclosed remote AUR lifecycle内部で使い、
+internal cleanup-candidate assessmentを構築します。full invocationとcurrent metadata / policy observationが
+成功し、exactにcorrelateされたactual dependency `Install`だけがinternal `Eligible`へ到達できます。
+このassessmentはpublic preview、prompt、removalへ接続せず、makepkg sync dependencyのownershipも
+独立した未解決authorityのままです。
+
 v2.0.0のpackage名と唯一のexecutableは`moguet`で、`/usr/bin/jpacker`をinstall
 しません。payloadはjpacker v1.16.0 packageと重複しないため、metadataには
 `jpacker`への`provides`、`conflicts`、`replaces`を意図的に設定しません。manual
@@ -269,7 +275,7 @@ makepkg -si
 systemへinstallします。これは、development treeをその場でbuild・確認するだけで
 何もinstallしない、上記の`make`や`./moguet --help`とは異なります。`PKGBUILD`はcanonicalな
 production CMake build / install consumerとして`BUILD_TESTING=OFF`を指定し、99個のdeveloper
-C++ test-ledger executable、1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、123件のCTest
+C++ test-ledger executable、1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、124件のCTest
 registrationはhost / CI / release validation側で扱います。
 この`PKGBUILD`は
 repository同梱のpackaging経路であり、AUR submissionではありません。Moguetはまだ

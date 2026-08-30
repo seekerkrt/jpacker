@@ -1,5 +1,7 @@
 #include "source_install.hpp"
 
+#include "invocation_owned_cleanup_adapter.hpp"
+
 #include "interactive_confirmation.hpp"
 
 #include "app_config.hpp"
@@ -1510,6 +1512,11 @@ void build_source_target(
     }
     PreparedRemoteSourceBuild prepared = std::move(
         std::get<PreparedRemoteSourceBuild>(preparation));
+    if(prepared.source.source_kind() == SourceBuildSourceKind::Aur) {
+        static_cast<void>(collect_remote_aur_cleanup_candidates(
+            std::move(prepared), config));
+        return;
+    }
     execute_prepared_source_build_invocation(
         std::move(prepared.invocation), config);
 }
@@ -1688,6 +1695,43 @@ execute_prepared_package_base_source_build_work_item_typed(
         database_paths, config);
 }
 
+namespace {
+
+PackageBaseSourceBuildExecutionResult
+execute_prepared_package_base_source_build_work_item_with_cleanup(
+    const ProductionSourceBuildWorkItem& work_item,
+    const PacmanDatabasePaths& database_paths,
+    const AppConfig& config,
+    RemoteAurCleanupCandidateCollector& collector,
+    std::size_t work_item_index) {
+    require_static_production_source_build_work_item(work_item);
+    if(work_item.artifact_lifecycle_intent !=
+       ArtifactLifecycleIntent::PackageBaseSet) {
+        throw std::logic_error(
+            "PackageBase set source-build execution received a non-set lifecycle work item.");
+    }
+    if(work_item.request.only_if_updated) {
+        throw std::logic_error(localization::format_translated_message(
+            "{} set source-build execution does not support only-if-updated requests.",
+            "PackageBase"));
+    }
+    if(work_item.required_target_provenance ==
+       RequiredTargetProvenance::AurBuildPlanProjection) {
+        Logger::info(localization::format_translated_message(
+            "Building {} {}: {}", "AUR", "PackageBase",
+            work_item.request.checkout_name));
+        Logger::info(localization::format_translated_message(
+            "Target package(s): {}",
+            join_required_package_names(work_item.required_targets)));
+    }
+    return execute_source_build_package_base_with_cleanup_authority(
+        work_item.request, work_item.required_targets,
+        require_prepared_cache_root(work_item), database_paths,
+        config, collector, work_item_index);
+}
+
+} // namespace
+
 SourceBuildPreparationOutcome
 prepare_package_base_source_build_work_item_typed(
     const ProductionSourceBuildWorkItem& work_item,
@@ -1786,9 +1830,13 @@ execute_prepared_source_build_work_item(
             work_item, database_paths, config));
 }
 
-ProductionSourceBuildInvocationResult execute_prepared_source_build_invocation(
-    PreparedProductionSourceBuildInvocation invocation,
-    const AppConfig& config) {
+namespace {
+
+ProductionSourceBuildInvocationResult
+execute_prepared_source_build_invocation_impl(
+    PreparedProductionSourceBuildInvocation& invocation,
+    const AppConfig& config,
+    RemoteAurCleanupCandidateCollector* collector) {
     ProductionSourceBuildInvocationResult aggregate;
     aggregate.work_items.reserve(invocation.work_items.size());
     for(const ProductionSourceBuildWorkItem& work_item :
@@ -1799,13 +1847,22 @@ ProductionSourceBuildInvocationResult execute_prepared_source_build_invocation(
     }
     activate_production_source_build_cache(invocation);
     SelectedRepositoryProviderTransactionResult provider_transaction =
-        execute_selected_repository_provider_transaction(
-            invocation, config);
+        collector == nullptr
+            ? execute_selected_repository_provider_transaction(
+                  invocation, config)
+            : collector->execute_selected_repository_provider_transaction(
+                  config);
     if(!provider_transaction.is_success()) {
-        throw std::runtime_error(
+        const std::string diagnostic =
             provider_transaction.diagnostic.value_or(
                 localization::translate_message(
-                    "Failed to install selected repository providers.")));
+                    "Failed to install selected repository providers."));
+        if(collector != nullptr) {
+            throw RemoteAurCleanupInvocationExecutionError(
+                std::move(aggregate), std::move(provider_transaction),
+                diagnostic);
+        }
+        throw std::runtime_error(diagnostic);
     }
     for(std::size_t index = 0; index < invocation.work_items.size();
         ++index) {
@@ -1835,8 +1892,14 @@ ProductionSourceBuildInvocationResult execute_prepared_source_build_invocation(
            ArtifactLifecycleIntent::PackageBaseSet) {
             try {
                 PackageBaseSourceBuildExecutionResult result =
-                    execute_prepared_package_base_source_build_work_item_typed(
-                        work_item, invocation.database_paths, config);
+                    collector != nullptr &&
+                            collector->should_use_trusted_source_artifact_install(
+                                index)
+                        ? execute_prepared_package_base_source_build_work_item_with_cleanup(
+                              work_item, invocation.database_paths, config,
+                              *collector, index)
+                        : execute_prepared_package_base_source_build_work_item_typed(
+                              work_item, invocation.database_paths, config);
                 work_item_outcome.status =
                     ProductionSourceBuildWorkItemStatus::Succeeded;
                 work_item_outcome.production_outcome =
@@ -1993,4 +2056,23 @@ ProductionSourceBuildInvocationResult execute_prepared_source_build_invocation(
         }
     }
     return aggregate;
+}
+
+} // namespace
+
+ProductionSourceBuildInvocationResult execute_prepared_source_build_invocation(
+    PreparedProductionSourceBuildInvocation invocation,
+    const AppConfig& config) {
+    return execute_prepared_source_build_invocation_impl(
+        invocation, config, nullptr);
+}
+
+ProductionSourceBuildInvocationResult
+execute_prepared_remote_aur_cleanup_invocation(
+    RemoteAurCleanupCandidateCollector& collector,
+    const AppConfig& config) {
+    PreparedProductionSourceBuildInvocation& invocation =
+        collector.prepared_invocation_for_execution();
+    return execute_prepared_source_build_invocation_impl(
+        invocation, config, &collector);
 }

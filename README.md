@@ -271,6 +271,13 @@ artifact bytes into its private root-owned transaction state before a fixed
 unsupported and fail-closed; installing either helper does not enable
 dependency cleanup.
 
+The current development tree uses those owner-specific helpers inside one
+closed remote-AUR lifecycle to build an internal cleanup-candidate assessment.
+Only an exact, correlated actual dependency `Install` can become internally
+eligible after the full invocation and current metadata/policy observations
+succeed. This assessment has no public preview, prompt, or removal connection;
+makepkg sync-dependency ownership remains a separate unresolved authority.
+
 The v2.0.0 package and its only executable are named `moguet`; it does not
 install `/usr/bin/jpacker`. Its payload is disjoint from the jpacker v1.16.0
 package, so the metadata intentionally declares no `provides`, `conflicts`, or
@@ -314,7 +321,7 @@ system with `pacman -U` in the same step. This differs from `make` and
 in place and install nothing. The `PKGBUILD` is the canonical production
 CMake build/install consumer and configures `BUILD_TESTING=OFF`; the 99
 developer C++ test-ledger executables, one `EXCLUDE_FROM_ALL` installed
-transport fixture harness, and 123 CTest registrations remain in host, CI,
+transport fixture harness, and 124 CTest registrations remain in host, CI,
 and release validation. This `PKGBUILD` is a repository-provided
 packaging path, not an AUR submission; Moguet still has no published AUR
 page.

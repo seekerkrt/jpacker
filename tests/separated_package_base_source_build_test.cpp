@@ -1,4 +1,5 @@
 #include "separated_package_base_source_build.hpp"
+#include "invocation_owned_cleanup_adapter.hpp"
 
 #include "stubs/artifact-install-executor/process_stub.hpp"
 #include "stubs/package-metadata/alpm_stub.hpp"
@@ -17,6 +18,16 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+PackageBaseArtifactInstallExecutionResult
+RemoteAurCleanupCandidateCollector::
+    execute_source_artifact_install_transaction(
+        PreparedPackageBaseArtifactInstall&,
+        std::size_t,
+        const ArtifactInstallExecutionOptions&) {
+    throw std::logic_error(
+        "separated PackageBase test unexpectedly used cleanup execution");
+}
 
 #include <unistd.h>
 
