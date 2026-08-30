@@ -20,6 +20,22 @@ enum class CleanupLifecycleBoundary {
     Unknown,
 };
 
+enum class CleanupObservationPhase {
+    BeforeFirstDependencyMutation,
+    AfterFullSupportedInvocationSuccess,
+};
+
+enum class CleanupWorkItemOutcomeShape {
+    ValidSucceeded,
+    ValidFailed,
+    ValidNotAttempted,
+    Invalid,
+};
+
+[[nodiscard]] CleanupWorkItemOutcomeShape
+validate_production_source_build_work_item_outcome(
+    const ProductionSourceBuildWorkItemOutcome& outcome) noexcept;
+
 // The evidence borrows existing production values. It adds only the lifecycle
 // boundary that current result types do not express; it does not copy command
 // output or invent package-level transaction ownership.
@@ -28,21 +44,23 @@ public:
     [[nodiscard]] static CleanupInvocationLifecycleEvidence unknown() noexcept;
     [[nodiscard]] static CleanupInvocationLifecycleEvidence
     before_build_completion(
-        const PreparedProductionSourceBuildInvocation& invocation) noexcept;
+        const CleanupInvocationSession& session);
     [[nodiscard]] static CleanupInvocationLifecycleEvidence after_work_item(
-        const PreparedProductionSourceBuildInvocation& invocation,
+        const CleanupInvocationSession& session,
         const ProductionSourceBuildInvocationResult& result,
-        std::size_t completed_work_item_index) noexcept;
+        std::size_t completed_work_item_index);
     [[nodiscard]] static CleanupInvocationLifecycleEvidence
     after_successful_invocation(
-        const PreparedProductionSourceBuildInvocation& invocation,
-        const ProductionSourceBuildInvocationResult& result) noexcept;
+        const CleanupInvocationSession& session,
+        const ProductionSourceBuildInvocationResult& result);
     [[nodiscard]] static CleanupInvocationLifecycleEvidence
     after_invocation_completion(
-        const PreparedProductionSourceBuildInvocation& invocation,
-        const ProductionSourceBuildInvocationResult& result) noexcept;
+        const CleanupInvocationSession& session,
+        const ProductionSourceBuildInvocationResult& result);
 
     [[nodiscard]] CleanupLifecycleBoundary boundary() const noexcept;
+    [[nodiscard]] const std::optional<CleanupInvocationAuthority>& authority()
+        const noexcept;
     [[nodiscard]] const PreparedProductionSourceBuildInvocation* invocation()
         const noexcept;
     [[nodiscard]] const ProductionSourceBuildInvocationResult* result()
@@ -53,6 +71,7 @@ public:
 private:
     CleanupInvocationLifecycleEvidence(
         CleanupLifecycleBoundary boundary,
+        std::optional<CleanupInvocationAuthority> authority,
         std::optional<std::reference_wrapper<
             const PreparedProductionSourceBuildInvocation>>
             invocation,
@@ -62,6 +81,7 @@ private:
         std::optional<std::size_t> completed_work_item_index) noexcept;
 
     CleanupLifecycleBoundary boundary_;
+    std::optional<CleanupInvocationAuthority> authority_;
     std::optional<std::reference_wrapper<
         const PreparedProductionSourceBuildInvocation>>
         invocation_;
@@ -70,6 +90,140 @@ private:
         result_;
     std::optional<std::size_t> completed_work_item_index_;
 };
+
+class CleanupBaselineSnapshotObservation final {
+public:
+    CleanupBaselineSnapshotObservation() = delete;
+    CleanupBaselineSnapshotObservation(
+        const CleanupBaselineSnapshotObservation&) = default;
+    CleanupBaselineSnapshotObservation(
+        CleanupBaselineSnapshotObservation&&) noexcept = default;
+    CleanupBaselineSnapshotObservation& operator=(
+        const CleanupBaselineSnapshotObservation&) = default;
+    CleanupBaselineSnapshotObservation& operator=(
+        CleanupBaselineSnapshotObservation&&) noexcept = default;
+    ~CleanupBaselineSnapshotObservation() = default;
+
+    [[nodiscard]] const CleanupInvocationAuthority& authority()
+        const noexcept;
+    [[nodiscard]] CleanupObservationPhase phase() const noexcept;
+    [[nodiscard]] const InstalledPackageStateSnapshotResult& snapshot()
+        const noexcept;
+
+private:
+    CleanupBaselineSnapshotObservation(
+        CleanupInvocationAuthority authority,
+        InstalledPackageStateSnapshotResult snapshot) noexcept;
+
+    CleanupInvocationAuthority authority_;
+    InstalledPackageStateSnapshotResult snapshot_;
+
+    friend class CleanupPhaseObservationProducer;
+};
+
+class CleanupCurrentInstalledObservation final {
+public:
+    CleanupCurrentInstalledObservation() = delete;
+    CleanupCurrentInstalledObservation(
+        const CleanupCurrentInstalledObservation&) = default;
+    CleanupCurrentInstalledObservation(
+        CleanupCurrentInstalledObservation&&) noexcept = default;
+    CleanupCurrentInstalledObservation& operator=(
+        const CleanupCurrentInstalledObservation&) = default;
+    CleanupCurrentInstalledObservation& operator=(
+        CleanupCurrentInstalledObservation&&) noexcept = default;
+    ~CleanupCurrentInstalledObservation() = default;
+
+    [[nodiscard]] const CleanupInvocationAuthority& authority()
+        const noexcept;
+    [[nodiscard]] CleanupObservationPhase phase() const noexcept;
+    [[nodiscard]] const InstalledPackageStateSnapshotResult& snapshot()
+        const noexcept;
+    [[nodiscard]] std::size_t completed_transaction_count() const noexcept;
+
+private:
+    CleanupCurrentInstalledObservation(
+        CleanupInvocationAuthority authority,
+        CleanupObservationPhase phase,
+        std::size_t completed_transaction_count,
+        InstalledPackageStateSnapshotResult snapshot) noexcept;
+
+    CleanupInvocationAuthority authority_;
+    CleanupObservationPhase phase_;
+    std::size_t completed_transaction_count_;
+    InstalledPackageStateSnapshotResult snapshot_;
+
+    friend class CleanupPhaseObservationProducer;
+};
+
+class CleanupPolicyObservation final {
+public:
+    CleanupPolicyObservation() = delete;
+    CleanupPolicyObservation(const CleanupPolicyObservation&) = default;
+    CleanupPolicyObservation(CleanupPolicyObservation&&) noexcept = default;
+    CleanupPolicyObservation& operator=(const CleanupPolicyObservation&) =
+        default;
+    CleanupPolicyObservation& operator=(CleanupPolicyObservation&&) noexcept =
+        default;
+    ~CleanupPolicyObservation() = default;
+
+    [[nodiscard]] const CleanupInvocationAuthority& authority()
+        const noexcept;
+    [[nodiscard]] CleanupObservationPhase phase() const noexcept;
+    [[nodiscard]] const CleanupPolicyProtectionEvidence& evidence()
+        const noexcept;
+    [[nodiscard]] std::size_t completed_transaction_count() const noexcept;
+
+private:
+    CleanupPolicyObservation(
+        CleanupInvocationAuthority authority,
+        CleanupObservationPhase phase,
+        std::size_t completed_transaction_count,
+        CleanupPolicyProtectionEvidence evidence) noexcept;
+
+    CleanupInvocationAuthority authority_;
+    CleanupObservationPhase phase_;
+    std::size_t completed_transaction_count_;
+    CleanupPolicyProtectionEvidence evidence_;
+
+    friend class CleanupPhaseObservationProducer;
+};
+
+[[nodiscard]] CleanupBaselineSnapshotObservation
+observe_cleanup_baseline_before_first_dependency_mutation(
+    CleanupInvocationSession& session);
+
+[[nodiscard]] CleanupCurrentInstalledObservation
+observe_cleanup_current_after_full_supported_invocation(
+    CleanupInvocationSession& session,
+    const ProductionSourceBuildInvocationResult& result);
+
+[[nodiscard]] CleanupPolicyObservation
+observe_cleanup_policy_after_full_supported_invocation(
+    CleanupInvocationSession& session,
+    const ProductionSourceBuildInvocationResult& result,
+    const std::string& candidate_package_name);
+
+#ifdef MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
+[[nodiscard]] CleanupBaselineSnapshotObservation
+make_cleanup_baseline_observation_for_test(
+    CleanupInvocationSession& session,
+    InstalledPackageStateSnapshotResult snapshot);
+
+[[nodiscard]] CleanupCurrentInstalledObservation
+make_cleanup_current_observation_for_test(
+    CleanupInvocationSession& session,
+    InstalledPackageStateSnapshotResult snapshot,
+    CleanupObservationPhase phase = CleanupObservationPhase::
+        AfterFullSupportedInvocationSuccess);
+
+[[nodiscard]] CleanupPolicyObservation
+make_cleanup_policy_observation_for_test(
+    CleanupInvocationSession& session,
+    CleanupPolicyProtectionEvidence evidence,
+    CleanupObservationPhase phase = CleanupObservationPhase::
+        AfterFullSupportedInvocationSuccess);
+#endif
 
 enum class CleanupLifecycleProjectionIssueKind {
     BaselineSnapshotUnavailable,
@@ -108,6 +262,7 @@ using InvocationOwnedCleanupCandidateProjectionResult = std::variant<
     InvocationOwnedCleanupCandidateProjectionFailure>;
 
 enum class CleanupSourceArtifactCorrelationIssueKind {
+    InvocationAuthorityMissing,
     InvocationMismatch,
     LifecycleInvocationMismatch,
     WorkItemIndexOutOfRange,
@@ -145,7 +300,8 @@ public:
     ~CleanupSourceArtifactCorrelationEvidence() = default;
 
     [[nodiscard]] CleanupEvidenceCompleteness completeness() const noexcept;
-    [[nodiscard]] const CleanupInvocationIdentity& invocation() const noexcept;
+    [[nodiscard]] const CleanupInvocationAuthority& authority()
+        const noexcept;
     [[nodiscard]] const SourceArtifactInstallCausalEvidence& causal_evidence()
         const noexcept;
     [[nodiscard]] std::size_t work_item_index() const noexcept;
@@ -162,7 +318,7 @@ public:
 private:
     CleanupSourceArtifactCorrelationEvidence(
         CleanupEvidenceCompleteness completeness,
-        CleanupInvocationIdentity invocation,
+        CleanupInvocationAuthority authority,
         SourceArtifactInstallCausalEvidence causal_evidence,
         std::size_t work_item_index,
         std::string package_base,
@@ -172,7 +328,7 @@ private:
         std::vector<CleanupSourceArtifactCorrelationIssueKind> issues) noexcept;
 
     CleanupEvidenceCompleteness completeness_;
-    CleanupInvocationIdentity invocation_;
+    CleanupInvocationAuthority authority_;
     SourceArtifactInstallCausalEvidence causal_evidence_;
     std::size_t work_item_index_;
     std::string package_base_;
@@ -183,26 +339,24 @@ private:
 
     friend CleanupSourceArtifactCorrelationEvidence
     correlate_source_artifact_install_to_build_plan(
-        const CleanupInvocationIdentity& invocation_identity,
-        const BuildPlan& plan,
-        const PreparedProductionSourceBuildInvocation& invocation,
+        const CleanupInvocationSession& session,
         const CleanupInvocationLifecycleEvidence& lifecycle,
         const SourceArtifactInstallCausalEvidence& causal_evidence);
 };
 
 [[nodiscard]] CleanupSourceArtifactCorrelationEvidence
 correlate_source_artifact_install_to_build_plan(
-    const CleanupInvocationIdentity& invocation_identity,
-    const BuildPlan& plan,
-    const PreparedProductionSourceBuildInvocation& invocation,
+    const CleanupInvocationSession& session,
     const CleanupInvocationLifecycleEvidence& lifecycle,
     const SourceArtifactInstallCausalEvidence& causal_evidence);
 
 enum class CleanupSelectedProviderCorrelationIssueKind {
-    InvocationIdentityMissing,
     InvocationMismatch,
     LifecycleInvocationMismatch,
+    CurrentObservationMismatch,
     BuildPlanIncomplete,
+    BindingSetMissing,
+    BindingSetMismatch,
     DependencyEdgeOutOfRange,
     DependencyEdgeNotSelectedRepositoryProvider,
     DependencyEdgeAttributionMismatch,
@@ -214,13 +368,18 @@ enum class CleanupSelectedProviderCorrelationIssueKind {
     ProvidedCapabilityMismatch,
     CurrentPackageIdentityIncomplete,
     CurrentPackageIdentityMismatch,
-    TransactionResultMismatch,
-    ReceiptCaptureMissing,
-    ReceiptCaptureIncomplete,
-    TransactionLedgerMismatch,
-    ReceiptMismatch,
     ProviderNotInstalled,
     UncorrelatedActualInstall,
+};
+
+struct CleanupSelectedProviderEdgeCorrelation {
+    std::size_t work_item_index;
+    std::size_t build_plan_edge_index;
+    DependencyRequirement requirement;
+    BuildPlanProvidedDependency selected_decision;
+    ProvidedDependency provider;
+    SourceAwarePackageIdentity package_identity;
+    CleanupCurrentPackageEvidence current_package;
 };
 
 class CleanupSelectedProviderCorrelationEvidence final {
@@ -237,20 +396,14 @@ public:
     ~CleanupSelectedProviderCorrelationEvidence() = default;
 
     [[nodiscard]] CleanupEvidenceCompleteness completeness() const noexcept;
-    [[nodiscard]] const CleanupInvocationIdentity& invocation() const noexcept;
-    [[nodiscard]] std::size_t work_item_index() const noexcept;
-    [[nodiscard]] std::size_t build_plan_edge_index() const noexcept;
-    [[nodiscard]] const std::optional<ProvidedDependency>& provider()
+    [[nodiscard]] const CleanupInvocationAuthority& authority()
         const noexcept;
-    [[nodiscard]] const std::optional<SourceAwarePackageIdentity>&
-    package_identity() const noexcept;
-    [[nodiscard]] const CleanupCurrentPackageEvidence& current_package()
-        const noexcept;
-    [[nodiscard]] const std::optional<std::string>& transaction_token()
-        const noexcept;
+    [[nodiscard]] const std::string& transaction_token() const noexcept;
+    [[nodiscard]] const std::vector<CleanupSelectedProviderEdgeCorrelation>&
+    edge_correlations() const noexcept;
     [[nodiscard]] const std::vector<std::string>& actual_install_set()
         const noexcept;
-    [[nodiscard]] const SelectedRepositoryProviderTrustedReceiptExecutionResult&
+    [[nodiscard]] const SelectedRepositoryProviderTrustedExecutionEvidence&
     execution() const noexcept;
     [[nodiscard]] const std::vector<
         CleanupSelectedProviderCorrelationIssueKind>&
@@ -259,51 +412,38 @@ public:
 private:
     CleanupSelectedProviderCorrelationEvidence(
         CleanupEvidenceCompleteness completeness,
-        CleanupInvocationIdentity invocation,
-        std::size_t work_item_index,
-        std::size_t build_plan_edge_index,
-        std::optional<ProvidedDependency> provider,
-        std::optional<SourceAwarePackageIdentity> package_identity,
-        CleanupCurrentPackageEvidence current_package,
-        std::optional<std::string> transaction_token,
+        CleanupInvocationAuthority authority,
+        std::string transaction_token,
+        std::vector<CleanupSelectedProviderEdgeCorrelation>
+            edge_correlations,
         std::vector<std::string> actual_install_set,
-        SelectedRepositoryProviderTrustedReceiptExecutionResult execution,
+        SelectedRepositoryProviderTrustedExecutionEvidence execution,
         std::vector<CleanupSelectedProviderCorrelationIssueKind>
             issues) noexcept;
 
     CleanupEvidenceCompleteness completeness_;
-    CleanupInvocationIdentity invocation_;
-    std::size_t work_item_index_;
-    std::size_t build_plan_edge_index_;
-    std::optional<ProvidedDependency> provider_;
-    std::optional<SourceAwarePackageIdentity> package_identity_;
-    CleanupCurrentPackageEvidence current_package_;
-    std::optional<std::string> transaction_token_;
+    CleanupInvocationAuthority authority_;
+    std::string transaction_token_;
+    std::vector<CleanupSelectedProviderEdgeCorrelation>
+        edge_correlations_;
     std::vector<std::string> actual_install_set_;
-    SelectedRepositoryProviderTrustedReceiptExecutionResult execution_;
+    SelectedRepositoryProviderTrustedExecutionEvidence execution_;
     std::vector<CleanupSelectedProviderCorrelationIssueKind> issues_;
 
     friend CleanupSelectedProviderCorrelationEvidence
     correlate_selected_repository_provider_to_build_plan(
-        const CleanupInvocationIdentity& invocation_identity,
-        const BuildPlan& plan,
-        const PreparedProductionSourceBuildInvocation& invocation,
+        const CleanupInvocationSession& session,
         const CleanupInvocationLifecycleEvidence& lifecycle,
-        std::size_t build_plan_edge_index,
-        const CleanupCurrentPackageEvidence& current_package,
-        const SelectedRepositoryProviderTrustedReceiptExecutionResult&
-            execution);
+        const CleanupCurrentInstalledObservation& current_observation,
+        const SelectedRepositoryProviderTrustedExecutionEvidence& execution);
 };
 
 [[nodiscard]] CleanupSelectedProviderCorrelationEvidence
 correlate_selected_repository_provider_to_build_plan(
-    const CleanupInvocationIdentity& invocation_identity,
-    const BuildPlan& plan,
-    const PreparedProductionSourceBuildInvocation& invocation,
+    const CleanupInvocationSession& session,
     const CleanupInvocationLifecycleEvidence& lifecycle,
-    std::size_t build_plan_edge_index,
-    const CleanupCurrentPackageEvidence& current_package,
-    const SelectedRepositoryProviderTrustedReceiptExecutionResult& execution);
+    const CleanupCurrentInstalledObservation& current_observation,
+    const SelectedRepositoryProviderTrustedExecutionEvidence& execution);
 
 enum class CleanupInvocationEvidenceIssueKind {
     UnsupportedRoute,
@@ -316,14 +456,43 @@ enum class CleanupInvocationEvidenceIssueKind {
     WorkItemOutcomeFailed,
     WorkItemOutcomeNotAttempted,
     WorkItemOutcomeUnknown,
+    WorkItemOutcomeInvalid,
+    DependencyEdgeInventoryEmpty,
+    CleanupRelevantEdgeInventoryEmpty,
+    DependencyEdgeUnsupportedOrUnowned,
+    DependencyEdgeInvalidOrUnknown,
+    DependencyEdgeAttributionMismatch,
     SourceArtifactCorrelationMissing,
     SourceArtifactCorrelationUnexpected,
     SelectedProviderCorrelationMissing,
     SelectedProviderCorrelationUnexpected,
     CorrelationInvocationMismatch,
     CorrelationIncomplete,
+    TransactionTokenInventoryMissing,
+    TransactionTokenInventoryUnexpected,
+    TransactionTokenOwnerMismatch,
+    TransactionTokenDuplicate,
+    PhaseObservationMissing,
+    PhaseObservationMismatch,
     MakepkgSyncDependenciesUnowned,
     UncorrelatedActualInstall,
+};
+
+enum class CleanupDependencyEdgeClassificationKind {
+    SupportedOwnerSpecificReceipt,
+    AuthoritativelyPreExistingOrIrrelevant,
+    UnsupportedOrUnowned,
+    InvalidOrUnknown,
+};
+
+struct CleanupDependencyEdgeClassification {
+    std::size_t build_plan_edge_index;
+    CleanupDependencyEdgeClassificationKind classification;
+    std::optional<InvocationDependencyTransactionOwner> owner;
+    std::optional<std::size_t> work_item_index;
+
+    bool operator==(const CleanupDependencyEdgeClassification&) const =
+        default;
 };
 
 struct CleanupInvocationWorkItemEvidence {
@@ -349,7 +518,7 @@ public:
     [[nodiscard]] CleanupRouteKind route_kind() const noexcept;
     [[nodiscard]] CleanupRouteAuthority route_authority() const noexcept;
     [[nodiscard]] CleanupEvidenceCompleteness completeness() const noexcept;
-    [[nodiscard]] const std::optional<CleanupInvocationIdentity>& invocation()
+    [[nodiscard]] const std::optional<CleanupInvocationAuthority>& authority()
         const noexcept;
     [[nodiscard]] const BuildPlan* build_plan() const noexcept;
     [[nodiscard]] const std::vector<RootTargetIdentity>& roots() const noexcept;
@@ -357,6 +526,17 @@ public:
     work_items() const noexcept;
     [[nodiscard]] const std::vector<PackageBaseIdentity>& package_bases()
         const noexcept;
+    [[nodiscard]] const std::vector<CleanupDependencyEdgeClassification>&
+    edge_classifications() const noexcept;
+    [[nodiscard]] const std::vector<
+        CleanupTrustedTransactionTokenInventoryEntry>&
+    transaction_token_inventory() const noexcept;
+    [[nodiscard]] const std::optional<CleanupBaselineSnapshotObservation>&
+    baseline_observation() const noexcept;
+    [[nodiscard]] const std::optional<CleanupCurrentInstalledObservation>&
+    current_observation() const noexcept;
+    [[nodiscard]] const std::optional<CleanupPolicyObservation>&
+    policy_observation() const noexcept;
     [[nodiscard]] const std::vector<
         CleanupSourceArtifactCorrelationEvidence>&
     source_artifact_evidence() const noexcept;
@@ -375,11 +555,20 @@ private:
         CleanupRouteKind route_kind,
         CleanupRouteAuthority route_authority,
         CleanupEvidenceCompleteness completeness,
-        std::optional<CleanupInvocationIdentity> invocation,
+        std::optional<CleanupInvocationAuthority> authority,
         std::optional<BuildPlan> build_plan,
         std::vector<RootTargetIdentity> roots,
         std::vector<CleanupInvocationWorkItemEvidence> work_items,
         std::vector<PackageBaseIdentity> package_bases,
+        std::vector<CleanupDependencyEdgeClassification>
+            edge_classifications,
+        std::vector<CleanupTrustedTransactionTokenInventoryEntry>
+            transaction_token_inventory,
+        std::optional<CleanupBaselineSnapshotObservation>
+            baseline_observation,
+        std::optional<CleanupCurrentInstalledObservation>
+            current_observation,
+        std::optional<CleanupPolicyObservation> policy_observation,
         std::vector<CleanupSourceArtifactCorrelationEvidence>
             source_artifact_evidence,
         std::vector<CleanupSelectedProviderCorrelationEvidence>
@@ -391,11 +580,20 @@ private:
     CleanupRouteKind route_kind_;
     CleanupRouteAuthority route_authority_;
     CleanupEvidenceCompleteness completeness_;
-    std::optional<CleanupInvocationIdentity> invocation_;
+    std::optional<CleanupInvocationAuthority> authority_;
     std::optional<BuildPlan> build_plan_;
     std::vector<RootTargetIdentity> roots_;
     std::vector<CleanupInvocationWorkItemEvidence> work_items_;
     std::vector<PackageBaseIdentity> package_bases_;
+    std::vector<CleanupDependencyEdgeClassification>
+        edge_classifications_;
+    std::vector<CleanupTrustedTransactionTokenInventoryEntry>
+        transaction_token_inventory_;
+    std::optional<CleanupBaselineSnapshotObservation>
+        baseline_observation_;
+    std::optional<CleanupCurrentInstalledObservation>
+        current_observation_;
+    std::optional<CleanupPolicyObservation> policy_observation_;
     std::vector<CleanupSourceArtifactCorrelationEvidence>
         source_artifact_evidence_;
     std::vector<CleanupSelectedProviderCorrelationEvidence>
@@ -408,9 +606,11 @@ private:
         CleanupRouteKind route_kind);
     friend CleanupInvocationEvidence
     aggregate_remote_aur_cleanup_invocation_evidence(
-        const CleanupInvocationIdentity& invocation_identity,
-        const PreparedRemoteSourceBuild& prepared,
+        const CleanupInvocationSession& session,
         const CleanupInvocationLifecycleEvidence& lifecycle,
+        const CleanupBaselineSnapshotObservation& baseline_observation,
+        const CleanupCurrentInstalledObservation& current_observation,
+        const CleanupPolicyObservation& policy_observation,
         std::vector<CleanupSourceArtifactCorrelationEvidence>
             source_artifact_evidence,
         std::vector<CleanupSelectedProviderCorrelationEvidence>
@@ -426,9 +626,11 @@ private:
 
 [[nodiscard]] CleanupInvocationEvidence
 aggregate_remote_aur_cleanup_invocation_evidence(
-    const CleanupInvocationIdentity& invocation_identity,
-    const PreparedRemoteSourceBuild& prepared,
+    const CleanupInvocationSession& session,
     const CleanupInvocationLifecycleEvidence& lifecycle,
+    const CleanupBaselineSnapshotObservation& baseline_observation,
+    const CleanupCurrentInstalledObservation& current_observation,
+    const CleanupPolicyObservation& policy_observation,
     std::vector<CleanupSourceArtifactCorrelationEvidence>
         source_artifact_evidence,
     std::vector<CleanupSelectedProviderCorrelationEvidence>

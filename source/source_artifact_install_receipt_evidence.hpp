@@ -11,13 +11,12 @@
 
 class SourceArtifactInstallTrustedTransport;
 
-// This identity separates invocation-local evidence sets. It is correlation
-// authority, not runtime authentication, a PID/timestamp, or a replacement for
-// Slice 2's root-backed transaction token.
-using SourceArtifactInstallInvocationIdentity = CleanupInvocationIdentity;
-
 struct SourceArtifactInstallWorkItemBinding {
-    SourceArtifactInstallInvocationIdentity invocation;
+    // Legacy transport-only fixtures may omit cleanup authority. Such an
+    // observation can validate the root transport but can never become a
+    // positive invocation correlation or route aggregate.
+    std::optional<CleanupInvocationAuthority> invocation_authority =
+        std::nullopt;
     std::size_t work_item_index;
     std::string package_base;
     std::vector<RootTargetIdentity> requested_roots;

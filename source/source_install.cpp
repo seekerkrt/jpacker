@@ -20,8 +20,10 @@
 #include "shell_words.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -37,6 +39,19 @@ namespace {
 
 // NO_TRANSLATE: These are protocol endpoint identities, not user-facing prose.
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
+
+bool is_safe_repository_target_name(const std::string& repository_name) {
+    if(repository_name.empty() || repository_name == "." ||
+       repository_name == ".." ||
+       repository_name.find('/') != std::string::npos) {
+        return false;
+    }
+    return std::none_of(
+        repository_name.begin(), repository_name.end(),
+        [](unsigned char character) {
+            return std::iscntrl(character) != 0;
+        });
+}
 
 SourceBuildEnvironment load_source_preference_environment(
     const std::string& package_name) {
@@ -803,7 +818,444 @@ prepare_selected_repository_provider_transaction(
     return prepared;
 }
 
+const std::string& requirement_raw_specification(
+    const DependencyRequirement& requirement) {
+    return std::visit(
+        [](const auto& typed_requirement) -> const std::string& {
+            return typed_requirement.raw_specification();
+        },
+        requirement);
+}
+
+const std::string& requirement_package_name(
+    const DependencyRequirement& requirement) {
+    return std::visit(
+        [](const auto& typed_requirement) -> const std::string& {
+            using Requirement = std::decay_t<decltype(typed_requirement)>;
+            if constexpr(std::is_same_v<
+                             Requirement,
+                             ConsumerDependencyRequirement>) {
+                return typed_requirement.package_name();
+            } else {
+                return typed_requirement.soname();
+            }
+        },
+        requirement);
+}
+
+bool requirement_is_canonical(
+    const DependencyRequirement& requirement,
+    const std::string& raw_specification) {
+    const DependencyRequirementParseResult parsed =
+        parse_dependency_requirement(raw_specification);
+    return parsed.requirement() != nullptr &&
+           *parsed.requirement() == requirement;
+}
+
+bool provider_metadata_is_complete(
+    const ProvidedDependency& provider,
+    const BuildPlan& plan) {
+    const auto* repository =
+        std::get_if<RepositoryProviderOrigin>(&provider.origin);
+    if(repository == nullptr ||
+       !repository->configured_order.has_value() ||
+       !plan.configured_repository_order.has_value() ||
+       repository->configured_order.value() >=
+           plan.configured_repository_order->size() ||
+       (*plan.configured_repository_order)
+               [repository->configured_order.value()] !=
+           repository->repository_name ||
+       !is_safe_repository_target_name(repository->repository_name) ||
+       !is_valid_package_name(provider.package_name) ||
+       !is_valid_package_name(provider.package_base) ||
+       !provider.package_architecture.has_value() ||
+       !is_valid_package_name(provider.provided_dependency_name) ||
+       !provider.package_version.has_value() ||
+       !provider.constraint_metadata.has_value()) {
+        return false;
+    }
+    const std::string& package_architecture =
+        provider.package_architecture.value();
+    if(package_architecture.empty() ||
+       std::any_of(
+           package_architecture.begin(), package_architecture.end(),
+           [](unsigned char character) {
+               return character <= 0x20 || character == 0x7f;
+           })) {
+        return false;
+    }
+
+    const ProviderConstraintMetadata& metadata =
+        provider.constraint_metadata.value();
+    const ProviderCapability& capability = metadata.provided_capability;
+    const std::string* package_version = metadata.package_version.version();
+    if(metadata.package_version.source() !=
+           ObservedVersionSource::RepositoryExactPackage ||
+       metadata.provided_version.source() !=
+           ObservedVersionSource::RepositoryProviderCapability ||
+       package_version == nullptr ||
+       *package_version != provider.package_version.value() ||
+       capability.package_name() != provider.provided_dependency_name ||
+       capability.raw_specification() !=
+           provider.provided_dependency_specification) {
+        return false;
+    }
+    return metadata.provided_version ==
+           ObservedVersion::from_provider_capability(
+               ObservedVersionSource::RepositoryProviderCapability,
+               capability);
+}
+
+bool provider_edge_is_exact(
+    const BuildPlanDependencyEdge& edge,
+    const ProvidedDependency& provider,
+    const BuildPlan& plan) {
+    if(edge.kind != DependencyKind::Provided ||
+       edge.provider_resolution != ProviderResolutionKind::UserSelected ||
+       !edge.resolved_provider.has_value() ||
+       edge.resolved_provider.value() != provider ||
+       !edge.resolved_candidate.has_value() ||
+       !edge.requirement.has_value() ||
+       !edge.constraint_evaluation.has_value() ||
+       !provider_metadata_is_complete(provider, plan) ||
+       requirement_raw_specification(edge.requirement.value()) !=
+           edge.dependency_spec ||
+       !requirement_is_canonical(
+           edge.requirement.value(), edge.dependency_spec) ||
+       requirement_package_name(edge.requirement.value()) !=
+           provider.provided_dependency_name) {
+        return false;
+    }
+
+    const auto* resolved = std::get_if<ProviderResolvedDependencyCandidate>(
+        &edge.resolved_candidate.value());
+    if(resolved == nullptr || resolved->provider != provider ||
+       resolved->provided_version !=
+           provider.constraint_metadata->provided_version) {
+        return false;
+    }
+
+    const auto* consumer = std::get_if<ConsumerDependencyRequirement>(
+        &edge.requirement.value());
+    if(consumer == nullptr) return false;
+    const ConstraintEvaluation expected =
+        evaluate_consumer_dependency_requirement(
+            *consumer,
+            provider.constraint_metadata->provided_version);
+    return edge.constraint_evaluation.value() == expected &&
+           (expected.satisfaction() == ConstraintSatisfaction::Satisfied ||
+            expected.satisfaction() ==
+                ConstraintSatisfaction::Unconstrained);
+}
+
+const BuildPlanProvidedDependency* exact_selected_decision(
+    const BuildPlan& plan,
+    const BuildPlanDependencyEdge& edge,
+    const ProvidedDependency& provider) {
+    const BuildPlanProvidedDependency* match = nullptr;
+    for(const BuildPlanProvidedDependency& selected : plan.provided) {
+        if(selected.dependency != edge.dependency_spec ||
+           selected.resolution != edge.provider_resolution ||
+           selected.provider != provider) {
+            continue;
+        }
+        if(match != nullptr) return nullptr;
+        match = &selected;
+    }
+    return match;
+}
+
+struct SelectedRepositoryProviderBindingProjection {
+    std::vector<SelectedRepositoryProviderTrustedExecutionBinding> bindings;
+    std::vector<std::size_t> work_item_indices;
+};
+
+std::optional<SelectedRepositoryProviderBindingProjection>
+project_selected_repository_provider_bindings(
+    const PreparedRemoteSourceBuild& prepared) {
+    if(prepared.source.source_kind() != SourceBuildSourceKind::Aur ||
+       !prepared.aur_build_plan.has_value()) {
+        return std::nullopt;
+    }
+    const BuildPlan& plan = prepared.aur_build_plan.value();
+    const PlanStateProjection plan_state = project_build_plan_state(plan);
+    if(plan_state.construction != PlanConstruction::Constructed ||
+       plan_state.completeness != PlanCompleteness::Complete ||
+       plan_state.provider_decision != ProviderDecision::Selected) {
+        return std::nullopt;
+    }
+
+    SelectedRepositoryProviderBindingProjection projection;
+    std::set<std::size_t> attributed_edges;
+    std::set<std::size_t> attributed_work_items;
+    for(std::size_t work_item_index = 0;
+        work_item_index < prepared.invocation.work_items.size();
+        ++work_item_index) {
+        const ProductionSourceBuildWorkItem& work_item =
+            prepared.invocation.work_items[work_item_index];
+        for(const std::size_t edge_index :
+            work_item.selected_repository_provider_edge_indices) {
+            if(edge_index >= plan.dependency_edges.size() ||
+               !attributed_edges.insert(edge_index).second) {
+                return std::nullopt;
+            }
+            const BuildPlanDependencyEdge& edge =
+                plan.dependency_edges[edge_index];
+            if(edge.parent_package_base !=
+                   work_item.request.checkout_name ||
+               !edge.resolved_provider.has_value()) {
+                return std::nullopt;
+            }
+            const ProvidedDependency& provider =
+                edge.resolved_provider.value();
+            const BuildPlanProvidedDependency* selected =
+                exact_selected_decision(plan, edge, provider);
+            if(selected == nullptr ||
+               !provider_edge_is_exact(edge, provider, plan) ||
+               std::count(
+                   work_item.selected_repository_providers.begin(),
+                   work_item.selected_repository_providers.end(),
+                   provider) != 1 ||
+               std::count(
+                   prepared.invocation.selected_repository_providers.begin(),
+                   prepared.invocation.selected_repository_providers.end(),
+                   provider) != 1) {
+                return std::nullopt;
+            }
+            projection.bindings.push_back(
+                SelectedRepositoryProviderTrustedExecutionBinding{
+                    work_item_index,
+                    edge_index,
+                    edge.parent_package_base,
+                    edge.requirement.value(),
+                    *selected,
+                    provider,
+                    edge.provider_resolution});
+            attributed_work_items.insert(work_item_index);
+        }
+    }
+    if(projection.bindings.empty()) return std::nullopt;
+
+    for(std::size_t edge_index = 0;
+        edge_index < plan.dependency_edges.size(); ++edge_index) {
+        const BuildPlanDependencyEdge& edge = plan.dependency_edges[edge_index];
+        if(edge.kind != DependencyKind::Provided ||
+           edge.provider_resolution !=
+               ProviderResolutionKind::UserSelected ||
+           !edge.resolved_provider.has_value() ||
+           !std::holds_alternative<RepositoryProviderOrigin>(
+               edge.resolved_provider->origin)) {
+            continue;
+        }
+        if(attributed_edges.find(edge_index) == attributed_edges.end()) {
+            return std::nullopt;
+        }
+    }
+    for(const BuildPlanProvidedDependency& selected : plan.provided) {
+        if(selected.resolution != ProviderResolutionKind::UserSelected ||
+           !std::holds_alternative<RepositoryProviderOrigin>(
+               selected.provider.origin)) {
+            continue;
+        }
+        if(std::none_of(
+               projection.bindings.begin(), projection.bindings.end(),
+               [&selected](const auto& binding) {
+                   return binding.selected_decision.dependency ==
+                              selected.dependency &&
+                          binding.selected_decision.resolution ==
+                              selected.resolution &&
+                          binding.selected_decision.provider ==
+                              selected.provider;
+               })) {
+            return std::nullopt;
+        }
+    }
+    for(const ProvidedDependency& provider :
+        prepared.invocation.selected_repository_providers) {
+        if(std::none_of(
+               projection.bindings.begin(), projection.bindings.end(),
+               [&provider](const auto& binding) {
+                   return binding.provider == provider;
+               })) {
+            return std::nullopt;
+        }
+    }
+    for(std::size_t work_item_index = 0;
+        work_item_index < prepared.invocation.work_items.size();
+        ++work_item_index) {
+        for(const ProvidedDependency& provider :
+            prepared.invocation.work_items[work_item_index]
+                .selected_repository_providers) {
+            if(std::none_of(
+                   projection.bindings.begin(), projection.bindings.end(),
+                   [work_item_index, &provider](const auto& binding) {
+                       return binding.work_item_index == work_item_index &&
+                              binding.provider == provider;
+                   })) {
+                return std::nullopt;
+            }
+        }
+    }
+
+    projection.work_item_indices.assign(
+        attributed_work_items.begin(), attributed_work_items.end());
+    return projection;
+}
+
+std::vector<std::string> selected_provider_package_names(
+    const std::vector<ProvidedDependency>& providers) {
+    std::vector<std::string> names;
+    names.reserve(providers.size());
+    for(const ProvidedDependency& provider : providers) {
+        names.push_back(provider.package_name);
+    }
+    return names;
+}
+
 } // namespace
+
+SelectedRepositoryProviderTrustedReceiptExecutionResult::
+    SelectedRepositoryProviderTrustedReceiptExecutionResult(
+        SelectedRepositoryProviderTransactionResult transaction_value,
+        std::optional<TrustedAlpmReceiptCaptureResult>
+            receipt_capture_value) noexcept
+    : transaction(std::move(transaction_value)),
+      receipt_capture(std::move(receipt_capture_value)) {
+}
+
+const std::optional<SelectedRepositoryProviderTrustedExecutionEvidence>&
+SelectedRepositoryProviderTrustedReceiptExecutionResult::
+    trusted_execution_evidence() const noexcept {
+    return trusted_execution_evidence_;
+}
+
+class SelectedRepositoryProviderTrustedReceiptExecutor final {
+public:
+    [[nodiscard]] static bool session_is_ready(
+        const SelectedRepositoryProviderTrustedReceiptRequest& request) noexcept {
+        return !request.invocation_authority().has_value() ||
+               (request.invocation_authority()->is_active() &&
+                request.invocation_authority()->baseline_was_observed());
+    }
+
+    [[nodiscard]] static const PreparedProductionSourceBuildInvocation&
+    select_invocation(
+        const SelectedRepositoryProviderTrustedReceiptRequest& request,
+        const PreparedProductionSourceBuildInvocation& compatibility_invocation) noexcept {
+        // CONTRACT(#485): a session-bearing request executes its owned
+        // invocation; the caller argument is only the Slice 3.6 raw fallback.
+        if(request.invocation_authority().has_value() &&
+           request.invocation_authority()->is_active()) {
+            return request.invocation_authority()->prepared().invocation;
+        }
+        return compatibility_invocation;
+    }
+
+    static void close_execution_evidence(
+        SelectedRepositoryProviderTrustedReceiptExecutionResult& execution,
+        const SelectedRepositoryProviderTrustedReceiptRequest& request) {
+        if(!request.invocation_authority().has_value() ||
+           !request.invocation_authority()->is_active() ||
+           !execution.receipt_capture.has_value()) {
+            return;
+        }
+        const CleanupInvocationAuthority& authority =
+            request.invocation_authority().value();
+        const PreparedRemoteSourceBuild& prepared = authority.prepared();
+        const auto projection =
+            project_selected_repository_provider_bindings(prepared);
+        if(!projection.has_value() ||
+           execution.transaction.status !=
+               SelectedRepositoryProviderTransactionStatus::Succeeded ||
+           execution.transaction.package_state_change !=
+               PackageStateChange::Unknown ||
+           execution.transaction.command_exit_status !=
+               std::optional<int>{0} ||
+           execution.transaction.diagnostic.has_value() ||
+           execution.transaction.selected_providers !=
+               prepared.invocation.selected_repository_providers) {
+            return;
+        }
+
+        const TrustedAlpmReceiptCaptureResult& capture =
+            execution.receipt_capture.value();
+        if(capture.status != TrustedAlpmReceiptCaptureStatus::Complete ||
+           capture.pacman_exit_status != std::optional<int>{0} ||
+           capture.diagnostic.has_value() ||
+           capture.transaction_ledger.transactions.size() != 1) {
+            return;
+        }
+        const InvocationDependencyTransaction& transaction =
+            capture.transaction_ledger.transactions.front();
+        const std::vector<std::string> requested_package_names =
+            selected_provider_package_names(
+                prepared.invocation.selected_repository_providers);
+        if(transaction.owner !=
+               InvocationDependencyTransactionOwner::
+                   SelectedRepositoryProvider ||
+           !is_valid_pacman_transaction_token(
+               transaction.transaction_token) ||
+           transaction.command_outcome !=
+               InvocationDependencyTransactionCommandOutcome::Succeeded ||
+           transaction.requested_package_names != requested_package_names ||
+           !transaction.receipt.is_complete_for(
+               transaction.transaction_token,
+               InvocationDependencyTransactionOwner::
+                   SelectedRepositoryProvider)) {
+            return;
+        }
+
+        std::set<std::string> unique_requested_names;
+        if(requested_package_names.empty() ||
+           !std::all_of(
+               requested_package_names.begin(), requested_package_names.end(),
+               [&unique_requested_names](const std::string& package_name) {
+                   return is_valid_package_name(package_name) &&
+                          unique_requested_names.insert(package_name).second;
+               })) {
+            return;
+        }
+        std::vector<std::string> actual_install_set;
+        for(const PacmanInstalledPackageReceipt& installed :
+            transaction.receipt.newly_installed_packages()) {
+            actual_install_set.push_back(installed.package_name);
+        }
+        if(actual_install_set.empty() ||
+           std::any_of(
+               requested_package_names.begin(), requested_package_names.end(),
+               [&transaction](const std::string& package_name) {
+                   return !transaction.receipt
+                               .contains_newly_installed_package(package_name);
+               })) {
+            return;
+        }
+
+        // LANDMINE(#485): build the complete immutable snapshot before the
+        // session inventory retires the token. Registration is the final
+        // authority transition and must happen exactly once.
+        SelectedRepositoryProviderTrustedExecutionEvidence evidence(
+            authority,
+            transaction.transaction_token,
+            projection->bindings,
+            execution.transaction,
+            capture,
+            std::move(actual_install_set));
+        if(!authority.register_trusted_transaction_token(
+               InvocationDependencyTransactionOwner::
+                   SelectedRepositoryProvider,
+               transaction.transaction_token,
+               projection->work_item_indices)) {
+            return;
+        }
+        if(!authority.mark_trusted_transaction_completed(
+               InvocationDependencyTransactionOwner::
+                   SelectedRepositoryProvider,
+               transaction.transaction_token)) {
+            return;
+        }
+        execution.trusted_execution_evidence_ = std::move(evidence);
+    }
+};
 
 SelectedRepositoryProviderTransactionResult
 execute_selected_repository_provider_transaction(
@@ -847,11 +1299,27 @@ execute_selected_repository_provider_transaction(
     const PreparedProductionSourceBuildInvocation& invocation,
     const AppConfig& config,
     SelectedRepositoryProviderTrustedReceiptRequest receipt_request) {
+    const PreparedProductionSourceBuildInvocation& selected_invocation =
+        SelectedRepositoryProviderTrustedReceiptExecutor::select_invocation(
+            receipt_request, invocation);
+    if(!SelectedRepositoryProviderTrustedReceiptExecutor::session_is_ready(
+           receipt_request)) {
+        SelectedRepositoryProviderTransactionResult blocked;
+        blocked.status = SelectedRepositoryProviderTransactionStatus::
+            BlockedBeforeExecution;
+        blocked.selected_providers =
+            selected_invocation.selected_repository_providers;
+        blocked.package_state_change = PackageStateChange::Unknown;
+        // NO_TRANSLATE: trusted cleanup transport has no production CLI caller.
+        blocked.diagnostic =
+            "Cleanup invocation baseline was not observed before the selected-provider transaction.";
+        return SelectedRepositoryProviderTrustedReceiptExecutionResult{
+            std::move(blocked), std::nullopt};
+    }
     PreparedSelectedRepositoryProviderTransaction prepared =
-        prepare_selected_repository_provider_transaction(invocation);
+        prepare_selected_repository_provider_transaction(selected_invocation);
     SelectedRepositoryProviderTrustedReceiptExecutionResult execution{
         std::move(prepared.result), std::nullopt};
-    execution.invocation_identity = receipt_request.invocation_identity();
     if(execution.transaction.selected_providers.empty() ||
        !prepared.directive.has_value()) {
         return execution;
@@ -905,6 +1373,8 @@ execute_selected_repository_provider_transaction(
     // fail closed because consume/publication was unavailable.
     execution.transaction.status =
         SelectedRepositoryProviderTransactionStatus::Succeeded;
+    SelectedRepositoryProviderTrustedReceiptExecutor::
+        close_execution_evidence(execution, receipt_request);
     return execution;
 }
 

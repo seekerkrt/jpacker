@@ -394,6 +394,8 @@ void test_repository_provider_capabilities() {
                 std::optional<std::size_t>{0} &&
             equality.package_name == "provider-a" &&
             equality.package_base == "provider-a" &&
+            equality.package_architecture ==
+                std::optional<std::string>{"x86_64"} &&
             equality.provided_dependency_specification ==
                 "virtual-api=2.1-3" &&
             equality.package_version ==
@@ -408,6 +410,11 @@ void test_repository_provider_capabilities() {
         *equality.constraint_metadata->provided_version.version() !=
             equality.package_version.value(),
         "Provider package version replaced the capability version");
+    ProvidedDependency different_architecture = equality;
+    different_architecture.package_architecture = "aarch64";
+    expect(
+        different_architecture != equality,
+        "Provider full equality ignored exact architecture");
 
     const ProvidedDependency& unversioned = snapshot.candidates[1];
     expect(
@@ -424,6 +431,8 @@ void test_repository_provider_capabilities() {
 
     set_repository_package("core", "rust", "1.90.0-1");
     alpm_stub::set_repository_package_base("core", "rust", "rust");
+    alpm_stub::set_repository_package_architecture(
+        "core", "rust", "any");
     alpm_stub::set_repository_package_provides(
         "core", "rust",
         {alpm_stub::RepositoryProvidedPackageMetadata{
@@ -438,9 +447,30 @@ void test_repository_provider_capabilities() {
         cargo_snapshot.candidates.size() == 1 &&
             cargo_snapshot.candidates.front().package_name == "rust" &&
             cargo_snapshot.candidates.front().package_base == "rust" &&
+            cargo_snapshot.candidates.front().package_architecture ==
+                std::optional<std::string>{"any"} &&
             cargo_snapshot.candidates.front().provided_dependency_name ==
                 "cargo",
         "cargo requirement, rust provider package, and rust PackageBase were flattened");
+
+    alpm_stub::reset_alpm_stub();
+    set_repository_package("core", "missing-arch-provider", "1.0-1");
+    alpm_stub::set_repository_package_provides(
+        "core", "missing-arch-provider",
+        {alpm_stub::RepositoryProvidedPackageMetadata{
+            std::string("virtual-api"), std::nullopt,
+            ALPM_DEP_MOD_ANY}});
+    alpm_stub::set_repository_package_architecture_null(
+        "core", "missing-arch-provider");
+    enqueue_configuration(database, {"core"});
+    const RepositoryProviderQuerySnapshot& missing_architecture =
+        require_provider_snapshot(
+            query_repository_providers_strict("virtual-api"),
+            "missing provider architecture");
+    expect(
+        missing_architecture.candidates.empty() &&
+            missing_architecture.source_failures.size() == 1,
+        "Missing provider architecture became a complete candidate");
 }
 
 void test_provider_partial_source_failure() {

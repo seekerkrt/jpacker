@@ -1,24 +1,32 @@
 #include "invocation_owned_cleanup_model.hpp"
 
 #include "package_identifier.hpp"
+#include "source_install.hpp"
 #include "trusted_alpm_receipt_protocol.hpp"
 
 #include <algorithm>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
 
-namespace {
+struct CleanupInvocationSessionState {
+    explicit CleanupInvocationSessionState(
+        PreparedRemoteSourceBuild prepared_value) noexcept
+        : prepared(std::move(prepared_value)) {
+    }
 
-bool is_valid_invocation_local_value(const std::string& value) noexcept {
-    if(value.empty() || value.size() > 256) return false;
-    return std::all_of(
-        value.begin(), value.end(), [](unsigned char character) {
-            return character >= 0x21 && character <= 0x7e;
-        });
-}
+    mutable std::mutex mutex;
+    PreparedRemoteSourceBuild prepared;
+    bool baseline_observed = false;
+    std::size_t post_success_observation_count = 0;
+    std::vector<CleanupTrustedTransactionTokenInventoryEntry>
+        transaction_inventory;
+};
+
+namespace {
 
 void add_receipt_issue(
     std::vector<PacmanTransactionReceiptIssueKind>& issues,
@@ -92,6 +100,19 @@ bool is_valid_baseline(CleanupBaselineObservation baseline) noexcept {
         case CleanupBaselineObservation::PreExisting:
         case CleanupBaselineObservation::NewlyObserved:
         case CleanupBaselineObservation::Unknown:
+            return true;
+    }
+    return false;
+}
+
+bool is_valid_installed_metadata_value_state(
+    InstalledPackageMetadataValueState state) noexcept {
+    switch(state) {
+        case InstalledPackageMetadataValueState::Known:
+        case InstalledPackageMetadataValueState::Missing:
+        case InstalledPackageMetadataValueState::Malformed:
+        case InstalledPackageMetadataValueState::Unavailable:
+        case InstalledPackageMetadataValueState::Unknown:
             return true;
     }
     return false;
@@ -275,11 +296,61 @@ std::vector<CleanupClassificationReason> structural_reasons(
             add_reason(
                 reasons, CleanupClassificationReason::InvalidTypedState);
         }
+        if(!is_valid_installed_metadata_value_state(
+               metadata.package_base.state()) ||
+           !is_valid_installed_metadata_value_state(
+               metadata.architecture.state())) {
+            add_reason(
+                reasons, CleanupClassificationReason::InvalidTypedState);
+        }
         if(metadata.name != candidate.package.package().package_name()) {
             add_reason(
                 reasons,
                 CleanupClassificationReason::
                     CurrentPackageIdentityMismatch);
+        }
+        if(metadata.package_base.state() ==
+           InstalledPackageMetadataValueState::Known) {
+            const std::string* package_base = metadata.package_base.value();
+            if(package_base == nullptr ||
+               !is_valid_package_name(*package_base)) {
+                add_reason(
+                    reasons,
+                    CleanupClassificationReason::InvalidTypedState);
+            } else if(*package_base !=
+                      candidate.package.package()
+                          .package_base()
+                          .package_base()) {
+                add_reason(
+                    reasons,
+                    CleanupClassificationReason::
+                        CurrentPackageIdentityMismatch);
+            }
+        }
+        if(metadata.architecture.state() ==
+           InstalledPackageMetadataValueState::Known) {
+            const std::string* architecture =
+                metadata.architecture.value();
+            const bool valid_architecture =
+                architecture != nullptr && !architecture->empty() &&
+                std::all_of(
+                    architecture->begin(), architecture->end(),
+                    [](unsigned char character) {
+                        return character > 0x20 && character != 0x7f;
+                    });
+            if(!valid_architecture) {
+                add_reason(
+                    reasons,
+                    CleanupClassificationReason::InvalidTypedState);
+            } else if(candidate.package.architecture().state() ==
+                          PackageArchitectureState::Known &&
+                      (candidate.package.architecture().architectures().size() != 1 ||
+                       candidate.package.architecture().architectures().front() != *architecture)) {
+                add_reason(
+                    reasons,
+                    CleanupClassificationReason::
+                        CurrentPackageIdentityMismatch);
+            }
         }
         const PackageVersionIdentity& package_version =
             candidate.package.package_version();
@@ -450,6 +521,26 @@ std::vector<CleanupClassificationReason> unknown_reasons(
                     CurrentPackageVersionUnavailable);
             break;
     }
+    if(candidate.current_package.state == CleanupInstalledState::Present) {
+        if(!candidate.current_package.metadata.has_value() ||
+           candidate.current_package.metadata->package_base.state() !=
+               InstalledPackageMetadataValueState::Known) {
+            add_reason(
+                reasons,
+                CleanupClassificationReason::CurrentPackageBaseUnknown);
+        }
+        if(!candidate.current_package.metadata.has_value() ||
+           candidate.current_package.metadata->architecture.state() !=
+               InstalledPackageMetadataValueState::Known ||
+           candidate.package.architecture().state() !=
+               PackageArchitectureState::Known ||
+           candidate.package.architecture().architectures().size() != 1) {
+            add_reason(
+                reasons,
+                CleanupClassificationReason::
+                    CurrentPackageArchitectureUnknown);
+        }
+    }
     if(candidate.causal_ownership == CleanupCausalOwnership::Unknown) {
         add_reason(
             reasons,
@@ -531,23 +622,201 @@ std::vector<CleanupClassificationReason> unknown_reasons(
 
 } // namespace
 
-CleanupInvocationIdentity::CleanupInvocationIdentity(
-    std::string value) noexcept
-    : value_(std::move(value)) {
+CleanupInvocationAuthority::CleanupInvocationAuthority(
+    std::shared_ptr<CleanupInvocationSessionState> state) noexcept
+    : state_(std::move(state)) {
 }
 
-CleanupInvocationIdentity CleanupInvocationIdentity::from_local_value(
-    std::string value) {
-    if(!is_valid_invocation_local_value(value)) {
-        throw std::invalid_argument(
-            "Cleanup invocation identity is invalid.");
+bool CleanupInvocationAuthority::register_trusted_transaction_token(
+    InvocationDependencyTransactionOwner owner,
+    const std::string& transaction_token,
+    std::vector<std::size_t> work_item_indices) const {
+    if(!is_active() ||
+       (owner != InvocationDependencyTransactionOwner::
+                     SelectedRepositoryProvider &&
+        owner != InvocationDependencyTransactionOwner::
+                     SourceArtifactInstall) ||
+       !is_valid_pacman_transaction_token(transaction_token) ||
+       work_item_indices.empty()) {
+        return false;
     }
-    return CleanupInvocationIdentity(std::move(value));
+    std::sort(work_item_indices.begin(), work_item_indices.end());
+    if(std::adjacent_find(
+           work_item_indices.begin(), work_item_indices.end()) !=
+       work_item_indices.end()) {
+        return false;
+    }
+
+    std::scoped_lock lock(state_->mutex);
+    if(!state_->baseline_observed ||
+       std::any_of(
+           work_item_indices.begin(), work_item_indices.end(),
+           [this](std::size_t work_item_index) {
+               return work_item_index >=
+                      state_->prepared.invocation.work_items.size();
+           }) ||
+       std::any_of(
+           state_->transaction_inventory.begin(),
+           state_->transaction_inventory.end(),
+           [&transaction_token](
+               const CleanupTrustedTransactionTokenInventoryEntry& entry) {
+               return entry.transaction_token == transaction_token;
+           })) {
+        return false;
+    }
+    state_->transaction_inventory.push_back(
+        CleanupTrustedTransactionTokenInventoryEntry{
+            owner, transaction_token, std::move(work_item_indices), false});
+    return true;
 }
 
-const std::string& CleanupInvocationIdentity::value() const noexcept {
-    return value_;
+bool CleanupInvocationAuthority::mark_trusted_transaction_completed(
+    InvocationDependencyTransactionOwner owner,
+    const std::string& transaction_token) const {
+    if(!is_active()) return false;
+    std::scoped_lock lock(state_->mutex);
+    const auto entry = std::find_if(
+        state_->transaction_inventory.begin(),
+        state_->transaction_inventory.end(),
+        [owner, &transaction_token](const auto& candidate) {
+            return candidate.owner == owner &&
+                   candidate.transaction_token == transaction_token;
+        });
+    if(entry == state_->transaction_inventory.end() ||
+       entry->completed_successfully) {
+        return false;
+    }
+    entry->completed_successfully = true;
+    return true;
 }
+
+const PreparedRemoteSourceBuild& CleanupInvocationAuthority::prepared()
+    const noexcept {
+    return state_->prepared;
+}
+
+bool CleanupInvocationAuthority::is_active() const noexcept {
+    return state_ != nullptr;
+}
+
+bool CleanupInvocationAuthority::baseline_was_observed() const noexcept {
+    if(!is_active()) return false;
+    std::scoped_lock lock(state_->mutex);
+    return state_->baseline_observed;
+}
+
+CleanupInvocationSession::CleanupInvocationSession(
+    std::shared_ptr<CleanupInvocationSessionState> state) noexcept
+    : state_(std::move(state)), authority_(state_) {
+}
+
+#ifdef MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
+CleanupInvocationSession CleanupInvocationSession::begin(
+    PreparedRemoteSourceBuild prepared) {
+    if(prepared.source.source_kind() != SourceBuildSourceKind::Aur ||
+       !prepared.aur_build_plan.has_value()) {
+        throw std::invalid_argument(
+            "Cleanup invocation session requires a remote AUR preparation.");
+    }
+    return CleanupInvocationSession(
+        std::make_shared<CleanupInvocationSessionState>(
+            std::move(prepared)));
+}
+#endif
+
+const CleanupInvocationAuthority& CleanupInvocationSession::authority()
+    const noexcept {
+    return authority_;
+}
+
+const PreparedRemoteSourceBuild& CleanupInvocationSession::prepared()
+    const noexcept {
+    return state_->prepared;
+}
+
+bool CleanupInvocationSession::is_active() const noexcept {
+    return state_ != nullptr && authority_.is_active();
+}
+
+bool CleanupInvocationSession::record_baseline_observation() const {
+    if(!is_active()) return false;
+    std::scoped_lock lock(state_->mutex);
+    if(state_->baseline_observed ||
+       !state_->transaction_inventory.empty() ||
+       state_->post_success_observation_count != 0) {
+        return false;
+    }
+    state_->baseline_observed = true;
+    return true;
+}
+
+std::optional<std::size_t>
+CleanupInvocationSession::record_post_success_observation() const {
+    if(!is_active()) return std::nullopt;
+    std::scoped_lock lock(state_->mutex);
+    if(!state_->baseline_observed ||
+       state_->transaction_inventory.empty() ||
+       !std::all_of(
+           state_->transaction_inventory.begin(),
+           state_->transaction_inventory.end(), [](const auto& entry) {
+               return entry.completed_successfully;
+           })) {
+        return std::nullopt;
+    }
+    ++state_->post_success_observation_count;
+    return state_->transaction_inventory.size();
+}
+
+bool CleanupInvocationSession::contains_trusted_transaction_token(
+    InvocationDependencyTransactionOwner owner,
+    const std::string& transaction_token,
+    std::size_t work_item_index) const noexcept {
+    if(!is_active()) return false;
+    std::scoped_lock lock(state_->mutex);
+    return std::any_of(
+        state_->transaction_inventory.begin(),
+        state_->transaction_inventory.end(),
+        [owner, &transaction_token, work_item_index](
+            const CleanupTrustedTransactionTokenInventoryEntry& entry) {
+            return entry.owner == owner &&
+                   entry.transaction_token == transaction_token &&
+                   entry.completed_successfully &&
+                   std::find(
+                       entry.work_item_indices.begin(),
+                       entry.work_item_indices.end(), work_item_index) !=
+                       entry.work_item_indices.end();
+        });
+}
+
+std::vector<CleanupTrustedTransactionTokenInventoryEntry>
+CleanupInvocationSession::transaction_token_inventory() const {
+    if(!is_active()) return {};
+    std::scoped_lock lock(state_->mutex);
+    return state_->transaction_inventory;
+}
+
+#ifdef MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
+void mark_cleanup_invocation_baseline_observed_for_test(
+    CleanupInvocationSession& session) {
+    if(!session.record_baseline_observation()) {
+        throw std::logic_error(
+            "Cleanup invocation test baseline is out of phase.");
+    }
+}
+
+bool register_cleanup_invocation_transaction_token_for_test(
+    CleanupInvocationSession& session,
+    InvocationDependencyTransactionOwner owner,
+    const std::string& transaction_token,
+    std::vector<std::size_t> work_item_indices) {
+    if(!session.authority_.register_trusted_transaction_token(
+           owner, transaction_token, std::move(work_item_indices))) {
+        return false;
+    }
+    return session.authority_.mark_trusted_transaction_completed(
+        owner, transaction_token);
+}
+#endif
 
 PacmanTransactionReceipt::PacmanTransactionReceipt(
     PacmanTransactionReceiptState state,

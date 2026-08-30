@@ -4,6 +4,7 @@
 #include "package_metadata.hpp"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -59,6 +60,10 @@ struct RepositoryExactPackage {
     std::string package_base;
     ObservedVersion package_version;
     std::vector<RepositoryProviderCapability> provides;
+    // Strict libalpm observations set an exact single value. Legacy factual
+    // fixtures remain explicitly unknown instead of inferring from package
+    // name, PackageBase, or host architecture.
+    std::optional<std::string> architecture = std::nullopt;
 };
 
 struct RepositoryExactPackageAbsent {

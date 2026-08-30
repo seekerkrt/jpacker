@@ -1,6 +1,7 @@
 #include "app_config.hpp"
 #include "cache_authority.hpp"
 #include "dependency_plan.hpp"
+#include "invocation_owned_cleanup_adapter.hpp"
 #include "local_dependency_plan_projection.hpp"
 #include "local_package_metadata.hpp"
 #include "process.hpp"
@@ -819,7 +820,9 @@ ProvidedDependency make_repository_provider(
     const std::string& provided_dependency_name,
     const std::string& provided_dependency_specification,
     const std::optional<std::string>& package_version,
-    const std::string& package_base = "repository-provider-base") {
+    const std::string& package_base = "repository-provider-base",
+    const std::string& package_architecture = "x86_64",
+    std::optional<std::size_t> configured_order = std::nullopt) {
     const ProviderCapabilityParseResult capability_parse =
         parse_provider_capability(provided_dependency_specification);
     const ProviderCapability* const parsed_capability =
@@ -839,21 +842,24 @@ ProvidedDependency make_repository_provider(
                   ObservedVersionSource::RepositoryProviderCapability,
                   ObservedVersionUnknownReason::
                       UnversionedProviderCapability);
+    ProviderConstraintMetadata metadata{
+        *parsed_capability,
+        package_version.has_value()
+            ? ObservedVersion::available(
+                  ObservedVersionSource::RepositoryExactPackage,
+                  package_version.value())
+            : ObservedVersion::unknown(
+                  ObservedVersionSource::RepositoryExactPackage,
+                  ObservedVersionUnknownReason::MissingVersionMetadata),
+        provided_version};
+    if(configured_order.has_value()) {
+        return ProvidedDependency::from_repository_constraint_metadata(
+            repository_name, configured_order.value(), package_name,
+            package_base, package_architecture, std::move(metadata));
+    }
     return ProvidedDependency::from_repository_constraint_metadata(
-        repository_name, package_name, package_base,
-        ProviderConstraintMetadata{
-            *parsed_capability,
-            package_version.has_value()
-                ? ObservedVersion::available(
-                      ObservedVersionSource::
-                          RepositoryExactPackage,
-                      package_version.value())
-                : ObservedVersion::unknown(
-                      ObservedVersionSource::
-                          RepositoryExactPackage,
-                      ObservedVersionUnknownReason::
-                          MissingVersionMetadata),
-            provided_version});
+        repository_name, package_name, package_base, package_architecture,
+        std::move(metadata));
 }
 
 BuildPlanDependencyEdge make_repository_provider_edge(
@@ -2280,17 +2286,51 @@ void test_new_repository_provider_uses_asdeps_needed_transaction(
         "new selected repository provider exact --asdeps --needed transaction");
 }
 
-void test_selected_repository_provider_trusted_receipt_api_reaches_ledger(
+void test_selected_repository_provider_trusted_executor_closes_evidence(
     const TemporaryProductionEnvironment& environment) {
+    constexpr std::size_t REPOSITORY_ORDER = 0;
+    const std::string repository_name = "core";
+    const std::string package_name = "receipt-provider";
+    const std::string package_base = "receipt-provider-base";
+    const std::string package_architecture = "x86_64";
+    const std::string provided_name = "virtual-receipt-provider";
+    const std::string provided_specification =
+        "virtual-receipt-provider=1";
+    const std::string package_version = "1.0-1";
+    const std::string provided_version = "1";
+    const ScopedEnvironmentVariable vercmp_lhs(
+        "MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS", provided_version);
+    const ScopedEnvironmentVariable vercmp_rhs(
+        "MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS", provided_version);
+    const ScopedEnvironmentVariable vercmp_result(
+        "MOGUET_TEST_ALPM_VERCMP_RESULT", std::string("0"));
     const ProvidedDependency provider = make_repository_provider(
-        "core", "receipt-provider", "virtual-receipt-provider",
-        "virtual-receipt-provider=1", std::string("1.0-1"));
+        repository_name, package_name, provided_name,
+        provided_specification, package_version, package_base,
+        package_architecture, REPOSITORY_ORDER);
+    BuildPlan plan = single_repository_provider_plan(
+        provider, ProviderResolutionKind::UserSelected);
+    plan.configured_repository_order =
+        std::vector<std::string>{repository_name};
+    BuildPlanDependencyEdge& edge = plan.dependency_edges.front();
+    const DependencyRequirementParseResult requirement_parse =
+        parse_dependency_requirement(provided_specification);
+    const DependencyRequirement* const requirement =
+        requirement_parse.requirement();
+    expect(
+        requirement != nullptr &&
+            std::holds_alternative<ConsumerDependencyRequirement>(
+                *requirement),
+        "Closed selected-provider fixture did not parse its typed requirement");
+    edge.requirement = *requirement;
+    edge.resolved_candidate = ProviderResolvedDependencyCandidate{
+        provider, provider.constraint_metadata->provided_version};
+    edge.constraint_evaluation = evaluate_consumer_dependency_requirement(
+        std::get<ConsumerDependencyRequirement>(*requirement),
+        provider.constraint_metadata->provided_version);
+
     std::vector<ProductionSourceBuildWorkItem> work_items =
-        prepare_aur_source_build_work_items(
-            single_repository_provider_plan(
-                provider,
-                ProviderResolutionKind::UserSelected),
-            false, false);
+        prepare_aur_source_build_work_items(plan, false, false);
     AppConfig config = noninteractive_config();
     config.no_confirm = true;
     ProductionScenario scenario =
@@ -2302,57 +2342,204 @@ void test_selected_repository_provider_trusted_receipt_api_reaches_ledger(
             std::move(work_items), scenario.config);
     activate_production_source_build_cache(invocation);
 
-    const std::string token(64, 'a');
     const auto owner = InvocationDependencyTransactionOwner::
         SelectedRepositoryProvider;
-    PacmanTransactionReceipt receipt = validate_pacman_transaction_receipt(
-        token, owner,
-        PacmanTransactionReceiptObservation{
-            PacmanTransactionReceiptObservationState::Complete,
-            token,
-            owner,
-            {{PacmanTransactionPackageOperation::Install,
-              provider.package_name},
-             {PacmanTransactionPackageOperation::Install,
-              "solver-introduced-provider-dependency"}}});
-    InvocationDependencyTransactionLedger ledger;
-    ledger.transactions.push_back(InvocationDependencyTransaction{
-        token, owner, {provider.package_name}, InvocationDependencyTransactionCommandOutcome::Succeeded, std::move(receipt)});
+    const auto complete_capture =
+        [&provider, owner](
+            const std::string& token,
+            const std::vector<std::string>& actual_install_set) {
+            std::vector<PacmanTransactionPackageObservation> operations;
+            operations.reserve(actual_install_set.size());
+            for(const std::string& installed : actual_install_set) {
+                operations.push_back(PacmanTransactionPackageObservation{
+                    PacmanTransactionPackageOperation::Install, installed});
+            }
+            PacmanTransactionReceipt receipt =
+                validate_pacman_transaction_receipt(
+                    token, owner,
+                    PacmanTransactionReceiptObservation{
+                        PacmanTransactionReceiptObservationState::Complete,
+                        token, owner, std::move(operations)});
+            InvocationDependencyTransactionLedger ledger;
+            ledger.transactions.push_back(
+                InvocationDependencyTransaction{
+                    token,
+                    owner,
+                    {provider.package_name},
+                    InvocationDependencyTransactionCommandOutcome::Succeeded,
+                    std::move(receipt)});
+            return TrustedAlpmReceiptCaptureResult{
+                TrustedAlpmReceiptCaptureStatus::Complete, 0,
+                std::move(ledger), std::nullopt};
+        };
+
+    PreparedRemoteSourceBuild prepared{
+        ResolvedSourceBuildIdentity{ResolvedAurSourceBuildIdentity{
+            "ordinary-set-root", "ordinary-set-root"}},
+        plan,
+        invocation};
+    CleanupInvocationSession session =
+        CleanupInvocationSession::begin(std::move(prepared));
+    mark_cleanup_invocation_baseline_observed_for_test(session);
+
+    const std::string token(64, 'a');
     trusted_receipt_transport_stub::set_result(
-        TrustedAlpmReceiptCaptureResult{
-            TrustedAlpmReceiptCaptureStatus::Complete, 0,
-            std::move(ledger), std::nullopt});
-
-    const CleanupInvocationIdentity cleanup_invocation =
-        CleanupInvocationIdentity::from_local_value(
-            "production-provider-receipt-invocation");
-
+        complete_capture(token, {package_name}));
     const SelectedRepositoryProviderTrustedReceiptExecutionResult execution =
         execute_selected_repository_provider_transaction(
             invocation, config,
             SelectedRepositoryProviderTrustedReceiptRequest::
-                capture_actual_installs(cleanup_invocation));
+                capture_actual_installs(session.authority()));
     expect(
         execution.transaction.status ==
-                SelectedRepositoryProviderTransactionStatus::
-                    Succeeded &&
+                SelectedRepositoryProviderTransactionStatus::Succeeded &&
             execution.transaction.package_state_change ==
                 PackageStateChange::Unknown &&
             execution.receipt_capture.has_value() &&
             execution.receipt_capture->status ==
                 TrustedAlpmReceiptCaptureStatus::Complete &&
-            execution.invocation_identity ==
-                std::optional<CleanupInvocationIdentity>{
-                    cleanup_invocation} &&
             execution.receipt_capture->transaction_ledger.transactions
                     .size() == 1 &&
             execution.receipt_capture->transaction_ledger
                 .transactions[0]
                 .receipt.contains_newly_installed_package(
-                    "solver-introduced-provider-dependency"),
-        "receipt-capable selected-provider API did not retain its complete ledger");
+                    package_name) &&
+            execution.trusted_execution_evidence().has_value(),
+        "trusted selected-provider executor did not close complete evidence");
+
+    const SelectedRepositoryProviderTrustedExecutionEvidence& evidence =
+        execution.trusted_execution_evidence().value();
+    expect(
+        evidence.selected_providers().size() == 1 &&
+            evidence.selected_providers().front().constraint_metadata.has_value(),
+        "trusted selected-provider producer did not retain one complete provider");
+    const ProvidedDependency& observed_provider =
+        evidence.selected_providers().front();
+    const auto* observed_repository =
+        std::get_if<RepositoryProviderOrigin>(&observed_provider.origin);
+    const ProviderConstraintMetadata& observed_constraint =
+        observed_provider.constraint_metadata.value();
+    const ProviderCapability& observed_capability =
+        observed_constraint.provided_capability;
+    const std::string* observed_package_version =
+        observed_constraint.package_version.version();
+    const std::string* observed_provided_version =
+        observed_constraint.provided_version.version();
+    expect(
+        evidence.owner() == owner &&
+            evidence.invocation_authority() == session.authority() &&
+            evidence.transaction_token() == token &&
+            evidence.transaction().status ==
+                SelectedRepositoryProviderTransactionStatus::Succeeded &&
+            evidence.receipt_capture().status ==
+                TrustedAlpmReceiptCaptureStatus::Complete &&
+            observed_repository != nullptr &&
+            observed_repository->repository_name == repository_name &&
+            observed_repository->configured_order == REPOSITORY_ORDER &&
+            observed_provider.package_name == package_name &&
+            observed_provider.package_base == package_base &&
+            observed_provider.package_architecture == package_architecture &&
+            observed_provider.provided_dependency_name == provided_name &&
+            observed_provider.provided_dependency_specification ==
+                provided_specification &&
+            observed_provider.package_version == package_version &&
+            observed_capability.package_name() == provided_name &&
+            observed_capability.raw_specification() ==
+                provided_specification &&
+            observed_capability.version() == provided_version &&
+            observed_package_version != nullptr &&
+            *observed_package_version == package_version &&
+            observed_provided_version != nullptr &&
+            *observed_provided_version == provided_version &&
+            evidence.actual_install_set() ==
+                std::vector<std::string>{package_name},
+        "trusted selected-provider producer did not retain its independent fixture values");
+
+    expect(
+        evidence.bindings().size() == 1,
+        "trusted selected-provider producer did not retain one edge binding");
+    const SelectedRepositoryProviderTrustedExecutionBinding& binding =
+        evidence.bindings().front();
+    const auto* bound_requirement =
+        std::get_if<ConsumerDependencyRequirement>(&binding.requirement);
+    expect(
+        binding.work_item_index == 0 &&
+            binding.build_plan_edge_index == 0 &&
+            binding.parent_package_base == "ordinary-set-root" &&
+            binding.resolution == ProviderResolutionKind::UserSelected &&
+            binding.provider == provider &&
+            binding.selected_decision.dependency ==
+                provided_specification &&
+            binding.selected_decision.resolution ==
+                ProviderResolutionKind::UserSelected &&
+            binding.selected_decision.provider == provider &&
+            bound_requirement != nullptr &&
+            bound_requirement->raw_specification() ==
+                provided_specification &&
+            bound_requirement->package_name() == provided_name &&
+            bound_requirement->constraint().has_value() &&
+            bound_requirement->constraint()->relation() ==
+                DependencyVersionRelation::Equal &&
+            bound_requirement->constraint()->version() == provided_version,
+        "trusted selected-provider producer did not retain its exact decision binding");
+
+    ProductionSourceBuildInvocationResult successful_result;
+    successful_result.work_items.push_back(
+        ProductionSourceBuildWorkItemOutcome{
+            "ordinary-set-root",
+            ProductionSourceBuildWorkItemStatus::Succeeded,
+            ProductionSourceBuildStagedOutcome{
+                ProductionSourceBuildProvenance{},
+                ProductionSourceBuildCommandOutcome::Succeeded,
+                ProductionSourceInstallOutcome::Succeeded},
+            std::nullopt,
+            std::nullopt,
+            nullptr});
+    const CleanupInvocationLifecycleEvidence lifecycle =
+        CleanupInvocationLifecycleEvidence::after_successful_invocation(
+            session, successful_result);
+    InstalledPackageStateSnapshot current_snapshot;
+    current_snapshot.emplace(
+        package_name,
+        InstalledPackageMetadata{
+            package_name, package_version,
+            InstalledPackageReason::Dependency,
+            InstalledPackageBaseIdentity::known(package_base),
+            InstalledPackageArchitectureIdentity::known(
+                package_architecture)});
+    const CleanupCurrentInstalledObservation current_observation =
+        make_cleanup_current_observation_for_test(
+            session, std::move(current_snapshot));
+    const CleanupSelectedProviderCorrelationEvidence correlation =
+        correlate_selected_repository_provider_to_build_plan(
+            session, lifecycle, current_observation, evidence);
+    expect(
+        correlation.completeness() ==
+                CleanupEvidenceCompleteness::Complete &&
+            correlation.issues().empty() &&
+            correlation.transaction_token() == token &&
+            correlation.edge_correlations().size() == 1 &&
+            correlation.edge_correlations().front().work_item_index == 0 &&
+            correlation.edge_correlations()
+                    .front()
+                    .build_plan_edge_index == 0 &&
+            correlation.edge_correlations().front().provider == provider &&
+            correlation.edge_correlations()
+                .front()
+                .current_package.metadata.has_value() &&
+            correlation.edge_correlations()
+                    .front()
+                    .current_package.metadata->package_base ==
+                InstalledPackageBaseIdentity::known(package_base) &&
+            correlation.edge_correlations()
+                    .front()
+                    .current_package.metadata->architecture ==
+                InstalledPackageArchitectureIdentity::known(
+                    package_architecture),
+        "actual selected-provider trusted producer did not reach one complete correlation");
+
     const std::vector<TrustedAlpmReceiptRepositoryTarget> expected_targets{
-        {"core", provider.package_name}};
+        {repository_name, package_name}};
     expect(
         trusted_receipt_transport_stub::call_count == 1 &&
             trusted_receipt_transport_stub::last_request.has_value() &&
@@ -2360,13 +2547,55 @@ void test_selected_repository_provider_trusted_receipt_api_reaches_ledger(
                 expected_targets &&
             trusted_receipt_transport_stub::last_request
                     ->install_directive ==
-                TrustedAlpmReceiptRepositoryInstallDirective::
-                    AsDependency &&
+                TrustedAlpmReceiptRepositoryInstallDirective::AsDependency &&
             trusted_receipt_transport_stub::last_request->no_confirm,
         "selected-provider receipt request changed target/reason/noconfirm authority");
     expect(
         process_stub::run_command_call_count() == 0,
         "receipt-capable API fell through to the legacy shell command");
+
+    const std::string compatibility_token(64, 'b');
+    trusted_receipt_transport_stub::set_result(
+        complete_capture(compatibility_token, {package_name}));
+    const SelectedRepositoryProviderTrustedReceiptExecutionResult
+        compatibility_execution =
+            execute_selected_repository_provider_transaction(
+                invocation, config,
+                SelectedRepositoryProviderTrustedReceiptRequest::
+                    capture_actual_installs());
+    expect(
+        compatibility_execution.transaction.status ==
+                SelectedRepositoryProviderTransactionStatus::Succeeded &&
+            compatibility_execution.receipt_capture.has_value() &&
+            !compatibility_execution.trusted_execution_evidence().has_value(),
+        "legacy no-session selected-provider request gained closed evidence");
+
+    const SelectedRepositoryProviderTrustedReceiptExecutionResult raw_rewrap{
+        execution.transaction, execution.receipt_capture};
+    expect(
+        !raw_rewrap.trusted_execution_evidence().has_value(),
+        "raw selected-provider execution rewrap gained closed evidence");
+
+    CleanupInvocationAuthority moved_from_authority = session.authority();
+    [[maybe_unused]] CleanupInvocationAuthority retained_authority =
+        std::move(moved_from_authority);
+    const std::size_t calls_before_moved_from =
+        trusted_receipt_transport_stub::call_count;
+    const SelectedRepositoryProviderTrustedReceiptExecutionResult
+        moved_from_execution =
+            execute_selected_repository_provider_transaction(
+                invocation, config,
+                SelectedRepositoryProviderTrustedReceiptRequest::
+                    capture_actual_installs(
+                        std::move(moved_from_authority)));
+    expect(
+        moved_from_execution.transaction.status ==
+                SelectedRepositoryProviderTransactionStatus::
+                    BlockedBeforeExecution &&
+            !moved_from_execution.receipt_capture.has_value() &&
+            trusted_receipt_transport_stub::call_count ==
+                calls_before_moved_from,
+        "moved-from cleanup authority did not fail closed before transport");
     process_stub::require_process_expectations_consumed();
     deactivate_scenario();
 }
@@ -5788,7 +6017,7 @@ int main() {
                 environment);
             test_new_repository_provider_uses_asdeps_needed_transaction(
                 environment);
-            test_selected_repository_provider_trusted_receipt_api_reaches_ledger(
+            test_selected_repository_provider_trusted_executor_closes_evidence(
                 environment);
             test_existing_explicit_repository_provider_same_version_stays_explicit(
                 environment);

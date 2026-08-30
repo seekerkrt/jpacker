@@ -239,6 +239,9 @@ struct RepositoryExactPackageMetadata {
     std::string package_base;
     std::optional<std::string> version;
     std::vector<RepositoryProvidedPackageMetadata> provides;
+    // A successful strict repository observation always carries the exact
+    // libalpm value. Missing or malformed architecture is a source failure.
+    std::string architecture;
 };
 
 struct RepositoryExactPackageMetadataNotFound {
@@ -324,7 +327,8 @@ using LocalPackageVersionSnapshotResult = std::variant<
     PackageMetadataFailure>;
 
 // cleanup baseline/current observation向けのfull local DB snapshot。
-// keyとvalueはともにownedで、1 read phaseのname/version/reasonを保持する。
+// keyとvalueはともにownedで、1 read phaseのname/version/actual
+// PackageBase/actual architecture/reasonをlosslessに保持する。
 using InstalledPackageStateSnapshot =
     std::map<std::string, InstalledPackageMetadata>;
 

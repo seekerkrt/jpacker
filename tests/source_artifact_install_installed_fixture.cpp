@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -92,7 +93,9 @@ int run_fixture(int argc, char* argv[]) {
             << "usage: source-artifact-install-installed-fixture <invocation> <work-index> <PackageBase> <package> <version> <arch> <archive> [--needed]\n";
         return 2;
     }
-    const std::string invocation_value = argv[1];
+    // The legacy CLI field remains for container-lane compatibility only. A
+    // caller-provided string is never promoted to cleanup authority.
+    static_cast<void>(argv[1]);
     std::size_t parsed = 0;
     const unsigned long work_item_value = std::stoul(argv[2], &parsed, 10);
     if(parsed != std::string(argv[2]).size()) fail("invalid work-item index");
@@ -147,8 +150,7 @@ int run_fixture(int argc, char* argv[]) {
 
     const RootTargetIdentity root{0, "fixture-root"};
     const SourceArtifactInstallTrustedBinding binding{
-        {SourceArtifactInstallInvocationIdentity::from_local_value(
-             invocation_value),
+        {std::nullopt,
          work_item_index,
          package_base,
          {root}},

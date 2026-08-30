@@ -85,7 +85,7 @@ ProvidedDependency typed_repository_provider(
                                                        ObservedVersionUnknownReason::UnversionedProviderCapability);
     return ProvidedDependency::from_repository_constraint_metadata(
         std::move(repository_name), std::move(package_name),
-        std::move(package_base),
+        std::move(package_base), "x86_64",
         ProviderConstraintMetadata{
             std::move(parsed),
             package_version.has_value()

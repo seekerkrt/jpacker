@@ -535,6 +535,56 @@ InvocationDependencyTransaction make_transaction(
 } // namespace
 
 class SourceArtifactInstallTrustedTransport final {
+    static bool session_binding_is_coherent(
+        const SourceArtifactInstallTrustedBinding& binding) noexcept {
+        if(!binding.work_item.invocation_authority.has_value()) return true;
+        if(!binding.work_item.invocation_authority->is_active()) return false;
+        const PreparedRemoteSourceBuild& prepared =
+            binding.work_item.invocation_authority->prepared();
+        const std::size_t work_item_index =
+            binding.work_item.work_item_index;
+        if(!prepared.aur_build_plan.has_value() ||
+           work_item_index >= prepared.invocation.work_items.size()) {
+            return false;
+        }
+        const ProductionSourceBuildWorkItem& work_item =
+            prepared.invocation.work_items[work_item_index];
+        if(work_item.request.checkout_name !=
+           binding.work_item.package_base) {
+            return false;
+        }
+        for(const SourceArtifactInstallExpectedSelectedArtifact& selected :
+            binding.selected_artifacts) {
+            for(const std::size_t edge_index :
+                selected.build_plan_dependency_edge_indices) {
+                if(edge_index >=
+                       prepared.aur_build_plan->dependency_edges.size() ||
+                   std::find(
+                       work_item.build_plan_dependency_edge_indices.begin(),
+                       work_item.build_plan_dependency_edge_indices.end(),
+                       edge_index) ==
+                       work_item.build_plan_dependency_edge_indices.end()) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+public:
+    static bool register_transaction_token(
+        const SourceArtifactInstallTrustedBinding& binding,
+        const std::string& transaction_token) {
+        if(!binding.work_item.invocation_authority.has_value()) return true;
+        return binding.work_item.invocation_authority
+            ->register_trusted_transaction_token(
+                InvocationDependencyTransactionOwner::
+                    SourceArtifactInstall,
+                transaction_token,
+                {binding.work_item.work_item_index});
+    }
+
+private:
     static PreparedTransportInput snapshot_selected_artifacts(
         PreparedPackageBaseArtifactInstall& install,
         const SourceArtifactInstallTrustedBinding& binding,
@@ -689,7 +739,8 @@ public:
         const SourceArtifactInstallTrustedBinding& binding) noexcept {
         try {
             install.require_execution_coherence();
-            return binding_is_coherent(install, binding);
+            return binding_is_coherent(install, binding) &&
+                   session_binding_is_coherent(binding);
         } catch(...) {
             return false;
         }
@@ -953,9 +1004,23 @@ public:
                     InvocationDependencyTransactionOwner::
                         SourceArtifactInstall,
                     std::move(operations)}));
+        const bool session_completion_recorded =
+            !binding.work_item.invocation_authority.has_value() ||
+            binding.work_item.invocation_authority
+                ->mark_trusted_transaction_completed(
+                    InvocationDependencyTransactionOwner::
+                        SourceArtifactInstall,
+                    transaction_token);
         return SourceArtifactInstallTrustedExecutionResult(
-            SourceArtifactInstallTrustedExecutionStatus::Complete, 0,
-            std::move(expectation), std::move(observation), std::nullopt);
+            session_completion_recorded
+                ? SourceArtifactInstallTrustedExecutionStatus::Complete
+                : SourceArtifactInstallTrustedExecutionStatus::
+                      OutcomeUnknown,
+            0, std::move(expectation), std::move(observation),
+            session_completion_recorded
+                ? std::nullopt
+                : std::optional<std::string>{
+                      "source-artifact cleanup session rejected transaction completion"});
     }
 };
 
@@ -1023,6 +1088,12 @@ execute_source_artifact_install_trusted_transaction(
                 TokenGenerationFailed,
             "cryptographic source-artifact transaction token generation failed");
     }
+    if(!SourceArtifactInstallTrustedTransport::register_transaction_token(
+           binding, *transaction_token)) {
+        return SourceArtifactInstallTrustedTransport::invalid_result(
+            SourceArtifactInstallTrustedExecutionStatus::InvalidRequest,
+            "source-artifact cleanup session rejected the transaction token");
+    }
     try {
         return SourceArtifactInstallTrustedTransport::execute(
             install, binding, options, *transaction_token);
@@ -1053,6 +1124,12 @@ execute_source_artifact_install_trusted_transaction_for_test(
         return SourceArtifactInstallTrustedTransport::invalid_result(
             SourceArtifactInstallTrustedExecutionStatus::InvalidRequest,
             "source-artifact trusted test token is invalid");
+    }
+    if(!SourceArtifactInstallTrustedTransport::register_transaction_token(
+           binding, transaction_token)) {
+        return SourceArtifactInstallTrustedTransport::invalid_result(
+            SourceArtifactInstallTrustedExecutionStatus::InvalidRequest,
+            "source-artifact cleanup test session rejected the transaction token");
     }
     try {
         return SourceArtifactInstallTrustedTransport::execute(

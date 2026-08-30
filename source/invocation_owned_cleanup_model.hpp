@@ -5,36 +5,18 @@
 #include "source_package_identity.hpp"
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
-// Opaque in-process identity shared by every owner-specific evidence path in
-// one cleanup correlation set. It is not an authentication token, PID, or
-// persistent key; the trusted transaction token remains a separate field.
-class CleanupInvocationIdentity final {
-public:
-    CleanupInvocationIdentity() = delete;
-    CleanupInvocationIdentity(const CleanupInvocationIdentity&) = default;
-    CleanupInvocationIdentity(CleanupInvocationIdentity&&) noexcept = default;
-    CleanupInvocationIdentity& operator=(
-        const CleanupInvocationIdentity&) = default;
-    CleanupInvocationIdentity& operator=(
-        CleanupInvocationIdentity&&) noexcept = default;
-    ~CleanupInvocationIdentity() = default;
-
-    [[nodiscard]] static CleanupInvocationIdentity
-    from_local_value(std::string value);
-
-    [[nodiscard]] const std::string& value() const noexcept;
-
-    bool operator==(const CleanupInvocationIdentity&) const = default;
-
-private:
-    explicit CleanupInvocationIdentity(std::string value) noexcept;
-
-    std::string value_;
-};
+struct PreparedRemoteSourceBuild;
+class CleanupInvocationSession;
+class CleanupInvocationSessionInspector;
+class CleanupPhaseObservationProducer;
+class SelectedRepositoryProviderTrustedReceiptExecutor;
+class SourceArtifactInstallTrustedTransport;
+struct CleanupInvocationSessionState;
 
 // The owner identifies the mutation path, not the package selected by its
 // solver. A complete receipt may therefore contain packages that were not
@@ -45,6 +27,129 @@ enum class InvocationDependencyTransactionOwner {
     MakepkgSyncDependencies,
     Unknown,
 };
+
+struct CleanupTrustedTransactionTokenInventoryEntry {
+    InvocationDependencyTransactionOwner owner;
+    std::string transaction_token;
+    std::vector<std::size_t> work_item_indices;
+    bool completed_successfully = false;
+
+    bool operator==(
+        const CleanupTrustedTransactionTokenInventoryEntry&) const =
+        default;
+};
+
+// Copyable evidence receives only this opaque authority. Equality is the
+// identity of one live invocation-session state, never a caller-provided
+// string, PID, timestamp, package name, or serialized value.
+class CleanupInvocationAuthority final {
+public:
+    CleanupInvocationAuthority() = delete;
+    CleanupInvocationAuthority(const CleanupInvocationAuthority&) = default;
+    CleanupInvocationAuthority(CleanupInvocationAuthority&&) noexcept =
+        default;
+    CleanupInvocationAuthority& operator=(
+        const CleanupInvocationAuthority&) = default;
+    CleanupInvocationAuthority& operator=(
+        CleanupInvocationAuthority&&) noexcept = default;
+    ~CleanupInvocationAuthority() = default;
+
+    bool operator==(const CleanupInvocationAuthority&) const noexcept =
+        default;
+
+private:
+    explicit CleanupInvocationAuthority(
+        std::shared_ptr<CleanupInvocationSessionState> state) noexcept;
+
+    [[nodiscard]] bool register_trusted_transaction_token(
+        InvocationDependencyTransactionOwner owner,
+        const std::string& transaction_token,
+        std::vector<std::size_t> work_item_indices) const;
+    [[nodiscard]] bool mark_trusted_transaction_completed(
+        InvocationDependencyTransactionOwner owner,
+        const std::string& transaction_token) const;
+    [[nodiscard]] const PreparedRemoteSourceBuild& prepared() const noexcept;
+    [[nodiscard]] bool is_active() const noexcept;
+    [[nodiscard]] bool baseline_was_observed() const noexcept;
+
+    std::shared_ptr<CleanupInvocationSessionState> state_;
+
+    friend class CleanupInvocationSession;
+    friend class SelectedRepositoryProviderTrustedReceiptExecutor;
+    friend class SourceArtifactInstallTrustedTransport;
+#ifdef MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
+    friend bool register_cleanup_invocation_transaction_token_for_test(
+        CleanupInvocationSession& session,
+        InvocationDependencyTransactionOwner owner,
+        const std::string& transaction_token,
+        std::vector<std::size_t> work_item_indices);
+#endif
+};
+
+// One move-only owner binds the immutable remote-AUR preparation, phase
+// observations, trusted transaction inventory, correlations, and aggregate.
+// begin() consumes the preparation so another session cannot be reconstructed
+// from the same caller-selected textual identity.
+class CleanupInvocationSession final {
+public:
+    CleanupInvocationSession() = delete;
+    CleanupInvocationSession(const CleanupInvocationSession&) = delete;
+    CleanupInvocationSession& operator=(const CleanupInvocationSession&) =
+        delete;
+    CleanupInvocationSession(CleanupInvocationSession&&) noexcept = default;
+    CleanupInvocationSession& operator=(CleanupInvocationSession&&) noexcept =
+        default;
+    ~CleanupInvocationSession() = default;
+
+#ifdef MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
+    [[nodiscard]] static CleanupInvocationSession begin(
+        PreparedRemoteSourceBuild prepared);
+#endif
+
+    [[nodiscard]] const CleanupInvocationAuthority& authority()
+        const noexcept;
+
+private:
+    explicit CleanupInvocationSession(
+        std::shared_ptr<CleanupInvocationSessionState> state) noexcept;
+
+    [[nodiscard]] const PreparedRemoteSourceBuild& prepared() const noexcept;
+    [[nodiscard]] bool is_active() const noexcept;
+    [[nodiscard]] bool record_baseline_observation() const;
+    [[nodiscard]] std::optional<std::size_t>
+    record_post_success_observation() const;
+    [[nodiscard]] bool contains_trusted_transaction_token(
+        InvocationDependencyTransactionOwner owner,
+        const std::string& transaction_token,
+        std::size_t work_item_index) const noexcept;
+    [[nodiscard]] std::vector<CleanupTrustedTransactionTokenInventoryEntry>
+    transaction_token_inventory() const;
+
+    std::shared_ptr<CleanupInvocationSessionState> state_;
+    CleanupInvocationAuthority authority_;
+
+    friend class CleanupInvocationSessionInspector;
+    friend class CleanupPhaseObservationProducer;
+#ifdef MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
+    friend void mark_cleanup_invocation_baseline_observed_for_test(
+        CleanupInvocationSession& session);
+    friend bool register_cleanup_invocation_transaction_token_for_test(
+        CleanupInvocationSession& session,
+        InvocationDependencyTransactionOwner owner,
+        const std::string& transaction_token,
+        std::vector<std::size_t> work_item_indices);
+#endif
+};
+
+#ifdef MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
+void mark_cleanup_invocation_baseline_observed_for_test(
+    CleanupInvocationSession& session);
+[[nodiscard]] bool register_cleanup_invocation_transaction_token_for_test(
+    CleanupInvocationSession& session,
+    InvocationDependencyTransactionOwner owner,
+    const std::string& transaction_token,
+    std::vector<std::size_t> work_item_indices);
+#endif
 
 enum class InvocationDependencyTransactionCommandOutcome {
     NotAttempted,
@@ -347,6 +452,8 @@ enum class CleanupClassificationReason {
     InstallReasonUnknown,
     CurrentPackageVersionUnknown,
     CurrentPackageVersionUnavailable,
+    CurrentPackageBaseUnknown,
+    CurrentPackageArchitectureUnknown,
     CausalOwnershipUnknown,
     CurrentPackageEvidenceUnverified,
     CorrelationCoverageIncomplete,

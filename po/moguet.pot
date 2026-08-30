@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.5.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-30 04:29+0900\n"
+"POT-Creation-Date: 2026-08-30 18:13+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -5662,6 +5662,12 @@ msgstr ""
 msgid "Repository package metadata contains an invalid {}."
 msgstr ""
 
+msgid "Repository package metadata is missing its architecture."
+msgstr ""
+
+msgid "Repository package metadata contains an invalid architecture."
+msgstr ""
+
 #, c++-format
 msgid "Repository package search failed: {} reported no error detail."
 msgstr ""
@@ -6275,6 +6281,9 @@ msgid "Warning: installed state is unavailable for provider candidate {}: {}."
 msgstr ""
 
 msgid "Repository provider capability metadata is invalid."
+msgstr ""
+
+msgid "Repository provider package architecture is unavailable."
 msgstr ""
 
 msgid "Reviewed source review could not produce explicit acceptance; the build was not started."

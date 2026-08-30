@@ -128,6 +128,14 @@ PackageVersionIdentity provider_package_version(
     return PackageVersionIdentity::unknown();
 }
 
+PackageArchitectureIdentity repository_package_architecture(
+    const std::optional<std::string>& architecture) {
+    return architecture.has_value()
+               ? PackageArchitectureIdentity::known(
+                     {architecture.value()})
+               : PackageArchitectureIdentity::unknown();
+}
+
 std::optional<SourcePackageIdentityProjectionIssueKind>
 artifact_package_base_issue(
     const ArtifactPackageBaseIdentity& package_base) noexcept {
@@ -235,7 +243,8 @@ SourcePackageIdentityProjectionResult project_provider_dependency(
                 provider_package_version(
                     provider,
                     ObservedVersionSource::RepositoryExactPackage),
-                PackageArchitectureIdentity::unknown()));
+                repository_package_architecture(
+                    provider.package_architecture)));
         }
         return single_success(make_identity(
             PackageSourceIdentity::aur(
@@ -459,7 +468,8 @@ project_dependency_source_package_identity(
                             source_candidate.package_version,
                             ObservedVersionSource::
                                 RepositoryExactPackage),
-                        PackageArchitectureIdentity::unknown()));
+                        repository_package_architecture(
+                            source_candidate.architecture)));
                 } catch(const std::invalid_argument&) {
                     return invalid_identity_failure(
                         SourcePackageIdentityProjectionInputKind::

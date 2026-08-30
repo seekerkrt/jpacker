@@ -43,6 +43,30 @@ static_assert(
     !std::is_convertible_v<
         SourceArtifactInstallCausalEvidence,
         TrustedAlpmReceiptCaptureResult>);
+static_assert(
+    !std::is_constructible_v<
+        SelectedRepositoryProviderTrustedExecutionEvidence,
+        SourceArtifactInstallCausalEvidence>);
+static_assert(
+    !std::is_convertible_v<
+        SourceArtifactInstallCausalEvidence,
+        SelectedRepositoryProviderTrustedExecutionEvidence>);
+static_assert(
+    !std::is_constructible_v<
+        SelectedRepositoryProviderTrustedExecutionEvidence,
+        InvocationDependencyTransactionLedger>);
+static_assert(
+    !std::is_convertible_v<
+        InvocationDependencyTransactionLedger,
+        SelectedRepositoryProviderTrustedExecutionEvidence>);
+static_assert(
+    !std::is_constructible_v<
+        SelectedRepositoryProviderTrustedExecutionEvidence,
+        std::string>);
+static_assert(
+    !std::is_convertible_v<
+        std::string,
+        SelectedRepositoryProviderTrustedExecutionEvidence>);
 
 using CleanupCandidateProjectionFunction = decltype(&project_invocation_owned_cleanup_candidate);
 static_assert(
@@ -68,6 +92,16 @@ std::string token(char character = 'a') {
 
 RootTargetIdentity root(std::size_t index, std::string name) {
     return RootTargetIdentity{index, std::move(name)};
+}
+
+CleanupInvocationAuthority invocation_authority() {
+    CleanupInvocationSession session = CleanupInvocationSession::begin(
+        PreparedRemoteSourceBuild{
+            ResolvedSourceBuildIdentity{ResolvedAurSourceBuildIdentity{
+                "receipt-fixture", "receipt-fixture"}},
+            BuildPlan{},
+            PreparedProductionSourceBuildInvocation{}});
+    return session.authority();
 }
 
 SourceAwarePackageIdentity expected_identity(
@@ -152,13 +186,10 @@ struct ScenarioInputs {
 };
 
 ScenarioInputs positive_inputs() {
-    const auto invocation =
-        SourceArtifactInstallInvocationIdentity::from_local_value(
-            "invocation-a");
     const std::vector<RootTargetIdentity> roots = {
         root(0, "root-a"), root(1, "root-b")};
     SourceArtifactInstallWorkItemBinding binding{
-        invocation, 3, "foo", roots};
+        std::nullopt, 3, "foo", roots};
 
     std::vector<SourceArtifactInstallExpectedSelectedArtifact> expected = {
         SourceArtifactInstallExpectedSelectedArtifact{
@@ -254,20 +285,31 @@ void test_complete_source_artifact_install_evidence() {
 }
 
 void test_invocation_work_item_and_selection_mismatch_matrix() {
-    ScenarioInputs wrong_invocation = positive_inputs();
-    wrong_invocation.observed_work_item.invocation =
-        SourceArtifactInstallInvocationIdentity::from_local_value(
-            "prior-invocation");
-    const SourceArtifactInstallReceiptEvidence stale_evidence =
-        wrong_invocation.evaluate();
+    ScenarioInputs missing_authority = positive_inputs();
+    const CleanupInvocationAuthority typed_authority =
+        invocation_authority();
+    missing_authority.observed_work_item.invocation_authority =
+        typed_authority;
+    const SourceArtifactInstallReceiptEvidence separated_evidence =
+        missing_authority.evaluate();
     expect(
-        stale_evidence.expectation().work_item.invocation.value() ==
-                "invocation-a" &&
-            stale_evidence.observation().work_item().invocation.value() ==
-                "prior-invocation",
-        "stale observation binding was discarded from factual evidence");
+        !separated_evidence.expectation()
+                .work_item.invocation_authority.has_value() &&
+            separated_evidence.observation()
+                    .work_item()
+                    .invocation_authority == typed_authority,
+        "missing and typed invocation authority were not kept separate");
     expect_no_causal_evidence(
-        wrong_invocation, "stale prior invocation",
+        missing_authority, "missing invocation authority relabel",
+        SourceArtifactInstallReceiptEvidenceIssueKind::InvocationMismatch);
+
+    ScenarioInputs stale_authority = positive_inputs();
+    stale_authority.expectation.work_item.invocation_authority =
+        invocation_authority();
+    stale_authority.observed_work_item.invocation_authority =
+        invocation_authority();
+    expect_no_causal_evidence(
+        stale_authority, "same-value distinct invocation authority",
         SourceArtifactInstallReceiptEvidenceIssueKind::InvocationMismatch);
 
     ScenarioInputs wrong_work_item = positive_inputs();

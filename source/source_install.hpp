@@ -466,33 +466,169 @@ public:
     }
 
     [[nodiscard]] static SelectedRepositoryProviderTrustedReceiptRequest
-    capture_actual_installs(CleanupInvocationIdentity invocation) noexcept {
+    capture_actual_installs(CleanupInvocationAuthority authority) noexcept {
         return SelectedRepositoryProviderTrustedReceiptRequest(
-            std::move(invocation));
+            std::move(authority));
     }
 
-    [[nodiscard]] const std::optional<CleanupInvocationIdentity>&
-    invocation_identity() const noexcept {
-        return invocation_identity_;
+    [[nodiscard]] const std::optional<CleanupInvocationAuthority>&
+    invocation_authority() const noexcept {
+        return invocation_authority_;
     }
 
 private:
     SelectedRepositoryProviderTrustedReceiptRequest() noexcept = default;
     explicit SelectedRepositoryProviderTrustedReceiptRequest(
-        CleanupInvocationIdentity invocation) noexcept
-        : invocation_identity_(std::move(invocation)) {
+        CleanupInvocationAuthority authority) noexcept
+        : invocation_authority_(std::move(authority)) {
     }
 
-    std::optional<CleanupInvocationIdentity> invocation_identity_;
+    std::optional<CleanupInvocationAuthority> invocation_authority_;
 };
 
-struct SelectedRepositoryProviderTrustedReceiptExecutionResult {
+// One selected-provider transaction can satisfy several BuildPlan edges. The
+// token therefore remains transaction-owned while each exact decision keeps
+// its own work-item attribution.
+struct SelectedRepositoryProviderTrustedExecutionBinding {
+    std::size_t work_item_index;
+    std::size_t build_plan_edge_index;
+    std::string parent_package_base;
+    DependencyRequirement requirement;
+    BuildPlanProvidedDependency selected_decision;
+    ProvidedDependency provider;
+    ProviderResolutionKind resolution;
+};
+
+// Positive selected-provider factual authority. Raw receipt/capture/result
+// aggregates cannot construct this value; only the executor that ran the
+// session-owned exact transaction can close it.
+class SelectedRepositoryProviderTrustedExecutionEvidence final {
+public:
+    SelectedRepositoryProviderTrustedExecutionEvidence() = delete;
+    SelectedRepositoryProviderTrustedExecutionEvidence(
+        const SelectedRepositoryProviderTrustedExecutionEvidence&) = default;
+    SelectedRepositoryProviderTrustedExecutionEvidence(
+        SelectedRepositoryProviderTrustedExecutionEvidence&&) noexcept =
+        default;
+    SelectedRepositoryProviderTrustedExecutionEvidence& operator=(
+        const SelectedRepositoryProviderTrustedExecutionEvidence&) = default;
+    SelectedRepositoryProviderTrustedExecutionEvidence& operator=(
+        SelectedRepositoryProviderTrustedExecutionEvidence&&) noexcept =
+        default;
+    ~SelectedRepositoryProviderTrustedExecutionEvidence() = default;
+
+    [[nodiscard]] InvocationDependencyTransactionOwner owner() const noexcept {
+        return InvocationDependencyTransactionOwner::
+            SelectedRepositoryProvider;
+    }
+    [[nodiscard]] const CleanupInvocationAuthority& invocation_authority()
+        const noexcept {
+        return authority_;
+    }
+    [[nodiscard]] const std::string& transaction_token() const noexcept {
+        return transaction_token_;
+    }
+    [[nodiscard]] const std::vector<
+        SelectedRepositoryProviderTrustedExecutionBinding>&
+    bindings() const noexcept {
+        return bindings_;
+    }
+    [[nodiscard]] const SelectedRepositoryProviderTransactionResult&
+    transaction() const noexcept {
+        return transaction_;
+    }
+    [[nodiscard]] const TrustedAlpmReceiptCaptureResult& receipt_capture()
+        const noexcept {
+        return receipt_capture_;
+    }
+    [[nodiscard]] const std::vector<ProvidedDependency>& selected_providers()
+        const noexcept {
+        return transaction_.selected_providers;
+    }
+    [[nodiscard]] const std::vector<std::string>& actual_install_set()
+        const noexcept {
+        return actual_install_set_;
+    }
+
+#ifdef MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
+    [[nodiscard]] static SelectedRepositoryProviderTrustedExecutionEvidence
+    make_for_test(
+        CleanupInvocationAuthority authority,
+        std::string transaction_token,
+        std::vector<SelectedRepositoryProviderTrustedExecutionBinding>
+            bindings,
+        SelectedRepositoryProviderTransactionResult transaction,
+        TrustedAlpmReceiptCaptureResult receipt_capture,
+        std::vector<std::string> actual_install_set) noexcept {
+        return SelectedRepositoryProviderTrustedExecutionEvidence(
+            std::move(authority), std::move(transaction_token),
+            std::move(bindings), std::move(transaction),
+            std::move(receipt_capture), std::move(actual_install_set));
+    }
+#endif
+
+private:
+    SelectedRepositoryProviderTrustedExecutionEvidence(
+        CleanupInvocationAuthority authority,
+        std::string transaction_token,
+        std::vector<SelectedRepositoryProviderTrustedExecutionBinding>
+            bindings,
+        SelectedRepositoryProviderTransactionResult transaction,
+        TrustedAlpmReceiptCaptureResult receipt_capture,
+        std::vector<std::string> actual_install_set) noexcept
+        : authority_(std::move(authority)),
+          transaction_token_(std::move(transaction_token)),
+          bindings_(std::move(bindings)),
+          transaction_(std::move(transaction)),
+          receipt_capture_(std::move(receipt_capture)),
+          actual_install_set_(std::move(actual_install_set)) {
+    }
+
+    CleanupInvocationAuthority authority_;
+    std::string transaction_token_;
+    std::vector<SelectedRepositoryProviderTrustedExecutionBinding> bindings_;
+    SelectedRepositoryProviderTransactionResult transaction_;
+    TrustedAlpmReceiptCaptureResult receipt_capture_;
+    std::vector<std::string> actual_install_set_;
+
+    friend class SelectedRepositoryProviderTrustedReceiptExecutor;
+};
+
+// The public fields remain a non-authoritative diagnostic result. Making this
+// a non-aggregate keeps the closed optional private: rewrapping a raw capture
+// can never populate positive execution evidence.
+class SelectedRepositoryProviderTrustedReceiptExecutionResult final {
+public:
+    SelectedRepositoryProviderTrustedReceiptExecutionResult() = default;
+    SelectedRepositoryProviderTrustedReceiptExecutionResult(
+        SelectedRepositoryProviderTransactionResult transaction,
+        std::optional<TrustedAlpmReceiptCaptureResult> receipt_capture) noexcept;
+    SelectedRepositoryProviderTrustedReceiptExecutionResult(
+        const SelectedRepositoryProviderTrustedReceiptExecutionResult&) =
+        default;
+    SelectedRepositoryProviderTrustedReceiptExecutionResult(
+        SelectedRepositoryProviderTrustedReceiptExecutionResult&&) noexcept =
+        default;
+    SelectedRepositoryProviderTrustedReceiptExecutionResult& operator=(
+        const SelectedRepositoryProviderTrustedReceiptExecutionResult&) =
+        default;
+    SelectedRepositoryProviderTrustedReceiptExecutionResult& operator=(
+        SelectedRepositoryProviderTrustedReceiptExecutionResult&&) noexcept =
+        default;
+    ~SelectedRepositoryProviderTrustedReceiptExecutionResult() = default;
+
     SelectedRepositoryProviderTransactionResult transaction;
     std::optional<TrustedAlpmReceiptCaptureResult> receipt_capture;
-    // Empty denotes the Slice 3.6 compatibility API. Slice 4 closed
-    // correlation accepts only the exact identity-bearing request/result.
-    std::optional<CleanupInvocationIdentity> invocation_identity =
-        std::nullopt;
+
+    [[nodiscard]] const std::optional<
+        SelectedRepositoryProviderTrustedExecutionEvidence>&
+    trusted_execution_evidence() const noexcept;
+
+private:
+    std::optional<SelectedRepositoryProviderTrustedExecutionEvidence>
+        trusted_execution_evidence_;
+
+    friend class SelectedRepositoryProviderTrustedReceiptExecutor;
 };
 
 #ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS

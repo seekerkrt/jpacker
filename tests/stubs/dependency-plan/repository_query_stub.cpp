@@ -40,7 +40,7 @@ std::vector<ProvidedDependency> repository_providers(
                                                            ObservedVersionUnknownReason::UnversionedProviderCapability);
         return ProvidedDependency::from_repository_constraint_metadata(
             std::move(repository), std::move(package),
-            std::move(package_base),
+            std::move(package_base), "x86_64",
             ProviderConstraintMetadata{
                 std::move(parsed),
                 ObservedVersion::available(
@@ -70,6 +70,7 @@ std::vector<ProvidedDependency> repository_providers(
             std::optional<std::string>{"6"});
         return {ProvidedDependency::from_repository_constraint_metadata(
             "extra", 1, "case23-provider", "case23-provider-base",
+            "x86_64",
             ProviderConstraintMetadata{
                 capability,
                 ObservedVersion::available(
@@ -231,7 +232,8 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
                     ObservedVersion::available(
                         ObservedVersionSource::
                             RepositoryProviderCapability,
-                        "6")}}}}};
+                        "6")}},
+                std::string("x86_64")}}};
     }
     if(dependency_name ==
        "preflight-repository-partial-provider-virtual") {
@@ -239,6 +241,7 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
             {ProvidedDependency::from_repository_constraint_metadata(
                 "core", "partial-repository-provider",
                 "partial-repository-provider-base",
+                "x86_64",
                 ProviderConstraintMetadata{
                     ProviderCapability(
                         "preflight-repository-partial-provider-virtual=1",
@@ -270,6 +273,7 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
                 ProvidedDependency::from_repository_constraint_metadata(
                     "extra", "target-metadata-provider-a",
                     "target-metadata-provider-a-base",
+                    "x86_64",
                     ProviderConstraintMetadata{
                         ProviderCapability(
                             capability,
@@ -287,6 +291,7 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
                 ProvidedDependency::from_repository_constraint_metadata(
                     "community", "target-metadata-provider-b",
                     "target-metadata-provider-b-base",
+                    "x86_64",
                     ProviderConstraintMetadata{
                         ProviderCapability(
                             "target-metadata-change-virtual=4",
@@ -311,6 +316,7 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
             {ProvidedDependency::from_repository_constraint_metadata(
                 "extra", "selected-source-change-provider",
                 "selected-source-change-provider-base",
+                "x86_64",
                 ProviderConstraintMetadata{
                     ProviderCapability(
                         "selected-source-change-virtual=1",

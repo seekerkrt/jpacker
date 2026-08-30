@@ -172,7 +172,9 @@ InvocationOwnedCleanupCandidate eligible_candidate(
             CleanupInstalledState::Present,
             InstalledPackageMetadata{
                 "cleanup-tool", "1.0-1",
-                InstalledPackageReason::Dependency},
+                InstalledPackageReason::Dependency,
+                InstalledPackageBaseIdentity::known("cleanup-tools"),
+                InstalledPackageArchitectureIdentity::known("x86_64")},
             CleanupEvidenceVerification::Verified},
         CleanupCausalOwnership::InvocationOwned,
         CleanupSharedRequirementState::NoLongerRequired,
@@ -367,6 +369,73 @@ void test_current_package_version_identity() {
                    CleanupClassificationReason::
                        CurrentPackageVersionUnavailable),
            "Unavailable package version authority became Eligible.");
+}
+
+void test_current_package_base_and_architecture_identity() {
+    InvocationOwnedCleanupCandidate wrong_base = eligible_candidate();
+    wrong_base.current_package.metadata->package_base =
+        InstalledPackageBaseIdentity::known("other-tools");
+    const CleanupClassificationResult wrong_base_result =
+        classify_invocation_owned_cleanup(wrong_base);
+    expect(
+        wrong_base_result.classification() == CleanupClassification::Invalid &&
+            has_reason(
+                wrong_base_result,
+                CleanupClassificationReason::CurrentPackageIdentityMismatch),
+        "Wrong current PackageBase was not Invalid.");
+
+    InvocationOwnedCleanupCandidate wrong_architecture = eligible_candidate();
+    wrong_architecture.current_package.metadata->architecture =
+        InstalledPackageArchitectureIdentity::known("aarch64");
+    const CleanupClassificationResult wrong_architecture_result =
+        classify_invocation_owned_cleanup(wrong_architecture);
+    expect(
+        wrong_architecture_result.classification() ==
+                CleanupClassification::Invalid &&
+            has_reason(
+                wrong_architecture_result,
+                CleanupClassificationReason::CurrentPackageIdentityMismatch),
+        "Wrong current architecture was not Invalid.");
+
+    const std::vector<InstalledPackageBaseIdentity> incomplete_package_bases{
+        InstalledPackageBaseIdentity::missing(),
+        InstalledPackageBaseIdentity::malformed(),
+        InstalledPackageBaseIdentity::unavailable(),
+        InstalledPackageBaseIdentity::unknown()};
+    for(const InstalledPackageBaseIdentity& package_base :
+        incomplete_package_bases) {
+        InvocationOwnedCleanupCandidate candidate = eligible_candidate();
+        candidate.current_package.metadata->package_base = package_base;
+        const CleanupClassificationResult result =
+            classify_invocation_owned_cleanup(candidate);
+        expect(
+            result.classification() == CleanupClassification::Unknown &&
+                has_reason(
+                    result,
+                    CleanupClassificationReason::CurrentPackageBaseUnknown),
+            "Incomplete current PackageBase became Eligible.");
+    }
+
+    const std::vector<InstalledPackageArchitectureIdentity>
+        incomplete_architectures{
+            InstalledPackageArchitectureIdentity::missing(),
+            InstalledPackageArchitectureIdentity::malformed(),
+            InstalledPackageArchitectureIdentity::unavailable(),
+            InstalledPackageArchitectureIdentity::unknown()};
+    for(const InstalledPackageArchitectureIdentity& architecture :
+        incomplete_architectures) {
+        InvocationOwnedCleanupCandidate candidate = eligible_candidate();
+        candidate.current_package.metadata->architecture = architecture;
+        const CleanupClassificationResult result =
+            classify_invocation_owned_cleanup(candidate);
+        expect(
+            result.classification() == CleanupClassification::Unknown &&
+                has_reason(
+                    result,
+                    CleanupClassificationReason::
+                        CurrentPackageArchitectureUnknown),
+            "Incomplete current architecture became Eligible.");
+    }
 }
 
 void test_correlation_coverage_authority() {
@@ -828,6 +897,7 @@ int main() {
         test_missing_incomplete_and_mismatched_receipts_fail_closed();
         test_make_or_check_only_is_eligible();
         test_current_package_version_identity();
+        test_current_package_base_and_architecture_identity();
         test_correlation_coverage_authority();
         test_unknown_and_not_owned_causal_states();
         test_pre_existing_is_always_protected();

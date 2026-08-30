@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.5.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-30 04:29+0900\n"
+"POT-Creation-Date: 2026-08-30 18:13+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -5654,6 +5654,12 @@ msgstr "リポジトリパッケージデータベースを登録できません
 msgid "Repository package metadata contains an invalid {}."
 msgstr "リポジトリパッケージのメタデータに無効な {} が含まれています。"
 
+msgid "Repository package metadata is missing its architecture."
+msgstr "リポジトリパッケージのメタデータにアーキテクチャがありません。"
+
+msgid "Repository package metadata contains an invalid architecture."
+msgstr "リポジトリパッケージのメタデータに無効なアーキテクチャが含まれています。"
+
 #, c++-format
 msgid "Repository package search failed: {} reported no error detail."
 msgstr "リポジトリパッケージの検索に失敗しました: {} からエラーの詳細が報告されませんでした。"
@@ -6268,6 +6274,9 @@ msgstr "警告: プロバイダー候補 {} のインストール状態を取得
 
 msgid "Repository provider capability metadata is invalid."
 msgstr "リポジトリプロバイダーのcapabilityメタデータが無効です。"
+
+msgid "Repository provider package architecture is unavailable."
+msgstr "リポジトリプロバイダーパッケージのアーキテクチャを利用できません。"
 
 msgid "Reviewed source review could not produce explicit acceptance; the build was not started."
 msgstr "確認済みソースのレビューで明示的な受諾を得られなかったため、ビルドを開始しませんでした。"

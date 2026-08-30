@@ -575,8 +575,7 @@ public:
         const RootTargetIdentity root{0, "fixture-root"};
         binding_ = std::make_unique<SourceArtifactInstallTrustedBinding>(
             SourceArtifactInstallTrustedBinding{
-                {SourceArtifactInstallInvocationIdentity::from_local_value(
-                     "fixture-invocation"),
+                {std::nullopt,
                  0,
                  "moguet-source-transport-base",
                  {root}},
@@ -697,18 +696,13 @@ void test_transport_observation_and_failure_matrix(
                     "moguet-source-transport-test", "solver-added"},
         "trusted transport did not produce closed causal evidence");
 
-    SourceArtifactInstallReceiptExpectation wrong_invocation =
-        *complete.expectation();
-    wrong_invocation.work_item.invocation =
-        SourceArtifactInstallInvocationIdentity::from_local_value(
-            "other-invocation");
-    const auto cross_evidence =
-        establish_source_artifact_install_receipt_evidence(
-            wrong_invocation, *complete.observation());
     expect(
-        !project_source_artifact_install_causal_evidence(cross_evidence)
-             .has_value(),
-        "transport observation crossed invocation identity");
+        !complete.expectation()
+                ->work_item.invocation_authority.has_value() &&
+            !complete.observation()
+                 ->work_item()
+                 .invocation_authority.has_value(),
+        "standalone transport minted cleanup invocation authority");
     SourceArtifactInstallReceiptExpectation wrong_work_item =
         *complete.expectation();
     ++wrong_work_item.work_item.work_item_index;

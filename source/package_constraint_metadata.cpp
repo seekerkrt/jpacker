@@ -214,7 +214,8 @@ RepositoryExactPackageObservationResult observe_repository_exact_package(
                     ObservedVersionSource::RepositoryExactPackage,
                     metadata->version),
                 std::get<std::vector<RepositoryProviderCapability>>(
-                    std::move(provides_result))});
+                    std::move(provides_result)),
+                std::move(metadata->architecture)});
             continue;
         }
 
@@ -302,7 +303,8 @@ RepositoryProviderObservationResult observe_repository_providers(
                         ObservedVersionSource::RepositoryExactPackage,
                         metadata.version),
                     std::get<std::vector<RepositoryProviderCapability>>(
-                        std::move(provides_result))});
+                        std::move(provides_result)),
+                    std::move(metadata.architecture)});
             }
             if(parse_failure.has_value()) {
                 observation.source_results.push_back(

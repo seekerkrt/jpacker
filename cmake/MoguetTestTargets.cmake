@@ -837,6 +837,7 @@ moguet_add_cpp_test(
         source/logging.cpp
         source/shell_words.cpp
     DEFINITIONS
+        MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
         MOGUET_ENABLE_INVOCATION_TRANSACTION_LEDGER_TEST_HOOKS
         MOGUET_ENABLE_SOURCE_ARTIFACT_INSTALL_RECEIPT_TEST_HOOKS
         MOGUET_ENABLE_TRUSTED_ALPM_RECEIPT_TEST_HOOKS
@@ -1530,8 +1531,10 @@ moguet_add_cpp_test(
         source/reviewed_source_state_store.cpp
         source/reviewed_source_state.cpp
         source/source_package_identity.cpp
+        source/source_package_identity_projection.cpp
         source/interactive_confirmation.cpp
         source/invocation_owned_cleanup_model.cpp
+        source/invocation_owned_cleanup_adapter.cpp
         source/diagnostic_projection.cpp
         source/runtime_diagnostic.cpp
         source/separated_source_build.cpp
@@ -1571,12 +1574,15 @@ moguet_add_cpp_test(
         MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
         MOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS
         MOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
+        MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
         MOGUET_ENABLE_REVIEWED_SOURCE_PRODUCTION_TEST_HOOKS
         MOGUET_ENABLE_TEST_OVERRIDES
     INCLUDE_DIRECTORIES
         "${_moguet_test_source_include_dir}"
         "${_moguet_test_support_include_dir}"
         "${_moguet_test_alpm_stub_include_dir}"
+    COMPILE_OPTIONS -ffunction-sections -fdata-sections
+    LINK_OPTIONS LINKER:--gc-sections
 )
 
 moguet_add_cpp_test(

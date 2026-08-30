@@ -340,8 +340,8 @@ establish_source_artifact_install_receipt_evidence(
            observation.work_item().requested_roots)) {
         add_issue(issues, EvidenceIssue::InvalidRequestedRootAttribution);
     }
-    if(expectation.work_item.invocation !=
-       observation.work_item().invocation) {
+    if(expectation.work_item.invocation_authority !=
+       observation.work_item().invocation_authority) {
         add_issue(issues, EvidenceIssue::InvocationMismatch);
     }
     if(expectation.work_item.work_item_index !=

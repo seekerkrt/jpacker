@@ -64,9 +64,16 @@ struct FixturePackageMetadata {
         std::string package_version = "1-1",
         std::vector<std::string> package_provides = {},
         std::vector<std::string> package_groups = {},
-        std::vector<std::string> package_dependencies = {})
+        std::vector<std::string> package_dependencies = {},
+        std::string actual_package_base = {},
+        std::string actual_architecture = "any")
         : name(std::move(package_name)),
           version(std::move(package_version)),
+          package_base(
+              actual_package_base.empty()
+                  ? name
+                  : std::move(actual_package_base)),
+          architecture(std::move(actual_architecture)),
           provides(std::move(package_provides)),
           groups(std::move(package_groups)),
           dependencies(std::move(package_dependencies)) {
@@ -74,6 +81,8 @@ struct FixturePackageMetadata {
 
     std::string name;
     std::string version;
+    std::string package_base;
+    std::string architecture;
     std::vector<std::string> provides;
     std::vector<std::string> groups;
     std::vector<std::string> dependencies;
@@ -120,9 +129,10 @@ std::string local_package_descriptor(
                << "%VERSION%\n"
                << package.version << "\n\n"
                << "%BASE%\n"
-               << package.name << "\n\n"
+               << package.package_base << "\n\n"
                << "%DESC%\ncleanup policy fixture\n\n"
-               << "%ARCH%\nany\n\n"
+               << "%ARCH%\n"
+               << package.architecture << "\n\n"
                << "%REASON%\n1\n\n";
     append_fixture_field(descriptor, "PROVIDES", package.provides);
     append_fixture_field(descriptor, "GROUPS", package.groups);
@@ -139,7 +149,7 @@ std::string sync_package_descriptor(
                << "%NAME%\n"
                << package.name << "\n\n"
                << "%BASE%\n"
-               << package.name << "\n\n"
+               << package.package_base << "\n\n"
                << "%VERSION%\n"
                << package.version << "\n\n"
                << "%DESC%\ncleanup policy fixture\n\n"
@@ -149,7 +159,8 @@ std::string sync_package_descriptor(
                << std::string(64, '0') << "\n\n"
                << "%URL%\nhttps://example.invalid/\n\n"
                << "%LICENSE%\nGPL\n\n"
-               << "%ARCH%\nany\n\n"
+               << "%ARCH%\n"
+               << package.architecture << "\n\n"
                << "%BUILDDATE%\n1\n\n"
                << "%PACKAGER%\nMoguet test fixture\n\n";
     append_fixture_field(descriptor, "PROVIDES", package.provides);
@@ -271,6 +282,18 @@ void run_pacman_metadata_smoke_test() {
     expect(metadata.name == "pacman", "pacman metadata returned a different package name");
     expect(!metadata.version.empty(), "pacman metadata returned an empty version");
     expect(
+        metadata.package_base.state() ==
+                InstalledPackageMetadataValueState::Known &&
+            metadata.package_base.value() != nullptr &&
+            !metadata.package_base.value()->empty(),
+        "pacman metadata did not retain actual PackageBase");
+    expect(
+        metadata.architecture.state() ==
+                InstalledPackageMetadataValueState::Known &&
+            metadata.architecture.value() != nullptr &&
+            !metadata.architecture.value()->empty(),
+        "pacman metadata did not retain actual architecture");
+    expect(
         metadata.reason == InstalledPackageReason::Explicit ||
             metadata.reason == InstalledPackageReason::Dependency ||
             metadata.reason == InstalledPackageReason::Unknown,
@@ -293,8 +316,45 @@ void run_pacman_metadata_smoke_test() {
     expect(
         pacman->second.name == metadata.name &&
             pacman->second.version == metadata.version &&
-            pacman->second.reason == metadata.reason,
+            pacman->second.reason == metadata.reason &&
+            pacman->second.package_base == metadata.package_base &&
+            pacman->second.architecture == metadata.architecture,
         "installed package state snapshot differs from exact metadata");
+}
+
+void run_installed_identity_fixture_test() {
+    TemporaryDirectory fixture;
+    const fs::path database_path = fixture.path() / "database";
+    create_local_database(
+        database_path,
+        {FixturePackageMetadata{
+            "split-child", "2-3", {}, {}, {}, "split-base", "aarch64"}});
+
+    PackageMetadataSession session = PackageMetadataSession::open(
+        PacmanDatabasePaths{"/", database_path});
+    const InstalledPackageMetadata metadata =
+        std::get<InstalledPackageMetadata>(
+            session.query_installed_package("split-child"));
+    expect(
+        metadata.package_base.state() ==
+                InstalledPackageMetadataValueState::Known &&
+            metadata.package_base.value() != nullptr &&
+            *metadata.package_base.value() == "split-base",
+        "synthetic local DB PackageBase was replaced by child identity");
+    expect(
+        metadata.architecture.state() ==
+                InstalledPackageMetadataValueState::Known &&
+            metadata.architecture.value() != nullptr &&
+            *metadata.architecture.value() == "aarch64",
+        "synthetic local DB architecture was not retained exactly");
+
+    const InstalledPackageStateSnapshot snapshot =
+        std::get<InstalledPackageStateSnapshot>(
+            session.snapshot_installed_package_states());
+    expect(
+        snapshot.at("split-child").package_base == metadata.package_base &&
+            snapshot.at("split-child").architecture == metadata.architecture,
+        "synthetic full snapshot changed installed identity metadata");
 }
 
 void run_repository_metadata_smoke_test() {
@@ -673,6 +733,7 @@ int main() {
     try {
         test_raw_capture_preserves_boundary_whitespace();
         run_pacman_metadata_smoke_test();
+        run_installed_identity_fixture_test();
         run_repository_metadata_smoke_test();
         run_current_arch_base_devel_policy_smoke_test();
         run_foreign_package_inventory_compatibility_test();

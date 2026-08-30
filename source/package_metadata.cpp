@@ -537,6 +537,45 @@ InstalledPackageReason map_install_reason(alpm_pkgreason_t reason) {
     }
 }
 
+InstalledPackageBaseIdentity snapshot_installed_package_base(
+    alpm_pkg_t* package) {
+    const char* raw_package_base = alpm_pkg_get_base(package);
+    if(raw_package_base == nullptr) {
+        return InstalledPackageBaseIdentity::missing();
+    }
+
+    std::string package_base(raw_package_base);
+    if(!is_valid_package_name(package_base)) {
+        return InstalledPackageBaseIdentity::malformed();
+    }
+    return InstalledPackageBaseIdentity::known(std::move(package_base));
+}
+
+bool is_valid_package_architecture_metadata(
+    const std::string& architecture) noexcept {
+    return !architecture.empty() &&
+           std::none_of(
+               architecture.begin(), architecture.end(),
+               [](unsigned char character) {
+                   return character <= 0x20 || character == 0x7f;
+               });
+}
+
+InstalledPackageArchitectureIdentity snapshot_installed_package_architecture(
+    alpm_pkg_t* package) {
+    const char* raw_architecture = alpm_pkg_get_arch(package);
+    if(raw_architecture == nullptr) {
+        return InstalledPackageArchitectureIdentity::missing();
+    }
+
+    std::string architecture(raw_architecture);
+    if(!is_valid_package_architecture_metadata(architecture)) {
+        return InstalledPackageArchitectureIdentity::malformed();
+    }
+    return InstalledPackageArchitectureIdentity::known(
+        std::move(architecture));
+}
+
 RepositoryProvidedPackageRelation map_provided_package_relation(
     alpm_depmod_t relation) noexcept {
     switch(relation) {
@@ -568,6 +607,10 @@ using RepositoryPackageBaseSnapshotResult = std::variant<
     std::string,
     PackageMetadataFailure>;
 
+using RepositoryPackageArchitectureSnapshotResult = std::variant<
+    std::string,
+    PackageMetadataFailure>;
+
 RepositoryPackageBaseSnapshotResult snapshot_repository_package_base(
     alpm_pkg_t* package) {
     const char* package_base = alpm_pkg_get_base(package);
@@ -579,6 +622,26 @@ RepositoryPackageBaseSnapshotResult snapshot_repository_package_base(
                 "PackageBase")};
     }
     return std::string(package_base);
+}
+
+RepositoryPackageArchitectureSnapshotResult
+snapshot_repository_package_architecture(alpm_pkg_t* package) {
+    const char* raw_architecture = alpm_pkg_get_arch(package);
+    if(raw_architecture == nullptr) {
+        return PackageMetadataFailure{
+            PackageMetadataErrorCode::MalformedMetadata,
+            localization::translate_message(
+                "Repository package metadata is missing its architecture.")};
+    }
+
+    std::string architecture(raw_architecture);
+    if(!is_valid_package_architecture_metadata(architecture)) {
+        return PackageMetadataFailure{
+            PackageMetadataErrorCode::MalformedMetadata,
+            localization::translate_message(
+                "Repository package metadata contains an invalid architecture.")};
+    }
+    return architecture;
 }
 
 RepositoryProvidedPackageMetadataResult snapshot_package_provides(
@@ -1840,7 +1903,9 @@ InstalledPackageQueryResult PackageMetadataSession::query_installed_package(
     return InstalledPackageMetadata{
         returned_name,
         installed_version,
-        map_install_reason(alpm_pkg_get_reason(package))};
+        map_install_reason(alpm_pkg_get_reason(package)),
+        snapshot_installed_package_base(package),
+        snapshot_installed_package_architecture(package)};
 }
 
 InstalledExactPackageMetadataQueryResult
@@ -1987,7 +2052,9 @@ PackageMetadataSession::snapshot_installed_package_states() const {
         InstalledPackageMetadata metadata{
             package_name,
             raw_package_version,
-            map_install_reason(alpm_pkg_get_reason(package))};
+            map_install_reason(alpm_pkg_get_reason(package)),
+            snapshot_installed_package_base(package),
+            snapshot_installed_package_architecture(package)};
         if(!snapshot.emplace(std::move(package_name), std::move(metadata))
                 .second) {
             return query_failure(
@@ -2372,6 +2439,20 @@ RepositoryPackageMetadataSession::query_repository_exact_package_metadata(
             continue;
         }
 
+        RepositoryPackageArchitectureSnapshotResult architecture_result =
+            snapshot_repository_package_architecture(package);
+        if(const auto* failure =
+               std::get_if<PackageMetadataFailure>(&architecture_result);
+           failure != nullptr) {
+            snapshot.source_results.push_back(
+                RepositoryExactPackageMetadataSourceFailure{
+                    repository_order,
+                    repository.repository_name,
+                    package_name,
+                    *failure});
+            continue;
+        }
+
         RepositoryProvidedPackageMetadataResult provides_result =
             snapshot_package_provides(package);
         if(const auto* failure =
@@ -2396,7 +2477,8 @@ RepositoryPackageMetadataSession::query_repository_exact_package_metadata(
                 ? std::nullopt
                 : std::optional<std::string>(package_version),
             std::move(std::get<std::vector<RepositoryProvidedPackageMetadata>>(
-                provides_result))});
+                provides_result)),
+            std::get<std::string>(std::move(architecture_result))});
     }
     return snapshot;
 }
@@ -2486,6 +2568,15 @@ RepositoryPackageMetadataSession::query_repository_provider_package_metadata(
                 source_failure = *failure;
                 break;
             }
+            RepositoryPackageArchitectureSnapshotResult architecture_result =
+                snapshot_repository_package_architecture(package);
+            if(const auto* failure =
+                   std::get_if<PackageMetadataFailure>(
+                       &architecture_result);
+               failure != nullptr) {
+                source_failure = *failure;
+                break;
+            }
             const char* package_version = alpm_pkg_get_version(package);
             source.packages.push_back(RepositoryExactPackageMetadata{
                 repository_order,
@@ -2496,7 +2587,8 @@ RepositoryPackageMetadataSession::query_repository_provider_package_metadata(
                 package_version == nullptr
                     ? std::nullopt
                     : std::optional<std::string>(package_version),
-                std::move(provides)});
+                std::move(provides),
+                std::get<std::string>(std::move(architecture_result))});
         }
 
         if(source_failure.has_value()) {

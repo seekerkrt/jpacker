@@ -600,6 +600,8 @@ void test_repository_provides_use_equality_only_capabilities() {
         "core", "provider-package", 10, 20);
     stub::set_repository_package_version(
         "core", "provider-package", "9.0-1");
+    stub::set_repository_package_architecture(
+        "core", "provider-package", "any");
     stub::set_repository_package_provides(
         "core",
         "provider-package",
@@ -627,8 +629,10 @@ void test_repository_provides_use_equality_only_capabilities() {
             observation.source_results[0],
             "repository provider package");
     expect(
-        package.provides.size() == 2,
-        "Repository Provides capability count differs");
+        package.provides.size() == 2 &&
+            package.architecture ==
+                std::optional<std::string>{"any"},
+        "Repository Provides lost capability or architecture metadata");
 
     const RepositoryProviderCapability& unversioned = package.provides[0];
     expect(

@@ -12,6 +12,87 @@
 #include <utility>
 #include <variant>
 
+class CleanupInvocationSessionInspector final {
+public:
+    [[nodiscard]] static const PreparedRemoteSourceBuild& prepared(
+        const CleanupInvocationSession& session) {
+        if(!session.is_active()) {
+            throw std::logic_error(
+                "Cleanup invocation session is inactive.");
+        }
+        return session.prepared();
+    }
+
+    [[nodiscard]] static bool contains_transaction_token(
+        const CleanupInvocationSession& session,
+        InvocationDependencyTransactionOwner owner,
+        const std::string& transaction_token,
+        std::size_t work_item_index) noexcept {
+        return session.contains_trusted_transaction_token(
+            owner, transaction_token, work_item_index);
+    }
+
+    [[nodiscard]] static std::vector<
+        CleanupTrustedTransactionTokenInventoryEntry>
+    transaction_inventory(const CleanupInvocationSession& session) {
+        return session.transaction_token_inventory();
+    }
+};
+
+class CleanupPhaseObservationProducer final {
+public:
+    [[nodiscard]] static CleanupBaselineSnapshotObservation baseline(
+        CleanupInvocationSession& session,
+        InstalledPackageStateSnapshotResult snapshot) {
+        if(!session.record_baseline_observation()) {
+            throw std::logic_error(
+                "Cleanup baseline observation is out of phase.");
+        }
+        return CleanupBaselineSnapshotObservation(
+            session.authority(), std::move(snapshot));
+    }
+
+    [[nodiscard]] static CleanupCurrentInstalledObservation current(
+        CleanupInvocationSession& session,
+        InstalledPackageStateSnapshotResult snapshot,
+        CleanupObservationPhase phase) {
+        std::size_t completed_transaction_count = 0;
+        if(phase == CleanupObservationPhase::
+                        AfterFullSupportedInvocationSuccess) {
+            const std::optional<std::size_t> completed =
+                session.record_post_success_observation();
+            if(!completed.has_value()) {
+                throw std::logic_error(
+                    "Cleanup current observation is out of phase.");
+            }
+            completed_transaction_count = completed.value();
+        }
+        return CleanupCurrentInstalledObservation(
+            session.authority(), phase, completed_transaction_count,
+            std::move(snapshot));
+    }
+
+    [[nodiscard]] static CleanupPolicyObservation policy(
+        CleanupInvocationSession& session,
+        CleanupPolicyProtectionEvidence evidence,
+        CleanupObservationPhase phase) {
+        std::size_t completed_transaction_count = 0;
+        if(phase == CleanupObservationPhase::
+                        AfterFullSupportedInvocationSuccess) {
+            const std::optional<std::size_t> completed =
+                session.record_post_success_observation();
+            if(!completed.has_value()) {
+                throw std::logic_error(
+                    "Cleanup policy observation is out of phase.");
+            }
+            completed_transaction_count = completed.value();
+        }
+        return CleanupPolicyObservation(
+            session.authority(), phase, completed_transaction_count,
+            std::move(evidence));
+    }
+};
+
 namespace {
 
 void add_issue(
@@ -36,6 +117,26 @@ const InstalledPackageStateSnapshot* successful_snapshot(
     return std::get_if<InstalledPackageStateSnapshot>(&snapshot);
 }
 
+bool installed_package_identity_is_complete(
+    const InstalledPackageMetadata& metadata) noexcept {
+    const auto has_valid_architecture = [](const std::string& value) {
+        return !value.empty() &&
+               std::all_of(
+                   value.begin(), value.end(), [](unsigned char character) {
+                       return character > 0x20 && character != 0x7f;
+                   });
+    };
+    return is_valid_package_name(metadata.name) && !metadata.version.empty() &&
+           metadata.package_base.state() ==
+               InstalledPackageMetadataValueState::Known &&
+           metadata.package_base.value() != nullptr &&
+           is_valid_package_name(*metadata.package_base.value()) &&
+           metadata.architecture.state() ==
+               InstalledPackageMetadataValueState::Known &&
+           metadata.architecture.value() != nullptr &&
+           has_valid_architecture(*metadata.architecture.value());
+}
+
 void retain_snapshot_failure(
     const InstalledPackageStateSnapshotResult& snapshot,
     CleanupLifecycleProjectionIssueKind kind,
@@ -52,6 +153,172 @@ bool is_known_role(PackageRole role) noexcept {
         case PackageRole::RuntimeDependency:
         case PackageRole::BuildDependency:
         case PackageRole::CheckDependency:
+            return true;
+    }
+    return false;
+}
+
+bool is_valid_review_status(ProductionSourceReviewStatus status) noexcept {
+    switch(status) {
+        case ProductionSourceReviewStatus::NotApplicable:
+        case ProductionSourceReviewStatus::CompatibilityWithoutReview:
+        case ProductionSourceReviewStatus::Reviewed:
+            return true;
+    }
+    return false;
+}
+
+bool is_valid_editor_overlay(
+    ReviewedSourceEditorOverlayStatus status) noexcept {
+    switch(status) {
+        case ReviewedSourceEditorOverlayStatus::None:
+        case ReviewedSourceEditorOverlayStatus::InvocationLocal:
+            return true;
+    }
+    return false;
+}
+
+bool is_valid_compatibility_reason(
+    ReviewedSourceCompatibilityBuildReason reason) noexcept {
+    switch(reason) {
+        case ReviewedSourceCompatibilityBuildReason::NoDiff:
+        case ReviewedSourceCompatibilityBuildReason::NoConfirm:
+        case ReviewedSourceCompatibilityBuildReason::NonInteractiveInput:
+        case ReviewedSourceCompatibilityBuildReason::ExplicitReviewDecline:
+        case ReviewedSourceCompatibilityBuildReason::DefaultReviewDecline:
+            return true;
+    }
+    return false;
+}
+
+bool is_valid_publication_status(
+    ReviewedSourcePublicationStatus status) noexcept {
+    switch(status) {
+        case ReviewedSourcePublicationStatus::Published:
+        case ReviewedSourcePublicationStatus::AlreadyPublishedSameTarget:
+            return true;
+    }
+    return false;
+}
+
+bool is_valid_reviewed_outcome(
+    ProductionReviewedSourceOutcome outcome) noexcept {
+    switch(outcome) {
+        case ProductionReviewedSourceOutcome::InitialFullReview:
+        case ProductionReviewedSourceOutcome::UpdateReview:
+        case ProductionReviewedSourceOutcome::RebaselineFullReview:
+        case ProductionReviewedSourceOutcome::
+            AbnormalStateRebindFullReview:
+        case ProductionReviewedSourceOutcome::AlreadyReviewed:
+            return true;
+    }
+    return false;
+}
+
+bool is_valid_abnormal_state_reason(
+    ReviewedSourceAbnormalStateReason reason) noexcept {
+    switch(reason) {
+        case ReviewedSourceAbnormalStateReason::Invalid:
+        case ReviewedSourceAbnormalStateReason::Corrupted:
+        case ReviewedSourceAbnormalStateReason::SourceMismatch:
+            return true;
+    }
+    return false;
+}
+
+bool production_provenance_is_valid(
+    const ProductionSourceBuildProvenance& provenance) noexcept {
+    if(!is_valid_review_status(provenance.review_status) ||
+       !is_valid_editor_overlay(provenance.editor_overlay) ||
+       (provenance.compatibility_reason.has_value() &&
+        !is_valid_compatibility_reason(
+            provenance.compatibility_reason.value())) ||
+       (provenance.publication_status.has_value() &&
+        !is_valid_publication_status(
+            provenance.publication_status.value())) ||
+       (provenance.reviewed_outcome.has_value() &&
+        !is_valid_reviewed_outcome(provenance.reviewed_outcome.value())) ||
+       (provenance.abnormal_state_reason.has_value() &&
+        !is_valid_abnormal_state_reason(
+            provenance.abnormal_state_reason.value()))) {
+        return false;
+    }
+
+    const bool has_reviewed_fields =
+        provenance.reviewed_upstream_base_revision.has_value() ||
+        provenance.publication_status.has_value() ||
+        provenance.reviewed_outcome.has_value() ||
+        provenance.abnormal_state_reason.has_value() ||
+        provenance.reviewed_state_generation.has_value();
+    switch(provenance.review_status) {
+        case ProductionSourceReviewStatus::NotApplicable:
+            return !provenance.compatibility_reason.has_value() &&
+                   !has_reviewed_fields;
+        case ProductionSourceReviewStatus::CompatibilityWithoutReview:
+            return provenance.compatibility_reason.has_value() &&
+                   !has_reviewed_fields;
+        case ProductionSourceReviewStatus::Reviewed:
+            if(provenance.compatibility_reason.has_value() ||
+               !provenance.reviewed_upstream_base_revision.has_value() ||
+               provenance.reviewed_upstream_base_revision->state() !=
+                   SourceRevisionState::Known ||
+               provenance.reviewed_upstream_base_revision->git_commit() ==
+                   nullptr ||
+               !provenance.publication_status.has_value() ||
+               !provenance.reviewed_outcome.has_value() ||
+               !provenance.reviewed_state_generation.has_value() ||
+               provenance.reviewed_state_generation.value() == 0 ||
+               (provenance.reviewed_outcome.value() ==
+                    ProductionReviewedSourceOutcome::AlreadyReviewed &&
+                provenance.publication_status.value() !=
+                    ReviewedSourcePublicationStatus::
+                        AlreadyPublishedSameTarget)) {
+                return false;
+            }
+            return (provenance.reviewed_outcome.value() ==
+                    ProductionReviewedSourceOutcome::
+                        AbnormalStateRebindFullReview) ==
+                   provenance.abnormal_state_reason.has_value();
+    }
+    return false;
+}
+
+bool staged_outcome_is_valid(
+    const ProductionSourceBuildStagedOutcome& outcome) noexcept {
+    if(!production_provenance_is_valid(outcome.source_provenance)) {
+        return false;
+    }
+    switch(outcome.build_outcome) {
+        case ProductionSourceBuildCommandOutcome::NotAttempted:
+        case ProductionSourceBuildCommandOutcome::Started:
+        case ProductionSourceBuildCommandOutcome::Failed:
+            return outcome.install_outcome ==
+                   ProductionSourceInstallOutcome::NotAttempted;
+        case ProductionSourceBuildCommandOutcome::Succeeded:
+            break;
+        default:
+            return false;
+    }
+    switch(outcome.install_outcome) {
+        case ProductionSourceInstallOutcome::NotAttempted:
+        case ProductionSourceInstallOutcome::Started:
+        case ProductionSourceInstallOutcome::Failed:
+        case ProductionSourceInstallOutcome::Succeeded:
+            return true;
+    }
+    return false;
+}
+
+bool is_valid_failure_stage(
+    ProductionSourceBuildFailureStage stage) noexcept {
+    switch(stage) {
+        case ProductionSourceBuildFailureStage::Review:
+        case ProductionSourceBuildFailureStage::Build:
+        case ProductionSourceBuildFailureStage::ArtifactValidation:
+        case ProductionSourceBuildFailureStage::InstallPreparation:
+        case ProductionSourceBuildFailureStage::InstallTransaction:
+        case ProductionSourceBuildFailureStage::Cleanup:
+        case ProductionSourceBuildFailureStage::Other:
             return true;
     }
     return false;
@@ -93,6 +360,24 @@ std::string resolved_candidate_package_name(
                 return resolved.provider.package_name;
             } else {
                 return resolved.package_name;
+            }
+        },
+        candidate);
+}
+
+std::optional<std::string> resolved_candidate_package_base(
+    const ResolvedDependencyCandidate& candidate) {
+    return std::visit(
+        [](const auto& resolved) -> std::optional<std::string> {
+            using Candidate = std::decay_t<decltype(resolved)>;
+            if constexpr(std::is_same_v<Candidate, InstalledExactPackage>) {
+                return std::nullopt;
+            } else if constexpr(std::is_same_v<
+                                    Candidate,
+                                    ProviderResolvedDependencyCandidate>) {
+                return resolved.provider.package_base;
+            } else {
+                return resolved.package_base;
             }
         },
         candidate);
@@ -379,8 +664,7 @@ bool provider_association_is_complete(
     const auto* resolved = std::get_if<ProviderResolvedDependencyCandidate>(
         &edge.resolved_candidate.value());
     if(resolved == nullptr ||
-       !same_provider_identity(
-           edge.resolved_provider.value(), resolved->provider)) {
+       edge.resolved_provider.value() != resolved->provider) {
         return false;
     }
 
@@ -446,13 +730,8 @@ bool direct_association_is_complete(
 
 bool work_item_outcome_succeeded(
     const ProductionSourceBuildWorkItemOutcome& outcome) noexcept {
-    return outcome.status ==
-               ProductionSourceBuildWorkItemStatus::Succeeded &&
-           outcome.production_outcome.has_value() &&
-           outcome.production_outcome->build_outcome ==
-               ProductionSourceBuildCommandOutcome::Succeeded &&
-           outcome.production_outcome->install_outcome ==
-               ProductionSourceInstallOutcome::Succeeded;
+    return validate_production_source_build_work_item_outcome(outcome) ==
+           CleanupWorkItemOutcomeShape::ValidSucceeded;
 }
 
 bool lifecycle_result_matches_invocation(
@@ -502,6 +781,9 @@ CleanupSharedRequirementState project_shared_requirement(
     if(has_role(observed_roles, PackageRole::Root) ||
        has_role(observed_roles, PackageRole::RuntimeDependency)) {
         return CleanupSharedRequirementState::StillRequired;
+    }
+    if(relevant_edge_indices.empty()) {
+        return CleanupSharedRequirementState::Unknown;
     }
 
     if(lifecycle.boundary() == CleanupLifecycleBoundary::AfterWorkItem &&
@@ -849,21 +1131,6 @@ bool is_build_or_check_role(PackageRole role) noexcept {
            role == PackageRole::CheckDependency;
 }
 
-bool edge_resolves_to_aur_source(
-    const BuildPlanDependencyEdge& edge) noexcept {
-    if(!edge.resolved_candidate.has_value()) return false;
-    if(std::holds_alternative<AurResolvedDependencyCandidate>(
-           edge.resolved_candidate.value())) {
-        return true;
-    }
-    const auto* provider =
-        std::get_if<ProviderResolvedDependencyCandidate>(
-            &edge.resolved_candidate.value());
-    return provider != nullptr &&
-           std::holds_alternative<AurProviderOrigin>(
-               provider->provider.origin);
-}
-
 bool current_package_matches_provider(
     const CleanupCurrentPackageEvidence& current,
     const ProvidedDependency& provider) noexcept {
@@ -873,7 +1140,17 @@ bool current_package_matches_provider(
            current.metadata->name == provider.package_name &&
            current.metadata->reason == InstalledPackageReason::Dependency &&
            provider.package_version.has_value() &&
-           current.metadata->version == provider.package_version.value();
+           current.metadata->version == provider.package_version.value() &&
+           current.metadata->package_base.state() ==
+               InstalledPackageMetadataValueState::Known &&
+           current.metadata->package_base.value() != nullptr &&
+           *current.metadata->package_base.value() == provider.package_base &&
+           provider.package_architecture.has_value() &&
+           current.metadata->architecture.state() ==
+               InstalledPackageMetadataValueState::Known &&
+           current.metadata->architecture.value() != nullptr &&
+           *current.metadata->architecture.value() ==
+               provider.package_architecture.value();
 }
 
 std::optional<std::size_t> find_work_item_for_edge(
@@ -907,12 +1184,129 @@ bool selected_provider_decision_matches_plan(
     for(const BuildPlanProvidedDependency& selected : plan.provided) {
         if(selected.dependency != edge.dependency_spec ||
            selected.resolution != edge.provider_resolution ||
-           !same_provider_identity(selected.provider, provider)) {
+           selected.provider != provider) {
             continue;
         }
         ++matches;
     }
     return matches == 1;
+}
+
+bool provider_edge_shape_is_complete(
+    const BuildPlan& plan,
+    const BuildPlanDependencyEdge& edge) {
+    if(edge.kind != DependencyKind::Provided ||
+       !edge.resolved_provider.has_value() ||
+       !edge.resolved_candidate.has_value() ||
+       !edge.requirement.has_value() ||
+       !requirement_matches_raw_specification(
+           edge.requirement.value(), edge.dependency_spec) ||
+       !successful_constraint_evaluation(edge)) {
+        return false;
+    }
+    const auto* resolved = std::get_if<ProviderResolvedDependencyCandidate>(
+        &edge.resolved_candidate.value());
+    const ProvidedDependency& provider = edge.resolved_provider.value();
+    if(resolved == nullptr || resolved->provider != provider ||
+       provider.package_base.empty() ||
+       provider.provided_dependency_name !=
+           requirement_identity(edge.requirement.value()) ||
+       provider.provided_dependency_specification.empty() ||
+       !provider.constraint_metadata.has_value() ||
+       provider.constraint_metadata->provided_capability.package_name() !=
+           provider.provided_dependency_name ||
+       provider.constraint_metadata->provided_capability
+               .raw_specification() !=
+           provider.provided_dependency_specification ||
+       resolved->provided_version !=
+           provider.constraint_metadata->provided_version ||
+       !selected_provider_decision_matches_plan(plan, edge, provider)) {
+        return false;
+    }
+    return repository_provider_provenance_is_complete(provider, plan);
+}
+
+bool direct_edge_identity_shape_is_complete(
+    const BuildPlanDependencyEdge& edge) {
+    if(edge.kind == DependencyKind::Provided ||
+       edge.provider_resolution != ProviderResolutionKind::Unique ||
+       edge.resolved_provider.has_value() ||
+       !edge.resolved_candidate.has_value() ||
+       !edge.resolved_package_name.has_value() ||
+       !edge.requirement.has_value()) {
+        return false;
+    }
+    const auto* requirement =
+        std::get_if<ConsumerDependencyRequirement>(&edge.requirement.value());
+    if(requirement == nullptr) return false;
+
+    return std::visit(
+        [&edge, requirement](const auto& candidate) {
+            using Candidate = std::decay_t<decltype(candidate)>;
+            if constexpr(std::is_same_v<Candidate, InstalledExactPackage>) {
+                return edge.kind == DependencyKind::Installed &&
+                       !edge.resolved_package_base.has_value() &&
+                       edge.resolved_package_name.value() ==
+                           candidate.package_name &&
+                       requirement->package_name() == candidate.package_name;
+            } else if constexpr(std::is_same_v<
+                                    Candidate,
+                                    RepositoryExactPackage>) {
+                return edge.kind == DependencyKind::Repo &&
+                       edge.resolved_package_base ==
+                           std::optional<std::string>{
+                               candidate.package_base} &&
+                       edge.resolved_package_name.value() ==
+                           candidate.package_name &&
+                       requirement->package_name() == candidate.package_name;
+            } else if constexpr(std::is_same_v<
+                                    Candidate,
+                                    AurResolvedDependencyCandidate> ||
+                                std::is_same_v<
+                                    Candidate,
+                                    LocalResolvedDependencyCandidate>) {
+                const DependencyKind expected_kind =
+                    std::is_same_v<
+                        Candidate,
+                        AurResolvedDependencyCandidate>
+                        ? DependencyKind::Aur
+                        : DependencyKind::Local;
+                return edge.kind == expected_kind &&
+                       edge.resolved_package_base ==
+                           std::optional<std::string>{
+                               candidate.package_base} &&
+                       edge.resolved_package_name.value() ==
+                           candidate.package_name &&
+                       requirement->package_name() == candidate.package_name;
+            } else {
+                return false;
+            }
+        },
+        edge.resolved_candidate.value());
+}
+
+bool dependency_kind_is_valid(DependencyKind kind) noexcept {
+    switch(kind) {
+        case DependencyKind::Installed:
+        case DependencyKind::Repo:
+        case DependencyKind::Aur:
+        case DependencyKind::Local:
+        case DependencyKind::Provided:
+        case DependencyKind::AmbiguousProvider:
+        case DependencyKind::Unknown:
+            return true;
+    }
+    return false;
+}
+
+bool provider_resolution_is_valid(
+    ProviderResolutionKind resolution) noexcept {
+    switch(resolution) {
+        case ProviderResolutionKind::Unique:
+        case ProviderResolutionKind::UserSelected:
+            return true;
+    }
+    return false;
 }
 
 std::vector<std::string> selected_provider_package_names(
@@ -923,16 +1317,6 @@ std::vector<std::string> selected_provider_package_names(
         names.push_back(provider.package_name);
     }
     return names;
-}
-
-bool provider_sets_match(
-    const std::vector<ProvidedDependency>& lhs,
-    const std::vector<ProvidedDependency>& rhs) {
-    if(lhs.size() != rhs.size()) return false;
-    for(std::size_t index = 0; index < lhs.size(); ++index) {
-        if(lhs[index] != rhs[index]) return false;
-    }
-    return true;
 }
 
 std::optional<std::size_t> exact_work_item_index_for_package_base(
@@ -964,8 +1348,51 @@ bool route_kind_is_valid(CleanupRouteKind route_kind) noexcept {
 
 } // namespace
 
+CleanupWorkItemOutcomeShape
+validate_production_source_build_work_item_outcome(
+    const ProductionSourceBuildWorkItemOutcome& outcome) noexcept {
+    switch(outcome.status) {
+        case ProductionSourceBuildWorkItemStatus::Succeeded:
+            if(!outcome.production_outcome.has_value() ||
+               !staged_outcome_is_valid(
+                   outcome.production_outcome.value()) ||
+               outcome.production_outcome->build_outcome !=
+                   ProductionSourceBuildCommandOutcome::Succeeded ||
+               outcome.production_outcome->install_outcome !=
+                   ProductionSourceInstallOutcome::Succeeded ||
+               outcome.failure_stage.has_value() ||
+               outcome.diagnostic.has_value() ||
+               outcome.failure_exception != nullptr) {
+                return CleanupWorkItemOutcomeShape::Invalid;
+            }
+            return CleanupWorkItemOutcomeShape::ValidSucceeded;
+        case ProductionSourceBuildWorkItemStatus::Failed:
+            if(!outcome.failure_stage.has_value() ||
+               !is_valid_failure_stage(outcome.failure_stage.value()) ||
+               !outcome.diagnostic.has_value() ||
+               outcome.diagnostic->empty() ||
+               outcome.failure_exception == nullptr ||
+               (outcome.production_outcome.has_value() &&
+                !staged_outcome_is_valid(
+                    outcome.production_outcome.value()))) {
+                return CleanupWorkItemOutcomeShape::Invalid;
+            }
+            return CleanupWorkItemOutcomeShape::ValidFailed;
+        case ProductionSourceBuildWorkItemStatus::NotAttempted:
+            if(outcome.production_outcome.has_value() ||
+               outcome.failure_stage.has_value() ||
+               outcome.diagnostic.has_value() ||
+               outcome.failure_exception != nullptr) {
+                return CleanupWorkItemOutcomeShape::Invalid;
+            }
+            return CleanupWorkItemOutcomeShape::ValidNotAttempted;
+    }
+    return CleanupWorkItemOutcomeShape::Invalid;
+}
+
 CleanupInvocationLifecycleEvidence::CleanupInvocationLifecycleEvidence(
     CleanupLifecycleBoundary boundary,
+    std::optional<CleanupInvocationAuthority> authority,
     std::optional<std::reference_wrapper<
         const PreparedProductionSourceBuildInvocation>>
         invocation,
@@ -973,57 +1400,88 @@ CleanupInvocationLifecycleEvidence::CleanupInvocationLifecycleEvidence(
         const ProductionSourceBuildInvocationResult>>
         result,
     std::optional<std::size_t> completed_work_item_index) noexcept
-    : boundary_(boundary), invocation_(invocation), result_(result),
+    : boundary_(boundary), authority_(std::move(authority)),
+      invocation_(invocation), result_(result),
       completed_work_item_index_(completed_work_item_index) {
 }
 
 CleanupInvocationLifecycleEvidence
 CleanupInvocationLifecycleEvidence::unknown() noexcept {
     return CleanupInvocationLifecycleEvidence(
-        CleanupLifecycleBoundary::Unknown, std::nullopt, std::nullopt,
-        std::nullopt);
+        CleanupLifecycleBoundary::Unknown, std::nullopt,
+        std::nullopt, std::nullopt, std::nullopt);
 }
 
 CleanupInvocationLifecycleEvidence
 CleanupInvocationLifecycleEvidence::before_build_completion(
-    const PreparedProductionSourceBuildInvocation& invocation) noexcept {
+    const CleanupInvocationSession& session) {
+    const PreparedRemoteSourceBuild& prepared =
+        CleanupInvocationSessionInspector::prepared(session);
     return CleanupInvocationLifecycleEvidence(
         CleanupLifecycleBoundary::BeforeBuildCompletion,
-        std::cref(invocation), std::nullopt, std::nullopt);
+        session.authority(), std::cref(prepared.invocation),
+        std::nullopt, std::nullopt);
 }
 
 CleanupInvocationLifecycleEvidence
 CleanupInvocationLifecycleEvidence::after_work_item(
-    const PreparedProductionSourceBuildInvocation& invocation,
+    const CleanupInvocationSession& session,
     const ProductionSourceBuildInvocationResult& result,
-    std::size_t completed_work_item_index) noexcept {
+    std::size_t completed_work_item_index) {
+    const PreparedRemoteSourceBuild& prepared =
+        CleanupInvocationSessionInspector::prepared(session);
     return CleanupInvocationLifecycleEvidence(
         CleanupLifecycleBoundary::AfterWorkItem,
-        std::cref(invocation), std::cref(result),
+        session.authority(), std::cref(prepared.invocation),
+        std::cref(result),
         completed_work_item_index);
 }
 
 CleanupInvocationLifecycleEvidence
 CleanupInvocationLifecycleEvidence::after_successful_invocation(
-    const PreparedProductionSourceBuildInvocation& invocation,
-    const ProductionSourceBuildInvocationResult& result) noexcept {
+    const CleanupInvocationSession& session,
+    const ProductionSourceBuildInvocationResult& result) {
+    const PreparedRemoteSourceBuild& prepared =
+        CleanupInvocationSessionInspector::prepared(session);
+    bool is_complete_success =
+        prepared.invocation.work_items.size() == result.work_items.size();
+    for(std::size_t index = 0;
+        is_complete_success && index < result.work_items.size(); ++index) {
+        is_complete_success =
+            prepared.invocation.work_items[index].request.checkout_name ==
+                result.work_items[index].package_base &&
+            validate_production_source_build_work_item_outcome(
+                result.work_items[index]) ==
+                CleanupWorkItemOutcomeShape::ValidSucceeded;
+    }
     return CleanupInvocationLifecycleEvidence(
-        CleanupLifecycleBoundary::AfterSuccessfulInvocation,
-        std::cref(invocation), std::cref(result), std::nullopt);
+        is_complete_success
+            ? CleanupLifecycleBoundary::AfterSuccessfulInvocation
+            : CleanupLifecycleBoundary::Unknown,
+        session.authority(), std::cref(prepared.invocation),
+        std::cref(result), std::nullopt);
 }
 
 CleanupInvocationLifecycleEvidence
 CleanupInvocationLifecycleEvidence::after_invocation_completion(
-    const PreparedProductionSourceBuildInvocation& invocation,
-    const ProductionSourceBuildInvocationResult& result) noexcept {
+    const CleanupInvocationSession& session,
+    const ProductionSourceBuildInvocationResult& result) {
+    const PreparedRemoteSourceBuild& prepared =
+        CleanupInvocationSessionInspector::prepared(session);
     return CleanupInvocationLifecycleEvidence(
         CleanupLifecycleBoundary::AfterInvocationCompletion,
-        std::cref(invocation), std::cref(result), std::nullopt);
+        session.authority(), std::cref(prepared.invocation),
+        std::cref(result), std::nullopt);
 }
 
 CleanupLifecycleBoundary
 CleanupInvocationLifecycleEvidence::boundary() const noexcept {
     return boundary_;
+}
+
+const std::optional<CleanupInvocationAuthority>&
+CleanupInvocationLifecycleEvidence::authority() const noexcept {
+    return authority_;
 }
 
 const PreparedProductionSourceBuildInvocation*
@@ -1042,10 +1500,179 @@ CleanupInvocationLifecycleEvidence::completed_work_item_index()
     return completed_work_item_index_;
 }
 
+CleanupBaselineSnapshotObservation::CleanupBaselineSnapshotObservation(
+    CleanupInvocationAuthority authority,
+    InstalledPackageStateSnapshotResult snapshot) noexcept
+    : authority_(std::move(authority)), snapshot_(std::move(snapshot)) {
+}
+
+const CleanupInvocationAuthority&
+CleanupBaselineSnapshotObservation::authority() const noexcept {
+    return authority_;
+}
+
+CleanupObservationPhase CleanupBaselineSnapshotObservation::phase()
+    const noexcept {
+    return CleanupObservationPhase::BeforeFirstDependencyMutation;
+}
+
+const InstalledPackageStateSnapshotResult&
+CleanupBaselineSnapshotObservation::snapshot() const noexcept {
+    return snapshot_;
+}
+
+CleanupCurrentInstalledObservation::CleanupCurrentInstalledObservation(
+    CleanupInvocationAuthority authority,
+    CleanupObservationPhase phase,
+    std::size_t completed_transaction_count,
+    InstalledPackageStateSnapshotResult snapshot) noexcept
+    : authority_(std::move(authority)), phase_(phase),
+      completed_transaction_count_(completed_transaction_count),
+      snapshot_(std::move(snapshot)) {
+}
+
+const CleanupInvocationAuthority&
+CleanupCurrentInstalledObservation::authority() const noexcept {
+    return authority_;
+}
+
+CleanupObservationPhase CleanupCurrentInstalledObservation::phase()
+    const noexcept {
+    return phase_;
+}
+
+const InstalledPackageStateSnapshotResult&
+CleanupCurrentInstalledObservation::snapshot() const noexcept {
+    return snapshot_;
+}
+
+std::size_t
+CleanupCurrentInstalledObservation::completed_transaction_count()
+    const noexcept {
+    return completed_transaction_count_;
+}
+
+CleanupPolicyObservation::CleanupPolicyObservation(
+    CleanupInvocationAuthority authority,
+    CleanupObservationPhase phase,
+    std::size_t completed_transaction_count,
+    CleanupPolicyProtectionEvidence evidence) noexcept
+    : authority_(std::move(authority)), phase_(phase),
+      completed_transaction_count_(completed_transaction_count),
+      evidence_(std::move(evidence)) {
+}
+
+const CleanupInvocationAuthority& CleanupPolicyObservation::authority()
+    const noexcept {
+    return authority_;
+}
+
+CleanupObservationPhase CleanupPolicyObservation::phase() const noexcept {
+    return phase_;
+}
+
+const CleanupPolicyProtectionEvidence& CleanupPolicyObservation::evidence()
+    const noexcept {
+    return evidence_;
+}
+
+std::size_t CleanupPolicyObservation::completed_transaction_count()
+    const noexcept {
+    return completed_transaction_count_;
+}
+
+CleanupBaselineSnapshotObservation
+observe_cleanup_baseline_before_first_dependency_mutation(
+    CleanupInvocationSession& session) {
+    const PreparedRemoteSourceBuild& prepared =
+        CleanupInvocationSessionInspector::prepared(session);
+    return CleanupPhaseObservationProducer::baseline(
+        session,
+        snapshot_installed_package_states(
+            prepared.invocation.database_paths));
+}
+
+CleanupCurrentInstalledObservation
+observe_cleanup_current_after_full_supported_invocation(
+    CleanupInvocationSession& session,
+    const ProductionSourceBuildInvocationResult& result) {
+    const CleanupInvocationLifecycleEvidence lifecycle =
+        CleanupInvocationLifecycleEvidence::after_successful_invocation(
+            session, result);
+    if(lifecycle.boundary() !=
+       CleanupLifecycleBoundary::AfterSuccessfulInvocation) {
+        throw std::logic_error(
+            "Cleanup current observation requires full supported invocation success.");
+    }
+    const PreparedRemoteSourceBuild& prepared =
+        CleanupInvocationSessionInspector::prepared(session);
+    return CleanupPhaseObservationProducer::current(
+        session,
+        snapshot_installed_package_states(
+            prepared.invocation.database_paths),
+        CleanupObservationPhase::AfterFullSupportedInvocationSuccess);
+}
+
+CleanupPolicyObservation
+observe_cleanup_policy_after_full_supported_invocation(
+    CleanupInvocationSession& session,
+    const ProductionSourceBuildInvocationResult& result,
+    const std::string& candidate_package_name) {
+    const CleanupInvocationLifecycleEvidence lifecycle =
+        CleanupInvocationLifecycleEvidence::after_successful_invocation(
+            session, result);
+    if(lifecycle.boundary() !=
+       CleanupLifecycleBoundary::AfterSuccessfulInvocation) {
+        throw std::logic_error(
+            "Cleanup policy observation requires full supported invocation success.");
+    }
+    const PreparedRemoteSourceBuild& prepared =
+        CleanupInvocationSessionInspector::prepared(session);
+    if(!prepared.aur_build_plan.has_value() ||
+       !prepared.aur_build_plan->configured_repository_order.has_value()) {
+        throw std::logic_error(
+            "Cleanup policy observation requires the session repository configuration.");
+    }
+    const PacmanRepositoryConfiguration configuration{
+        prepared.invocation.database_paths,
+        prepared.aur_build_plan->configured_repository_order.value()};
+    return CleanupPhaseObservationProducer::policy(
+        session,
+        query_cleanup_policy_protection_evidence(
+            configuration, candidate_package_name),
+        CleanupObservationPhase::AfterFullSupportedInvocationSuccess);
+}
+
+#ifdef MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
+CleanupBaselineSnapshotObservation
+make_cleanup_baseline_observation_for_test(
+    CleanupInvocationSession& session,
+    InstalledPackageStateSnapshotResult snapshot) {
+    return CleanupPhaseObservationProducer::baseline(
+        session, std::move(snapshot));
+}
+
+CleanupCurrentInstalledObservation make_cleanup_current_observation_for_test(
+    CleanupInvocationSession& session,
+    InstalledPackageStateSnapshotResult snapshot,
+    CleanupObservationPhase phase) {
+    return CleanupPhaseObservationProducer::current(
+        session, std::move(snapshot), phase);
+}
+
+CleanupPolicyObservation make_cleanup_policy_observation_for_test(
+    CleanupInvocationSession& session,
+    CleanupPolicyProtectionEvidence evidence,
+    CleanupObservationPhase phase) {
+    return CleanupPhaseObservationProducer::policy(
+        session, std::move(evidence), phase);
+}
+#endif
+
 CleanupSourceArtifactCorrelationEvidence::
     CleanupSourceArtifactCorrelationEvidence(
         CleanupEvidenceCompleteness completeness,
-        CleanupInvocationIdentity invocation,
+        CleanupInvocationAuthority authority,
         SourceArtifactInstallCausalEvidence causal_evidence,
         std::size_t work_item_index,
         std::string package_base,
@@ -1053,7 +1680,7 @@ CleanupSourceArtifactCorrelationEvidence::
             selected_artifacts,
         std::vector<std::string> actual_install_set,
         std::vector<CleanupSourceArtifactCorrelationIssueKind> issues) noexcept
-    : completeness_(completeness), invocation_(std::move(invocation)),
+    : completeness_(completeness), authority_(std::move(authority)),
       causal_evidence_(std::move(causal_evidence)),
       work_item_index_(work_item_index),
       package_base_(std::move(package_base)),
@@ -1067,9 +1694,9 @@ CleanupSourceArtifactCorrelationEvidence::completeness() const noexcept {
     return completeness_;
 }
 
-const CleanupInvocationIdentity&
-CleanupSourceArtifactCorrelationEvidence::invocation() const noexcept {
-    return invocation_;
+const CleanupInvocationAuthority&
+CleanupSourceArtifactCorrelationEvidence::authority() const noexcept {
+    return authority_;
 }
 
 const SourceArtifactInstallCausalEvidence&
@@ -1106,20 +1733,29 @@ CleanupSourceArtifactCorrelationEvidence::issues() const noexcept {
 
 CleanupSourceArtifactCorrelationEvidence
 correlate_source_artifact_install_to_build_plan(
-    const CleanupInvocationIdentity& invocation_identity,
-    const BuildPlan& plan,
-    const PreparedProductionSourceBuildInvocation& invocation,
+    const CleanupInvocationSession& session,
     const CleanupInvocationLifecycleEvidence& lifecycle,
     const SourceArtifactInstallCausalEvidence& causal_evidence) {
     using Issue = CleanupSourceArtifactCorrelationIssueKind;
+    const PreparedRemoteSourceBuild& prepared =
+        CleanupInvocationSessionInspector::prepared(session);
+    const BuildPlan& plan = prepared.aur_build_plan.value();
+    const PreparedProductionSourceBuildInvocation& invocation =
+        prepared.invocation;
     std::vector<Issue> issues;
     std::vector<CleanupSourceArtifactSelectedCorrelation>
         selected_correlations;
 
-    if(causal_evidence.work_item().invocation != invocation_identity) {
+    if(!causal_evidence.work_item().invocation_authority.has_value()) {
+        add_unique_typed_issue(
+            issues, Issue::InvocationAuthorityMissing);
+    } else if(causal_evidence.work_item().invocation_authority.value() !=
+              session.authority()) {
         add_unique_typed_issue(issues, Issue::InvocationMismatch);
     }
-    if(lifecycle.invocation() != &invocation || lifecycle.result() == nullptr) {
+    if(!lifecycle.authority().has_value() ||
+       lifecycle.authority().value() != session.authority() ||
+       lifecycle.invocation() != &invocation || lifecycle.result() == nullptr) {
         add_unique_typed_issue(issues, Issue::LifecycleInvocationMismatch);
     }
 
@@ -1289,7 +1925,7 @@ correlate_source_artifact_install_to_build_plan(
                     resolved != nullptr &&
                     std::holds_alternative<AurProviderOrigin>(
                         provider.origin) &&
-                    same_provider_identity(provider, resolved->provider) &&
+                    provider == resolved->provider &&
                     provider.package_name ==
                         selected.expected_identity.package().package_name() &&
                     provider.package_base ==
@@ -1408,7 +2044,7 @@ correlate_source_artifact_install_to_build_plan(
                        : CleanupEvidenceCompleteness::Incomplete;
     return CleanupSourceArtifactCorrelationEvidence(
         completeness,
-        invocation_identity, causal_evidence, work_item_index,
+        session.authority(), causal_evidence, work_item_index,
         causal_evidence.work_item().package_base,
         std::move(selected_correlations),
         causal_evidence.actual_install_set(), std::move(issues));
@@ -1417,24 +2053,17 @@ correlate_source_artifact_install_to_build_plan(
 CleanupSelectedProviderCorrelationEvidence::
     CleanupSelectedProviderCorrelationEvidence(
         CleanupEvidenceCompleteness completeness,
-        CleanupInvocationIdentity invocation,
-        std::size_t work_item_index,
-        std::size_t build_plan_edge_index,
-        std::optional<ProvidedDependency> provider,
-        std::optional<SourceAwarePackageIdentity> package_identity,
-        CleanupCurrentPackageEvidence current_package,
-        std::optional<std::string> transaction_token,
+        CleanupInvocationAuthority authority,
+        std::string transaction_token,
+        std::vector<CleanupSelectedProviderEdgeCorrelation>
+            edge_correlations,
         std::vector<std::string> actual_install_set,
-        SelectedRepositoryProviderTrustedReceiptExecutionResult execution,
+        SelectedRepositoryProviderTrustedExecutionEvidence execution,
         std::vector<CleanupSelectedProviderCorrelationIssueKind>
             issues) noexcept
-    : completeness_(completeness), invocation_(std::move(invocation)),
-      work_item_index_(work_item_index),
-      build_plan_edge_index_(build_plan_edge_index),
-      provider_(std::move(provider)),
-      package_identity_(std::move(package_identity)),
-      current_package_(std::move(current_package)),
+    : completeness_(completeness), authority_(std::move(authority)),
       transaction_token_(std::move(transaction_token)),
+      edge_correlations_(std::move(edge_correlations)),
       actual_install_set_(std::move(actual_install_set)),
       execution_(std::move(execution)),
       issues_(std::move(issues)) {
@@ -1445,43 +2074,21 @@ CleanupSelectedProviderCorrelationEvidence::completeness() const noexcept {
     return completeness_;
 }
 
-const CleanupInvocationIdentity&
-CleanupSelectedProviderCorrelationEvidence::invocation() const noexcept {
-    return invocation_;
+const CleanupInvocationAuthority&
+CleanupSelectedProviderCorrelationEvidence::authority() const noexcept {
+    return authority_;
 }
 
-std::size_t
-CleanupSelectedProviderCorrelationEvidence::work_item_index() const noexcept {
-    return work_item_index_;
-}
-
-std::size_t
-CleanupSelectedProviderCorrelationEvidence::build_plan_edge_index()
-    const noexcept {
-    return build_plan_edge_index_;
-}
-
-const std::optional<ProvidedDependency>&
-CleanupSelectedProviderCorrelationEvidence::provider() const noexcept {
-    return provider_;
-}
-
-const std::optional<SourceAwarePackageIdentity>&
-CleanupSelectedProviderCorrelationEvidence::package_identity()
-    const noexcept {
-    return package_identity_;
-}
-
-const CleanupCurrentPackageEvidence&
-CleanupSelectedProviderCorrelationEvidence::current_package()
-    const noexcept {
-    return current_package_;
-}
-
-const std::optional<std::string>&
+const std::string&
 CleanupSelectedProviderCorrelationEvidence::transaction_token()
     const noexcept {
     return transaction_token_;
+}
+
+const std::vector<CleanupSelectedProviderEdgeCorrelation>&
+CleanupSelectedProviderCorrelationEvidence::edge_correlations()
+    const noexcept {
+    return edge_correlations_;
 }
 
 const std::vector<std::string>&
@@ -1490,7 +2097,7 @@ CleanupSelectedProviderCorrelationEvidence::actual_install_set()
     return actual_install_set_;
 }
 
-const SelectedRepositoryProviderTrustedReceiptExecutionResult&
+const SelectedRepositoryProviderTrustedExecutionEvidence&
 CleanupSelectedProviderCorrelationEvidence::execution() const noexcept {
     return execution_;
 }
@@ -1502,28 +2109,32 @@ CleanupSelectedProviderCorrelationEvidence::issues() const noexcept {
 
 CleanupSelectedProviderCorrelationEvidence
 correlate_selected_repository_provider_to_build_plan(
-    const CleanupInvocationIdentity& invocation_identity,
-    const BuildPlan& plan,
-    const PreparedProductionSourceBuildInvocation& invocation,
+    const CleanupInvocationSession& session,
     const CleanupInvocationLifecycleEvidence& lifecycle,
-    std::size_t build_plan_edge_index,
-    const CleanupCurrentPackageEvidence& current_package,
-    const SelectedRepositoryProviderTrustedReceiptExecutionResult& execution) {
+    const CleanupCurrentInstalledObservation& current_observation,
+    const SelectedRepositoryProviderTrustedExecutionEvidence& execution) {
     using Issue = CleanupSelectedProviderCorrelationIssueKind;
+    const PreparedRemoteSourceBuild& prepared =
+        CleanupInvocationSessionInspector::prepared(session);
+    const BuildPlan& plan = prepared.aur_build_plan.value();
+    const PreparedProductionSourceBuildInvocation& invocation =
+        prepared.invocation;
     std::vector<Issue> issues;
-    std::optional<ProvidedDependency> provider;
-    std::optional<SourceAwarePackageIdentity> package_identity;
-    std::optional<std::string> transaction_token;
-    std::vector<std::string> actual_install_set;
-    std::size_t work_item_index = 0;
+    std::vector<CleanupSelectedProviderEdgeCorrelation> edge_correlations;
+    std::set<std::size_t> observed_edge_indices;
 
-    if(!execution.invocation_identity.has_value()) {
-        add_unique_typed_issue(issues, Issue::InvocationIdentityMissing);
-    } else if(execution.invocation_identity.value() != invocation_identity) {
+    if(execution.invocation_authority() != session.authority()) {
         add_unique_typed_issue(issues, Issue::InvocationMismatch);
     }
-    if(lifecycle.invocation() != &invocation) {
+    if(!lifecycle.authority().has_value() ||
+       lifecycle.authority().value() != session.authority() ||
+       lifecycle.invocation() != &invocation) {
         add_unique_typed_issue(issues, Issue::LifecycleInvocationMismatch);
+    }
+    if(current_observation.authority() != session.authority() ||
+       current_observation.phase() !=
+           CleanupObservationPhase::AfterFullSupportedInvocationSuccess) {
+        add_unique_typed_issue(issues, Issue::CurrentObservationMismatch);
     }
     const PlanStateProjection plan_state = project_build_plan_state(plan);
     if(plan_state.construction != PlanConstruction::Constructed ||
@@ -1533,84 +2144,95 @@ correlate_selected_repository_provider_to_build_plan(
         add_unique_typed_issue(issues, Issue::BuildPlanIncomplete);
     }
 
-    const BuildPlanDependencyEdge* edge = nullptr;
-    if(build_plan_edge_index >= plan.dependency_edges.size()) {
-        add_unique_typed_issue(issues, Issue::DependencyEdgeOutOfRange);
-    } else {
-        edge = &plan.dependency_edges[build_plan_edge_index];
-        if(edge->kind != DependencyKind::Provided ||
-           edge->provider_resolution !=
-               ProviderResolutionKind::UserSelected ||
-           !edge->resolved_provider.has_value() ||
-           !edge->resolved_candidate.has_value() ||
-           !std::holds_alternative<RepositoryProviderOrigin>(
-               edge->resolved_provider->origin)) {
-            add_unique_typed_issue(
-                issues, Issue::DependencyEdgeNotSelectedRepositoryProvider);
-        } else {
-            provider = edge->resolved_provider;
-            package_identity = project_dependency_identity(
-                edge->resolved_candidate.value());
-        }
+    if(execution.bindings().empty()) {
+        add_unique_typed_issue(issues, Issue::BindingSetMissing);
     }
 
-    const std::optional<std::size_t> attributed_work_item =
-        find_work_item_for_edge(invocation, build_plan_edge_index, true);
-    if(!attributed_work_item.has_value()) {
-        add_unique_typed_issue(
-            issues, Issue::DependencyEdgeAttributionMismatch);
-    } else {
-        work_item_index = attributed_work_item.value();
-        if(edge != nullptr &&
-           invocation.work_items[work_item_index].request.checkout_name !=
-               edge->parent_package_base) {
+    for(const SelectedRepositoryProviderTrustedExecutionBinding& binding :
+        execution.bindings()) {
+        if(!observed_edge_indices.insert(binding.build_plan_edge_index).second) {
+            add_unique_typed_issue(issues, Issue::BindingSetMismatch);
+            continue;
+        }
+        if(binding.build_plan_edge_index >= plan.dependency_edges.size()) {
+            add_unique_typed_issue(issues, Issue::DependencyEdgeOutOfRange);
+            continue;
+        }
+        const BuildPlanDependencyEdge& edge =
+            plan.dependency_edges[binding.build_plan_edge_index];
+        const std::optional<std::size_t> attributed_work_item =
+            find_work_item_for_edge(
+                invocation, binding.build_plan_edge_index, true);
+        if(!attributed_work_item.has_value() ||
+           attributed_work_item.value() != binding.work_item_index ||
+           binding.work_item_index >= invocation.work_items.size() ||
+           invocation.work_items[binding.work_item_index]
+                   .request.checkout_name != edge.parent_package_base ||
+           binding.parent_package_base != edge.parent_package_base) {
             add_unique_typed_issue(
                 issues, Issue::DependencyEdgeAttributionMismatch);
         }
-    }
-
-    if(edge != nullptr && provider.has_value()) {
-        const auto* repository =
-            std::get_if<RepositoryProviderOrigin>(&provider->origin);
-        if(provider->package_base.empty()) {
+        if(edge.kind != DependencyKind::Provided ||
+           edge.provider_resolution !=
+               ProviderResolutionKind::UserSelected ||
+           !edge.resolved_provider.has_value() ||
+           !edge.resolved_candidate.has_value() ||
+           !std::holds_alternative<RepositoryProviderOrigin>(
+               edge.resolved_provider->origin)) {
+            add_unique_typed_issue(
+                issues, Issue::DependencyEdgeNotSelectedRepositoryProvider);
+            continue;
+        }
+        const ProvidedDependency& provider = edge.resolved_provider.value();
+        if(provider != binding.provider ||
+           edge.provider_resolution != binding.resolution) {
+            add_unique_typed_issue(issues, Issue::ProviderIdentityMismatch);
+        }
+        if(provider.package_base.empty()) {
             add_unique_typed_issue(issues, Issue::PackageBaseMissing);
         }
-        if(repository == nullptr ||
-           !repository_provider_provenance_is_complete(*provider, plan)) {
+        if(!repository_provider_provenance_is_complete(provider, plan)) {
             add_unique_typed_issue(
                 issues, Issue::RepositoryProvenanceMismatch);
         }
         const auto* resolved =
             std::get_if<ProviderResolvedDependencyCandidate>(
-                &edge->resolved_candidate.value());
-        if(resolved == nullptr ||
-           !same_provider_identity(*provider, resolved->provider)) {
+                &edge.resolved_candidate.value());
+        if(resolved == nullptr || resolved->provider != provider ||
+           !provider.constraint_metadata.has_value() ||
+           resolved->provided_version !=
+               provider.constraint_metadata->provided_version) {
             add_unique_typed_issue(issues, Issue::ProviderIdentityMismatch);
         }
-        if(!edge->requirement.has_value() ||
+        if(!edge.requirement.has_value() ||
+           edge.requirement.value() != binding.requirement ||
            !requirement_matches_raw_specification(
-               edge->requirement.value(), edge->dependency_spec) ||
-           provider->provided_dependency_name !=
-               (edge->requirement.has_value()
-                    ? requirement_identity(edge->requirement.value())
-                    : std::string{})) {
+               binding.requirement, edge.dependency_spec) ||
+           provider.provided_dependency_name !=
+               requirement_identity(binding.requirement)) {
             add_unique_typed_issue(issues, Issue::RequirementMismatch);
         }
-        if(!provider->constraint_metadata.has_value() ||
-           provider->constraint_metadata->provided_capability.package_name() !=
-               provider->provided_dependency_name ||
-           provider->constraint_metadata->provided_capability
-                   .raw_specification() !=
-               provider->provided_dependency_specification ||
-           !successful_constraint_evaluation(*edge)) {
+        if(!provider_edge_shape_is_complete(plan, edge)) {
             add_unique_typed_issue(
                 issues, Issue::ProvidedCapabilityMismatch);
         }
-        if(!selected_provider_decision_matches_plan(
-               plan, *edge, *provider)) {
+        if(binding.selected_decision.dependency != edge.dependency_spec ||
+           binding.selected_decision.resolution != edge.provider_resolution ||
+           binding.selected_decision.provider != provider ||
+           !selected_provider_decision_matches_plan(plan, edge, provider)) {
             add_unique_typed_issue(issues, Issue::SelectedDecisionMismatch);
         }
-        if(!current_package_matches_provider(current_package, *provider)) {
+
+        std::optional<SourceAwarePackageIdentity> package_identity =
+            project_dependency_identity(edge.resolved_candidate.value());
+        if(!package_identity.has_value()) {
+            add_unique_typed_issue(issues, Issue::ProviderIdentityMismatch);
+            continue;
+        }
+        CleanupCurrentPackageEvidence current_package =
+            project_cleanup_current_package_evidence(
+                current_observation.snapshot(), provider.package_name);
+        if(!current_package_matches_provider(current_package, provider)) {
             if(current_package.state != CleanupInstalledState::Present ||
                current_package.verification !=
                    CleanupEvidenceVerification::Verified ||
@@ -1622,81 +2244,54 @@ correlate_selected_repository_provider_to_build_plan(
                     issues, Issue::CurrentPackageIdentityMismatch);
             }
         }
-    }
-
-    if(execution.transaction.status !=
-           SelectedRepositoryProviderTransactionStatus::Succeeded ||
-       execution.transaction.command_exit_status != std::optional<int>{0} ||
-       !provider_sets_match(
-           execution.transaction.selected_providers,
-           invocation.selected_repository_providers)) {
-        add_unique_typed_issue(issues, Issue::TransactionResultMismatch);
-    }
-    if(provider.has_value() &&
-       std::count_if(
-           execution.transaction.selected_providers.begin(),
-           execution.transaction.selected_providers.end(),
-           [&provider](const ProvidedDependency& selected) {
-               return same_provider_identity(selected, provider.value());
-           }) != 1) {
-        add_unique_typed_issue(issues, Issue::ProviderIdentityMismatch);
-    }
-
-    if(!execution.receipt_capture.has_value()) {
-        add_unique_typed_issue(issues, Issue::ReceiptCaptureMissing);
-    } else {
-        const TrustedAlpmReceiptCaptureResult& capture =
-            execution.receipt_capture.value();
-        if(capture.status != TrustedAlpmReceiptCaptureStatus::Complete ||
-           capture.pacman_exit_status != std::optional<int>{0}) {
-            add_unique_typed_issue(
-                issues, Issue::ReceiptCaptureIncomplete);
+        if(std::find(
+               execution.actual_install_set().begin(),
+               execution.actual_install_set().end(),
+               provider.package_name) ==
+           execution.actual_install_set().end()) {
+            add_unique_typed_issue(issues, Issue::ProviderNotInstalled);
         }
-        if(capture.transaction_ledger.transactions.size() != 1) {
-            add_unique_typed_issue(issues, Issue::TransactionLedgerMismatch);
-        } else {
-            const InvocationDependencyTransaction& transaction =
-                capture.transaction_ledger.transactions.front();
-            transaction_token = transaction.transaction_token;
-            for(const PacmanInstalledPackageReceipt& installed :
-                transaction.receipt.newly_installed_packages()) {
-                actual_install_set.push_back(installed.package_name);
-            }
-            if(transaction.owner !=
-                   InvocationDependencyTransactionOwner::
-                       SelectedRepositoryProvider ||
-               !is_valid_pacman_transaction_token(
-                   transaction.transaction_token) ||
-               transaction.command_outcome !=
-                   InvocationDependencyTransactionCommandOutcome::Succeeded ||
-               transaction.requested_package_names !=
-                   selected_provider_package_names(
-                       invocation.selected_repository_providers)) {
-                add_unique_typed_issue(
-                    issues, Issue::TransactionLedgerMismatch);
-            }
-            if(!transaction.receipt.is_complete_for(
-                   transaction.transaction_token,
-                   InvocationDependencyTransactionOwner::
-                       SelectedRepositoryProvider)) {
-                add_unique_typed_issue(issues, Issue::ReceiptMismatch);
-            }
-            if(provider.has_value() &&
-               !transaction.receipt.contains_newly_installed_package(
-                   provider->package_name)) {
-                add_unique_typed_issue(issues, Issue::ProviderNotInstalled);
-            }
-            const std::vector<std::string> selected_names =
-                selected_provider_package_names(
-                    invocation.selected_repository_providers);
-            for(const std::string& installed : actual_install_set) {
-                if(std::find(
-                       selected_names.begin(), selected_names.end(),
-                       installed) == selected_names.end()) {
-                    add_unique_typed_issue(
-                        issues, Issue::UncorrelatedActualInstall);
-                }
-            }
+        if(!CleanupInvocationSessionInspector::contains_transaction_token(
+               session,
+               InvocationDependencyTransactionOwner::
+                   SelectedRepositoryProvider,
+               execution.transaction_token(), binding.work_item_index)) {
+            add_unique_typed_issue(issues, Issue::BindingSetMismatch);
+        }
+        edge_correlations.push_back(CleanupSelectedProviderEdgeCorrelation{
+            binding.work_item_index,
+            binding.build_plan_edge_index,
+            binding.requirement,
+            binding.selected_decision,
+            provider,
+            std::move(package_identity.value()),
+            std::move(current_package)});
+    }
+
+    std::set<std::size_t> expected_edge_indices;
+    for(std::size_t edge_index = 0;
+        edge_index < plan.dependency_edges.size(); ++edge_index) {
+        const BuildPlanDependencyEdge& edge = plan.dependency_edges[edge_index];
+        if(edge.kind == DependencyKind::Provided &&
+           edge.provider_resolution ==
+               ProviderResolutionKind::UserSelected &&
+           edge.resolved_provider.has_value() &&
+           std::holds_alternative<RepositoryProviderOrigin>(
+               edge.resolved_provider->origin)) {
+            expected_edge_indices.insert(edge_index);
+        }
+    }
+    if(expected_edge_indices != observed_edge_indices) {
+        add_unique_typed_issue(issues, Issue::BindingSetMismatch);
+    }
+    const std::vector<std::string> selected_names =
+        selected_provider_package_names(execution.selected_providers());
+    for(const std::string& installed : execution.actual_install_set()) {
+        if(std::find(
+               selected_names.begin(), selected_names.end(), installed) ==
+           selected_names.end()) {
+            add_unique_typed_issue(
+                issues, Issue::UncorrelatedActualInstall);
         }
     }
 
@@ -1706,9 +2301,8 @@ correlate_selected_repository_provider_to_build_plan(
                        : CleanupEvidenceCompleteness::Incomplete;
     return CleanupSelectedProviderCorrelationEvidence(
         completeness,
-        invocation_identity, work_item_index, build_plan_edge_index,
-        std::move(provider), std::move(package_identity), current_package,
-        std::move(transaction_token), std::move(actual_install_set), execution,
+        session.authority(), execution.transaction_token(),
+        std::move(edge_correlations), execution.actual_install_set(), execution,
         std::move(issues));
 }
 
@@ -1716,11 +2310,20 @@ CleanupInvocationEvidence::CleanupInvocationEvidence(
     CleanupRouteKind route_kind,
     CleanupRouteAuthority route_authority,
     CleanupEvidenceCompleteness completeness,
-    std::optional<CleanupInvocationIdentity> invocation,
+    std::optional<CleanupInvocationAuthority> authority,
     std::optional<BuildPlan> build_plan,
     std::vector<RootTargetIdentity> roots,
     std::vector<CleanupInvocationWorkItemEvidence> work_items,
     std::vector<PackageBaseIdentity> package_bases,
+    std::vector<CleanupDependencyEdgeClassification>
+        edge_classifications,
+    std::vector<CleanupTrustedTransactionTokenInventoryEntry>
+        transaction_token_inventory,
+    std::optional<CleanupBaselineSnapshotObservation>
+        baseline_observation,
+    std::optional<CleanupCurrentInstalledObservation>
+        current_observation,
+    std::optional<CleanupPolicyObservation> policy_observation,
     std::vector<CleanupSourceArtifactCorrelationEvidence>
         source_artifact_evidence,
     std::vector<CleanupSelectedProviderCorrelationEvidence>
@@ -1729,10 +2332,15 @@ CleanupInvocationEvidence::CleanupInvocationEvidence(
     std::optional<std::size_t> completed_work_item_index,
     std::vector<CleanupInvocationEvidenceIssueKind> issues) noexcept
     : route_kind_(route_kind), route_authority_(route_authority),
-      completeness_(completeness), invocation_(std::move(invocation)),
+      completeness_(completeness), authority_(std::move(authority)),
       build_plan_(std::move(build_plan)), roots_(std::move(roots)),
       work_items_(std::move(work_items)),
       package_bases_(std::move(package_bases)),
+      edge_classifications_(std::move(edge_classifications)),
+      transaction_token_inventory_(std::move(transaction_token_inventory)),
+      baseline_observation_(std::move(baseline_observation)),
+      current_observation_(std::move(current_observation)),
+      policy_observation_(std::move(policy_observation)),
       source_artifact_evidence_(std::move(source_artifact_evidence)),
       selected_provider_evidence_(std::move(selected_provider_evidence)),
       lifecycle_boundary_(lifecycle_boundary),
@@ -1754,9 +2362,9 @@ CleanupInvocationEvidence::completeness() const noexcept {
     return completeness_;
 }
 
-const std::optional<CleanupInvocationIdentity>&
-CleanupInvocationEvidence::invocation() const noexcept {
-    return invocation_;
+const std::optional<CleanupInvocationAuthority>&
+CleanupInvocationEvidence::authority() const noexcept {
+    return authority_;
 }
 
 const BuildPlan* CleanupInvocationEvidence::build_plan() const noexcept {
@@ -1776,6 +2384,31 @@ CleanupInvocationEvidence::work_items() const noexcept {
 const std::vector<PackageBaseIdentity>&
 CleanupInvocationEvidence::package_bases() const noexcept {
     return package_bases_;
+}
+
+const std::vector<CleanupDependencyEdgeClassification>&
+CleanupInvocationEvidence::edge_classifications() const noexcept {
+    return edge_classifications_;
+}
+
+const std::vector<CleanupTrustedTransactionTokenInventoryEntry>&
+CleanupInvocationEvidence::transaction_token_inventory() const noexcept {
+    return transaction_token_inventory_;
+}
+
+const std::optional<CleanupBaselineSnapshotObservation>&
+CleanupInvocationEvidence::baseline_observation() const noexcept {
+    return baseline_observation_;
+}
+
+const std::optional<CleanupCurrentInstalledObservation>&
+CleanupInvocationEvidence::current_observation() const noexcept {
+    return current_observation_;
+}
+
+const std::optional<CleanupPolicyObservation>&
+CleanupInvocationEvidence::policy_observation() const noexcept {
+    return policy_observation_;
 }
 
 const std::vector<CleanupSourceArtifactCorrelationEvidence>&
@@ -1842,25 +2475,62 @@ CleanupInvocationEvidence project_cleanup_route_evidence(
         project_cleanup_route_authority(
             route_kind, CleanupEvidenceCompleteness::Unknown),
         CleanupEvidenceCompleteness::Unknown, std::nullopt,
-        std::nullopt, {}, {}, {}, {}, {},
+        std::nullopt, {}, {}, {}, {}, {}, std::nullopt,
+        std::nullopt, std::nullopt, {}, {},
         CleanupLifecycleBoundary::Unknown, std::nullopt,
         std::move(issues));
 }
 
 CleanupInvocationEvidence aggregate_remote_aur_cleanup_invocation_evidence(
-    const CleanupInvocationIdentity& invocation_identity,
-    const PreparedRemoteSourceBuild& prepared,
+    const CleanupInvocationSession& session,
     const CleanupInvocationLifecycleEvidence& lifecycle,
+    const CleanupBaselineSnapshotObservation& baseline_observation,
+    const CleanupCurrentInstalledObservation& current_observation,
+    const CleanupPolicyObservation& policy_observation,
     std::vector<CleanupSourceArtifactCorrelationEvidence>
         source_artifact_evidence,
     std::vector<CleanupSelectedProviderCorrelationEvidence>
         selected_provider_evidence) {
     using Issue = CleanupInvocationEvidenceIssueKind;
+    const PreparedRemoteSourceBuild& prepared =
+        CleanupInvocationSessionInspector::prepared(session);
     std::vector<Issue> issues;
     std::optional<BuildPlan> plan;
     std::vector<RootTargetIdentity> roots;
     std::vector<CleanupInvocationWorkItemEvidence> work_items;
     std::vector<PackageBaseIdentity> package_bases;
+    std::vector<CleanupDependencyEdgeClassification>
+        edge_classifications;
+    std::vector<CleanupTrustedTransactionTokenInventoryEntry>
+        transaction_token_inventory =
+            CleanupInvocationSessionInspector::transaction_inventory(
+                session);
+
+    if(baseline_observation.authority() != session.authority() ||
+       baseline_observation.phase() !=
+           CleanupObservationPhase::BeforeFirstDependencyMutation ||
+       current_observation.authority() != session.authority() ||
+       current_observation.phase() !=
+           CleanupObservationPhase::AfterFullSupportedInvocationSuccess ||
+       policy_observation.authority() != session.authority() ||
+       policy_observation.phase() !=
+           CleanupObservationPhase::AfterFullSupportedInvocationSuccess ||
+       current_observation.completed_transaction_count() !=
+           transaction_token_inventory.size() ||
+       policy_observation.completed_transaction_count() !=
+           transaction_token_inventory.size() ||
+       std::any_of(
+           transaction_token_inventory.begin(),
+           transaction_token_inventory.end(), [](const auto& entry) {
+               return !entry.completed_successfully;
+           }) ||
+       !lifecycle.authority().has_value() || lifecycle.authority().value() != session.authority()) {
+        add_unique_typed_issue(issues, Issue::PhaseObservationMismatch);
+    }
+    if(!snapshot_succeeded(baseline_observation.snapshot()) ||
+       !snapshot_succeeded(current_observation.snapshot())) {
+        add_unique_typed_issue(issues, Issue::PhaseObservationMissing);
+    }
 
     if(prepared.source.source_kind() != SourceBuildSourceKind::Aur ||
        !prepared.aur_build_plan.has_value()) {
@@ -1971,20 +2641,21 @@ CleanupInvocationEvidence aggregate_remote_aur_cleanup_invocation_evidence(
                 prepared_work_item
                     .selected_repository_provider_edge_indices,
                 outcome});
-            switch(outcome.status) {
-                case ProductionSourceBuildWorkItemStatus::Succeeded:
-                    if(!work_item_outcome_succeeded(outcome)) {
-                        add_unique_typed_issue(
-                            issues, Issue::WorkItemOutcomeUnknown);
-                    }
+            switch(validate_production_source_build_work_item_outcome(
+                outcome)) {
+                case CleanupWorkItemOutcomeShape::ValidSucceeded:
                     break;
-                case ProductionSourceBuildWorkItemStatus::Failed:
+                case CleanupWorkItemOutcomeShape::ValidFailed:
                     add_unique_typed_issue(
                         issues, Issue::WorkItemOutcomeFailed);
                     break;
-                case ProductionSourceBuildWorkItemStatus::NotAttempted:
+                case CleanupWorkItemOutcomeShape::ValidNotAttempted:
                     add_unique_typed_issue(
                         issues, Issue::WorkItemOutcomeNotAttempted);
+                    break;
+                case CleanupWorkItemOutcomeShape::Invalid:
+                    add_unique_typed_issue(
+                        issues, Issue::WorkItemOutcomeInvalid);
                     break;
             }
         }
@@ -2005,11 +2676,9 @@ CleanupInvocationEvidence aggregate_remote_aur_cleanup_invocation_evidence(
             for(const std::size_t edge_index :
                 work_item.build_plan_dependency_edge_indices) {
                 if(edge_index >= plan->dependency_edges.size() ||
-                   !attributed_source_edges.insert(edge_index).second ||
-                   !edge_resolves_to_aur_source(
-                       plan->dependency_edges[edge_index])) {
+                   !attributed_source_edges.insert(edge_index).second) {
                     add_unique_typed_issue(
-                        issues, Issue::WorkItemInventoryIncomplete);
+                        issues, Issue::DependencyEdgeAttributionMismatch);
                 }
             }
             for(const std::size_t edge_index :
@@ -2017,64 +2686,234 @@ CleanupInvocationEvidence aggregate_remote_aur_cleanup_invocation_evidence(
                 if(edge_index >= plan->dependency_edges.size() ||
                    !attributed_provider_edges.insert(edge_index).second) {
                     add_unique_typed_issue(
-                        issues, Issue::WorkItemInventoryIncomplete);
+                        issues, Issue::DependencyEdgeAttributionMismatch);
                 }
             }
+        }
+
+        if(plan->dependency_edges.empty()) {
+            add_unique_typed_issue(
+                issues, Issue::DependencyEdgeInventoryEmpty);
         }
         for(std::size_t edge_index = 0;
             edge_index < plan->dependency_edges.size(); ++edge_index) {
             const BuildPlanDependencyEdge& edge =
                 plan->dependency_edges[edge_index];
-            if(edge.kind == DependencyKind::Repo) {
-                add_unique_typed_issue(
-                    issues, Issue::MakepkgSyncDependenciesUnowned);
-            }
-            if(edge.kind == DependencyKind::Provided &&
-               edge.resolved_provider.has_value() &&
-               std::holds_alternative<RepositoryProviderOrigin>(
-                   edge.resolved_provider->origin) &&
-               edge.provider_resolution !=
-                   ProviderResolutionKind::UserSelected) {
-                add_unique_typed_issue(
-                    issues, Issue::MakepkgSyncDependenciesUnowned);
-            }
-            if(edge.kind == DependencyKind::Provided &&
-               edge.resolved_provider.has_value() &&
-               std::holds_alternative<RepositoryProviderOrigin>(
-                   edge.resolved_provider->origin) &&
-               edge.provider_resolution ==
-                   ProviderResolutionKind::UserSelected) {
-                expected_provider_edges.insert(edge_index);
-                if(attributed_provider_edges.find(edge_index) ==
-                       attributed_provider_edges.end() ||
-                   !find_work_item_for_edge(
-                        prepared.invocation, edge_index, true)
-                        .has_value()) {
-                    add_unique_typed_issue(
-                        issues, Issue::WorkItemInventoryIncomplete);
+            CleanupDependencyEdgeClassification classification{
+                edge_index,
+                CleanupDependencyEdgeClassificationKind::InvalidOrUnknown,
+                std::nullopt,
+                std::nullopt};
+
+            const bool common_shape_is_valid =
+                dependency_kind_is_valid(edge.kind) &&
+                is_dependency_role(edge.role) &&
+                provider_resolution_is_valid(edge.provider_resolution) &&
+                is_valid_package_name(edge.parent_package_name) &&
+                is_valid_package_name(edge.parent_package_base) &&
+                edge.requirement.has_value() &&
+                requirement_matches_raw_specification(
+                    edge.requirement.value(), edge.dependency_spec) &&
+                edge.resolved_candidate.has_value() &&
+                successful_constraint_evaluation(edge);
+            if(common_shape_is_valid) {
+                switch(edge.kind) {
+                    case DependencyKind::Installed:
+                        if(direct_edge_identity_shape_is_complete(edge)) {
+                            classification.classification =
+                                CleanupDependencyEdgeClassificationKind::
+                                    AuthoritativelyPreExistingOrIrrelevant;
+                        }
+                        break;
+                    case DependencyKind::Repo:
+                        if(direct_edge_identity_shape_is_complete(edge)) {
+                            classification.classification =
+                                CleanupDependencyEdgeClassificationKind::
+                                    UnsupportedOrUnowned;
+                        }
+                        break;
+                    case DependencyKind::Aur:
+                        if(direct_edge_identity_shape_is_complete(edge)) {
+                            if(is_build_or_check_role(edge.role)) {
+                                classification.classification =
+                                    CleanupDependencyEdgeClassificationKind::
+                                        SupportedOwnerSpecificReceipt;
+                                classification.owner =
+                                    InvocationDependencyTransactionOwner::
+                                        SourceArtifactInstall;
+                            } else {
+                                classification.classification =
+                                    CleanupDependencyEdgeClassificationKind::
+                                        AuthoritativelyPreExistingOrIrrelevant;
+                            }
+                        }
+                        break;
+                    case DependencyKind::Local:
+                        if(direct_edge_identity_shape_is_complete(edge)) {
+                            classification.classification =
+                                CleanupDependencyEdgeClassificationKind::
+                                    UnsupportedOrUnowned;
+                        }
+                        break;
+                    case DependencyKind::Provided:
+                        if(provider_edge_shape_is_complete(*plan, edge)) {
+                            const ProvidedDependency& provider =
+                                edge.resolved_provider.value();
+                            if(std::holds_alternative<
+                                   RepositoryProviderOrigin>(
+                                   provider.origin)) {
+                                if(edge.provider_resolution ==
+                                   ProviderResolutionKind::UserSelected) {
+                                    classification.classification =
+                                        CleanupDependencyEdgeClassificationKind::
+                                            SupportedOwnerSpecificReceipt;
+                                    classification.owner =
+                                        InvocationDependencyTransactionOwner::
+                                            SelectedRepositoryProvider;
+                                } else {
+                                    classification.classification =
+                                        CleanupDependencyEdgeClassificationKind::
+                                            UnsupportedOrUnowned;
+                                }
+                            } else if(is_build_or_check_role(edge.role)) {
+                                classification.classification =
+                                    CleanupDependencyEdgeClassificationKind::
+                                        SupportedOwnerSpecificReceipt;
+                                classification.owner =
+                                    InvocationDependencyTransactionOwner::
+                                        SourceArtifactInstall;
+                            } else {
+                                classification.classification =
+                                    CleanupDependencyEdgeClassificationKind::
+                                        AuthoritativelyPreExistingOrIrrelevant;
+                            }
+                        }
+                        break;
+                    case DependencyKind::AmbiguousProvider:
+                    case DependencyKind::Unknown:
+                        break;
                 }
             }
-            if(is_build_or_check_role(edge.role) &&
-               edge_resolves_to_aur_source(edge)) {
-                expected_source_edges.insert(edge_index);
-                if(attributed_source_edges.find(edge_index) ==
-                       attributed_source_edges.end() ||
-                   !find_work_item_for_edge(
-                        prepared.invocation, edge_index, false)
-                        .has_value()) {
+
+            if(classification.classification ==
+               CleanupDependencyEdgeClassificationKind::
+                   SupportedOwnerSpecificReceipt) {
+                const bool is_selected_provider =
+                    classification.owner ==
+                    InvocationDependencyTransactionOwner::
+                        SelectedRepositoryProvider;
+                const std::optional<std::size_t> work_item_index =
+                    find_work_item_for_edge(
+                        prepared.invocation, edge_index,
+                        is_selected_provider);
+                const bool attributed_to_expected_vector =
+                    is_selected_provider
+                        ? attributed_provider_edges.find(edge_index) !=
+                              attributed_provider_edges.end()
+                        : attributed_source_edges.find(edge_index) !=
+                              attributed_source_edges.end();
+                const std::optional<std::string> source_work_item_base =
+                    edge.resolved_candidate.has_value()
+                        ? resolved_candidate_package_base(
+                              edge.resolved_candidate.value())
+                        : std::nullopt;
+                const std::string* expected_work_item_base =
+                    is_selected_provider
+                        ? &edge.parent_package_base
+                        : (source_work_item_base.has_value()
+                               ? &source_work_item_base.value()
+                               : nullptr);
+                if(!work_item_index.has_value() ||
+                   !attributed_to_expected_vector ||
+                   expected_work_item_base == nullptr ||
+                   prepared.invocation
+                           .work_items[work_item_index.value()]
+                           .request.checkout_name !=
+                       *expected_work_item_base) {
+                    classification.classification =
+                        CleanupDependencyEdgeClassificationKind::
+                            InvalidOrUnknown;
+                    classification.owner.reset();
                     add_unique_typed_issue(
-                        issues, Issue::WorkItemInventoryIncomplete);
+                        issues,
+                        Issue::DependencyEdgeAttributionMismatch);
+                } else {
+                    classification.work_item_index = work_item_index;
+                    if(is_selected_provider) {
+                        expected_provider_edges.insert(edge_index);
+                    } else {
+                        expected_source_edges.insert(edge_index);
+                    }
                 }
             }
+
+            switch(classification.classification) {
+                case CleanupDependencyEdgeClassificationKind::
+                    SupportedOwnerSpecificReceipt:
+                case CleanupDependencyEdgeClassificationKind::
+                    AuthoritativelyPreExistingOrIrrelevant:
+                    break;
+                case CleanupDependencyEdgeClassificationKind::
+                    UnsupportedOrUnowned:
+                    add_unique_typed_issue(
+                        issues,
+                        Issue::DependencyEdgeUnsupportedOrUnowned);
+                    add_unique_typed_issue(
+                        issues, Issue::MakepkgSyncDependenciesUnowned);
+                    break;
+                case CleanupDependencyEdgeClassificationKind::
+                    InvalidOrUnknown:
+                    add_unique_typed_issue(
+                        issues, Issue::DependencyEdgeInvalidOrUnknown);
+                    break;
+            }
+            edge_classifications.push_back(std::move(classification));
+        }
+        if(attributed_source_edges != expected_source_edges ||
+           attributed_provider_edges != expected_provider_edges) {
+            add_unique_typed_issue(
+                issues, Issue::DependencyEdgeAttributionMismatch);
+        }
+        if(expected_source_edges.empty() &&
+           expected_provider_edges.empty()) {
+            add_unique_typed_issue(
+                issues, Issue::CleanupRelevantEdgeInventoryEmpty);
         }
     }
 
     std::set<std::size_t> observed_source_edges;
+    std::set<std::string> observed_transaction_tokens;
     for(const CleanupSourceArtifactCorrelationEvidence& evidence :
         source_artifact_evidence) {
-        if(evidence.invocation() != invocation_identity) {
+        if(evidence.authority() != session.authority()) {
             add_unique_typed_issue(
                 issues, Issue::CorrelationInvocationMismatch);
+        }
+        const std::string& transaction_token =
+            evidence.causal_evidence().transaction_token();
+        if(!observed_transaction_tokens.insert(transaction_token).second) {
+            add_unique_typed_issue(
+                issues, Issue::TransactionTokenDuplicate);
+        }
+        if(!CleanupInvocationSessionInspector::contains_transaction_token(
+               session,
+               InvocationDependencyTransactionOwner::SourceArtifactInstall,
+               transaction_token, evidence.work_item_index())) {
+            const auto inventory_entry = std::find_if(
+                transaction_token_inventory.begin(),
+                transaction_token_inventory.end(),
+                [&transaction_token](const auto& entry) {
+                    return entry.transaction_token == transaction_token;
+                });
+            if(inventory_entry != transaction_token_inventory.end() &&
+               inventory_entry->owner !=
+                   InvocationDependencyTransactionOwner::
+                       SourceArtifactInstall) {
+                add_unique_typed_issue(
+                    issues, Issue::TransactionTokenOwnerMismatch);
+            }
+            add_unique_typed_issue(
+                issues, Issue::TransactionTokenInventoryMissing);
         }
         if(evidence.completeness() !=
            CleanupEvidenceCompleteness::Complete) {
@@ -2091,6 +2930,7 @@ CleanupInvocationEvidence aggregate_remote_aur_cleanup_invocation_evidence(
         std::set<std::size_t> evidence_source_edges;
         for(const CleanupSourceArtifactSelectedCorrelation& selected :
             evidence.selected_artifacts()) {
+            std::set<std::size_t> selected_source_edge_set;
             for(const CleanupPackageCorrelation& correlation :
                 selected.dependency_correlations) {
                 if(correlation.dependency_edge.has_value()) {
@@ -2098,14 +2938,56 @@ CleanupInvocationEvidence aggregate_remote_aur_cleanup_invocation_evidence(
                         correlation.dependency_edge
                             ->build_plan_edge_index;
                     evidence_source_edges.insert(edge_index);
+                    selected_source_edge_set.insert(edge_index);
                     if(plan.has_value() &&
                        edge_index < plan->dependency_edges.size() &&
                        plan->dependency_edges[edge_index]
                            .resolved_candidate.has_value()) {
+                        const BuildPlanDependencyEdge& current_edge =
+                            plan->dependency_edges[edge_index];
+                        const std::optional<std::size_t>
+                            current_work_item = find_work_item_for_edge(
+                                prepared.invocation, edge_index, false);
+                        const std::optional<PackageChildIdentity>
+                            requiring_package = project_requiring_package(
+                                current_edge, package_bases);
+                        const std::optional<std::string>
+                            current_source_package_base =
+                                resolved_candidate_package_base(
+                                    current_edge.resolved_candidate.value());
+                        const PlannedPackageTarget* current_parent =
+                            find_unique_package_target(
+                                *plan, current_edge.parent_package_name,
+                                current_edge.parent_package_base);
+                        if(!current_work_item.has_value() ||
+                           current_work_item.value() !=
+                               evidence.work_item_index() ||
+                           !current_source_package_base.has_value() ||
+                           current_source_package_base.value() !=
+                               evidence.package_base() ||
+                           !requiring_package.has_value() ||
+                           requiring_package.value() !=
+                               correlation.dependency_edge
+                                   ->requiring_package ||
+                           !current_edge.requirement.has_value() ||
+                           current_edge.requirement.value() !=
+                               correlation.dependency_edge->requirement ||
+                           correlation.role !=
+                               std::optional<PackageRole>{
+                                   current_edge.role} ||
+                           current_parent == nullptr ||
+                           std::find(
+                               current_parent->roots.begin(),
+                               current_parent->roots.end(),
+                               correlation.requested_root) ==
+                               current_parent->roots.end()) {
+                            add_unique_typed_issue(
+                                issues,
+                                Issue::DependencyEdgeAttributionMismatch);
+                        }
                         std::optional<SourceAwarePackageIdentity>
                             current_identity = project_dependency_identity(
-                                plan->dependency_edges[edge_index]
-                                    .resolved_candidate.value());
+                                current_edge.resolved_candidate.value());
                         if(current_identity.has_value()) {
                             current_identity = bind_prepared_source_identity(
                                 current_identity.value(), package_bases);
@@ -2122,6 +3004,16 @@ CleanupInvocationEvidence aggregate_remote_aur_cleanup_invocation_evidence(
                             issues, Issue::CorrelationIncomplete);
                     }
                 }
+            }
+            const std::vector<std::size_t> selected_source_edges(
+                selected_source_edge_set.begin(),
+                selected_source_edge_set.end());
+            if(!edge_index_sets_match(
+                   selected_source_edges,
+                   selected.artifact
+                       .build_plan_dependency_edge_indices)) {
+                add_unique_typed_issue(
+                    issues, Issue::DependencyEdgeAttributionMismatch);
             }
         }
         for(const std::size_t edge_index : evidence_source_edges) {
@@ -2156,33 +3048,108 @@ CleanupInvocationEvidence aggregate_remote_aur_cleanup_invocation_evidence(
     std::set<std::size_t> observed_provider_edges;
     for(const CleanupSelectedProviderCorrelationEvidence& evidence :
         selected_provider_evidence) {
-        if(evidence.invocation() != invocation_identity) {
+        if(evidence.authority() != session.authority()) {
             add_unique_typed_issue(
                 issues, Issue::CorrelationInvocationMismatch);
+        }
+        if(!observed_transaction_tokens
+                .insert(evidence.transaction_token())
+                .second) {
+            add_unique_typed_issue(
+                issues, Issue::TransactionTokenDuplicate);
         }
         if(evidence.completeness() !=
            CleanupEvidenceCompleteness::Complete) {
             add_unique_typed_issue(issues, Issue::CorrelationIncomplete);
         }
-        if(!observed_provider_edges
-                .insert(evidence.build_plan_edge_index())
-                .second) {
-            add_unique_typed_issue(
-                issues, Issue::SelectedProviderCorrelationUnexpected);
-        }
-        if(plan.has_value() && evidence.provider().has_value() &&
-           evidence.build_plan_edge_index() <
-               plan->dependency_edges.size()) {
+        for(const CleanupSelectedProviderEdgeCorrelation& correlation :
+            evidence.edge_correlations()) {
+            if(!observed_provider_edges
+                    .insert(correlation.build_plan_edge_index)
+                    .second) {
+                add_unique_typed_issue(
+                    issues, Issue::SelectedProviderCorrelationUnexpected);
+            }
+            if(!plan.has_value() ||
+               correlation.build_plan_edge_index >=
+                   plan->dependency_edges.size()) {
+                add_unique_typed_issue(
+                    issues, Issue::CorrelationIncomplete);
+                continue;
+            }
             const BuildPlanDependencyEdge& current_edge =
-                plan->dependency_edges[evidence.build_plan_edge_index()];
+                plan->dependency_edges[correlation.build_plan_edge_index];
+            const std::optional<std::size_t> current_work_item =
+                find_work_item_for_edge(
+                    prepared.invocation,
+                    correlation.build_plan_edge_index, true);
+            const PlannedPackageTarget* parent = find_unique_package_target(
+                *plan, current_edge.parent_package_name,
+                current_edge.parent_package_base);
             if(!current_edge.resolved_provider.has_value() ||
                current_edge.resolved_provider.value() !=
-                   evidence.provider().value()) {
+                   correlation.provider ||
+               !current_edge.requirement.has_value() ||
+               current_edge.requirement.value() !=
+                   correlation.requirement ||
+               !current_work_item.has_value() ||
+               current_work_item.value() !=
+                   correlation.work_item_index ||
+               correlation.work_item_index >=
+                   prepared.invocation.work_items.size() ||
+               prepared.invocation
+                       .work_items[correlation.work_item_index]
+                       .request.checkout_name !=
+                   current_edge.parent_package_base ||
+               parent == nullptr || parent->roots.empty() ||
+               correlation.selected_decision.dependency !=
+                   current_edge.dependency_spec ||
+               correlation.selected_decision.resolution !=
+                   current_edge.provider_resolution ||
+               correlation.selected_decision.provider !=
+                   correlation.provider) {
                 add_unique_typed_issue(
                     issues, Issue::CorrelationIncomplete);
             }
-        } else {
-            add_unique_typed_issue(issues, Issue::CorrelationIncomplete);
+            std::optional<SourceAwarePackageIdentity> current_identity;
+            if(current_edge.resolved_candidate.has_value()) {
+                current_identity = project_dependency_identity(
+                    current_edge.resolved_candidate.value());
+            }
+            if(!current_identity.has_value() ||
+               !same_cleanup_package_identity(
+                   current_identity.value(),
+                   correlation.package_identity) ||
+               !current_package_matches_provider(
+                   correlation.current_package,
+                   correlation.provider)) {
+                add_unique_typed_issue(
+                    issues, Issue::CorrelationIncomplete);
+            }
+            if(!CleanupInvocationSessionInspector::
+                   contains_transaction_token(
+                       session,
+                       InvocationDependencyTransactionOwner::
+                           SelectedRepositoryProvider,
+                       evidence.transaction_token(),
+                       correlation.work_item_index)) {
+                const auto inventory_entry = std::find_if(
+                    transaction_token_inventory.begin(),
+                    transaction_token_inventory.end(),
+                    [&evidence](const auto& entry) {
+                        return entry.transaction_token ==
+                               evidence.transaction_token();
+                    });
+                if(inventory_entry != transaction_token_inventory.end() &&
+                   inventory_entry->owner !=
+                       InvocationDependencyTransactionOwner::
+                           SelectedRepositoryProvider) {
+                    add_unique_typed_issue(
+                        issues, Issue::TransactionTokenOwnerMismatch);
+                }
+                add_unique_typed_issue(
+                    issues, Issue::TransactionTokenInventoryMissing);
+            }
         }
         if(std::find(
                evidence.issues().begin(), evidence.issues().end(),
@@ -2191,6 +3158,11 @@ CleanupInvocationEvidence aggregate_remote_aur_cleanup_invocation_evidence(
             add_unique_typed_issue(
                 issues, Issue::UncorrelatedActualInstall);
         }
+    }
+    if(!expected_provider_edges.empty() &&
+       selected_provider_evidence.size() != 1) {
+        add_unique_typed_issue(
+            issues, Issue::SelectedProviderCorrelationUnexpected);
     }
     for(const std::size_t edge_index : expected_provider_edges) {
         if(observed_provider_edges.find(edge_index) ==
@@ -2207,6 +3179,57 @@ CleanupInvocationEvidence aggregate_remote_aur_cleanup_invocation_evidence(
         }
     }
 
+    std::set<std::string> inventory_tokens;
+    for(const CleanupTrustedTransactionTokenInventoryEntry& entry :
+        transaction_token_inventory) {
+        if(!inventory_tokens.insert(entry.transaction_token).second) {
+            add_unique_typed_issue(
+                issues, Issue::TransactionTokenDuplicate);
+        }
+        if(observed_transaction_tokens.find(entry.transaction_token) ==
+           observed_transaction_tokens.end()) {
+            add_unique_typed_issue(
+                issues, Issue::TransactionTokenInventoryUnexpected);
+        }
+        std::set<std::size_t> evidence_work_items;
+        for(const CleanupSourceArtifactCorrelationEvidence& evidence :
+            source_artifact_evidence) {
+            if(evidence.causal_evidence().transaction_token() ==
+               entry.transaction_token) {
+                evidence_work_items.insert(evidence.work_item_index());
+            }
+        }
+        for(const CleanupSelectedProviderCorrelationEvidence& evidence :
+            selected_provider_evidence) {
+            if(evidence.transaction_token() != entry.transaction_token) {
+                continue;
+            }
+            for(const CleanupSelectedProviderEdgeCorrelation& correlation :
+                evidence.edge_correlations()) {
+                evidence_work_items.insert(correlation.work_item_index);
+            }
+        }
+        const std::set<std::size_t> inventory_work_items(
+            entry.work_item_indices.begin(), entry.work_item_indices.end());
+        if(evidence_work_items != inventory_work_items) {
+            add_unique_typed_issue(
+                issues, Issue::TransactionTokenInventoryUnexpected);
+        }
+    }
+    for(const std::string& token : observed_transaction_tokens) {
+        const auto inventory = std::find_if(
+            transaction_token_inventory.begin(),
+            transaction_token_inventory.end(),
+            [&token](
+                const CleanupTrustedTransactionTokenInventoryEntry& entry) {
+                return entry.transaction_token == token;
+            });
+        if(inventory == transaction_token_inventory.end()) {
+            add_unique_typed_issue(
+                issues, Issue::TransactionTokenInventoryMissing);
+        }
+    }
+
     canonicalize_typed_issues(issues);
     const CleanupEvidenceCompleteness completeness =
         issues.empty() ? CleanupEvidenceCompleteness::Complete
@@ -2215,9 +3238,12 @@ CleanupInvocationEvidence aggregate_remote_aur_cleanup_invocation_evidence(
         CleanupRouteKind::RemoteAurSourceBuild,
         project_cleanup_route_authority(
             CleanupRouteKind::RemoteAurSourceBuild, completeness),
-        completeness, invocation_identity, std::move(plan),
+        completeness, session.authority(), std::move(plan),
         std::move(roots), std::move(work_items),
-        std::move(package_bases), std::move(source_artifact_evidence),
+        std::move(package_bases), std::move(edge_classifications),
+        std::move(transaction_token_inventory), baseline_observation,
+        current_observation, policy_observation,
+        std::move(source_artifact_evidence),
         std::move(selected_provider_evidence), lifecycle.boundary(),
         lifecycle.completed_work_item_index(), std::move(issues));
 }
@@ -2241,6 +3267,7 @@ CleanupSharedRequirementState project_shared_requirement(
         edge_index < plan->dependency_edges.size(); ++edge_index) {
         const BuildPlanDependencyEdge& edge =
             plan->dependency_edges[edge_index];
+        if(!is_dependency_role(edge.role)) continue;
         if(!edge.resolved_candidate.has_value()) continue;
         std::optional<SourceAwarePackageIdentity> resolved =
             project_dependency_identity(edge.resolved_candidate.value());
@@ -2269,6 +3296,9 @@ CleanupSharedRequirementState project_shared_requirement(
        has_role(roles, PackageRole::RuntimeDependency)) {
         return CleanupSharedRequirementState::StillRequired;
     }
+    if(relevant_edges.empty()) {
+        return CleanupSharedRequirementState::Unknown;
+    }
 
     if(evidence.work_items().size() != plan->order.size()) {
         return CleanupSharedRequirementState::Unknown;
@@ -2285,8 +3315,9 @@ CleanupSharedRequirementState project_shared_requirement(
         const std::size_t completed =
             evidence.completed_work_item_index().value();
         if(completed >= evidence.work_items().size() ||
-           evidence.work_items()[completed].outcome.status !=
-               ProductionSourceBuildWorkItemStatus::Succeeded) {
+           validate_production_source_build_work_item_outcome(
+               evidence.work_items()[completed].outcome) !=
+               CleanupWorkItemOutcomeShape::ValidSucceeded) {
             return CleanupSharedRequirementState::Unknown;
         }
         for(const std::size_t edge_index : relevant_edges) {
@@ -2306,8 +3337,9 @@ CleanupSharedRequirementState project_shared_requirement(
     const bool all_work_items_succeeded = std::all_of(
         evidence.work_items().begin(), evidence.work_items().end(),
         [](const CleanupInvocationWorkItemEvidence& work_item) {
-            return work_item.outcome.status ==
-                   ProductionSourceBuildWorkItemStatus::Succeeded;
+            return validate_production_source_build_work_item_outcome(
+                       work_item.outcome) ==
+                   CleanupWorkItemOutcomeShape::ValidSucceeded;
         });
     if(evidence.lifecycle_boundary() ==
            CleanupLifecycleBoundary::AfterSuccessfulInvocation &&
@@ -2349,7 +3381,9 @@ CleanupCurrentPackageEvidence project_cleanup_current_package_evidence(
     }
     return CleanupCurrentPackageEvidence{
         CleanupInstalledState::Present, found->second,
-        CleanupEvidenceVerification::Verified};
+        installed_package_identity_is_complete(found->second)
+            ? CleanupEvidenceVerification::Verified
+            : CleanupEvidenceVerification::Unverified};
 }
 
 CleanupCausalOwnership project_cleanup_causal_ownership(
