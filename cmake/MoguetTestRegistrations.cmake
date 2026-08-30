@@ -64,6 +64,13 @@ _moguet_add_direct_ctest(
     cpp.invocation_owned_cleanup_model
     invocation-owned-cleanup-model-test
 )
+moguet_add_ctest(
+    NAME cpp.remote_aur_cleanup_collector
+    TARGETS invocation-owned-cleanup-model-test
+    COMMAND
+        "$<TARGET_FILE:invocation-owned-cleanup-model-test>"
+        --collector-only
+)
 _moguet_add_direct_ctest(cpp.reviewed_source_state reviewed-source-state-test)
 _moguet_add_direct_ctest(
     cpp.reviewed_source_state_store
@@ -109,6 +116,10 @@ _moguet_add_direct_ctest(
 _moguet_add_direct_ctest(
     cpp.package_base_artifact_install_executor
     package-base-artifact-install-executor-test
+)
+_moguet_add_direct_ctest(
+    cpp.source_artifact_install_trusted_transport
+    source-artifact-install-trusted-transport-test
 )
 _moguet_add_direct_ctest(cpp.separated_source_build separated-source-build-test)
 _moguet_add_direct_ctest(

@@ -1,5 +1,7 @@
 #include "source_package_identity_projection.hpp"
 
+#include "package_identifier.hpp"
+
 #include <algorithm>
 #include <stdexcept>
 #include <type_traits>
@@ -126,6 +128,73 @@ PackageVersionIdentity provider_package_version(
     return PackageVersionIdentity::unknown();
 }
 
+PackageArchitectureIdentity repository_package_architecture(
+    const std::optional<std::string>& architecture) {
+    return architecture.has_value()
+               ? PackageArchitectureIdentity::known(
+                     {architecture.value()})
+               : PackageArchitectureIdentity::unknown();
+}
+
+std::optional<SourcePackageIdentityProjectionIssueKind>
+artifact_package_base_issue(
+    const ArtifactPackageBaseIdentity& package_base) noexcept {
+    switch(package_base.state()) {
+        case ArtifactMetadataValueState::Known:
+            return package_base.value() == nullptr ||
+                           !is_valid_package_name(*package_base.value())
+                       ? std::optional<
+                             SourcePackageIdentityProjectionIssueKind>{
+                             SourcePackageIdentityProjectionIssueKind::
+                                 ArtifactPackageBaseMalformed}
+                       : std::nullopt;
+        case ArtifactMetadataValueState::Missing:
+            return SourcePackageIdentityProjectionIssueKind::
+                ArtifactPackageBaseMissing;
+        case ArtifactMetadataValueState::Malformed:
+            return SourcePackageIdentityProjectionIssueKind::
+                ArtifactPackageBaseMalformed;
+        case ArtifactMetadataValueState::Unavailable:
+            return SourcePackageIdentityProjectionIssueKind::
+                ArtifactPackageBaseUnavailable;
+    }
+    return SourcePackageIdentityProjectionIssueKind::
+        ArtifactPackageBaseMalformed;
+}
+
+std::optional<SourcePackageIdentityProjectionIssueKind>
+artifact_architecture_issue(
+    const ArtifactPackageArchitectureIdentity& architecture) noexcept {
+    switch(architecture.state()) {
+        case ArtifactMetadataValueState::Known:
+            return architecture.value() == nullptr ||
+                           architecture.value()->empty() ||
+                           std::any_of(
+                               architecture.value()->begin(),
+                               architecture.value()->end(),
+                               [](unsigned char character) {
+                                   return character <= 0x20 ||
+                                          character == 0x7f;
+                               })
+                       ? std::optional<
+                             SourcePackageIdentityProjectionIssueKind>{
+                             SourcePackageIdentityProjectionIssueKind::
+                                 ArtifactArchitectureMalformed}
+                       : std::nullopt;
+        case ArtifactMetadataValueState::Missing:
+            return SourcePackageIdentityProjectionIssueKind::
+                ArtifactArchitectureMissing;
+        case ArtifactMetadataValueState::Malformed:
+            return SourcePackageIdentityProjectionIssueKind::
+                ArtifactArchitectureMalformed;
+        case ArtifactMetadataValueState::Unavailable:
+            return SourcePackageIdentityProjectionIssueKind::
+                ArtifactArchitectureUnavailable;
+    }
+    return SourcePackageIdentityProjectionIssueKind::
+        ArtifactArchitectureMalformed;
+}
+
 SourcePackageIdentityProjectionResult project_provider_dependency(
     const ProviderResolvedDependencyCandidate& candidate) {
     const ProvidedDependency& provider = candidate.provider;
@@ -174,7 +243,8 @@ SourcePackageIdentityProjectionResult project_provider_dependency(
                 provider_package_version(
                     provider,
                     ObservedVersionSource::RepositoryExactPackage),
-                PackageArchitectureIdentity::unknown()));
+                repository_package_architecture(
+                    provider.package_architecture)));
         }
         return single_success(make_identity(
             PackageSourceIdentity::aur(
@@ -398,7 +468,8 @@ project_dependency_source_package_identity(
                             source_candidate.package_version,
                             ObservedVersionSource::
                                 RepositoryExactPackage),
-                        PackageArchitectureIdentity::unknown()));
+                        repository_package_architecture(
+                            source_candidate.architecture)));
                 } catch(const std::invalid_argument&) {
                     return invalid_identity_failure(
                         SourcePackageIdentityProjectionInputKind::
@@ -484,11 +555,83 @@ SourcePackageIdentityProjectionResult project_artifact_source_package_identity(
             context.package().package_base().source()));
     }
 
+    if(const auto issue = artifact_package_base_issue(artifact.package_base);
+       issue.has_value()) {
+        return failure(make_issue(
+            SourcePackageIdentityProjectionInputKind::Artifact,
+            issue.value(), std::nullopt, artifact.package_name,
+            context.package().package_base().package_base(),
+            context.package().package_base().source()));
+    }
+    if(const auto issue = artifact_architecture_issue(artifact.architecture);
+       issue.has_value()) {
+        return failure(make_issue(
+            SourcePackageIdentityProjectionInputKind::Artifact,
+            issue.value(), std::nullopt, artifact.package_name,
+            context.package().package_base().package_base(),
+            context.package().package_base().source()));
+    }
+
+    const std::string* actual_package_base = artifact.package_base.value();
+    const std::string* actual_architecture = artifact.architecture.value();
+    if(actual_package_base == nullptr || actual_architecture == nullptr) {
+        return invalid_identity_failure(
+            SourcePackageIdentityProjectionInputKind::Artifact,
+            std::nullopt, artifact.package_name,
+            context.package().package_base().package_base());
+    }
+    if(*actual_package_base !=
+       context.package().package_base().package_base()) {
+        return failure(make_issue(
+            SourcePackageIdentityProjectionInputKind::Artifact,
+            SourcePackageIdentityProjectionIssueKind::PackageBaseMismatch,
+            std::nullopt, artifact.package_name, *actual_package_base,
+            context.package().package_base().source()));
+    }
+
+    const std::string* expected_version =
+        context.package_version().full_version();
+    if(context.package_version().state() != PackageVersionState::Known ||
+       expected_version == nullptr) {
+        return failure(make_issue(
+            SourcePackageIdentityProjectionInputKind::Artifact,
+            SourcePackageIdentityProjectionIssueKind::IncompleteAuthority,
+            std::nullopt, artifact.package_name, *actual_package_base,
+            context.package().package_base().source()));
+    }
+    if(*expected_version != artifact.full_version) {
+        return failure(make_issue(
+            SourcePackageIdentityProjectionInputKind::Artifact,
+            SourcePackageIdentityProjectionIssueKind::PackageVersionMismatch,
+            std::nullopt, artifact.package_name, *actual_package_base,
+            context.package().package_base().source()));
+    }
+
+    if(context.architecture().state() != PackageArchitectureState::Known ||
+       context.architecture().architectures().size() != 1) {
+        return failure(make_issue(
+            SourcePackageIdentityProjectionInputKind::Artifact,
+            SourcePackageIdentityProjectionIssueKind::IncompleteAuthority,
+            std::nullopt, artifact.package_name, *actual_package_base,
+            context.package().package_base().source()));
+    }
+    if(context.architecture().architectures().front() !=
+       *actual_architecture) {
+        // POLICY(#485): exact expected correlation only. In particular,
+        // "any" is retained as an actual value; this adapter is not an
+        // architecture compatibility solver.
+        return failure(make_issue(
+            SourcePackageIdentityProjectionInputKind::Artifact,
+            SourcePackageIdentityProjectionIssueKind::ArchitectureMismatch,
+            std::nullopt, artifact.package_name, *actual_package_base,
+            context.package().package_base().source()));
+    }
+
     try {
         return single_success(SourceAwarePackageIdentity::make(
             context.package(), context.source_revision(),
             PackageVersionIdentity::composite(artifact.full_version),
-            context.architecture()));
+            PackageArchitectureIdentity::known({*actual_architecture})));
     } catch(const std::invalid_argument&) {
         return invalid_identity_failure(
             SourcePackageIdentityProjectionInputKind::Artifact,

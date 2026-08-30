@@ -4,13 +4,13 @@
 
 この文書は、separated AUR / source-build lifecycleにおける`--rmdeps`の意味、拒否境界、pacman-only routeでの消費を定めるnormative production contractである。あわせてIssue #404で将来のsupportへ進むために必要なcleanup ownershipとinteractionのstaged authorityを定める。文書の規範上の正本は日本語本文である。
 
-current production behaviorとstaged targetは混同しない。Issue #404 Slice 3.6完了後も、production source-buildの`--rmdeps`はunsupportedかつfail closedであり、dependency removal、preview、promptは接続されていない。Slice 3.6はselected repository provider transactionだけにproduction-capableなtrusted receipt transportを追加する。`pacman -U`と`makepkg -s`は未対応であり、policy protection等の独立gateも残るためremovalへ進まない。
+current production behaviorとstaged targetは混同しない。Issue #485 Slice 5は、production `PreparedRemoteSourceBuild`をmove ownershipでconsumeする単一closed collectorの内部でだけsessionをmintし、baseline、owner-specific trusted transaction、full invocation result、post-success current / policy、aggregate、exact candidate projection、pure classifierを一方向に接続した。authoritatively correlated actual `Install`だけがcandidate originであり、completeなremote AUR invocationのexact build / check dependencyだけが`Eligible`へ到達できる。一方、production source-buildのpublic `--rmdeps`は引き続きunsupportedかつmutation前fail closedである。candidate assessmentはpreview、prompt、confirmation、removalへ公開・接続せず、cleanup execution capabilityでもない。Issue #404 Slice 3.6のselected repository provider transportと、Issue #485 Slice 2の`SourceArtifactInstall` transportは、installed helper、fixed protocol、root stateをownerごとに分離する。Slice 3はread-only local / configured sync libalpm metadataからexact `base-devel` policy authorityを追加した。Slice 4は2つのowner-specific resultをexact invocation、work item、PackageBase、BuildPlan edge、provider decisionへ閉じ、invocation-wide shared lifetime、route authority、evidence completenessをinternal evidence modelとして追加した。Slice 4.5はcaller文字列では再構成できないone-invocation session、trusted producerだけが発行するselected-provider closed evidence、owner/work-item別token inventory、全edge分類、nonempty invariant、outcome shape validation、actual current PackageBase / architecture、session/phase-bound baseline/current/policyへこのfoundationを閉じた。positiveな`Complete` routeは必要なnonempty evidenceが全て揃ったremote AUR source buildだけであり、local / upgradeは`Unsupported`、standalone repository source / makepkg syncdepsは`Unknown`のままである。`makepkg -s`も未対応であり、独立gateが残るためremovalへ進まない。
 
 - Origin Issue: [#269](https://github.com/seekerkrt/moguet/issues/269)
 - Staged extension: [#404](https://github.com/seekerkrt/moguet/issues/404)
 - Related Issues: [#123](https://github.com/seekerkrt/moguet/issues/123)、[#152](https://github.com/seekerkrt/moguet/issues/152)、[#218](https://github.com/seekerkrt/moguet/issues/218)、[#242](https://github.com/seekerkrt/moguet/issues/242)、[#266](https://github.com/seekerkrt/moguet/issues/266)、[#267](https://github.com/seekerkrt/moguet/issues/267)、[#271](https://github.com/seekerkrt/moguet/issues/271)、[#350](https://github.com/seekerkrt/moguet/issues/350)
 - Related PRs: #298（#269 policy）、#241、#257〜#261（#242 separated lifecycle）
-- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。Slice 3でinstall-reason付きfull local snapshotとproduction未接続のmetadata / lifecycle adapterを追加し、current causal authority不足をNO-GOとして固定。Slice 3.5でtransaction token、owner、command outcome、machine receipt completeness、package operation、invocation ledgerをpure typed contractとして追加した。Slice 3.6でpackage-installed root helper、root-owned transaction state、transaction-local Install hook、one-shot machine receipt、selected-provider typed transportを追加し、Slice 3.5 ledgerへactual `Install` setをprojectできるproduction-capable pathを成立させた。Slice 3.7でmakepkg syncdepsのpublic instrumentation authorityを監査し、安全なroot-owned adapter案は独立security redesignが必要なためDEFER、Issue #404はRETURN-HOMEと判定した。public cleanup routeと他mutation ownerは未接続である。
+- Update history: Issue #373で旧decision 10の本文から安定contractへ分離。Issue #404 Slice 1でcurrent lifecycle監査、causal ownership、future interaction boundaryを追加。Slice 2でproduction未接続のpure cleanup classification authorityを追加。Slice 3でinstall-reason付きfull local snapshotとproduction未接続のmetadata / lifecycle adapterを追加し、current causal authority不足をNO-GOとして固定。Slice 3.5でtransaction token、owner、command outcome、machine receipt completeness、package operation、invocation ledgerをpure typed contractとして追加した。Slice 3.6でpackage-installed root helper、root-owned transaction state、transaction-local Install hook、one-shot machine receipt、selected-provider typed transportを追加し、Slice 3.5 ledgerへactual `Install` setをprojectできるproduction-capable pathを成立させた。Slice 3.7でmakepkg syncdepsのpublic instrumentation authorityを監査し、安全なroot-owned adapter案は独立security redesignが必要なためDEFER、Issue #404はRETURN-HOMEと判定した。Issue #485 Slice 1でactual archive PackageBase / architectureと`SourceArtifactInstall` owner-specific closed evidenceを追加し、raw generic ledgerをproduction positive projectionから除外した。Issue #485 Slice 2で別installed helper、別`/run` namespace、sealed-bytes root staging、fixed `pacman -U`、Install-only receipt、production observation producerを追加した。Issue #485 Slice 3でexact installed / configured sync `base-devel` meta-package dependencyをprimary authorityとし、libalpm satisfier semantics、exact group compatibility fallback、losslessな`Protected` / `NotProtected` / `Unknown` reducerを追加した。Slice 4でrepository provider PackageBase保持、2 ownerのexact edge correlation、invocation-wide evidence / shared lifetime、route / completeness authorityを追加した。Slice 4.5でclosed selected producer、fresh session/token inventory、exhaustive/non-vacuous completeness、outcome/current/phase authorityを追加した。Slice 5で単一closed collectorをproduction remote AUR orchestrationへ接続し、authoritative candidate assessmentとinstalled positive fixtureを完成した。public cleanup routeは未接続である。
 - Related upper decisions: [decision 1](../DECISIONS.md#decision-1)、[decision 2](../DECISIONS.md#decision-2)、[decision 4](../DECISIONS.md#decision-4)、[decision 5](../DECISIONS.md#decision-5)、[decision 6](../DECISIONS.md#decision-6)、[decision 7](../DECISIONS.md#decision-7)
 
 ## Contract本文（日本語normative source of truth）
@@ -117,7 +117,7 @@ baseline/current projectionは次を固定する。
 - current snapshot成功 + package不在は`Absent`。
 - current snapshot failureは`Unknown`かつmetadata authorityなし。
 
-source-aware candidateは`ResolvedDependencyCandidate`またはrepository exact observation等のtyped authorityからのみ構成し、installed name/versionやpackage名からsource / PackageBaseを補完しない。repository providerのcurrent identityはPackageBaseを保持しないため、そのprovider edgeは`Unverified`かつcoverage `Incomplete`である。authoritative candidate identity自体を構成できない場合はcandidateを捏造せずtyped projection failureを返す。known candidate versionとcurrent installed versionの不一致はSlice 2 classifierの`Invalid`へ渡し、`Unknown` / `Unavailable` versionは推測でknownへ変換しない。
+source-aware candidateは`ResolvedDependencyCandidate`またはrepository exact observation等のtyped authorityからのみ構成し、installed name/versionやpackage名からsource / PackageBaseを補完しない。Slice 4以降のrepository providerはstrict `RepositoryExactPackage.package_base`をprovider identityへ保持する。empty PackageBaseをchild nameで補完せず、requirement / provided capability、actual provider package、PackageBaseを別identityとして相関する。authoritative candidate identity自体を構成できない場合はcandidateを捏造せずtyped projection failureを返す。known candidate versionとcurrent installed versionの不一致はSlice 2 classifierの`Invalid`へ渡し、`Unknown` / `Unavailable` versionは推測でknownへ変換しない。
 
 correlation coverage `Complete`は少なくとも次の全条件が揃う場合だけ生成する。
 
@@ -339,13 +339,146 @@ Slice 3.5のpure ledgerと`InvocationDependencyTransactionOwner::MakepkgSyncDepe
 - Slice 4 production cleanup readiness: **NO-GO**。causal authorityに加えてpolicy protection、route / correlation completeness、shared lifetime、mutation直前revalidationが未成立である。
 - Issue #404 continuation recommendation: **RETURN-HOME**。v2.5.0では成立済みのmodel / adapter / selected-provider trusted receipt foundationを保持し、public source-build `--rmdeps`はunsupported / fail-closedのままとする。makepkg syncdeps authority、残るcleanup candidate authority、preview / confirmation / mutation executorは最大3件のfollow-up候補へ分離し、Issue #404内で新しいsecurity subsystemを開始しない。
 
-### Slice 4 production cleanup readiness: NO-GO
+### Issue #485 Slice 1 source-artifact causal evidence（production未接続）
 
-causal authorityとは別に、Slice 3.6でもgroup / `base-devel`等のcomplete policy inventory authorityはなく、`CleanupPolicyProtection::Unknown`を維持する。source / correlation completeness、local routeのcomplete ownership、shared lifetime、current identity / reason / state、future mutation-time revalidationもそれぞれ独立したgateである。selected-provider causal transportがGOでも、policyが`Unknown`のままならclassifierは`Eligible`を生成せず、Slice 4 GOにはしない。
+actual package archive metadataは、validated path provenanceとは別にread-only `alpm_pkg_load()`と`alpm_pkg_get_name()` / `alpm_pkg_get_version()` / `alpm_pkg_get_base()` / `alpm_pkg_get_arch()`から取得する。`ArtifactPackageIdentity`はchild、exact full version、actual PackageBase、actual architectureを保持し、PackageBase / architectureの`Known` / `Missing` / `Malformed` / `Unavailable`を区別する。missing等をBuildPlanやupper source contextの値で補完せず、known expected child / version / PackageBase / architectureとのexact correlationだけをcompleteとする。`any`とknown other architectureもactual valueとして保持し、cleanup側でcompatibility solverを再実装しない。
+
+artifact path provenance、archive metadata identity、future actual ALPM Install receiptは別dimensionである。stable artifact indexはvalidated aggregate内のpathへ解決できるが、それ自体はpath capabilityでもreceiptでもない。同じinodeのcontent mutationをpath identityだけでは排除できないため、future transport / candidate integrationでもactual transaction receiptとcurrent installed identityを省略しない。
+
+`SourceArtifactInstall` evidenceは次を一つのclosed valueへ束縛する。
+
+- invocation-local identity、exact work-item index、PackageBase、requested root set。
+- selected artifact exact set。各artifactのstable index、expected source-aware child / version / PackageBase / exact architecture、actual archive identity、build / check role、`Dependency` desired reason、root attributionを保持する。
+- exact transaction token、hard-coded `InvocationDependencyTransactionOwner::SourceArtifactInstall`、requested package set、command outcome、receipt state / operation、actual Install setを保持する。
+
+positive causal capabilityは、bindingとselected setがexact、command `Succeeded`、receipt `Complete`、same token / fixed owner、全selected childがactual `Install`の場合だけ発行する。actual Install setのsolver-introduced / unselected entryはfactual resultへ残るがselected artifactへ昇格しない。`Upgrade`はversionの大小や同一性を問わず、normal upgrade、same-version reinstall、downgradeのすべてでpositive不可である。Root / Runtime role、Explicit desired reason、missing / incomplete / invalid receipt、command failure、token / owner / invocation / work item / PackageBase / selected set / name / version / architecture mismatchもpositive不可とする。
+
+generic `InvocationDependencyTransactionLedger`はfactual modelとして残すが、production candidate adapterはraw ledgerを受け取らない。raw ledgerからの旧causal projectionはreceipt model regression用test hookだけに限定し、selected-provider transport / helper / fixed owner / `/run` stateは変更しない。Slice 1時点の`SourceArtifactInstallReceiptObservation`にはproduction constructorがなく、次節のSlice 2 transportだけがproduction observationを構築する。
+
+### Issue #485 Slice 2 source-artifact trusted receipt transport（candidate未接続）
+
+SourceArtifactInstallはselected-provider helperをgeneric化せず、package-installedな
+`/usr/libexec/moguet/moguet-source-artifact-install-helper`、fixed owner
+`source-artifact-install`、fixed verb grammar、専用
+`/run/moguet/source-artifact-installs/{active,used}`を使用する。source helperのCLIはowner、state root、
+executable、hookdir、destination、pacman config / root / dbpathをcallerから受け取らない。selected-provider
+tokenとsource-artifact tokenは相互のstate namespaceでconsumeできない。
+
+unprivileged transportはvalidated aggregateが保持するartifact / signature descriptorからbytesをcopyし、
+size、mtime、ctime、device、inode、ownerをcopy前後で再確認する。copy先はLinux memfdで、
+`F_SEAL_WRITE` / `F_SEAL_GROW` / `F_SEAL_SHRINK` / `F_SEAL_SEAL`をすべて付与する。root helperはこの
+write-sealed regular fileだけをstdinとして受理し、caller pathを受け取らない。root helperはboundedな
+exact byte countをprivate preparing directoryへcopyし、root:root `0600`のgenerated basenameだけを作る。
+各root-owned staged archiveをread-only libalpmで再読し、child name、full version、actual PackageBase、
+actual architectureがprepared expectationとbyte-exactに一致した後だけ、state全体をactive tokenへatomic
+publishする。signatureが存在する場合も対応するgenerated sidecarへstageする。
+
+transportが実行するtransaction argvはabsolute `/usr/bin/sudo`と`/usr/bin/pacman`のshell-free argvで、
+次のclosed subsetだけである。
+
+```text
+/usr/bin/pacman -U [--needed] [--asdeps] [--noconfirm]
+  --hookdir <root-owned exact transaction hookdir>
+  -- <root-owned exact staged artifacts...>
+```
+
+全selected artifactのdesired reasonは`Dependency`、roleはbuild / checkだけに限定する。existing Dependencyを
+保持するtransactionではdirectiveなしを許すが、new installのpositive pathは`--asdeps`である。
+`--needed` successでもInstall receiptがなければpositiveにしない。hookは`Operation = Install`、
+`PostTransaction`、`NeedsTargets`だけを記録し、Upgrade、same-version reinstall、downgradeはMissing receiptに
+留まる。command failure、consume failure、malformed / incomplete / missing receiptをactual Installへ推測しない。
+
+root prepare / run / consume / abortは256-bit CSPRNG tokenをone-shot retirementへ束縛する。activeからusedへ
+先にatomic retireし、prepared state、hook、staged archive / signature、receiptというknown exact childrenだけを
+cleanupしてempty tombstoneを残す。unknown shapeをrecursive deleteせず、crash後のactive / used stateやstaged
+bytesを別tokenのauthorityへ再利用しない。
+
+trusted resultはexact invocation、work-item index、PackageBase、requested roots、selected stable index /
+identity / role / reasonとtransaction-local ledgerを同じ`SourceArtifactInstallReceiptObservation`へ保持する。
+requested selected setとactual Install setは別vectorであり、solver-introduced Installをfactual setへ保持しても
+selected cleanup authorityへ自動昇格しない。transport resultからSlice 1のclosed receipt evidenceとcausal
+capabilityを作れるが、`project_invocation_owned_cleanup_candidate()`、policy、shared lifetime、route completeness、
+public `--rmdeps`へは接続しない。
+
+### Issue #485 Slice 3 protected build environment policy（candidate未接続）
+
+initial protected build environment policyはexact `base-devel`だけである。current Archでは`base-devel`は
+groupではなくmeta packageであり、installed exact meta-package dependency metadataをprimary、完全な
+configured sync exact meta-package metadataを次のauthorityとする。両方がauthoritatively absentで、全configured
+sync databaseとexact group inventoryがcompleteな場合だけ、exact `base-devel` groupをcompatibility fallbackとして
+使う。arbitrary group、all groups、設定追加、`gcc` / `make`等のhard-coded member listは導入しない。
+
+candidateはread-only local libalpm metadataからexact name / version / provides / groupsをowned snapshotへ保持する。
+meta dependencyとのsatisfactionは`alpm_pkg_get_depends()`と`alpm_find_satisfier()`を使い、dependency parser / solverを
+Moguet側へ追加しない。local-only packageもlocal objectのname / versioned providesがdependencyをsatisfyする場合は
+`Protected`であり、repository identityをpackage名から補完しない。group fallbackのmembershipもcandidate local metadataの
+exact group declarationを使い、sync group memberとのpackage-name-only相関をprovenanceへ昇格しない。
+
+factual `CleanupPolicyProtectionEvidence`はlocal DB、candidate metadata、installed meta、configured sync meta、group
+inventory、satisfier evaluation、source consistency、failureを別stateで保持する。pure
+`project_cleanup_policy_protection()`は次を固定する。
+
+- selected authorityのcomplete positive satisfier / exact group evidenceだけを`Protected`へprojectする。
+- `NotProtected`はcandidate、selected protected authority、inventory、satisfier evaluationがすべてcompleteで、failure / contradictionがない場合だけ生成する。
+- local DB / required sync DB failure、candidate incomplete、meta / group malformed、partial inventory、evaluation failure、authority unresolved、contradictionは`Unknown`とする。
+- missing exact group、package-name listへの非membership、query failureを`NotProtected`へ変換しない。
+- installed metaはsync / groupより、sync metaはgroupより優先する。group fallbackはexact metaがpresentまたはunresolvedなら選択しない。
+
+standalone query / reducerはproduction buildへ含まれるが、current
+`project_invocation_owned_cleanup_candidate()`はSlice 4のinvocation-wide aggregateをまだ消費しないlegacy projectionであり、
+production candidate collector未接続のためpolicyを`Unknown`に保つ。Explicit、PreExisting、Root、RuntimeDependency、shared lifetime、receipt、routeはpolicy reducerへ
+混ぜず、既存classifierの独立dimensionを維持する。public behavior、cleanup candidate collector、preview / prompt /
+removalは変更しない。
+
+### Issue #485 Slice 4 correlation / shared lifetime / route authority（candidate未接続）
+
+Slice 4は、repository providerのauthoritative PackageBaseをstrict repository observationからprovider identityへlosslessに保持する。selected repository provider correlationは、invocation identity、exact BuildPlan edge、user-selected decision、configured repository order、actual provider package、PackageBase、provided capability / requirement、current package identity、paired trusted execution result / capture、token、Install receiptを同じclosed evidenceへ束縛する。raw receipt、transaction success、solver-introduced Install単独をselected provider edgeへ昇格しない。
+
+`SourceArtifactInstallCausalEvidence`は、invocation identity、ordered work-item index、PackageBase、selected artifact、dependency role、requested rootに加えてexact BuildPlan edge indexを保持する。route-specific correlationはprepared work itemとcomplete BuildPlanへ再照合し、same child / versionでもinvocation、work item、PackageBase、root、edge、roleのどれかが異なれば`Complete`にしない。
+
+invocation-wide evidenceはcomplete BuildPlan、全root、ordered work item、全PackageBase identity、全dependency edge、全work-item outcome、全source-artifact correlation、全selected-provider correlationを一つのowned aggregateへ保持する。shared lifetimeはcandidate countやfirst consumer completionでは決めない。Root / Runtime consumerまたはverified later consumerは`StillRequired`、failed / unattempted final lifecycleとincomplete evidenceは`Unknown`、supported invocation全体が成功し全consumerがbuild / check-onlyで後続requirementがない場合だけ`NoLongerRequired`である。
+
+routeとevidenceは独立dimensionである。`CleanupRouteAuthority`は`Complete / Unsupported / Unknown`、`CleanupEvidenceCompleteness`は`Complete / Incomplete / Unknown`を保持する。必要evidenceが全て揃ったremote AUR source buildだけがinitial positive `Complete` routeである。local build、`upgrade`、`upgrade-aur`、`upgrade-all`は`Unsupported`、standalone repository sourceとmakepkg syncdepsは`Unknown`であり、empty candidate setを`Complete` proofにしない。
+
+Slice 4はこのaggregateを`project_invocation_owned_cleanup_candidate()`、baseline/current collector、policy query、classifier、public routeへ接続しない。causal ownership、policy protection、shared lifetime、route authority、correlation completenessは独立したままである。production candidate collectorはIssue #485 Slice 5、preview / prompt / mutation-time revalidation / removalは後続authorityのscopeである。
+
+### Issue #485 Slice 4.5 closed producer / freshness / exhaustive completeness（candidate未接続）
+
+cleanup correlationのinvocation authorityは、callerが文字列から再構成するidentityではなく、1つのremote AUR preparationをmove ownershipする`CleanupInvocationSession`である。session authorityはprocess内のopaque state identityであり、PID、timestamp、package名、PackageBase、root、edge、同一textから復元できない。trusted request、phase observation、correlation、aggregateは同じauthorityを保持し、別sessionの値が同一でもevidenceをreuseしない。production buildにはcallerがraw `PreparedRemoteSourceBuild`からsessionをmintするfactoryを公開せず、session test factoryはfocused targetのcompile macro内だけである。future Slice 5 collectorだけがprivate session constructionを所有する。
+
+sessionはbaseline observationより前のtrusted transaction token登録を拒否する。selected repository providerとSourceArtifactInstallのtrusted producerだけが、fixed owner、exact transaction token、work-item集合をsession inventoryへ1回登録し、trusted transaction完了後に同じentryをcompleteへ進められる。current / policy observationはcapture時のcompleted transaction countを保持し、final inventoryと一致しないpre-transaction / mid-invocation snapshotをpost-success authorityにしない。aggregateはclosed evidenceとinventoryをtoken、owner、work itemでbijection確認し、missing、foreign、duplicate、wrong owner、previous invocation token、unused inventoryを`Incomplete`へ倒す。root helperのone-shot retirementとは独立して、copy済みin-memory evidenceのcross-invocation reuseもauthority mismatchとなる。
+
+selected repository providerのpositive inputは、trusted executorだけがprivate constructionするtransaction-level `SelectedRepositoryProviderTrustedExecutionEvidence`である。raw receipt observation、raw ledger、`TrustedAlpmReceiptCaptureResult`、public diagnostic execution result、caller-created current evidenceはpositive correlator inputではない。1 transaction tokenは1 closed evidenceに1回だけ保持し、その内部に複数edge / work-item bindingを持つ。selected decision、edge、resolved candidate、prepared invocation、execution bindingは、repository / configured order、actual provider package、PackageBase、architecture、typed requirement、provided dependency name、raw specification、package/provided version metadata、constraint result、resolutionをfull equalityで再照合する。SourceArtifactのtoken/nameをraw selected resultへ再包装してもclosed evidenceを構成できない。
+
+baselineは`BeforeFirstDependencyMutation`、current installed snapshotとpolicy queryは`AfterFullSupportedInvocationSuccess`へfixedし、same sessionへbindする。current installed metadataはlibalpm local package objectからactual name、version、PackageBase、architecture、reasonを同じread phaseで保持する。PackageBase / architectureの`Known` / `Missing` / `Malformed` / `Unavailable` / `Unknown`を区別し、candidate source、archive、package名から補完しない。repository providerのexpected architectureはstrict configured sync libalpm observationからlosslessに保持し、`any`を含むexact literal matchだけを使う。独自architecture compatibility solverは追加しない。
+
+remote aggregateは全BuildPlan dependency edgeをexactly one回、`SupportedOwnerSpecificReceipt`、`AuthoritativelyPreExistingOrIrrelevant`、`UnsupportedOrUnowned`、`InvalidOrUnknown`へ分類する。Local、Unknown、AmbiguousProvider、invalid enum、raw/untyped、missing requirement / resolution / constraintはsilent skipしない。dependency edge集合とcleanup-relevant supported edge集合はnonemptyを要求し、missing / duplicate / extra correlationやwork-item reattributionをcurrent plan / current work-item vectorへ再照合する。empty setの`all_of`から`Complete`を作らない。shared `NoLongerRequired`もcandidateに対するexact relevant edge集合がnonemptyの場合だけであり、Root / Runtime evidenceは従来どおり`StillRequired`を優先する。
+
+work-item outcomeはSucceeded / Failed / NotAttemptedごとのexhaustive shape validatorを通す。invalid status / staged enum / role / dependency kind / provider resolution、Succeededとfailure markerの同居、Failedのrequired failure shape不足、NotAttemptedとsuccess/failure stateの同居は`Incomplete / Unknown`である。
+
+Slice 4.5はsession-bound factual transportとaggregateをfreezeするだけで、production candidate collector、classifier lifecycle、public `--rmdeps`、preview、prompt、confirmation、mutation直前revalidation、removalを接続しない。mutation直前のinstalled identity / reason / policy / shared state再確認はIssue #486のauthorityである。
+
+### Issue #485 Slice 5 closed production lifecycle / candidate authority
+
+supported remote AUR source buildは、`PreparedRemoteSourceBuild`をmove ownershipでconsumeする単一の`RemoteAurCleanupCandidateCollector`相当だけがproduction sessionをmintする。callerへraw session factory、phase observation factory、positive enum、raw `InvocationOwnedCleanupCandidate`、aggregateを渡さない。one invocation / one collector / one sessionであり、session authorityとaggregateはpublic approval tokenや後続mutation capabilityとして返さない。
+
+collectorは最初のselected-provider / source-artifact dependency mutationより前に、session-owned pacman DB pathからbaseline local package snapshotを取得する。query failureやname / version / PackageBase / architecture / reasonの不完全さはtyped `Unknown`を維持する。baseline absenceは`NewlyObserved`に留まり、causal ownershipはowner-specific trusted actual `Install` receiptからだけ得る。
+
+selected repository providerはidentity-bearing trusted executorへ接続し、exact invocation、work item、edge、decision、repository、actual package、PackageBase、architecture、requirement / capabilityを閉じたevidenceとしてretainする。source dependency PackageBaseは、全selected childが`Dependency` reasonかつBuild / Check roleへexact attributionされた場合だけ`SourceArtifactInstall` trusted transportを使う。trusted transportを開始できないpre-mutation compatibility caseでは既存operation transactionへfallbackできるが、そのraw fallbackをcausal ownershipへ再利用せずcleanup authorityはIncompleteとする。pacman success後のreceipt missing / malformed / consume failureでもoperation resultはSucceededのまま保持し、cleanup evidenceだけをIncompleteへ倒す。automatic rollbackは行わない。
+
+全ordered work itemのoutcomeが成功した後だけ、same session / same DB authorityでcurrent installed snapshotとcandidateごとのprotected-policy queryを実行する。current identityはactual name、version、PackageBase、architecture、reasonを要求し、receiptやarchive contextから補完しない。policy `NotProtected`はcompleteなquery/reducer resultからだけ得る。
+
+candidate集合は、closed SourceArtifact causal evidenceのselected dependency childと、closed selected-provider executionのactual selected packageだけから列挙する。solver-introduced `Install`はfactual setへ残すがcandidate化せず、その存在はuncorrelated evidenceとしてaggregateをIncompleteにする。snapshot diff、orphan state、全installed dependency scan、makepkg `-s/-sc` syncdepsをcandidate originにしない。
+
+candidateごとにbaseline、current exact identity、causal ownership、policy、shared requirement、route / correlation completenessをinternal `InvocationOwnedCleanupCandidate`へ一方向にprojectし、pure classifierへ渡す。`Eligible`は`NewlyObserved`、exact current `Present` / `Dependency`、Build / Check only、InvocationOwned、NotProtected、NoLongerRequired、route / correlation / evidence Complete、full invocation successがすべて揃う場合だけである。duplicate/conflicting identity、pre-existing、Explicit、wrong version / PackageBase / architecture、query failure、Protected / Unknown policy、Root / Runtime、failed / unattempted later work、unsupported route、missing/foreign/cross-session evidence、Upgrade / reinstall / downgrade / `--needed` skipは`Eligible`にならない。
+
+networkless disposable Arch fixtureはsynthetic remote AUR rootとMoguet-owned source dependency transactionを用い、collector session mint、actual sealed-bytes `pacman -U` Install receipt、actual post-success metadata / policy query、correlation、aggregate、projection、classifierまでを通して`Eligible`を確認する。host package databaseは変更しない。同じfixture familyのnegative matrixと既存installed receipt matrixは、各authorityを1つずつ崩した場合にnon-Eligibleであることを確認する。
+
+Slice 5のassessmentはinternal resultであり、public output、preview、prompt、confirmation、removalへ接続しない。`pacman -R*`、`pacman -Qdt*`、broad orphan scan、automatic rollbackは追加しない。makepkg syncdeps authorityは#484 / #501、mutation直前revalidationとremovalは#486の独立scopeである。Issue #485のcandidate authority completionだけで#486全体をGOとしない。
 
 ### Source-build route
 
-source-build routeでは、今回のinvocationが導入したmake / check dependency集合をMoguetがauthoritativeに所有できない。build前後のinstalled package差分だけでは、次を安全に区別できない。
+source-build route全体では、Slice 5が閉じたowner-specific selected-provider / source-artifact subsetを除き、今回のinvocationが導入したmake / check dependency集合、特にmakepkg syncdepsをMoguetがauthoritativeに所有できない。build前後のinstalled package差分だけでは、次を安全に区別できない。
 
 - 並行するpackage transaction。
 - build前から存在するdependencyとExplicit package。
@@ -385,7 +518,7 @@ pacman-only routeでは、Moguetがmakepkg dependency installation lifecycleを�
 
 ### Issue #404 staged interaction authority（production未接続）
 
-このsectionはSlice 4以降が接続時に満たすinteraction authorityであり、current runtimeにcleanup promptが存在するという記述ではない。
+このsectionはcandidate lifecycle完成後の後続実装が満たすinteraction authorityであり、current runtimeにcleanup promptが存在するという記述ではない。
 
 - `--rmdeps`未指定では、通常buildへcleanup promptを追加せず、cleanup mutationを行わない。
 - interactive `--rmdeps`では、causal proofを満たすverified candidateが存在する場合だけpreviewを行う。candidateはpromptより先に表示する。
@@ -400,7 +533,7 @@ pacman-only routeでは、Moguetがmakepkg dependency installation lifecycleを�
 
 boolean token、EOF、typed outcome、non-rollbackの共通意味は[interactive confirmation contract](interactive-confirmation.md)に従う。ただしcleanup requestに対する初期`--noconfirm` / non-TTYのroute裁定は、safe default Noで通常buildを継続するのではなく、上記のとおりmutation前fail-closedとする。
 
-production preview、prompt、mutation直前revalidation、exact candidate removalを接続できる最初の段階はSlice 4である。Slice 1〜3.6でfuture interactionをstub executorや仮のcandidateへ接続してはならない。
+Slice 5はinternal candidate assessmentまでを完成したが、production preview、prompt、mutation直前revalidation、exact candidate removalを接続しない。preview / confirmation / revalidation / removalは後続authorityなしに接続してはならない。
 
 ## Non-scope / implementationを固定しない範囲
 

@@ -79,6 +79,16 @@ execute_separated_package_base_source_build(
         "Reviewed source production preparation test reached PackageBase execution.");
 }
 
+PackageBaseSourceBuildExecutionResult
+execute_separated_package_base_source_build_with_cleanup_authority(
+    SeparatedPackageBaseSourceBuildRequest,
+    const SeparatedSourceBuildUnitOptions&,
+    RemoteAurCleanupCandidateCollector&,
+    std::size_t) {
+    throw std::logic_error(
+        "Reviewed source production preparation test reached cleanup-authority PackageBase execution.");
+}
+
 SeparatedPackageBaseSourceBuildPhaseError::
     SeparatedPackageBaseSourceBuildPhaseError(
         SeparatedPackageBaseSourceBuildFailurePhase phase,

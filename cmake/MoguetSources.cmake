@@ -2,6 +2,7 @@
 # build-graph changes and must be explicit; do not replace this with a glob.
 set(MOGUET_PRODUCTION_SOURCES
     source/app_config.cpp
+    source/artifact_archive_metadata.cpp
     source/artifact_identity.cpp
     source/artifact_identity_selection.cpp
     source/artifact_identity_set.cpp
@@ -99,6 +100,9 @@ set(MOGUET_PRODUCTION_SOURCES
     source/separated_package_base_source_build.cpp
     source/separated_source_build.cpp
     source/shell_words.cpp
+    source/source_artifact_install_receipt_evidence.cpp
+    source/source_artifact_install_trusted_protocol.cpp
+    source/source_artifact_install_trusted_transport.cpp
     source/source_build.cpp
     source/source_entry_parser.cpp
     source/source_environment.cpp
@@ -138,6 +142,17 @@ set(MOGUET_ALPM_RECEIPT_HELPER_SOURCES
     source/trusted_alpm_receipt_protocol.cpp
 )
 
+# SourceArtifactInstall owns a distinct executable, protocol, and state
+# namespace. Only the token/name validators are shared with the existing
+# selected-provider receipt protocol.
+set(MOGUET_SOURCE_ARTIFACT_INSTALL_HELPER_SOURCES
+    source/source_artifact_install_trusted_helper_main.cpp
+    source/source_artifact_install_trusted_helper_state.cpp
+    source/source_artifact_install_trusted_protocol.cpp
+    source/trusted_alpm_receipt_protocol.cpp
+    source/package_identifier.cpp
+)
+
 set(_moguet_unique_alpm_receipt_helper_sources
     ${MOGUET_ALPM_RECEIPT_HELPER_SOURCES}
 )
@@ -167,6 +182,49 @@ unset(_moguet_helper_source)
 unset(_moguet_helper_source_count)
 unset(_moguet_unique_alpm_receipt_helper_sources)
 unset(_moguet_unique_helper_source_count)
+
+set(_moguet_unique_source_artifact_helper_sources
+    ${MOGUET_SOURCE_ARTIFACT_INSTALL_HELPER_SOURCES}
+)
+list(REMOVE_DUPLICATES _moguet_unique_source_artifact_helper_sources)
+list(
+    LENGTH
+    MOGUET_SOURCE_ARTIFACT_INSTALL_HELPER_SOURCES
+    _moguet_source_artifact_helper_source_count
+)
+list(
+    LENGTH
+    _moguet_unique_source_artifact_helper_sources
+    _moguet_unique_source_artifact_helper_source_count
+)
+if(
+    NOT _moguet_source_artifact_helper_source_count
+        EQUAL _moguet_unique_source_artifact_helper_source_count
+)
+    message(
+        FATAL_ERROR
+        "MOGUET_SOURCE_ARTIFACT_INSTALL_HELPER_SOURCES contains duplicate entries"
+    )
+endif()
+foreach(
+    _moguet_source_artifact_helper_source
+    IN LISTS MOGUET_SOURCE_ARTIFACT_INSTALL_HELPER_SOURCES
+)
+    if(
+        NOT EXISTS
+            "${CMAKE_CURRENT_SOURCE_DIR}/${_moguet_source_artifact_helper_source}"
+    )
+        message(
+            FATAL_ERROR
+            "Source-artifact install helper source does not exist: "
+            "${_moguet_source_artifact_helper_source}"
+        )
+    endif()
+endforeach()
+unset(_moguet_source_artifact_helper_source)
+unset(_moguet_source_artifact_helper_source_count)
+unset(_moguet_unique_source_artifact_helper_source_count)
+unset(_moguet_unique_source_artifact_helper_sources)
 
 set(_moguet_unique_production_sources ${MOGUET_PRODUCTION_SOURCES})
 list(REMOVE_DUPLICATES _moguet_unique_production_sources)

@@ -13,14 +13,18 @@
 
 void run_invocation_owned_cleanup_adapter_tests();
 void run_trusted_alpm_receipt_tests();
+void run_source_artifact_install_receipt_evidence_tests();
+void run_remote_aur_cleanup_candidate_collector_tests();
 
 // The focused target compiles the existing typed dependency requirement
 // implementation but never evaluates a version constraint. Keeping this
 // deterministic stub local proves that the cleanup classifier has no libalpm
 // runtime dependency.
+#ifndef MOGUET_ENABLE_REMOTE_AUR_CLEANUP_COLLECTOR_TEST_HOOKS
 extern "C" int alpm_pkg_vercmp(const char* lhs, const char* rhs) {
     return std::strcmp(lhs, rhs);
 }
+#endif
 
 namespace {
 
@@ -171,7 +175,9 @@ InvocationOwnedCleanupCandidate eligible_candidate(
             CleanupInstalledState::Present,
             InstalledPackageMetadata{
                 "cleanup-tool", "1.0-1",
-                InstalledPackageReason::Dependency},
+                InstalledPackageReason::Dependency,
+                InstalledPackageBaseIdentity::known("cleanup-tools"),
+                InstalledPackageArchitectureIdentity::known("x86_64")},
             CleanupEvidenceVerification::Verified},
         CleanupCausalOwnership::InvocationOwned,
         CleanupSharedRequirementState::NoLongerRequired,
@@ -366,6 +372,73 @@ void test_current_package_version_identity() {
                    CleanupClassificationReason::
                        CurrentPackageVersionUnavailable),
            "Unavailable package version authority became Eligible.");
+}
+
+void test_current_package_base_and_architecture_identity() {
+    InvocationOwnedCleanupCandidate wrong_base = eligible_candidate();
+    wrong_base.current_package.metadata->package_base =
+        InstalledPackageBaseIdentity::known("other-tools");
+    const CleanupClassificationResult wrong_base_result =
+        classify_invocation_owned_cleanup(wrong_base);
+    expect(
+        wrong_base_result.classification() == CleanupClassification::Invalid &&
+            has_reason(
+                wrong_base_result,
+                CleanupClassificationReason::CurrentPackageIdentityMismatch),
+        "Wrong current PackageBase was not Invalid.");
+
+    InvocationOwnedCleanupCandidate wrong_architecture = eligible_candidate();
+    wrong_architecture.current_package.metadata->architecture =
+        InstalledPackageArchitectureIdentity::known("aarch64");
+    const CleanupClassificationResult wrong_architecture_result =
+        classify_invocation_owned_cleanup(wrong_architecture);
+    expect(
+        wrong_architecture_result.classification() ==
+                CleanupClassification::Invalid &&
+            has_reason(
+                wrong_architecture_result,
+                CleanupClassificationReason::CurrentPackageIdentityMismatch),
+        "Wrong current architecture was not Invalid.");
+
+    const std::vector<InstalledPackageBaseIdentity> incomplete_package_bases{
+        InstalledPackageBaseIdentity::missing(),
+        InstalledPackageBaseIdentity::malformed(),
+        InstalledPackageBaseIdentity::unavailable(),
+        InstalledPackageBaseIdentity::unknown()};
+    for(const InstalledPackageBaseIdentity& package_base :
+        incomplete_package_bases) {
+        InvocationOwnedCleanupCandidate candidate = eligible_candidate();
+        candidate.current_package.metadata->package_base = package_base;
+        const CleanupClassificationResult result =
+            classify_invocation_owned_cleanup(candidate);
+        expect(
+            result.classification() == CleanupClassification::Unknown &&
+                has_reason(
+                    result,
+                    CleanupClassificationReason::CurrentPackageBaseUnknown),
+            "Incomplete current PackageBase became Eligible.");
+    }
+
+    const std::vector<InstalledPackageArchitectureIdentity>
+        incomplete_architectures{
+            InstalledPackageArchitectureIdentity::missing(),
+            InstalledPackageArchitectureIdentity::malformed(),
+            InstalledPackageArchitectureIdentity::unavailable(),
+            InstalledPackageArchitectureIdentity::unknown()};
+    for(const InstalledPackageArchitectureIdentity& architecture :
+        incomplete_architectures) {
+        InvocationOwnedCleanupCandidate candidate = eligible_candidate();
+        candidate.current_package.metadata->architecture = architecture;
+        const CleanupClassificationResult result =
+            classify_invocation_owned_cleanup(candidate);
+        expect(
+            result.classification() == CleanupClassification::Unknown &&
+                has_reason(
+                    result,
+                    CleanupClassificationReason::
+                        CurrentPackageArchitectureUnknown),
+            "Incomplete current architecture became Eligible.");
+    }
 }
 
 void test_correlation_coverage_authority() {
@@ -703,6 +776,14 @@ void test_absent_and_policy_states_fail_safe() {
     expect_classification(
         policy_unknown, CleanupClassification::Unknown,
         "Unknown policy evidence became Eligible.");
+
+    InvocationOwnedCleanupCandidate policy_not_protected_only =
+        eligible_candidate();
+    policy_not_protected_only.causal_ownership =
+        CleanupCausalOwnership::Unknown;
+    expect_classification(
+        policy_not_protected_only, CleanupClassification::Unknown,
+        "NotProtected policy alone bypassed missing causal authority.");
 }
 
 void test_structural_contradiction_is_invalid() {
@@ -812,13 +893,23 @@ void test_precedence_and_reason_ordering() {
 
 } // namespace
 
-int main() {
+int main(int argc, char* argv[]) {
     try {
+        if(argc == 2 &&
+           std::string(argv[1]) == "--collector-only") {
+            run_remote_aur_cleanup_candidate_collector_tests();
+            return 0;
+        }
+        if(argc != 1) {
+            throw std::runtime_error(
+                "unknown invocation-owned cleanup test mode");
+        }
         test_complete_transaction_receipt_tracks_actual_installs();
         test_malformed_transaction_receipts_are_invalid();
         test_missing_incomplete_and_mismatched_receipts_fail_closed();
         test_make_or_check_only_is_eligible();
         test_current_package_version_identity();
+        test_current_package_base_and_architecture_identity();
         test_correlation_coverage_authority();
         test_unknown_and_not_owned_causal_states();
         test_pre_existing_is_always_protected();
@@ -835,6 +926,8 @@ int main() {
         test_precedence_and_reason_ordering();
         run_invocation_owned_cleanup_adapter_tests();
         run_trusted_alpm_receipt_tests();
+        run_source_artifact_install_receipt_evidence_tests();
+        run_remote_aur_cleanup_candidate_collector_tests();
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

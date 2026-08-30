@@ -1,0 +1,12 @@
+pkgname=moguet-source-receipt-failure
+pkgver=1
+pkgrel=1
+pkgdesc='Moguet source-artifact receipt transaction failure fixture'
+arch=('any')
+license=('GPL')
+depends=('moguet-source-receipt-missing-dependency')
+
+package() {
+    install -Dm644 /dev/null \
+        "$pkgdir/usr/share/moguet-source-receipt/failure"
+}

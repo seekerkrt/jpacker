@@ -1112,10 +1112,17 @@ void test_selected_repository_provider_is_attached_to_parent_build_unit() {
 
     AurUpdateExecutionPreflight preflight = single_root_preflight();
     BuildPlan& plan = preflight.build_plan.value();
-    const ProvidedDependency selected_repository_provider =
+    ProvidedDependency selected_repository_provider =
         ProvidedDependency::from_repository(
             "extra", "selected-provider", "virtual-dependency",
             "virtual-dependency=2", "2.0-1");
+    selected_repository_provider.package_base =
+        "selected-provider-base";
+    ProvidedDependency unique_repository_provider =
+        ProvidedDependency::from_repository(
+            "core", "unique-provider", "unique-virtual",
+            "unique-virtual=1", "1.0-1");
+    unique_repository_provider.package_base = "unique-provider-base";
     plan.dependency_edges.push_back(BuildPlanDependencyEdge{
         "single-root",
         "single-root",
@@ -1157,9 +1164,7 @@ void test_selected_repository_provider_is_attached_to_parent_build_unit() {
         DependencyKind::Provided,
         std::nullopt,
         std::nullopt,
-        ProvidedDependency::from_repository(
-            "core", "unique-provider", "unique-virtual",
-            "unique-virtual=1", "1.0-1"),
+        unique_repository_provider,
         ProviderResolutionKind::Unique});
 
     const AppConfig config;

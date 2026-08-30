@@ -139,6 +139,18 @@ SourceAwarePackageIdentity aur_context(
         PackageArchitectureIdentity::known({"x86_64"}));
 }
 
+ArtifactPackageIdentity archive_identity(
+    std::string package_name = "artifact-child",
+    std::string version = "1.0-1",
+    ArtifactPackageBaseIdentity package_base =
+        ArtifactPackageBaseIdentity::known("artifact-base"),
+    ArtifactPackageArchitectureIdentity architecture =
+        ArtifactPackageArchitectureIdentity::known("x86_64")) {
+    return ArtifactPackageIdentity{
+        std::move(package_name), std::move(version),
+        std::move(package_base), std::move(architecture)};
+}
+
 void test_root_projection() {
     const RootPackageIdentity aur_root =
         AurRootPackageIdentity{"root-child", "root-base"};
@@ -239,7 +251,8 @@ void test_dependency_projection() {
         ObservedVersion::available(
             ObservedVersionSource::RepositoryExactPackage,
             "1.0-2"),
-        {}};
+        {},
+        std::string("any")};
     const SourceAwarePackageIdentity& repository_identity = require_single(
         project_dependency_source_package_identity(repository),
         "repository dependency");
@@ -248,8 +261,46 @@ void test_dependency_projection() {
                repository_identity.package_version().full_version() !=
                    nullptr &&
                *repository_identity.package_version().full_version() ==
-                   "1.0-2",
+                   "1.0-2" &&
+               repository_identity.architecture().state() ==
+                   PackageArchitectureState::Known &&
+               repository_identity.architecture().architectures() ==
+                   std::vector<std::string>{"any"},
            "Repository dependency projection lost exact metadata.");
+
+    const ResolvedDependencyCandidate legacy_repository =
+        RepositoryExactPackage{
+            ConfiguredRepositoryIdentity{"extra", 1},
+            "legacy-repository-dependency",
+            "legacy-repository-base",
+            ObservedVersion::available(
+                ObservedVersionSource::RepositoryExactPackage,
+                "1.0-2"),
+            {}};
+    expect(
+        require_single(
+            project_dependency_source_package_identity(
+                legacy_repository),
+            "legacy repository dependency")
+                .architecture()
+                .state() == PackageArchitectureState::Unknown,
+        "Legacy repository architecture was inferred");
+
+    const ResolvedDependencyCandidate malformed_repository =
+        RepositoryExactPackage{
+            ConfiguredRepositoryIdentity{"extra", 1},
+            "malformed-repository-dependency",
+            "malformed-repository-base",
+            ObservedVersion::available(
+                ObservedVersionSource::RepositoryExactPackage,
+                "1.0-2"),
+            {},
+            std::string("invalid architecture")};
+    require_single_issue(
+        project_dependency_source_package_identity(
+            malformed_repository),
+        SourcePackageIdentityProjectionIssueKind::InvalidIdentity,
+        "malformed repository architecture");
 
     const ResolvedDependencyCandidate aur = AurResolvedDependencyCandidate{
         "aur-dependency",
@@ -299,8 +350,54 @@ void test_dependency_projection() {
         "AUR provider dependency");
     expect(provider_identity.package_version().full_version() != nullptr &&
                *provider_identity.package_version().full_version() ==
-                   "5.0-3",
+                   "5.0-3" &&
+               provider_identity.architecture().state() ==
+                   PackageArchitectureState::Unknown,
            "Provider capability version replaced provider package version.");
+
+    const ProviderConstraintMetadata repository_constraint{
+        ProviderCapability(
+            "repo-virtual", "repo-virtual", std::nullopt),
+        ObservedVersion::available(
+            ObservedVersionSource::RepositoryExactPackage,
+            "6.0-1"),
+        ObservedVersion::unknown(
+            ObservedVersionSource::RepositoryProviderCapability,
+            ObservedVersionUnknownReason::
+                UnversionedProviderCapability)};
+    const ResolvedDependencyCandidate exact_repository_provider =
+        ProviderResolvedDependencyCandidate{
+            ProvidedDependency::from_repository_constraint_metadata(
+                "extra", 1, "repo-provider", "repo-provider-base",
+                "any", repository_constraint),
+            repository_constraint.provided_version};
+    const SourceAwarePackageIdentity& exact_repository_provider_identity =
+        require_single(
+            project_dependency_source_package_identity(
+                exact_repository_provider),
+            "exact repository provider dependency");
+    expect(
+        exact_repository_provider_identity.architecture().state() ==
+                PackageArchitectureState::Known &&
+            exact_repository_provider_identity.architecture()
+                    .architectures() ==
+                std::vector<std::string>{"any"},
+        "Repository provider projection lost exact architecture");
+
+    const ResolvedDependencyCandidate legacy_repository_provider =
+        ProviderResolvedDependencyCandidate{
+            ProvidedDependency::from_repository_constraint_metadata(
+                "extra", 1, "legacy-provider", "legacy-provider-base",
+                repository_constraint),
+            repository_constraint.provided_version};
+    expect(
+        require_single(
+            project_dependency_source_package_identity(
+                legacy_repository_provider),
+            "legacy repository provider dependency")
+                .architecture()
+                .state() == PackageArchitectureState::Unknown,
+        "Legacy repository provider architecture was fabricated");
 
     const ResolvedDependencyCandidate repository_provider =
         ProviderResolvedDependencyCandidate{
@@ -361,7 +458,7 @@ void test_dependency_projection() {
 }
 
 void test_artifact_projection() {
-    const ArtifactPackageIdentity artifact{"artifact-child", "1.1-2"};
+    const ArtifactPackageIdentity artifact = archive_identity();
     require_single_issue(
         project_artifact_source_package_identity(std::nullopt, artifact),
         SourcePackageIdentityProjectionIssueKind::MissingSourceContext,
@@ -381,8 +478,58 @@ void test_artifact_projection() {
                projected.source_revision() == context.source_revision() &&
                projected.architecture() == context.architecture() &&
                projected.package_version().full_version() != nullptr &&
-               *projected.package_version().full_version() == "1.1-2",
-           "Artifact projection did not preserve upper source context.");
+               *projected.package_version().full_version() == "1.0-1",
+           "Artifact projection did not retain exact archive identity.");
+
+    require_single_issue(
+        project_artifact_source_package_identity(
+            context, archive_identity("artifact-child", "1.1-2")),
+        SourcePackageIdentityProjectionIssueKind::PackageVersionMismatch,
+        "artifact version mismatch");
+    require_single_issue(
+        project_artifact_source_package_identity(
+            context,
+            archive_identity(
+                "artifact-child", "1.0-1",
+                ArtifactPackageBaseIdentity::known("other-base"))),
+        SourcePackageIdentityProjectionIssueKind::PackageBaseMismatch,
+        "artifact PackageBase mismatch");
+    require_single_issue(
+        project_artifact_source_package_identity(
+            context,
+            archive_identity(
+                "artifact-child", "1.0-1",
+                ArtifactPackageBaseIdentity::missing())),
+        SourcePackageIdentityProjectionIssueKind::ArtifactPackageBaseMissing,
+        "artifact PackageBase missing");
+    require_single_issue(
+        project_artifact_source_package_identity(
+            context,
+            archive_identity(
+                "artifact-child", "1.0-1",
+                ArtifactPackageBaseIdentity::unavailable())),
+        SourcePackageIdentityProjectionIssueKind::
+            ArtifactPackageBaseUnavailable,
+        "artifact PackageBase unavailable");
+    require_single_issue(
+        project_artifact_source_package_identity(
+            context,
+            archive_identity(
+                "artifact-child", "1.0-1",
+                ArtifactPackageBaseIdentity::known("artifact-base"),
+                ArtifactPackageArchitectureIdentity::known("armv7h"))),
+        SourcePackageIdentityProjectionIssueKind::ArchitectureMismatch,
+        "artifact architecture mismatch");
+    require_single_issue(
+        project_artifact_source_package_identity(
+            context,
+            archive_identity(
+                "artifact-child", "1.0-1",
+                ArtifactPackageBaseIdentity::known("artifact-base"),
+                ArtifactPackageArchitectureIdentity::missing())),
+        SourcePackageIdentityProjectionIssueKind::
+            ArtifactArchitectureMissing,
+        "artifact architecture missing");
 }
 
 void test_update_projection() {
@@ -534,8 +681,7 @@ void test_projection_compatibility_boundary() {
     const SourceAwarePackageIdentity context = aur_context();
     const SourcePackageIdentityProjectionResult artifact_projection =
         project_artifact_source_package_identity(
-            context,
-            ArtifactPackageIdentity{"artifact-child", "1.0-1"});
+            context, archive_identity());
     const SourceAwarePackageIdentity artifact = require_single(
         artifact_projection, "artifact compatibility boundary");
     const SourcePackageCompatibilityEvaluation artifact_evaluation =

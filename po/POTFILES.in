@@ -1,4 +1,4 @@
-source/artifact_identity.cpp
+source/artifact_archive_metadata.cpp
 source/artifact_identity_set.cpp
 source/artifact_install_executor.cpp
 source/artifact_install_plan.cpp

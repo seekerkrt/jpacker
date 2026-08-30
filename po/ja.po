@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.5.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-28 11:05+0900\n"
+"POT-Creation-Date: 2026-08-30 18:13+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -12,26 +12,13 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#. TRANSLATORS: {} is the literal command name "pacman".
+#. TRANSLATORS: {} is the literal library name "libalpm".
 #, c++-format
-msgid "{} returned malformed package artifact identity."
-msgstr "{} が不正なパッケージアーティファクト識別情報を返しました。"
+msgid "Failed to read package archive metadata with {}."
+msgstr "{}でパッケージアーカイブのメタデータを読み取れませんでした。"
 
-#. TRANSLATORS: {} is the literal command name "pacman".
-#, c++-format
-msgid "{} returned no package artifact identity."
-msgstr "{} がパッケージアーティファクト識別情報を返しませんでした。"
-
-#. TRANSLATORS: {} is the literal command name "pacman".
-#, c++-format
-msgid "{} returned an invalid package name for the artifact."
-msgstr "{} がアーティファクトに対して無効なパッケージ名を返しました。"
-
-#. TRANSLATORS: The first placeholder is the literal command
-#. name "pacman"; the second is its numeric exit code.
-#, c++-format
-msgid "{} failed to read package artifact identity with exit code {}."
-msgstr "{} はパッケージアーティファクト識別情報を読み取れず、終了コード {} で終了しました。"
+msgid "Package archive metadata contains an invalid name or version."
+msgstr "パッケージアーカイブのメタデータに無効な名前またはバージョンが含まれています。"
 
 msgid "Artifact package identity set must not be empty."
 msgstr "アーティファクトのパッケージ識別情報セットを空にはできません。"
@@ -5667,6 +5654,12 @@ msgstr "リポジトリパッケージデータベースを登録できません
 msgid "Repository package metadata contains an invalid {}."
 msgstr "リポジトリパッケージのメタデータに無効な {} が含まれています。"
 
+msgid "Repository package metadata is missing its architecture."
+msgstr "リポジトリパッケージのメタデータにアーキテクチャがありません。"
+
+msgid "Repository package metadata contains an invalid architecture."
+msgstr "リポジトリパッケージのメタデータに無効なアーキテクチャが含まれています。"
+
 #, c++-format
 msgid "Repository package search failed: {} reported no error detail."
 msgstr "リポジトリパッケージの検索に失敗しました: {} からエラーの詳細が報告されませんでした。"
@@ -6281,6 +6274,9 @@ msgstr "警告: プロバイダー候補 {} のインストール状態を取得
 
 msgid "Repository provider capability metadata is invalid."
 msgstr "リポジトリプロバイダーのcapabilityメタデータが無効です。"
+
+msgid "Repository provider package architecture is unavailable."
+msgstr "リポジトリプロバイダーパッケージのアーキテクチャを利用できません。"
 
 msgid "Reviewed source review could not produce explicit acceptance; the build was not started."
 msgstr "確認済みソースのレビューで明示的な受諾を得られなかったため、ビルドを開始しませんでした。"
@@ -7523,10 +7519,6 @@ msgid "Refusing unsafe clone rollback: unknown error."
 msgstr "安全でないクローンのロールバックを拒否します: 不明なエラーです。"
 
 #, c++-format
-msgid "Refusing a non-absolute custom CA path in the trusted {} environment variable {}."
-msgstr "信頼済み{}環境の環境変数{}に絶対パスではないカスタムCAパスが設定されているため拒否します。"
-
-#, c++-format
 msgid "Refusing unsafe local {} configuration in the managed checkout."
 msgstr "管理対象チェックアウト内の安全でないローカル{}設定を拒否します。"
 
@@ -7537,6 +7529,10 @@ msgstr "管理対象{}操作の前にリモートURLが変更されました。"
 #, c++-format
 msgid "Refusing an invalid managed {} branch name."
 msgstr "管理対象{}の無効なブランチ名を拒否します。"
+
+#, c++-format
+msgid "Refusing a non-absolute custom CA path in the trusted {} environment variable {}."
+msgstr "信頼済み{}環境の環境変数{}に絶対パスではないカスタムCAパスが設定されているため拒否します。"
 
 #, c++-format
 msgid "Prepared {} operation is invalid or has already been consumed."
@@ -9102,6 +9098,18 @@ msgstr "{}のデフォルト状態ログを段階{}で安全に使用できま�
 
 msgid "Unknown state log error code."
 msgstr "不明な状態ログエラーコードです。"
+
+#, c++-format
+#~ msgid "{} returned malformed package artifact identity."
+#~ msgstr "{} が不正なパッケージアーティファクト識別情報を返しました。"
+
+#, c++-format
+#~ msgid "{} returned no package artifact identity."
+#~ msgstr "{} がパッケージアーティファクト識別情報を返しませんでした。"
+
+#, c++-format
+#~ msgid "{} returned an invalid package name for the artifact."
+#~ msgstr "{} がアーティファクトに対して無効なパッケージ名を返しました。"
 
 #, c++-format
 #~ msgid "Unknown {} update classification."

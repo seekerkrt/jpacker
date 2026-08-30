@@ -67,11 +67,12 @@ void require_selected_repository_provider(
             "Production source-build selected provider has an invalid repository name.");
     }
     require_valid_package_name(provider.package_name);
+    // POLICY(#485): repository PackageBase comes from the same strict
+    // libalpm observation as the provider package. It is repository source
+    // identity, not an AUR-only field and must not be reconstructed from the
+    // child name.
+    require_valid_package_name(provider.package_base);
     require_valid_package_name(provider.provided_dependency_name);
-    if(!provider.package_base.empty()) {
-        throw std::logic_error(
-            "Production source-build repository provider has an AUR PackageBase.");
-    }
 }
 
 std::vector<ProvidedDependency> collect_selected_repository_providers(
@@ -197,6 +198,24 @@ void require_static_production_source_build_work_item(
             throw std::logic_error(
                 "Production source-build work item contains a duplicate selected repository provider.");
         }
+    }
+
+    const auto edge_indices_are_unique = [](const auto& edge_indices) {
+        for(std::size_t index = 0; index < edge_indices.size(); ++index) {
+            if(std::find(
+                   edge_indices.begin(), edge_indices.begin() + index,
+                   edge_indices[index]) != edge_indices.begin() + index) {
+                return false;
+            }
+        }
+        return true;
+    };
+    if(!edge_indices_are_unique(
+           work_item.build_plan_dependency_edge_indices) ||
+       !edge_indices_are_unique(
+           work_item.selected_repository_provider_edge_indices)) {
+        throw std::logic_error(
+            "Production source-build work item contains duplicate BuildPlan edge attribution.");
     }
 
     if(work_item.required_targets.size() == 1) {

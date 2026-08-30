@@ -276,7 +276,7 @@ Issue #355のcommon identityは、後続profile / snapshot / patch workflow向�
 
 Issue #355のgeneric current repository / AUR modelはexact source commitを保持しないためrevisionは`Unknown`であり、known commitとして推測しない。Issue #411のreviewed-source lifecycleはAUR review / build用のexact OIDを別のpersistent / capability authorityとして保持するが、そのOIDをgeneric `source_package_identity_projection`へ注入して`Known`へ昇格させない。generic source identity projectionとreviewed-source persistent / build authorityは同じものではない。current local routeはGit repositoryをauthorityにせずfilesystem / content provenanceを使うためrevisionは`Inapplicable`である。`Unknown`、`Absent`、`Unavailable`、`Inapplicable`をknown matchやabsenceへ丸めない。
 
-repository root candidateはPackageBaseを、actual artifactはPackageBase / sourceを単体では保持しない。internal read-only adapterは既存typed contextと相関できる場合だけcomplete common identityを返し、filename、package name、URL leaf、canonical source keyから不足fieldを逆算しない。PackageBaseを持たないrepository root、source contextを持たないartifact、installed-only dependency等はtyped failureであり、partial identityを公開しない。
+repository root candidateはPackageBaseを保持しない。actual artifactはarchive内のPackageBase / architectureをread-only libalpm metadataとして保持するが、source / revisionは保持しない。internal read-only adapterはactual child / version / PackageBase / architectureと既存typed contextをexactに相関できる場合だけcomplete common identityを返し、`Missing` / `Malformed` / `Unavailable`なactual metadataをupper contextで補完しない。filename、package name、URL leaf、canonical source keyから不足fieldを逆算しない。PackageBaseを持たないrepository root、source contextを持たないartifact、installed-only dependency等はtyped failureであり、partial identityを公開しない。
 
 internal compatibility evaluatorはsource、PackageBase、child、revision、release、architectureをdimension別に判定し、`ExactMatch`、`SamePackageChild`、`SamePackageBase`、`Incompatible`、`Indeterminate`を区別する。structurally equalな`Unknown` / `Absent` / `Unavailable` / `Inapplicable`も`ExactMatch`へ昇格しない。これらのadapter / evaluatorは後続v3 model向けで、current production routeのdecisionには未接続である。詳細なstate、equality、compatibility、projection contractは[source-aware package identity contract](contracts/source-package-identity.md)を正本とする。
 
@@ -304,6 +304,19 @@ selected childだけがinstall input、install reason、installed / skipped-as-n
 `--rmdeps`はpacman optionではなく、makepkg由来のMoguet global optionである。separated source-buildでは、今回のinvocationが導入したdependency集合をMoguetがauthoritativeに所有できないため、意味のあるcleanup要求をsilent ignoreせず、mutation前にfail closedする。current build-only commandは概ね`makepkg -sc`であり、`-s`によるdependency installが発生し得る。pre/post installed package差分だけではmakepkg内部または並行するtransaction、invocation外のinstall / reason変更を安全に区別できず、新しく観測された`NewlyObserved` packageを`InvocationOwned`へ昇格できない。
 
 source-build routeでは`makepkg -r`、`pacman -Rns`、`pacman -Qdt`、独自orphan cleanup、automatic rollbackへ変換しない。`--noconfirm`でも拒否を突破しない。
+
+current internal treeには、validated source artifact bytesをwrite-sealed snapshotからroot-owned stagingへ移し、
+actual `pacman -U`のInstall-only receiptを取得する`SourceArtifactInstall`専用transportがある。Issue #485 Slice 5は、
+trusted executor-issued selected-provider evidence、non-reconstructible invocation session、owner/work-item別token inventory、
+全BuildPlan edgeのexhaustive classification、nonempty completeness、exact current PackageBase / architecture、
+phase-bound baseline/current/policyを、remote AUR専用の単一closed production collector内部でfinal candidate assessmentまで
+一方向に接続した。candidate originはowner-specific actual selected `Install`だけであり、solver-introduced package、
+snapshot差分、orphan state、makepkg syncdepsはcandidate化しない。authoritative installed fixtureはcompleteな1 candidateだけが
+`Eligible`へ到達することと、各authorityを崩したnegativeがnon-Eligibleであることを確認する。
+
+このinternal completionはpublic `--rmdeps` supportではない。assessmentをpreview、prompt、confirmation、removeへ
+公開せず、public source-buildは引き続きexternal mutation前に`--rmdeps`を拒否する。makepkg syncdeps authorityは
+#484 / #501、mutation直前revalidationとremovalは#486の独立scopeであり、Issue #485だけでcleanup executionをGOにしない。
 
 pacman-only routeでは、Moguetがmakepkg dependency installation lifecycleを実行しない。そのためcleanup対象となるinvocation-owned dependency集合自体が発生せず、Moguetはoptionを消費するが作用させず、pacmanへ転送しない。このno-opはsource-build routeで意味のあるcleanupを黙って無視することとは異なる。pacman-onlyでは安全に作用させるcleanup lifecycleが存在しないからである。decision 1の「黙って無視せず、意味を安全に維持できない場合は停止する」とも矛盾しない。
 

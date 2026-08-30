@@ -30,8 +30,8 @@ current `develop`では、必要なidentityはrouteごとのownerへ分散して
 | registered / upgrade-all source | `RegisteredSourcePreferenceSnapshot` / `UpgradeAllExplicitSourceIdentity` | package name、resolved PackageBase、source kind、repository exact identity、derived canonical key | canonical keyをparseしてsource identityを逆算しない |
 | expected artifact | `ExpectedPackageArtifactPath` / set | ordered path、workspace/context lineage | package metadata identityを持たない |
 | required artifact | `RequiredPackageArtifactTarget` | PackageBase、package child、install reason | sourceとreleaseを持たない |
-| actual artifact | `ArtifactPackageIdentity` | package child、composite full version | PackageBase、source、architectureを持たない |
-| correlated artifact | `PackageBaseArtifactIdentitySelectionSuccess` | PackageBase、selected / unselected child、full version、stable artifact index | sourceはupper projectionから別途必要 |
+| actual artifact | `ArtifactPackageIdentity` | package child、composite full version、archive内PackageBase、architectureと各metadata state | source / revisionを持たない |
+| correlated artifact | `PackageBaseArtifactIdentitySelectionSuccess` | actual PackageBase / architectureを含むselected / unselected child identity、full version、stable artifact index | source / revisionはupper projectionから別途必要 |
 | relation observation | `PackageRelationObservedPackage` / `PackageRelationSourceIdentity` | repository / AUR / local source、child、optional PackageBase、version、runtime filesystem provenance | conflict/replaces観測固有であり、durable profile identityへ直接置換しない |
 
 Issue #355のgeneric projectionへ入力されるGit checkout / fetch modelはPackageBase、remote URL、branch / remote-refを扱うが、common source package identityとしてexact commit object IDを保持しない。したがって、既存repository / AUR modelからのgeneric projectionはrevisionを`Known`にしてはならない。
@@ -183,7 +183,7 @@ projectionは既存ownerのauthorityを再実装しない。
 1. source-specific variantやroute contextを使い、package nameからsourceを再推定しない。
 2. PackageBaseを保持しないrepository root candidateは、typed incomplete / unavailable resultとし、package nameからPackageBaseを推測しない。
 3. `BuildPlan::order` / `package_targets`だけからsource kindを逆算せず、`ResolvedDependencyCandidate`、route、local root等のauthoritative contextと相関する。
-4. artifactはrequired target / correlated selection / upper source contextを一緒に使う。filename、actual child名、full versionからPackageBaseやsourceを推測しない。
+4. artifactはarchiveからread-only libalpmで得たactual child、full version、PackageBase、architectureを、required target / correlated selection / upper source contextと一緒に使う。PackageBase / architectureが`Missing` / `Malformed` / `Unavailable`の場合はupper contextで補完せずtyped failureとし、known expected valueとのexact correlationだけをcompleteとする。filename、actual child名、full versionからPackageBaseやsourceを推測しない。architecture compatibility solverはこのprojectionで再実装しない。
 5. derived canonical source keyをparseしてsource kind / PackageBaseへ戻さない。keyを生成したtyped source snapshotからprojectする。
 6. current repository / AUR revisionは`Unknown`、current local revisionは`Inapplicable`とし、自動commit queryやreviewed-source exact OIDの注入をgeneric projectionへ追加しない。
 7. partial projectionをcomplete identityとして公開しない。failure armは欠けたfieldとauthorityをtyped reasonで保持する。

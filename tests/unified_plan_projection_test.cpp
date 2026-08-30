@@ -320,7 +320,7 @@ BuildPlan build_plan_fixture(
             DependencyVersionRelation::GreaterThanOrEqual, "2"});
     const ProvidedDependency provider =
         ProvidedDependency::from_repository_constraint_metadata(
-            "extra", 1, "runtime-provider",
+            "extra", 1, "runtime-provider", "runtime-provider-base",
             ProviderConstraintMetadata{
                 ProviderCapability(
                     "virtual-runtime=2", "virtual-runtime",
@@ -868,6 +868,7 @@ void test_build_plan_partial_failure_remains_typed() {
     const ProvidedDependency similar_provider =
         ProvidedDependency::from_repository_constraint_metadata(
             "core", 0, "similar-runtime-provider",
+            "similar-runtime-provider-base",
             ProviderConstraintMetadata{
                 ProviderCapability(
                     "virtual-runtime=1", "virtual-runtime",

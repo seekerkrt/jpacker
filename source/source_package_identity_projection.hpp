@@ -32,6 +32,15 @@ enum class SourcePackageIdentityProjectionIssueKind {
     SourceNotFound,
     SourceMetadataUnavailable,
     PackageNameMismatch,
+    PackageBaseMismatch,
+    PackageVersionMismatch,
+    ArchitectureMismatch,
+    ArtifactPackageBaseMissing,
+    ArtifactPackageBaseMalformed,
+    ArtifactPackageBaseUnavailable,
+    ArtifactArchitectureMissing,
+    ArtifactArchitectureMalformed,
+    ArtifactArchitectureUnavailable,
     InvalidIdentity,
 };
 
@@ -122,9 +131,9 @@ SourcePackageIdentityProjectionResult
 project_dependency_source_package_identity(
     const ResolvedDependencyCandidate& candidate);
 
-// Artifact metadata proves the actual child/release only. The optional common
-// context supplies the already-projected source/PackageBase/revision/arch; a
-// missing context is a typed failure rather than inferred identity.
+// Artifact metadata proves actual child/release/PackageBase/architecture. The
+// optional common context supplies source/revision plus exact expected values;
+// missing/unknown actual metadata is never filled from that context.
 SourcePackageIdentityProjectionResult project_artifact_source_package_identity(
     const std::optional<SourceAwarePackageIdentity>& source_context,
     const ArtifactPackageIdentity& artifact);

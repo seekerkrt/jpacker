@@ -2994,6 +2994,32 @@ void test_repository_provider_phase_reduces_without_work_item_attribution() {
          AurUpdateOperationTargetStatus::NotAttempted},
         "provider phase failure");
 
+    SelectedRepositoryProviderTransactionResult provider_unknown =
+        provider_failure;
+    provider_unknown.status =
+        SelectedRepositoryProviderTransactionStatus::OutcomeUnknown;
+    provider_unknown.command_exit_status.reset();
+    provider_unknown.diagnostic =
+        "scripted provider transaction outcome unknown";
+    const AurUpdateSourceBuildExecutionResult unknown_execution =
+        execution_result(
+            AurUpdateInvocationExecutionStatus::
+                StoppedOnProviderTransactionFailure,
+            failed_execution.work_item_results, provider_unknown);
+    const AurUpdateOperationResult unknown =
+        reduce_aur_update_operation_result(
+            preflight, preparation, unknown_execution);
+    expect(
+        unknown.status == AurUpdateOperationStatus::
+                              StoppedOnProviderTransactionFailure &&
+            unknown.reduction_issues.empty() &&
+            unknown.selected_repository_provider_transaction.status ==
+                SelectedRepositoryProviderTransactionStatus::
+                    OutcomeUnknown &&
+            !unknown.changed_package_state() &&
+            unknown.has_not_attempted_targets(),
+        "Unknown provider outcome became an inconsistent aggregate");
+
     SelectedRepositoryProviderTransactionResult provider_success;
     provider_success.status =
         SelectedRepositoryProviderTransactionStatus::Succeeded;

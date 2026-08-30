@@ -18,6 +18,7 @@ class ExpectedPackageArtifactPath;
 class ExpectedPackageArtifactSet;
 class ValidatedPackageArtifactPath;
 class ValidatedPackageArtifactSet;
+class SourceArtifactInstallTrustedTransport;
 class ArtifactWorkspace;
 class ArtifactMakepkgContext;
 struct ArtifactMakepkgContextProvenance;
@@ -651,6 +652,9 @@ class ValidatedPackageArtifactSet final {
     friend ValidatedPackageArtifactSet validate_post_build_package_artifacts(
         ArtifactWorkspace&& workspace,
         const ExpectedPackageArtifactSet& expected);
+    // Dedicated SourceArtifactInstall transport may snapshot only retained
+    // descriptors selected by the closed PackageBase install capability.
+    friend class SourceArtifactInstallTrustedTransport;
 #ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
     friend ValidatedPackageArtifactSet
     validate_post_build_package_artifacts_for_test(

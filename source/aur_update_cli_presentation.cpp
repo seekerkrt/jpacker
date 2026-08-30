@@ -716,7 +716,9 @@ AurUpdateCliPresentation format_aur_update_cli_presentation(
     const SelectedRepositoryProviderTransactionResult& provider_transaction =
         result.selected_repository_provider_transaction;
     if(provider_transaction.status ==
-       SelectedRepositoryProviderTransactionStatus::Failed) {
+           SelectedRepositoryProviderTransactionStatus::Failed ||
+       provider_transaction.status ==
+           SelectedRepositoryProviderTransactionStatus::OutcomeUnknown) {
         if(!provider_transaction.diagnostic.has_value() ||
            provider_transaction.diagnostic->empty()) {
             throw std::logic_error(localization::translate_message(
