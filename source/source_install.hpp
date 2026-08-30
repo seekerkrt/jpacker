@@ -261,6 +261,11 @@ struct ProductionSourceBuildWorkItem {
     // 利用者が選択したofficial providerを、対応するAUR build unitの
     // execution前dependency transactionまでtyped identityのまま保持する。
     std::vector<ProvidedDependency> selected_repository_providers;
+    // AUR BuildPlan projectionだけが、artifact targetとselected repository
+    // providerをexact edge indexへ束縛する。別routeはemptyのままであり、
+    // 後段がpackage nameからedgeを再推定してはならない。
+    std::vector<std::size_t> build_plan_dependency_edge_indices;
+    std::vector<std::size_t> selected_repository_provider_edge_indices;
     // required targetのauthorityとartifact execution selectorを別domainで保持する。
     RequiredTargetProvenance required_target_provenance =
         RequiredTargetProvenance::Unspecified;
@@ -460,13 +465,34 @@ public:
         return SelectedRepositoryProviderTrustedReceiptRequest{};
     }
 
+    [[nodiscard]] static SelectedRepositoryProviderTrustedReceiptRequest
+    capture_actual_installs(CleanupInvocationIdentity invocation) noexcept {
+        return SelectedRepositoryProviderTrustedReceiptRequest(
+            std::move(invocation));
+    }
+
+    [[nodiscard]] const std::optional<CleanupInvocationIdentity>&
+    invocation_identity() const noexcept {
+        return invocation_identity_;
+    }
+
 private:
     SelectedRepositoryProviderTrustedReceiptRequest() noexcept = default;
+    explicit SelectedRepositoryProviderTrustedReceiptRequest(
+        CleanupInvocationIdentity invocation) noexcept
+        : invocation_identity_(std::move(invocation)) {
+    }
+
+    std::optional<CleanupInvocationIdentity> invocation_identity_;
 };
 
 struct SelectedRepositoryProviderTrustedReceiptExecutionResult {
     SelectedRepositoryProviderTransactionResult transaction;
     std::optional<TrustedAlpmReceiptCaptureResult> receipt_capture;
+    // Empty denotes the Slice 3.6 compatibility API. Slice 4 closed
+    // correlation accepts only the exact identity-bearing request/result.
+    std::optional<CleanupInvocationIdentity> invocation_identity =
+        std::nullopt;
 };
 
 #ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS

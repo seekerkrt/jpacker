@@ -67,7 +67,8 @@ ProvidedDependency typed_aur_provider(
 
 ProvidedDependency typed_repository_provider(
     std::string repository_name, std::string package_name,
-    std::string capability, std::optional<std::string> package_version) {
+    std::string package_base, std::string capability,
+    std::optional<std::string> package_version) {
     ProviderCapability parsed(
         capability,
         capability.substr(0, capability.find('=')),
@@ -84,6 +85,7 @@ ProvidedDependency typed_repository_provider(
                                                        ObservedVersionUnknownReason::UnversionedProviderCapability);
     return ProvidedDependency::from_repository_constraint_metadata(
         std::move(repository_name), std::move(package_name),
+        std::move(package_base),
         ProviderConstraintMetadata{
             std::move(parsed),
             package_version.has_value()
@@ -105,19 +107,22 @@ ProvidedDependency case7_aur_provider() {
 
 ProvidedDependency case8_repository_provider_a() {
     return typed_repository_provider(
-        "extra", "case8-provider-a", "case8-virtual=2",
+        "extra", "case8-provider-a", "case8-provider-a-base",
+        "case8-virtual=2",
         std::optional<std::string>{"2.0-1"});
 }
 
 ProvidedDependency case8_repository_provider_b() {
     return typed_repository_provider(
-        "community", "case8-provider-b", "case8-virtual=3",
+        "community", "case8-provider-b", "case8-provider-b-base",
+        "case8-virtual=3",
         std::optional<std::string>{"3.0-1"});
 }
 
 ProvidedDependency case14_repository_provider() {
     return typed_repository_provider(
-        "aur", "case14-provider", "case14-virtual=1",
+        "aur", "case14-provider", "case14-provider-base",
+        "case14-virtual=1",
         std::optional<std::string>{"1.0-1"});
 }
 
@@ -1377,10 +1382,12 @@ void test_case_8_selected_repository_provider() {
                               case8_repository_provider_a(),
                               case8_repository_provider_b()},
             "Case 8 selector candidates differ");
-        return ProvidedDependency::from_repository(
-            "community", "case8-provider-b", "selector-tampered",
-            "selector-tampered=999",
-            std::optional<std::string>{"999.0-1"});
+        ProvidedDependency selected = case8_repository_provider_b();
+        selected.provided_dependency_name = "selector-tampered";
+        selected.provided_dependency_specification =
+            "selector-tampered=999";
+        selected.package_version = "999.0-1";
+        return selected;
     };
 
     BuildPlan plan = resolve_build_plan("case8-app", select_provider);

@@ -393,6 +393,7 @@ void test_repository_provider_capabilities() {
                     .configured_order ==
                 std::optional<std::size_t>{0} &&
             equality.package_name == "provider-a" &&
+            equality.package_base == "provider-a" &&
             equality.provided_dependency_specification ==
                 "virtual-api=2.1-3" &&
             equality.package_version ==
@@ -411,6 +412,7 @@ void test_repository_provider_capabilities() {
     const ProvidedDependency& unversioned = snapshot.candidates[1];
     expect(
         unversioned.package_name == "provider-b" &&
+            unversioned.package_base == "provider-b" &&
             unversioned.constraint_metadata.has_value() &&
             unversioned.constraint_metadata->provided_version
                     .unknown_reason() != nullptr &&
@@ -419,6 +421,26 @@ void test_repository_provider_capabilities() {
                 ObservedVersionUnknownReason::
                     UnversionedProviderCapability,
         "Unversioned provider capability was not retained as Unknown");
+
+    set_repository_package("core", "rust", "1.90.0-1");
+    alpm_stub::set_repository_package_base("core", "rust", "rust");
+    alpm_stub::set_repository_package_provides(
+        "core", "rust",
+        {alpm_stub::RepositoryProvidedPackageMetadata{
+            std::string("cargo"), std::string("1.90.0"),
+            ALPM_DEP_MOD_EQ}});
+    enqueue_configuration(database, {"core"});
+    const RepositoryProviderQuerySnapshot& cargo_snapshot =
+        require_provider_snapshot(
+            query_repository_providers_strict("cargo"),
+            "cargo provider PackageBase authority");
+    expect(
+        cargo_snapshot.candidates.size() == 1 &&
+            cargo_snapshot.candidates.front().package_name == "rust" &&
+            cargo_snapshot.candidates.front().package_base == "rust" &&
+            cargo_snapshot.candidates.front().provided_dependency_name ==
+                "cargo",
+        "cargo requirement, rust provider package, and rust PackageBase were flattened");
 }
 
 void test_provider_partial_source_failure() {

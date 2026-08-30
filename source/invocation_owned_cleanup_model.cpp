@@ -5,11 +5,20 @@
 
 #include <algorithm>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
 
 namespace {
+
+bool is_valid_invocation_local_value(const std::string& value) noexcept {
+    if(value.empty() || value.size() > 256) return false;
+    return std::all_of(
+        value.begin(), value.end(), [](unsigned char character) {
+            return character >= 0x21 && character <= 0x7e;
+        });
+}
 
 void add_receipt_issue(
     std::vector<PacmanTransactionReceiptIssueKind>& issues,
@@ -521,6 +530,24 @@ std::vector<CleanupClassificationReason> unknown_reasons(
 }
 
 } // namespace
+
+CleanupInvocationIdentity::CleanupInvocationIdentity(
+    std::string value) noexcept
+    : value_(std::move(value)) {
+}
+
+CleanupInvocationIdentity CleanupInvocationIdentity::from_local_value(
+    std::string value) {
+    if(!is_valid_invocation_local_value(value)) {
+        throw std::invalid_argument(
+            "Cleanup invocation identity is invalid.");
+    }
+    return CleanupInvocationIdentity(std::move(value));
+}
+
+const std::string& CleanupInvocationIdentity::value() const noexcept {
+    return value_;
+}
 
 PacmanTransactionReceipt::PacmanTransactionReceipt(
     PacmanTransactionReceiptState state,

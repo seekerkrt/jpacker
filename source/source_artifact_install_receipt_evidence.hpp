@@ -14,33 +14,7 @@ class SourceArtifactInstallTrustedTransport;
 // This identity separates invocation-local evidence sets. It is correlation
 // authority, not runtime authentication, a PID/timestamp, or a replacement for
 // Slice 2's root-backed transaction token.
-class SourceArtifactInstallInvocationIdentity final {
-public:
-    SourceArtifactInstallInvocationIdentity() = delete;
-    SourceArtifactInstallInvocationIdentity(
-        const SourceArtifactInstallInvocationIdentity&) = default;
-    SourceArtifactInstallInvocationIdentity(
-        SourceArtifactInstallInvocationIdentity&&) noexcept = default;
-    SourceArtifactInstallInvocationIdentity& operator=(
-        const SourceArtifactInstallInvocationIdentity&) = default;
-    SourceArtifactInstallInvocationIdentity& operator=(
-        SourceArtifactInstallInvocationIdentity&&) noexcept = default;
-    ~SourceArtifactInstallInvocationIdentity() = default;
-
-    [[nodiscard]] static SourceArtifactInstallInvocationIdentity
-    from_local_value(std::string value);
-
-    [[nodiscard]] const std::string& value() const noexcept;
-
-    bool operator==(
-        const SourceArtifactInstallInvocationIdentity&) const = default;
-
-private:
-    explicit SourceArtifactInstallInvocationIdentity(
-        std::string value) noexcept;
-
-    std::string value_;
-};
+using SourceArtifactInstallInvocationIdentity = CleanupInvocationIdentity;
 
 struct SourceArtifactInstallWorkItemBinding {
     SourceArtifactInstallInvocationIdentity invocation;
@@ -58,6 +32,7 @@ struct SourceArtifactInstallExpectedSelectedArtifact {
     DesiredInstallReason desired_reason;
     std::vector<PackageRole> dependency_roles;
     std::vector<RootTargetIdentity> requested_roots;
+    std::vector<std::size_t> build_plan_dependency_edge_indices = {};
 
     bool operator==(
         const SourceArtifactInstallExpectedSelectedArtifact&) const =
@@ -70,6 +45,7 @@ struct SourceArtifactInstallObservedSelectedArtifact {
     DesiredInstallReason desired_reason;
     std::vector<PackageRole> dependency_roles;
     std::vector<RootTargetIdentity> requested_roots;
+    std::vector<std::size_t> build_plan_dependency_edge_indices = {};
 
     bool operator==(
         const SourceArtifactInstallObservedSelectedArtifact&) const =
@@ -170,10 +146,12 @@ enum class SourceArtifactInstallReceiptEvidenceIssueKind {
     DependencyRoleMissing,
     DependencyRoleNotBuildOrCheck,
     SelectedArtifactRootAttributionInvalid,
+    InvalidBuildPlanDependencyEdgeAttribution,
     SelectedArtifactSetMismatch,
     DesiredInstallReasonMismatch,
     DependencyRoleMismatch,
     SelectedArtifactRootAttributionMismatch,
+    BuildPlanDependencyEdgeAttributionMismatch,
     ArchiveIdentityMismatch,
     TransactionMissing,
     UnexpectedTransactionCount,
@@ -195,6 +173,7 @@ struct SourceArtifactInstallCorrelatedSelectedArtifact {
     DesiredInstallReason desired_reason;
     std::vector<PackageRole> dependency_roles;
     std::vector<RootTargetIdentity> requested_roots;
+    std::vector<std::size_t> build_plan_dependency_edge_indices = {};
 
     bool operator==(
         const SourceArtifactInstallCorrelatedSelectedArtifact&) const =

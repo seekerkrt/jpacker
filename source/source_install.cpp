@@ -26,6 +26,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -174,10 +175,66 @@ void add_selected_repository_provider(
     providers.push_back(provider);
 }
 
+std::optional<std::pair<std::string, std::string>>
+source_artifact_resolved_identity(
+    const BuildPlanDependencyEdge& edge) {
+    if(!edge.resolved_candidate.has_value()) return std::nullopt;
+    return std::visit(
+        [](const auto& candidate)
+            -> std::optional<std::pair<std::string, std::string>> {
+            using Candidate = std::decay_t<decltype(candidate)>;
+            if constexpr(std::is_same_v<
+                             Candidate,
+                             AurResolvedDependencyCandidate>) {
+                return std::pair{
+                    candidate.package_name, candidate.package_base};
+            } else if constexpr(std::is_same_v<
+                                    Candidate,
+                                    ProviderResolvedDependencyCandidate>) {
+                if(!std::holds_alternative<AurProviderOrigin>(
+                       candidate.provider.origin)) {
+                    return std::nullopt;
+                }
+                return std::pair{
+                    candidate.provider.package_name,
+                    candidate.provider.package_base};
+            }
+            return std::nullopt;
+        },
+        edge.resolved_candidate.value());
+}
+
+void attach_build_plan_dependency_edge_indices(
+    ProductionSourceBuildWorkItem& work_item,
+    const ProjectedBuildPlanArtifactTargets& unit,
+    const BuildPlan& plan) {
+    for(std::size_t edge_index = 0;
+        edge_index < plan.dependency_edges.size(); ++edge_index) {
+        const auto resolved = source_artifact_resolved_identity(
+            plan.dependency_edges[edge_index]);
+        if(!resolved.has_value() || resolved->second != unit.package_base) {
+            continue;
+        }
+        const bool is_required_target = std::any_of(
+            unit.required_targets.begin(), unit.required_targets.end(),
+            [&resolved](const RequiredPackageArtifactTarget& target) {
+                return target.package_name == resolved->first &&
+                       target.package_base == resolved->second;
+            });
+        if(is_required_target) {
+            work_item.build_plan_dependency_edge_indices.push_back(
+                edge_index);
+        }
+    }
+}
+
 void attach_selected_repository_providers(
     ProductionSourceBuildWorkItem& work_item,
     const BuildPlan& plan) {
-    for(const BuildPlanDependencyEdge& edge : plan.dependency_edges) {
+    for(std::size_t edge_index = 0;
+        edge_index < plan.dependency_edges.size(); ++edge_index) {
+        const BuildPlanDependencyEdge& edge =
+            plan.dependency_edges[edge_index];
         if(edge.parent_package_base != work_item.request.checkout_name ||
            edge.kind != DependencyKind::Provided ||
            edge.provider_resolution != ProviderResolutionKind::UserSelected ||
@@ -189,6 +246,8 @@ void attach_selected_repository_providers(
         add_selected_repository_provider(
             work_item.selected_repository_providers,
             edge.resolved_provider.value());
+        work_item.selected_repository_provider_edge_indices.push_back(
+            edge_index);
     }
 }
 
@@ -236,6 +295,7 @@ ProductionSourceBuildWorkItem make_aur_source_build_work_item(
         ArtifactLifecycleIntent::PackageBaseSet;
     work_item.configured_repository_order =
         plan.configured_repository_order;
+    attach_build_plan_dependency_edge_indices(work_item, unit, plan);
     attach_selected_repository_providers(work_item, plan);
     require_static_production_source_build_work_item(work_item);
     return work_item;
@@ -787,11 +847,11 @@ execute_selected_repository_provider_transaction(
     const PreparedProductionSourceBuildInvocation& invocation,
     const AppConfig& config,
     SelectedRepositoryProviderTrustedReceiptRequest receipt_request) {
-    static_cast<void>(receipt_request);
     PreparedSelectedRepositoryProviderTransaction prepared =
         prepare_selected_repository_provider_transaction(invocation);
     SelectedRepositoryProviderTrustedReceiptExecutionResult execution{
         std::move(prepared.result), std::nullopt};
+    execution.invocation_identity = receipt_request.invocation_identity();
     if(execution.transaction.selected_providers.empty() ||
        !prepared.directive.has_value()) {
         return execution;

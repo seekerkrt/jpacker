@@ -187,9 +187,11 @@ AurUpdateExecutionPreflight single_root_preflight(
 }
 
 ProvidedDependency selected_repository_provider() {
-    return ProvidedDependency::from_repository(
+    ProvidedDependency provider = ProvidedDependency::from_repository(
         "extra", "selected-runner-provider", "virtual-runner-api",
         "virtual-runner-api=2", "2.0-1");
+    provider.package_base = "selected-runner-provider-base";
+    return provider;
 }
 
 AurUpdateExecutionPreflight selected_repository_provider_preflight() {

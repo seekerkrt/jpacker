@@ -9,6 +9,33 @@
 #include <string>
 #include <vector>
 
+// Opaque in-process identity shared by every owner-specific evidence path in
+// one cleanup correlation set. It is not an authentication token, PID, or
+// persistent key; the trusted transaction token remains a separate field.
+class CleanupInvocationIdentity final {
+public:
+    CleanupInvocationIdentity() = delete;
+    CleanupInvocationIdentity(const CleanupInvocationIdentity&) = default;
+    CleanupInvocationIdentity(CleanupInvocationIdentity&&) noexcept = default;
+    CleanupInvocationIdentity& operator=(
+        const CleanupInvocationIdentity&) = default;
+    CleanupInvocationIdentity& operator=(
+        CleanupInvocationIdentity&&) noexcept = default;
+    ~CleanupInvocationIdentity() = default;
+
+    [[nodiscard]] static CleanupInvocationIdentity
+    from_local_value(std::string value);
+
+    [[nodiscard]] const std::string& value() const noexcept;
+
+    bool operator==(const CleanupInvocationIdentity&) const = default;
+
+private:
+    explicit CleanupInvocationIdentity(std::string value) noexcept;
+
+    std::string value_;
+};
+
 // The owner identifies the mutation path, not the package selected by its
 // solver. A complete receipt may therefore contain packages that were not
 // requested targets.
@@ -215,6 +242,29 @@ enum class CleanupCorrelationCoverage {
 enum class CleanupPolicyProtection {
     NotProtected,
     Protected,
+    Unknown,
+};
+
+enum class CleanupRouteKind {
+    RemoteAurSourceBuild,
+    LocalSourceBuild,
+    Upgrade,
+    UpgradeAur,
+    UpgradeAll,
+    StandaloneRepositorySourceBuild,
+    MakepkgSyncDependencies,
+    Unknown,
+};
+
+enum class CleanupRouteAuthority {
+    Complete,
+    Unsupported,
+    Unknown,
+};
+
+enum class CleanupEvidenceCompleteness {
+    Complete,
+    Incomplete,
     Unknown,
 };
 

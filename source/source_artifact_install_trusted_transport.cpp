@@ -236,6 +236,16 @@ bool roles_are_valid_and_unique(const std::vector<PackageRole>& roles) {
     return true;
 }
 
+bool edge_indices_are_unique(
+    const std::vector<std::size_t>& edge_indices) {
+    std::set<std::size_t> unique;
+    return std::all_of(
+        edge_indices.begin(), edge_indices.end(),
+        [&unique](std::size_t edge_index) {
+            return unique.insert(edge_index).second;
+        });
+}
+
 bool binding_is_coherent(
     const PreparedPackageBaseArtifactInstall& install,
     const SourceArtifactInstallTrustedBinding& binding) {
@@ -264,6 +274,8 @@ bool binding_is_coherent(
            expected.desired_reason != DesiredInstallReason::Dependency ||
            prepared.desired_reason != DesiredInstallReason::Dependency ||
            !roles_are_valid_and_unique(expected.dependency_roles) ||
+           !edge_indices_are_unique(
+               expected.build_plan_dependency_edge_indices) ||
            !roots_are_valid_and_unique(expected.requested_roots) ||
            !root_set_is_subset(
                expected.requested_roots,
@@ -614,7 +626,8 @@ class SourceArtifactInstallTrustedTransport final {
                     selected.identity,
                     selected.desired_reason,
                     expected.dependency_roles,
-                    expected.requested_roots});
+                    expected.requested_roots,
+                    expected.build_plan_dependency_edge_indices});
             requested_names.push_back(selected.identity.package_name);
         }
 

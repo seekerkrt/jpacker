@@ -818,7 +818,8 @@ ProvidedDependency make_repository_provider(
     const std::string& package_name,
     const std::string& provided_dependency_name,
     const std::string& provided_dependency_specification,
-    const std::optional<std::string>& package_version) {
+    const std::optional<std::string>& package_version,
+    const std::string& package_base = "repository-provider-base") {
     const ProviderCapabilityParseResult capability_parse =
         parse_provider_capability(provided_dependency_specification);
     const ProviderCapability* const parsed_capability =
@@ -839,7 +840,7 @@ ProvidedDependency make_repository_provider(
                   ObservedVersionUnknownReason::
                       UnversionedProviderCapability);
     return ProvidedDependency::from_repository_constraint_metadata(
-        repository_name, package_name,
+        repository_name, package_name, package_base,
         ProviderConstraintMetadata{
             *parsed_capability,
             package_version.has_value()
@@ -1833,6 +1834,31 @@ void test_build_plan_projection() {
             work_items[1].artifact_lifecycle_intent ==
                 ArtifactLifecycleIntent::PackageBaseSet,
         "--needed was not projected to every BuildPlan unit");
+
+    BuildPlan attributed_plan = two_entry_plan();
+    BuildPlanDependencyEdge attributed_edge;
+    attributed_edge.parent_package_name = "root-package";
+    attributed_edge.parent_package_base = "root-package";
+    attributed_edge.dependency_spec = "dependency-package";
+    attributed_edge.role = PackageRole::RuntimeDependency;
+    attributed_edge.kind = DependencyKind::Aur;
+    attributed_edge.resolved_package_name = "dependency-package";
+    attributed_edge.resolved_package_base = "dependency-package";
+    attributed_edge.resolved_candidate = AurResolvedDependencyCandidate{
+        "dependency-package", "dependency-package",
+        ObservedVersion::available(
+            ObservedVersionSource::AurExactPackage, "1.0-1")};
+    attributed_plan.dependency_edges.push_back(
+        std::move(attributed_edge));
+    const std::vector<ProductionSourceBuildWorkItem>
+        attributed_work_items = prepare_aur_source_build_work_items(
+            attributed_plan, false, false);
+    expect(
+        attributed_work_items[0].build_plan_dependency_edge_indices ==
+                std::vector<std::size_t>{0} &&
+            attributed_work_items[1]
+                .build_plan_dependency_edge_indices.empty(),
+        "AUR source artifact work item lost its exact BuildPlan edge index");
 }
 
 LocalPackageMetadata local_repository_provider_metadata_fixture() {
@@ -2167,7 +2193,12 @@ void test_selected_repository_provider_executes_before_source(
             std::move(work_items), config);
     expect(
         invocation.selected_repository_providers ==
-            std::vector<ProvidedDependency>{provider},
+                std::vector<ProvidedDependency>{provider} &&
+            invocation.selected_repository_providers.front()
+                    .package_base == "repository-provider-base" &&
+            invocation.work_items.front()
+                    .selected_repository_provider_edge_indices ==
+                std::vector<std::size_t>{0},
         "Selected repository provider did not reach execution invocation");
     process_stub::expect_run_command(
         expected_repository_provider_install_command({provider}, config),
@@ -2292,11 +2323,15 @@ void test_selected_repository_provider_trusted_receipt_api_reaches_ledger(
             TrustedAlpmReceiptCaptureStatus::Complete, 0,
             std::move(ledger), std::nullopt});
 
+    const CleanupInvocationIdentity cleanup_invocation =
+        CleanupInvocationIdentity::from_local_value(
+            "production-provider-receipt-invocation");
+
     const SelectedRepositoryProviderTrustedReceiptExecutionResult execution =
         execute_selected_repository_provider_transaction(
             invocation, config,
             SelectedRepositoryProviderTrustedReceiptRequest::
-                capture_actual_installs());
+                capture_actual_installs(cleanup_invocation));
     expect(
         execution.transaction.status ==
                 SelectedRepositoryProviderTransactionStatus::
@@ -2306,6 +2341,9 @@ void test_selected_repository_provider_trusted_receipt_api_reaches_ledger(
             execution.receipt_capture.has_value() &&
             execution.receipt_capture->status ==
                 TrustedAlpmReceiptCaptureStatus::Complete &&
+            execution.invocation_identity ==
+                std::optional<CleanupInvocationIdentity>{
+                    cleanup_invocation} &&
             execution.receipt_capture->transaction_ledger.transactions
                     .size() == 1 &&
             execution.receipt_capture->transaction_ledger

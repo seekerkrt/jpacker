@@ -94,6 +94,7 @@ void add_repository_provider_candidates(
                 package.repository.repository_name,
                 package.repository.configured_order,
                 package.package_name,
+                package.package_base,
                 ProviderConstraintMetadata{
                     provided.capability,
                     package.package_version,

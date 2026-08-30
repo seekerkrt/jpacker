@@ -124,6 +124,30 @@ bool has_issue(
         });
 }
 
+bool has_source_correlation_issue(
+    const CleanupSourceArtifactCorrelationEvidence& evidence,
+    CleanupSourceArtifactCorrelationIssueKind kind) {
+    return std::find(
+               evidence.issues().begin(), evidence.issues().end(), kind) !=
+           evidence.issues().end();
+}
+
+bool has_provider_correlation_issue(
+    const CleanupSelectedProviderCorrelationEvidence& evidence,
+    CleanupSelectedProviderCorrelationIssueKind kind) {
+    return std::find(
+               evidence.issues().begin(), evidence.issues().end(), kind) !=
+           evidence.issues().end();
+}
+
+bool has_invocation_issue(
+    const CleanupInvocationEvidence& evidence,
+    CleanupInvocationEvidenceIssueKind kind) {
+    return std::find(
+               evidence.issues().begin(), evidence.issues().end(), kind) !=
+           evidence.issues().end();
+}
+
 RootTargetIdentity root(
     std::size_t invocation_index, std::string requested_name) {
     return RootTargetIdentity{
@@ -227,7 +251,7 @@ ProvidedDependency repository_provider() {
     ProviderCapability capability(
         "virtual-build-tool", "virtual-build-tool", std::nullopt);
     return ProvidedDependency::from_repository_constraint_metadata(
-        "core", 0, "repository-tool",
+        "core", 0, "repository-tool", "repository-tools",
         ProviderConstraintMetadata{
             capability,
             ObservedVersion::available(
@@ -273,6 +297,58 @@ BuildPlan repository_provider_plan() {
     return plan;
 }
 
+ProvidedDependency cargo_repository_provider() {
+    ProviderCapability capability(
+        "cargo=1.90.0", "cargo", std::string("1.90.0"));
+    return ProvidedDependency::from_repository_constraint_metadata(
+        "extra", 0, "rust", "rust",
+        ProviderConstraintMetadata{
+            capability,
+            ObservedVersion::available(
+                ObservedVersionSource::RepositoryExactPackage,
+                "1.90.0-1"),
+            ObservedVersion::available(
+                ObservedVersionSource::RepositoryProviderCapability,
+                "1.90.0")});
+}
+
+BuildPlan cargo_provider_plan(std::size_t consumer_count = 1) {
+    BuildPlan plan;
+    plan.configured_repository_order =
+        std::vector<std::string>{"extra"};
+    const ProvidedDependency provider = cargo_repository_provider();
+    for(std::size_t index = 0; index < consumer_count; ++index) {
+        const std::string package_name =
+            index == 0 ? "root-a" : "root-b";
+        const std::string package_base =
+            index == 0 ? "root-a-base" : "root-b-base";
+        const RootTargetIdentity root_identity = root(index, package_name);
+        plan.root_targets.push_back(root_identity);
+        plan.package_targets.push_back(PlannedPackageTarget{
+            package_name, package_base, {PackageRole::Root}, {root_identity}});
+        plan.order.push_back(BuildPlanEntry{
+            package_base, {package_name}});
+
+        BuildPlanDependencyEdge edge;
+        edge.parent_package_name = package_name;
+        edge.parent_package_base = package_base;
+        edge.dependency_spec = "cargo";
+        edge.role = PackageRole::BuildDependency;
+        edge.kind = DependencyKind::Provided;
+        edge.resolved_provider = provider;
+        edge.provider_resolution = ProviderResolutionKind::UserSelected;
+        edge.requirement = requirement("cargo");
+        edge.resolved_candidate = ProviderResolvedDependencyCandidate{
+            provider,
+            provider.constraint_metadata->provided_version};
+        edge.constraint_evaluation = ConstraintEvaluation::satisfied();
+        plan.dependency_edges.push_back(std::move(edge));
+    }
+    plan.provided.push_back(BuildPlanProvidedDependency{
+        "cargo", provider, ProviderResolutionKind::UserSelected});
+    return plan;
+}
+
 ResolvedDependencyCandidate repository_exact_candidate() {
     return RepositoryExactPackage{
         ConfiguredRepositoryIdentity{"core", 0},
@@ -313,10 +389,73 @@ PreparedProductionSourceBuildInvocation prepared_invocation(
             RequiredTargetProvenance::AurBuildPlanProjection;
         work_item.artifact_lifecycle_intent =
             ArtifactLifecycleIntent::PackageBaseSet;
+        for(std::size_t edge_index = 0;
+            edge_index < plan.dependency_edges.size(); ++edge_index) {
+            const BuildPlanDependencyEdge& edge =
+                plan.dependency_edges[edge_index];
+            if(edge.kind == DependencyKind::Provided &&
+               edge.provider_resolution ==
+                   ProviderResolutionKind::UserSelected &&
+               edge.parent_package_base == unit.package_base &&
+               edge.resolved_provider.has_value() &&
+               std::holds_alternative<RepositoryProviderOrigin>(
+                   edge.resolved_provider->origin)) {
+                work_item.selected_repository_providers.push_back(
+                    edge.resolved_provider.value());
+                work_item.selected_repository_provider_edge_indices
+                    .push_back(edge_index);
+            }
+            if(!edge.resolved_candidate.has_value()) continue;
+            std::string resolved_name;
+            std::string resolved_base;
+            if(const auto* aur =
+                   std::get_if<AurResolvedDependencyCandidate>(
+                       &edge.resolved_candidate.value());
+               aur != nullptr) {
+                resolved_name = aur->package_name;
+                resolved_base = aur->package_base;
+            } else if(const auto* provider =
+                          std::get_if<
+                              ProviderResolvedDependencyCandidate>(
+                              &edge.resolved_candidate.value());
+                      provider != nullptr &&
+                      std::holds_alternative<AurProviderOrigin>(
+                          provider->provider.origin)) {
+                resolved_name = provider->provider.package_name;
+                resolved_base = provider->provider.package_base;
+            }
+            const bool matches_target = std::any_of(
+                unit.required_targets.begin(),
+                unit.required_targets.end(),
+                [&resolved_name, &resolved_base](
+                    const RequiredPackageArtifactTarget& target) {
+                    return target.package_name == resolved_name &&
+                           target.package_base == resolved_base;
+                });
+            if(matches_target) {
+                work_item.build_plan_dependency_edge_indices.push_back(
+                    edge_index);
+            }
+        }
         work_items.push_back(std::move(work_item));
     }
+    std::vector<ProvidedDependency> selected_providers;
+    for(const ProductionSourceBuildWorkItem& work_item : work_items) {
+        for(const ProvidedDependency& provider :
+            work_item.selected_repository_providers) {
+            if(std::find_if(
+                   selected_providers.begin(), selected_providers.end(),
+                   [&provider](const ProvidedDependency& existing) {
+                       return same_provider_identity(existing, provider);
+                   }) == selected_providers.end()) {
+                selected_providers.push_back(provider);
+            }
+        }
+    }
     return PreparedProductionSourceBuildInvocation{
-        std::move(work_items), {}, PacmanDatabasePaths{"/", "/var/lib/pacman"}, std::nullopt, std::nullopt};
+        std::move(work_items), std::move(selected_providers),
+        PacmanDatabasePaths{"/", "/var/lib/pacman"}, std::nullopt,
+        std::nullopt};
 }
 
 ProductionSourceBuildStagedOutcome successful_staged_outcome() {
@@ -415,6 +554,154 @@ InvocationDependencyTransaction dependency_transaction(
     return InvocationDependencyTransaction{
         std::move(token), owner, std::move(requested_package_names),
         command_outcome, std::move(receipt)};
+}
+
+SourceAwarePackageIdentity source_artifact_identity(
+    const std::string& package_name,
+    const std::string& package_base,
+    const std::string& version = "1.0-1") {
+    return SourceAwarePackageIdentity::make(
+        PackageChildIdentity::make(
+            aur_package_base(package_base), package_name),
+        SourceRevisionIdentity::unknown(),
+        PackageVersionIdentity::composite(version),
+        PackageArchitectureIdentity::known({"x86_64"}));
+}
+
+ArtifactPackageIdentity source_archive_identity(
+    const std::string& package_name,
+    const std::string& package_base,
+    const std::string& version = "1.0-1") {
+    return ArtifactPackageIdentity{
+        package_name,
+        version,
+        ArtifactPackageBaseIdentity::known(package_base),
+        ArtifactPackageArchitectureIdentity::known("x86_64")};
+}
+
+SourceArtifactInstallCausalEvidence source_artifact_causal_evidence(
+    const CleanupInvocationIdentity& invocation_identity,
+    std::size_t work_item_index,
+    const std::string& package_name,
+    const std::string& package_base,
+    std::vector<RootTargetIdentity> roots,
+    std::vector<PackageRole> roles,
+    std::vector<std::size_t> edge_indices,
+    const std::string& version = "1.0-1") {
+    SourceArtifactInstallWorkItemBinding binding{
+        invocation_identity, work_item_index, package_base, roots};
+    const SourceArtifactInstallExpectedSelectedArtifact expected{
+        0,
+        source_artifact_identity(package_name, package_base, version),
+        DesiredInstallReason::Dependency,
+        roles,
+        roots,
+        edge_indices};
+    const SourceArtifactInstallObservedSelectedArtifact observed{
+        0,
+        source_archive_identity(package_name, package_base, version),
+        DesiredInstallReason::Dependency,
+        roles,
+        roots,
+        edge_indices};
+    const std::string token = transaction_token('d');
+    InvocationDependencyTransactionLedger ledger{{dependency_transaction(
+        token,
+        InvocationDependencyTransactionOwner::SourceArtifactInstall,
+        {package_name},
+        InvocationDependencyTransactionCommandOutcome::Succeeded,
+        transaction_receipt(
+            token,
+            InvocationDependencyTransactionOwner::SourceArtifactInstall,
+            {{PacmanTransactionPackageOperation::Install,
+              package_name}}))}};
+    const SourceArtifactInstallReceiptEvidence receipt_evidence =
+        establish_source_artifact_install_receipt_evidence(
+            SourceArtifactInstallReceiptExpectation{
+                binding, {expected}, token},
+            make_source_artifact_install_receipt_observation_for_test(
+                binding, {observed}, std::move(ledger)));
+    std::optional<SourceArtifactInstallCausalEvidence> causal =
+        project_source_artifact_install_causal_evidence(
+            receipt_evidence);
+    if(!causal.has_value()) {
+        throw std::runtime_error(
+            "source artifact causal fixture was incomplete");
+    }
+    return std::move(causal.value());
+}
+
+PreparedRemoteSourceBuild prepared_remote_aur_build(BuildPlan plan) {
+    if(plan.root_targets.empty()) {
+        throw std::runtime_error("remote AUR fixture has no root");
+    }
+    const RootTargetIdentity& root_identity = plan.root_targets.front();
+    const PlannedPackageTarget* root_target = nullptr;
+    for(const PlannedPackageTarget& target : plan.package_targets) {
+        if(std::find(
+               target.roots.begin(), target.roots.end(), root_identity) !=
+               target.roots.end() &&
+           std::find(
+               target.roles.begin(), target.roles.end(),
+               PackageRole::Root) != target.roles.end()) {
+            root_target = &target;
+            break;
+        }
+    }
+    if(root_target == nullptr) {
+        throw std::runtime_error("remote AUR fixture root is incomplete");
+    }
+    PreparedProductionSourceBuildInvocation invocation =
+        prepared_invocation(plan);
+    return PreparedRemoteSourceBuild{
+        ResolvedSourceBuildIdentity{ResolvedAurSourceBuildIdentity{
+            root_identity.requested_name, root_target->package_base}},
+        std::move(plan), std::move(invocation)};
+}
+
+SelectedRepositoryProviderTrustedReceiptExecutionResult
+selected_provider_execution(
+    const CleanupInvocationIdentity& invocation_identity,
+    const PreparedProductionSourceBuildInvocation& invocation,
+    std::vector<std::string> extra_installs = {}) {
+    const std::string token = transaction_token('e');
+    std::vector<PacmanTransactionPackageObservation> operations;
+    std::vector<std::string> requested_names;
+    for(const ProvidedDependency& provider :
+        invocation.selected_repository_providers) {
+        requested_names.push_back(provider.package_name);
+        operations.push_back(PacmanTransactionPackageObservation{
+            PacmanTransactionPackageOperation::Install,
+            provider.package_name});
+    }
+    for(std::string& package_name : extra_installs) {
+        operations.push_back(PacmanTransactionPackageObservation{
+            PacmanTransactionPackageOperation::Install,
+            std::move(package_name)});
+    }
+    InvocationDependencyTransactionLedger ledger{{dependency_transaction(
+        token,
+        InvocationDependencyTransactionOwner::SelectedRepositoryProvider,
+        requested_names,
+        InvocationDependencyTransactionCommandOutcome::Succeeded,
+        transaction_receipt(
+            token,
+            InvocationDependencyTransactionOwner::
+                SelectedRepositoryProvider,
+            std::move(operations)))}};
+    SelectedRepositoryProviderTransactionResult transaction;
+    transaction.status =
+        SelectedRepositoryProviderTransactionStatus::Succeeded;
+    transaction.selected_providers =
+        invocation.selected_repository_providers;
+    transaction.package_state_change = PackageStateChange::Unknown;
+    transaction.command_exit_status = 0;
+    return SelectedRepositoryProviderTrustedReceiptExecutionResult{
+        std::move(transaction),
+        TrustedAlpmReceiptCaptureResult{
+            TrustedAlpmReceiptCaptureStatus::Complete, 0,
+            std::move(ledger), std::nullopt},
+        invocation_identity};
 }
 
 InvocationOwnedCleanupCandidateProjectionSuccess require_projection(
@@ -528,7 +815,7 @@ void test_current_lifecycle_never_proves_causal_ownership() {
         succeeded;
     aggregate_changed.selected_providers.push_back(
         ProvidedDependency::from_repository_constraint_metadata(
-            "extra", 1, "second-provider",
+            "extra", 1, "second-provider", "second-provider-base",
             ProviderConstraintMetadata{
                 ProviderCapability(
                     "other-virtual", "other-virtual",
@@ -960,7 +1247,7 @@ void test_incomplete_plan_states_never_project_complete_coverage() {
         "incomplete provider candidate set");
 }
 
-void test_repository_provider_without_package_base_is_unverified() {
+void test_repository_provider_package_base_is_verified() {
     BuildPlan plan = repository_provider_plan();
     PreparedProductionSourceBuildInvocation invocation =
         prepared_invocation(plan);
@@ -977,19 +1264,19 @@ void test_repository_provider_without_package_base_is_unverified() {
                 InstalledPackageReason::Dependency));
     expect(
         projection.candidate.correlation_coverage ==
-            CleanupCorrelationCoverage::Incomplete,
-        "repository provider without PackageBase kept Complete coverage");
+            CleanupCorrelationCoverage::Complete,
+        "repository provider PackageBase did not keep Complete coverage");
     expect(
         !projection.candidate.correlations.empty() &&
             projection.candidate.correlations.front().verification ==
-                CleanupEvidenceVerification::Unverified,
-        "repository provider without PackageBase became Verified");
+                CleanupEvidenceVerification::Verified,
+        "repository provider PackageBase did not become Verified");
     expect(
-        has_issue(
+        !has_issue(
             projection,
             CleanupLifecycleProjectionIssueKind::
                 RepositoryProviderPackageBaseUnavailable),
-        "missing repository provider PackageBase issue was not retained");
+        "authoritative repository provider PackageBase was discarded");
 }
 
 void test_mixed_roles_and_multiple_roots_are_preserved() {
@@ -1263,6 +1550,625 @@ void test_newly_observed_dependency_with_success_is_never_eligible() {
         "pre absent + post Dependency + verified plan + success became Eligible");
 }
 
+void test_source_artifact_exact_build_plan_correlation_matrix() {
+    BuildPlan plan = basic_plan();
+    PreparedProductionSourceBuildInvocation invocation =
+        prepared_invocation(plan);
+    ProductionSourceBuildInvocationResult result =
+        successful_result(invocation);
+    CleanupInvocationLifecycleEvidence lifecycle =
+        CleanupInvocationLifecycleEvidence::after_successful_invocation(
+            invocation, result);
+    const CleanupInvocationIdentity invocation_identity =
+        CleanupInvocationIdentity::from_local_value(
+            "source-correlation-invocation");
+    const std::vector<RootTargetIdentity> roots = plan.root_targets;
+
+    const auto correlate = [&](SourceArtifactInstallCausalEvidence causal) {
+        return correlate_source_artifact_install_to_build_plan(
+            invocation_identity, plan, invocation, lifecycle, causal);
+    };
+
+    CleanupSourceArtifactCorrelationEvidence exact = correlate(
+        source_artifact_causal_evidence(
+            invocation_identity, 0, "build-tool", "build-tools", roots,
+            {PackageRole::BuildDependency}, {0}));
+    expect(
+        exact.completeness() == CleanupEvidenceCompleteness::Complete &&
+            exact.selected_artifacts().size() == 1 &&
+            exact.selected_artifacts().front().dependency_correlations.size() == 1 &&
+            exact.selected_artifacts().front().dependency_correlations.front().dependency_edge->build_plan_edge_index == 0,
+        "exact source-artifact work item did not close its BuildPlan edge");
+
+    SourceArtifactInstallCausalEvidence wrong_invocation_causal =
+        source_artifact_causal_evidence(
+            CleanupInvocationIdentity::from_local_value(
+                "other-source-invocation"),
+            0, "build-tool", "build-tools", roots,
+            {PackageRole::BuildDependency}, {0});
+    expect(
+        wrong_invocation_causal.work_item().invocation !=
+            invocation_identity,
+        "source causal fixture lost its distinct invocation");
+    CleanupSourceArtifactCorrelationEvidence wrong_invocation = correlate(
+        std::move(wrong_invocation_causal));
+    expect(
+        wrong_invocation.completeness() !=
+            CleanupEvidenceCompleteness::Complete,
+        "different source-artifact invocation correlated");
+    expect(
+        has_source_correlation_issue(
+            wrong_invocation,
+            CleanupSourceArtifactCorrelationIssueKind::
+                InvocationMismatch),
+        "different source-artifact invocation lost its typed issue");
+
+    CleanupSourceArtifactCorrelationEvidence wrong_work_item = correlate(
+        source_artifact_causal_evidence(
+            invocation_identity, 1, "build-tool", "build-tools", roots,
+            {PackageRole::BuildDependency}, {0}));
+    expect(
+        wrong_work_item.completeness() !=
+                CleanupEvidenceCompleteness::Complete &&
+            has_source_correlation_issue(
+                wrong_work_item,
+                CleanupSourceArtifactCorrelationIssueKind::
+                    WorkItemPackageBaseMismatch),
+        "different source-artifact work item correlated");
+
+    CleanupSourceArtifactCorrelationEvidence wrong_package_base = correlate(
+        source_artifact_causal_evidence(
+            invocation_identity, 0, "build-tool", "other-build-tools",
+            roots, {PackageRole::BuildDependency}, {0}));
+    expect(
+        wrong_package_base.completeness() !=
+            CleanupEvidenceCompleteness::Complete,
+        "different source-artifact PackageBase correlated");
+
+    CleanupSourceArtifactCorrelationEvidence wrong_root = correlate(
+        source_artifact_causal_evidence(
+            invocation_identity, 0, "build-tool", "build-tools",
+            {root(9, "other-root")},
+            {PackageRole::BuildDependency}, {0}));
+    expect(
+        wrong_root.completeness() != CleanupEvidenceCompleteness::Complete &&
+            has_source_correlation_issue(
+                wrong_root,
+                CleanupSourceArtifactCorrelationIssueKind::
+                    RequestedRootAttributionMismatch),
+        "different source-artifact root attribution correlated");
+
+    CleanupSourceArtifactCorrelationEvidence wrong_edge = correlate(
+        source_artifact_causal_evidence(
+            invocation_identity, 0, "build-tool", "build-tools", roots,
+            {PackageRole::BuildDependency}, {1}));
+    expect(
+        wrong_edge.completeness() != CleanupEvidenceCompleteness::Complete &&
+            has_source_correlation_issue(
+                wrong_edge,
+                CleanupSourceArtifactCorrelationIssueKind::
+                    DependencyEdgeAttributionMismatch),
+        "different source-artifact dependency edge correlated");
+
+    CleanupSourceArtifactCorrelationEvidence wrong_role = correlate(
+        source_artifact_causal_evidence(
+            invocation_identity, 0, "build-tool", "build-tools", roots,
+            {PackageRole::CheckDependency}, {0}));
+    expect(
+        wrong_role.completeness() != CleanupEvidenceCompleteness::Complete &&
+            has_source_correlation_issue(
+                wrong_role,
+                CleanupSourceArtifactCorrelationIssueKind::
+                    DependencyRoleMismatch),
+        "different source-artifact dependency role correlated");
+
+    BuildPlan shared_plan = multiple_root_plan();
+    PreparedProductionSourceBuildInvocation shared_invocation =
+        prepared_invocation(shared_plan);
+    ProductionSourceBuildInvocationResult shared_result =
+        successful_result(shared_invocation);
+    CleanupInvocationLifecycleEvidence shared_lifecycle =
+        CleanupInvocationLifecycleEvidence::after_successful_invocation(
+            shared_invocation, shared_result);
+    CleanupSourceArtifactCorrelationEvidence wrong_edge_subset =
+        correlate_source_artifact_install_to_build_plan(
+            invocation_identity, shared_plan, shared_invocation,
+            shared_lifecycle,
+            source_artifact_causal_evidence(
+                invocation_identity, 0, "build-tool", "build-tools",
+                {shared_plan.root_targets.front()},
+                {PackageRole::BuildDependency}, {0}));
+    expect(
+        wrong_edge_subset.completeness() !=
+            CleanupEvidenceCompleteness::Complete,
+        "one of two exact dependency edges was treated as complete");
+
+    BuildPlan duplicate_edge_plan = basic_plan();
+    duplicate_edge_plan.dependency_edges.push_back(
+        duplicate_edge_plan.dependency_edges.front());
+    PreparedProductionSourceBuildInvocation duplicate_edge_invocation =
+        prepared_invocation(duplicate_edge_plan);
+    ProductionSourceBuildInvocationResult duplicate_edge_result =
+        successful_result(duplicate_edge_invocation);
+    CleanupInvocationLifecycleEvidence duplicate_edge_lifecycle =
+        CleanupInvocationLifecycleEvidence::after_successful_invocation(
+            duplicate_edge_invocation, duplicate_edge_result);
+    CleanupSourceArtifactCorrelationEvidence duplicate_edge_subset =
+        correlate_source_artifact_install_to_build_plan(
+            invocation_identity, duplicate_edge_plan,
+            duplicate_edge_invocation, duplicate_edge_lifecycle,
+            source_artifact_causal_evidence(
+                invocation_identity, 0, "build-tool", "build-tools",
+                duplicate_edge_plan.root_targets,
+                {PackageRole::BuildDependency}, {0}));
+    expect(
+        duplicate_edge_subset.completeness() !=
+            CleanupEvidenceCompleteness::Complete,
+        "same package/version/root/role from a different exact edge was accepted");
+}
+
+void test_selected_repository_provider_closed_correlation_matrix() {
+    BuildPlan plan = cargo_provider_plan();
+    PreparedRemoteSourceBuild prepared =
+        prepared_remote_aur_build(plan);
+    ProductionSourceBuildInvocationResult result =
+        successful_result(prepared.invocation);
+    CleanupInvocationLifecycleEvidence lifecycle =
+        CleanupInvocationLifecycleEvidence::after_successful_invocation(
+            prepared.invocation, result);
+    const CleanupInvocationIdentity invocation_identity =
+        CleanupInvocationIdentity::from_local_value(
+            "provider-correlation-invocation");
+    const CleanupCurrentPackageEvidence current =
+        project_cleanup_current_package_evidence(
+            present_snapshot(
+                "rust", "1.90.0-1",
+                InstalledPackageReason::Dependency),
+            "rust");
+    const SelectedRepositoryProviderTrustedReceiptExecutionResult execution =
+        selected_provider_execution(
+            invocation_identity, prepared.invocation);
+
+    CleanupSelectedProviderCorrelationEvidence exact =
+        correlate_selected_repository_provider_to_build_plan(
+            invocation_identity, plan, prepared.invocation, lifecycle, 0,
+            current, execution);
+    expect(
+        exact.completeness() == CleanupEvidenceCompleteness::Complete &&
+            exact.provider().has_value() &&
+            exact.provider()->package_name == "rust" &&
+            exact.provider()->package_base == "rust" &&
+            exact.provider()->provided_dependency_name == "cargo" &&
+            exact.package_identity().has_value() &&
+            exact.package_identity()->package().package_name() == "rust",
+        "cargo requirement, rust provider, PackageBase, receipt, and current identity did not close");
+    CleanupInvocationEvidence provider_route =
+        aggregate_remote_aur_cleanup_invocation_evidence(
+            invocation_identity, prepared, lifecycle, {}, {exact});
+    expect(
+        provider_route.route_authority() ==
+                CleanupRouteAuthority::Complete &&
+            provider_route.completeness() ==
+                CleanupEvidenceCompleteness::Complete &&
+            provider_route.selected_provider_evidence().size() == 1 &&
+            project_shared_requirement(
+                provider_route, exact.package_identity().value()) ==
+                CleanupSharedRequirementState::NoLongerRequired,
+        "complete selected repository provider remote route was not authoritative");
+
+    BuildPlan wrong_base_plan = plan;
+    wrong_base_plan.dependency_edges[0]
+        .resolved_provider->package_base = "wrong-rust-base";
+    std::get<ProviderResolvedDependencyCandidate>(
+        wrong_base_plan.dependency_edges[0].resolved_candidate.value())
+        .provider.package_base = "wrong-rust-base";
+    wrong_base_plan.provided[0].provider.package_base = "wrong-rust-base";
+    expect(
+        correlate_selected_repository_provider_to_build_plan(
+            invocation_identity, wrong_base_plan, prepared.invocation,
+            lifecycle, 0, current, execution)
+                .completeness() != CleanupEvidenceCompleteness::Complete,
+        "wrong repository provider PackageBase correlated");
+
+    BuildPlan wrong_repository_plan = plan;
+    std::get<RepositoryProviderOrigin>(
+        wrong_repository_plan.dependency_edges[0]
+            .resolved_provider->origin)
+        .repository_name = "core";
+    std::get<RepositoryProviderOrigin>(
+        std::get<ProviderResolvedDependencyCandidate>(
+            wrong_repository_plan.dependency_edges[0]
+                .resolved_candidate.value())
+            .provider.origin)
+        .repository_name = "core";
+    wrong_repository_plan.provided[0].provider =
+        wrong_repository_plan.dependency_edges[0]
+            .resolved_provider.value();
+    expect(
+        correlate_selected_repository_provider_to_build_plan(
+            invocation_identity, wrong_repository_plan,
+            prepared.invocation, lifecycle, 0, current, execution)
+                .completeness() != CleanupEvidenceCompleteness::Complete,
+        "wrong repository provenance correlated");
+
+    BuildPlan wrong_capability_plan = plan;
+    wrong_capability_plan.dependency_edges[0]
+        .resolved_provider->provided_dependency_name = "rust";
+    std::get<ProviderResolvedDependencyCandidate>(
+        wrong_capability_plan.dependency_edges[0]
+            .resolved_candidate.value())
+        .provider.provided_dependency_name = "rust";
+    wrong_capability_plan.provided[0].provider =
+        wrong_capability_plan.dependency_edges[0]
+            .resolved_provider.value();
+    expect(
+        correlate_selected_repository_provider_to_build_plan(
+            invocation_identity, wrong_capability_plan,
+            prepared.invocation, lifecycle, 0, current, execution)
+                .completeness() != CleanupEvidenceCompleteness::Complete,
+        "wrong provided capability correlated");
+
+    BuildPlan ambiguous_plan = plan;
+    ambiguous_plan.ambiguous_providers.push_back(
+        AmbiguousProvidedDependency{"cargo", {cargo_repository_provider()}});
+    expect(
+        correlate_selected_repository_provider_to_build_plan(
+            invocation_identity, ambiguous_plan, prepared.invocation,
+            lifecycle, 0, current, execution)
+                .completeness() != CleanupEvidenceCompleteness::Complete,
+        "ambiguous provider decision correlated");
+
+    BuildPlan wrong_decision_plan = plan;
+    wrong_decision_plan.dependency_edges[0].provider_resolution =
+        ProviderResolutionKind::Unique;
+    wrong_decision_plan.provided[0].resolution =
+        ProviderResolutionKind::Unique;
+    CleanupSelectedProviderCorrelationEvidence wrong_decision =
+        correlate_selected_repository_provider_to_build_plan(
+            invocation_identity, wrong_decision_plan,
+            prepared.invocation, lifecycle, 0, current, execution);
+    expect(
+        wrong_decision.completeness() !=
+                CleanupEvidenceCompleteness::Complete &&
+            has_provider_correlation_issue(
+                wrong_decision,
+                CleanupSelectedProviderCorrelationIssueKind::
+                    DependencyEdgeNotSelectedRepositoryProvider),
+        "wrong selected-provider decision correlated");
+
+    SelectedRepositoryProviderTrustedReceiptExecutionResult receipt_mismatch =
+        execution;
+    receipt_mismatch.receipt_capture->status =
+        TrustedAlpmReceiptCaptureStatus::Missing;
+    expect(
+        correlate_selected_repository_provider_to_build_plan(
+            invocation_identity, plan, prepared.invocation, lifecycle, 0,
+            current, receipt_mismatch)
+                .completeness() != CleanupEvidenceCompleteness::Complete,
+        "receipt mismatch correlated");
+
+    SelectedRepositoryProviderTrustedReceiptExecutionResult wrong_token =
+        execution;
+    wrong_token.receipt_capture->transaction_ledger.transactions.front()
+        .transaction_token = transaction_token('f');
+    expect(
+        correlate_selected_repository_provider_to_build_plan(
+            invocation_identity, plan, prepared.invocation, lifecycle, 0,
+            current, wrong_token)
+                .completeness() != CleanupEvidenceCompleteness::Complete,
+        "wrong transaction token correlated");
+
+    SelectedRepositoryProviderTrustedReceiptExecutionResult
+        wrong_transaction = execution;
+    wrong_transaction.transaction.selected_providers.clear();
+    expect(
+        correlate_selected_repository_provider_to_build_plan(
+            invocation_identity, plan, prepared.invocation, lifecycle, 0,
+            current, wrong_transaction)
+                .completeness() != CleanupEvidenceCompleteness::Complete,
+        "wrong selected-provider transaction correlated");
+
+    const CleanupCurrentPackageEvidence wrong_current =
+        project_cleanup_current_package_evidence(
+            present_snapshot(
+                "rust", "1.89.0-1",
+                InstalledPackageReason::Dependency),
+            "rust");
+    expect(
+        correlate_selected_repository_provider_to_build_plan(
+            invocation_identity, plan, prepared.invocation, lifecycle, 0,
+            wrong_current, execution)
+                .completeness() != CleanupEvidenceCompleteness::Complete,
+        "wrong current provider identity correlated");
+
+    const SelectedRepositoryProviderTrustedReceiptExecutionResult
+        solver_introduced = selected_provider_execution(
+            invocation_identity, prepared.invocation,
+            {"solver-introduced-package"});
+    CleanupSelectedProviderCorrelationEvidence solver_correlation =
+        correlate_selected_repository_provider_to_build_plan(
+            invocation_identity, plan, prepared.invocation, lifecycle, 0,
+            current, solver_introduced);
+    expect(
+        solver_correlation.completeness() !=
+                CleanupEvidenceCompleteness::Complete &&
+            has_provider_correlation_issue(
+                solver_correlation,
+                CleanupSelectedProviderCorrelationIssueKind::
+                    UncorrelatedActualInstall),
+        "solver-introduced Install became a selected-provider edge");
+}
+
+void test_remote_aur_invocation_route_and_evidence_completeness() {
+    BuildPlan plan = basic_plan();
+    PreparedRemoteSourceBuild prepared = prepared_remote_aur_build(plan);
+    ProductionSourceBuildInvocationResult result =
+        successful_result(prepared.invocation);
+    CleanupInvocationLifecycleEvidence lifecycle =
+        CleanupInvocationLifecycleEvidence::after_successful_invocation(
+            prepared.invocation, result);
+    const CleanupInvocationIdentity invocation_identity =
+        CleanupInvocationIdentity::from_local_value(
+            "complete-remote-aur-invocation");
+    SourceArtifactInstallCausalEvidence causal =
+        source_artifact_causal_evidence(
+            invocation_identity, 0, "build-tool", "build-tools",
+            plan.root_targets, {PackageRole::BuildDependency}, {0});
+    CleanupSourceArtifactCorrelationEvidence source_correlation =
+        correlate_source_artifact_install_to_build_plan(
+            invocation_identity, plan, prepared.invocation, lifecycle,
+            causal);
+    const SourceAwarePackageIdentity candidate =
+        source_correlation.selected_artifacts().front().artifact.expected_identity;
+    CleanupInvocationEvidence complete =
+        aggregate_remote_aur_cleanup_invocation_evidence(
+            invocation_identity, prepared, lifecycle,
+            {source_correlation}, {});
+    expect(
+        complete.route_kind() ==
+                CleanupRouteKind::RemoteAurSourceBuild &&
+            complete.route_authority() ==
+                CleanupRouteAuthority::Complete &&
+            complete.completeness() ==
+                CleanupEvidenceCompleteness::Complete &&
+            complete.build_plan() != nullptr &&
+            complete.roots() == plan.root_targets &&
+            complete.work_items().size() == plan.order.size() &&
+            complete.work_items().front().outcome.production_outcome.has_value() &&
+            complete.package_bases().size() == plan.order.size() &&
+            complete.source_artifact_evidence().size() == 1 &&
+            project_shared_requirement(complete, candidate) ==
+                CleanupSharedRequirementState::NoLongerRequired,
+        "complete remote AUR invocation did not retain closed route evidence");
+
+    CleanupInvocationEvidence incomplete =
+        aggregate_remote_aur_cleanup_invocation_evidence(
+            invocation_identity, prepared, lifecycle, {}, {});
+    expect(
+        incomplete.route_authority() ==
+                CleanupRouteAuthority::Unknown &&
+            incomplete.completeness() !=
+                CleanupEvidenceCompleteness::Complete &&
+            has_invocation_issue(
+                incomplete,
+                CleanupInvocationEvidenceIssueKind::
+                    SourceArtifactCorrelationMissing),
+        "incomplete remote evidence became Complete");
+}
+
+void test_invocation_wide_shared_lifetime_matrix() {
+    const CleanupInvocationIdentity invocation_identity =
+        CleanupInvocationIdentity::from_local_value(
+            "shared-lifetime-invocation");
+
+    BuildPlan multi_root = multiple_root_plan();
+    PreparedRemoteSourceBuild multi_prepared =
+        prepared_remote_aur_build(multi_root);
+    ProductionSourceBuildInvocationResult after_first_root =
+        result_after_work_item(multi_prepared.invocation, 1);
+    CleanupInvocationLifecycleEvidence after_first_lifecycle =
+        CleanupInvocationLifecycleEvidence::after_work_item(
+            multi_prepared.invocation, after_first_root, 1);
+    SourceArtifactInstallCausalEvidence multi_causal =
+        source_artifact_causal_evidence(
+            invocation_identity, 0, "build-tool", "build-tools",
+            multi_root.root_targets,
+            {PackageRole::BuildDependency,
+             PackageRole::CheckDependency},
+            {0, 1});
+    CleanupSourceArtifactCorrelationEvidence multi_source =
+        correlate_source_artifact_install_to_build_plan(
+            invocation_identity, multi_root, multi_prepared.invocation,
+            after_first_lifecycle, multi_causal);
+    SourceAwarePackageIdentity multi_candidate =
+        multi_source.selected_artifacts().front().artifact.expected_identity;
+    CleanupInvocationEvidence multi_evidence =
+        aggregate_remote_aur_cleanup_invocation_evidence(
+            invocation_identity, multi_prepared, after_first_lifecycle,
+            {multi_source}, {});
+    expect(
+        project_shared_requirement(multi_evidence, multi_candidate) ==
+            CleanupSharedRequirementState::StillRequired,
+        "root A completion released a dependency still needed by root B");
+
+    BuildPlan provider_plan = cargo_provider_plan(2);
+    PreparedRemoteSourceBuild provider_prepared =
+        prepared_remote_aur_build(provider_plan);
+    ProductionSourceBuildInvocationResult provider_partial =
+        result_after_work_item(provider_prepared.invocation, 0);
+    CleanupInvocationLifecycleEvidence provider_lifecycle =
+        CleanupInvocationLifecycleEvidence::after_work_item(
+            provider_prepared.invocation, provider_partial, 0);
+    SelectedRepositoryProviderTrustedReceiptExecutionResult execution =
+        selected_provider_execution(
+            invocation_identity, provider_prepared.invocation);
+    CleanupCurrentPackageEvidence current =
+        project_cleanup_current_package_evidence(
+            present_snapshot(
+                "rust", "1.90.0-1",
+                InstalledPackageReason::Dependency),
+            "rust");
+    std::vector<CleanupSelectedProviderCorrelationEvidence>
+        provider_correlations;
+    for(std::size_t edge_index = 0;
+        edge_index < provider_plan.dependency_edges.size(); ++edge_index) {
+        provider_correlations.push_back(
+            correlate_selected_repository_provider_to_build_plan(
+                invocation_identity, provider_plan,
+                provider_prepared.invocation, provider_lifecycle,
+                edge_index, current, execution));
+    }
+    SourceAwarePackageIdentity provider_identity =
+        provider_correlations.front().package_identity().value();
+    CleanupInvocationEvidence provider_evidence =
+        aggregate_remote_aur_cleanup_invocation_evidence(
+            invocation_identity, provider_prepared, provider_lifecycle, {},
+            provider_correlations);
+    expect(
+        project_shared_requirement(
+            provider_evidence, provider_identity) ==
+            CleanupSharedRequirementState::StillRequired,
+        "PackageBase A completion released provider rust before PackageBase B");
+
+    BuildPlan runtime_plan = mixed_runtime_plan();
+    PreparedRemoteSourceBuild runtime_prepared =
+        prepared_remote_aur_build(runtime_plan);
+    ProductionSourceBuildInvocationResult runtime_result =
+        successful_result(runtime_prepared.invocation);
+    CleanupInvocationLifecycleEvidence runtime_lifecycle =
+        CleanupInvocationLifecycleEvidence::after_successful_invocation(
+            runtime_prepared.invocation, runtime_result);
+    CleanupInvocationEvidence runtime_evidence =
+        aggregate_remote_aur_cleanup_invocation_evidence(
+            invocation_identity, runtime_prepared, runtime_lifecycle, {},
+            {});
+    expect(
+        project_shared_requirement(
+            runtime_evidence,
+            source_artifact_identity("build-tool", "build-tools")) ==
+            CleanupSharedRequirementState::StillRequired,
+        "later Runtime consumer was not StillRequired");
+
+    BuildPlan root_plan = basic_plan();
+    const RootTargetIdentity build_tool_root = root(1, "build-tool");
+    root_plan.root_targets.push_back(build_tool_root);
+    root_plan.package_targets.front().roles.push_back(PackageRole::Root);
+    root_plan.package_targets.front().roots.push_back(build_tool_root);
+    PreparedRemoteSourceBuild root_prepared =
+        prepared_remote_aur_build(root_plan);
+    ProductionSourceBuildInvocationResult root_result =
+        successful_result(root_prepared.invocation);
+    CleanupInvocationLifecycleEvidence root_lifecycle =
+        CleanupInvocationLifecycleEvidence::after_successful_invocation(
+            root_prepared.invocation, root_result);
+    CleanupInvocationEvidence root_evidence =
+        aggregate_remote_aur_cleanup_invocation_evidence(
+            invocation_identity, root_prepared, root_lifecycle, {}, {});
+    expect(
+        project_shared_requirement(
+            root_evidence,
+            source_artifact_identity("build-tool", "build-tools")) ==
+            CleanupSharedRequirementState::StillRequired,
+        "later Root consumer was not StillRequired");
+
+    BuildPlan failed_plan = basic_plan();
+    PreparedRemoteSourceBuild failed_prepared =
+        prepared_remote_aur_build(failed_plan);
+    ProductionSourceBuildInvocationResult failed_result =
+        result_after_work_item(failed_prepared.invocation, 0);
+    failed_result.work_items[1].status =
+        ProductionSourceBuildWorkItemStatus::Failed;
+    failed_result.work_items[1].failure_stage =
+        ProductionSourceBuildFailureStage::Build;
+    CleanupInvocationLifecycleEvidence failed_lifecycle =
+        CleanupInvocationLifecycleEvidence::after_invocation_completion(
+            failed_prepared.invocation, failed_result);
+    SourceArtifactInstallCausalEvidence failed_causal =
+        source_artifact_causal_evidence(
+            invocation_identity, 0, "build-tool", "build-tools",
+            failed_plan.root_targets, {PackageRole::BuildDependency}, {0});
+    CleanupSourceArtifactCorrelationEvidence failed_source =
+        correlate_source_artifact_install_to_build_plan(
+            invocation_identity, failed_plan, failed_prepared.invocation,
+            failed_lifecycle, failed_causal);
+    SourceAwarePackageIdentity failed_candidate =
+        failed_source.selected_artifacts().front().artifact.expected_identity;
+    CleanupInvocationEvidence failed_evidence =
+        aggregate_remote_aur_cleanup_invocation_evidence(
+            invocation_identity, failed_prepared, failed_lifecycle,
+            {failed_source}, {});
+    expect(
+        project_shared_requirement(
+            failed_evidence, failed_candidate) ==
+            CleanupSharedRequirementState::Unknown,
+        "failed later work item made dependency NoLongerRequired");
+
+    ProductionSourceBuildInvocationResult unattempted_result =
+        result_after_work_item(failed_prepared.invocation, 0);
+    CleanupInvocationLifecycleEvidence unattempted_lifecycle =
+        CleanupInvocationLifecycleEvidence::after_invocation_completion(
+            failed_prepared.invocation, unattempted_result);
+    CleanupSourceArtifactCorrelationEvidence unattempted_source =
+        correlate_source_artifact_install_to_build_plan(
+            invocation_identity, failed_plan, failed_prepared.invocation,
+            unattempted_lifecycle, failed_causal);
+    CleanupInvocationEvidence unattempted_evidence =
+        aggregate_remote_aur_cleanup_invocation_evidence(
+            invocation_identity, failed_prepared,
+            unattempted_lifecycle, {unattempted_source}, {});
+    expect(
+        project_shared_requirement(
+            unattempted_evidence, failed_candidate) ==
+            CleanupSharedRequirementState::Unknown,
+        "unattempted later work item made dependency NoLongerRequired");
+}
+
+void test_cleanup_route_matrix_is_explicit_and_fail_closed() {
+    expect(
+        project_cleanup_route_evidence(
+            CleanupRouteKind::LocalSourceBuild)
+                .route_authority() ==
+            CleanupRouteAuthority::Unsupported,
+        "local cleanup route was not Unsupported");
+    expect(
+        project_cleanup_route_evidence(CleanupRouteKind::Upgrade)
+                .route_authority() ==
+            CleanupRouteAuthority::Unsupported,
+        "upgrade cleanup route was not Unsupported");
+    expect(
+        project_cleanup_route_evidence(CleanupRouteKind::UpgradeAur)
+                .route_authority() ==
+            CleanupRouteAuthority::Unsupported,
+        "upgrade-aur cleanup route was not Unsupported");
+    expect(
+        project_cleanup_route_evidence(CleanupRouteKind::UpgradeAll)
+                .route_authority() ==
+            CleanupRouteAuthority::Unsupported,
+        "upgrade-all cleanup route was not Unsupported");
+    expect(
+        project_cleanup_route_evidence(
+            CleanupRouteKind::MakepkgSyncDependencies)
+                .route_authority() == CleanupRouteAuthority::Unknown,
+        "makepkg syncdeps cleanup route was promoted");
+    expect(
+        project_cleanup_route_evidence(
+            CleanupRouteKind::StandaloneRepositorySourceBuild)
+                .route_authority() == CleanupRouteAuthority::Unknown,
+        "standalone repository source route was promoted");
+    expect(
+        project_cleanup_route_authority(
+            CleanupRouteKind::RemoteAurSourceBuild,
+            CleanupEvidenceCompleteness::Incomplete) ==
+            CleanupRouteAuthority::Unknown,
+        "incomplete remote AUR evidence became Complete");
+    expect(
+        project_cleanup_route_authority(
+            CleanupRouteKind::LocalSourceBuild,
+            CleanupEvidenceCompleteness::Complete) ==
+            CleanupRouteAuthority::Unsupported,
+        "Unsupported route became a Complete empty set");
+}
+
 void test_cleanup_policy_reducer_authority_priority() {
     CleanupPolicyProtectionEvidence installed = base_policy_evidence();
     installed.installed_base_devel = meta_policy_authority(
@@ -1468,13 +2374,18 @@ void run_invocation_owned_cleanup_adapter_tests() {
     test_receipt_does_not_bypass_protection_precedence();
     test_complete_plan_projects_complete_correlations_and_lifetime();
     test_incomplete_plan_states_never_project_complete_coverage();
-    test_repository_provider_without_package_base_is_unverified();
+    test_repository_provider_package_base_is_verified();
     test_mixed_roles_and_multiple_roots_are_preserved();
     test_later_work_item_and_unknown_lifecycle_fail_safe();
     test_local_remote_dependency_subset_is_not_complete_authority();
     test_metadata_and_source_failures_remain_typed_unknown_evidence();
     test_version_mismatch_and_unknown_policy_fail_closed();
     test_newly_observed_dependency_with_success_is_never_eligible();
+    test_source_artifact_exact_build_plan_correlation_matrix();
+    test_selected_repository_provider_closed_correlation_matrix();
+    test_remote_aur_invocation_route_and_evidence_completeness();
+    test_invocation_wide_shared_lifetime_matrix();
+    test_cleanup_route_matrix_is_explicit_and_fail_closed();
     test_cleanup_policy_reducer_authority_priority();
     test_cleanup_policy_reducer_group_fallback();
     test_cleanup_policy_reducer_failure_matrix();

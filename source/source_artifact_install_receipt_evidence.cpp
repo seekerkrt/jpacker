@@ -29,13 +29,6 @@ void canonicalize_issues(std::vector<EvidenceIssue>& issues) {
     });
 }
 
-bool is_valid_invocation_local_value(const std::string& value) noexcept {
-    if(value.empty() || value.size() > 256) return false;
-    return std::all_of(value.begin(), value.end(), [](unsigned char character) {
-        return character >= 0x21 && character <= 0x7e;
-    });
-}
-
 bool roots_are_valid_and_unique(
     const std::vector<RootTargetIdentity>& roots) {
     if(roots.empty()) return false;
@@ -85,6 +78,27 @@ bool roles_are_unique(const std::vector<PackageRole>& roles) {
     return std::all_of(roles.begin(), roles.end(), [&seen](PackageRole role) {
         return seen.insert(static_cast<int>(role)).second;
     });
+}
+
+bool edge_indices_are_unique(
+    const std::vector<std::size_t>& edge_indices) {
+    std::set<std::size_t> seen;
+    return std::all_of(
+        edge_indices.begin(), edge_indices.end(),
+        [&seen](std::size_t edge_index) {
+            return seen.insert(edge_index).second;
+        });
+}
+
+bool same_edge_index_set(
+    const std::vector<std::size_t>& lhs,
+    const std::vector<std::size_t>& rhs) {
+    if(lhs.size() != rhs.size()) return false;
+    return std::all_of(
+        lhs.begin(), lhs.end(), [&rhs](std::size_t edge_index) {
+            return std::find(rhs.begin(), rhs.end(), edge_index) !=
+                   rhs.end();
+        });
 }
 
 bool same_role_set(
@@ -183,26 +197,6 @@ SourceArtifactInstallReceiptEvidenceCompleteness project_completeness(
 }
 
 } // namespace
-
-SourceArtifactInstallInvocationIdentity::
-    SourceArtifactInstallInvocationIdentity(std::string value) noexcept
-    : value_(std::move(value)) {
-}
-
-SourceArtifactInstallInvocationIdentity
-SourceArtifactInstallInvocationIdentity::from_local_value(
-    std::string value) {
-    if(!is_valid_invocation_local_value(value)) {
-        throw std::invalid_argument(
-            "Source artifact install invocation identity is invalid.");
-    }
-    return SourceArtifactInstallInvocationIdentity(std::move(value));
-}
-
-const std::string& SourceArtifactInstallInvocationIdentity::value()
-    const noexcept {
-    return value_;
-}
 
 SourceArtifactInstallReceiptObservation::
     SourceArtifactInstallReceiptObservation(
@@ -415,6 +409,12 @@ establish_source_artifact_install_receipt_evidence(
                 issues,
                 EvidenceIssue::SelectedArtifactRootAttributionInvalid);
         }
+        if(!edge_indices_are_unique(
+               expected.build_plan_dependency_edge_indices)) {
+            add_issue(
+                issues,
+                EvidenceIssue::InvalidBuildPlanDependencyEdgeAttribution);
+        }
         for(const RootTargetIdentity& root : expected.requested_roots) {
             if(std::find(attributed_roots.begin(), attributed_roots.end(), root) ==
                attributed_roots.end()) {
@@ -443,6 +443,15 @@ establish_source_artifact_install_receipt_evidence(
                 issues,
                 EvidenceIssue::SelectedArtifactRootAttributionMismatch);
         }
+        if(!edge_indices_are_unique(
+               observed->build_plan_dependency_edge_indices) ||
+           !same_edge_index_set(
+               expected.build_plan_dependency_edge_indices,
+               observed->build_plan_dependency_edge_indices)) {
+            add_issue(
+                issues,
+                EvidenceIssue::BuildPlanDependencyEdgeAttributionMismatch);
+        }
 
         const SourcePackageIdentityProjectionResult identity_projection =
             project_artifact_source_package_identity(
@@ -457,7 +466,8 @@ establish_source_artifact_install_receipt_evidence(
                 observed->archive_identity,
                 expected.desired_reason,
                 expected.dependency_roles,
-                expected.requested_roots});
+                expected.requested_roots,
+                expected.build_plan_dependency_edge_indices});
     }
     if(!same_root_set(
            attributed_roots, expectation.work_item.requested_roots)) {
