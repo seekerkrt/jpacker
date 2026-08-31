@@ -180,6 +180,47 @@ bool is_valid_source_artifact_install_target(
         target);
 }
 
+bool transaction_stage_matches_intent(
+    const UnifiedPlanTransactionIntent& intent) noexcept {
+    return std::visit(
+        [](const auto& typed_intent) {
+            using Intent = std::decay_t<decltype(typed_intent)>;
+            switch(typed_intent.stage) {
+                case UnifiedPlanTransactionIntentStage::RouteOwned:
+                    return true;
+                case UnifiedPlanTransactionIntentStage::
+                    RepositorySystemUpgrade:
+                    if constexpr(std::is_same_v<
+                                     Intent,
+                                     RepositoryPackageTransactionIntent>) {
+                        return typed_intent.targets.size() == 1 &&
+                               std::holds_alternative<
+                                   RepositorySystemUpgradeIntent>(
+                                   typed_intent.targets.front());
+                    }
+                    return false;
+                case UnifiedPlanTransactionIntentStage::LaterNormalAur:
+                    if constexpr(std::is_same_v<
+                                     Intent,
+                                     RepositoryPackageTransactionIntent>) {
+                        return !typed_intent.targets.empty() &&
+                               std::none_of(
+                                   typed_intent.targets.begin(),
+                                   typed_intent.targets.end(),
+                                   [](const RepositoryInstallIntentTarget&
+                                          target) {
+                                       return std::holds_alternative<
+                                           RepositorySystemUpgradeIntent>(
+                                           target);
+                                   });
+                    }
+                    return !typed_intent.targets.empty();
+            }
+            return false;
+        },
+        intent);
+}
+
 std::optional<std::size_t> observation_phase_rank(
     UnifiedPlanObservationPhase phase) noexcept {
     for(std::size_t index = 0;
@@ -818,6 +859,13 @@ UnifiedPlanObservationResult make_unified_plan_observation(
         intent_index < input.transaction_intents.size(); ++intent_index) {
         const UnifiedPlanTransactionIntent& intent =
             input.transaction_intents[intent_index];
+        if(!transaction_stage_matches_intent(intent)) {
+            add_invariant_issue(
+                issues,
+                UnifiedPlanObservationInvariantIssueKind::
+                    TransactionIntentStageInvalid,
+                intent_index);
+        }
         std::visit(
             [&](const auto& typed_intent) {
                 using Intent = std::decay_t<decltype(typed_intent)>;

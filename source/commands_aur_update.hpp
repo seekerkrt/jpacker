@@ -4,6 +4,12 @@
 
 struct AppConfig;
 
+// Shared typed presentation for normal AUR update results. Callers provide
+// the retained query/result authority; status is never reconstructed from
+// localized text.
+void present_filtered_aur_update_execution_result(
+    const FilteredAurUpdateExecutionResult& result);
+
 // Query/static preflight remains before the default state log. Only a
 // prepared executable capability may cross into the normal mutation route.
 PreparedFilteredAurUpdateOperation prepare_upgrade_aur_operation(

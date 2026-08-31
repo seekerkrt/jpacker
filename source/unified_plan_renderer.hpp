@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+class SystemAurUpdateUnifiedPlanProjection;
+
 enum class UnifiedPlanRenderingIssueKind {
     UnsupportedValue,
     MissingReferencedValue
@@ -20,7 +22,8 @@ enum class UnifiedPlanRenderingSection {
     BuildUnits,
     RequiredArtifacts,
     TransactionIntents,
-    Blockers
+    Blockers,
+    RouteSemantics
 };
 
 // Presentation-local failures never change the observation status or become
@@ -49,3 +52,6 @@ struct UnifiedPlanRenderingResult {
 // does not resolve, sort, rebuild transaction intent, or retain references.
 UnifiedPlanRenderingResult render_unified_plan_observation(
     const UnifiedPlanObservation& observation);
+
+UnifiedPlanRenderingResult render_system_aur_update_unified_plan(
+    const SystemAurUpdateUnifiedPlanProjection& projection);

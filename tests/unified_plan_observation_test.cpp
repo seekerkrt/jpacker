@@ -965,6 +965,36 @@ void test_transaction_intent_boundaries() {
                     .provider.get() == &provider,
         "Exact-known repository targets were copied or reconstructed");
 
+    RepositoryPackageTransactionIntent system_intent;
+    system_intent.targets.push_back(RepositorySystemUpgradeIntent{});
+    system_intent.stage =
+        UnifiedPlanTransactionIntentStage::RepositorySystemUpgrade;
+    UnifiedPlanObservationInput system_input;
+    system_input.status = UnifiedPlanObservationStatus::Ready;
+    system_input.transaction_intents.push_back(
+        std::move(system_intent));
+    expect_valid(
+        make_unified_plan_observation(std::move(system_input)),
+        "Repository system transaction stage");
+
+    RepositoryPackageTransactionIntent mismatched_stage;
+    mismatched_stage.targets.push_back(RepositorySystemUpgradeIntent{});
+    mismatched_stage.stage =
+        UnifiedPlanTransactionIntentStage::LaterNormalAur;
+    UnifiedPlanObservationInput mismatched_stage_input;
+    mismatched_stage_input.status = UnifiedPlanObservationStatus::Ready;
+    mismatched_stage_input.transaction_intents.push_back(
+        std::move(mismatched_stage));
+    expect(
+        has_invariant_issue(
+            expect_invalid(
+                make_unified_plan_observation(
+                    std::move(mismatched_stage_input)),
+                "Mismatched transaction stage"),
+            UnifiedPlanObservationInvariantIssueKind::
+                TransactionIntentStageInvalid),
+        "System transaction was accepted as a later AUR intent");
+
     const BuildPlan plan = build_plan_fixture();
     const RequiredPackageArtifactTarget root_target{
         "shared-suite", "same-name", DesiredInstallReason::Explicit};

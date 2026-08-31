@@ -121,6 +121,50 @@ assert_contains \
     '競合/置換の安全停止を回避せず、自動置換も行いません' \
     "$japanese_help"
 
+japanese_unsupported_option=$tmp_dir/unsupported-option-ja
+if HOME=$test_home \
+    XDG_CONFIG_HOME=$tmp_dir/config \
+    XDG_STATE_HOME=$tmp_dir/state \
+    XDG_CACHE_HOME=$tmp_dir/cache \
+    LOCPATH=$locale_root \
+    LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8 \
+    LANGUAGE=ja \
+    "$test_binary" -Syu --config custom.conf \
+        > "$japanese_unsupported_option" 2>&1
+then
+    fail 'Japanese unsupported Auto option unexpectedly succeeded.'
+else
+    unsupported_status=$?
+fi
+[ "$unsupported_status" -eq 1 ] ||
+    fail "Japanese unsupported Auto option returned $unsupported_status."
+assert_contains \
+    'pacmanオプションは複合-Syu経路では対応していません。moguet -Syu --repoを使用すると、pacman引数を完全に引き継ぐリポジトリ専用システム更新になります。' \
+    "$japanese_unsupported_option"
+
+japanese_unsupported_argument=$tmp_dir/unsupported-argument-ja
+if HOME=$test_home \
+    XDG_CONFIG_HOME=$tmp_dir/config \
+    XDG_STATE_HOME=$tmp_dir/state \
+    XDG_CACHE_HOME=$tmp_dir/cache \
+    LOCPATH=$locale_root \
+    LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8 \
+    LANGUAGE=ja \
+    "$test_binary" -Syu -- \
+        > "$japanese_unsupported_argument" 2>&1
+then
+    fail 'Japanese unsupported Auto argument form unexpectedly succeeded.'
+else
+    unsupported_status=$?
+fi
+[ "$unsupported_status" -eq 1 ] ||
+    fail "Japanese unsupported Auto argument form returned $unsupported_status."
+assert_contains \
+    'pacman引数形式は複合-Syu経路では対応していません。moguet -Syu --repoを使用すると、pacman引数を完全に引き継ぐリポジトリ専用システム更新になります。' \
+    "$japanese_unsupported_argument"
+
 for config_syntax in \
     'review.pkgbuild = "prompt"|"skip"' \
     'review.diff = "prompt"|"skip"' \

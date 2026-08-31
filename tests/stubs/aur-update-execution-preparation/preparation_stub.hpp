@@ -42,6 +42,7 @@ void fail_reviewed_state_preflight_on_call(
     std::string diagnostic);
 
 const std::vector<std::string>& strict_preference_read_history();
+std::size_t source_preference_directory_snapshot_call_count();
 const std::vector<bool>& supported_options_guard_history();
 const std::vector<SourceBuildEnvironment>& pkgdest_guard_history();
 std::size_t database_call_count();

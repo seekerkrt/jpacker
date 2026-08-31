@@ -520,7 +520,8 @@ AurUpdateSourceBuildPreparation prepare_single_root(
     const AppConfig config;
     AurUpdateSourceBuildPreparation preparation =
         prepare_aur_update_source_build_invocation(
-            preflight, false, config);
+            preflight, SavedSourcePreferencePolicy::Strict, false,
+            config);
     expect(preparation.is_prepared(), "Real preparation fixture was not prepared");
     return preparation;
 }
@@ -740,7 +741,8 @@ void test_preflight_blockers_keep_status_and_stop_executable_targets() {
     const AppConfig config;
     const AurUpdateSourceBuildPreparation preparation =
         prepare_aur_update_source_build_invocation(
-            preflight, false, config);
+            preflight, SavedSourcePreferencePolicy::Strict, false,
+            config);
 
     expect(
         preparation.is_blocked() &&
@@ -819,7 +821,8 @@ void test_preflight_blocker_missing_snapshot_is_inconsistent() {
     const AppConfig config;
     AurUpdateSourceBuildPreparation preparation =
         prepare_aur_update_source_build_invocation(
-            preflight, false, config);
+            preflight, SavedSourcePreferencePolicy::Strict, false,
+            config);
     preparation.affected_update_targets.clear();
 
     const AurUpdateOperationResult result =
@@ -865,7 +868,8 @@ void test_projection_payload_snapshot_drift_is_inconsistent() {
     const AppConfig config;
     AurUpdateSourceBuildPreparation preparation =
         prepare_aur_update_source_build_invocation(
-            preflight, false, config);
+            preflight, SavedSourcePreferencePolicy::Strict, false,
+            config);
     expect(
         preparation.affected_update_targets.size() == 1 &&
             preparation.affected_update_targets.front()
@@ -904,7 +908,8 @@ void test_preflight_blocker_with_invocation_is_inconsistent() {
     const AppConfig config;
     AurUpdateSourceBuildPreparation preparation =
         prepare_aur_update_source_build_invocation(
-            preflight, false, config);
+            preflight, SavedSourcePreferencePolicy::Strict, false,
+            config);
     preparation.issues.clear();
     preparation.invocation.emplace(
         std::move(*invocation_source.invocation));
@@ -1007,7 +1012,8 @@ void test_split_and_multiple_lifecycle_reduce_from_child_results() {
     const AppConfig config;
     const AurUpdateSourceBuildPreparation preparation =
         prepare_aur_update_source_build_invocation(
-            preflight, false, config);
+            preflight, SavedSourcePreferencePolicy::Strict, false,
+            config);
     expect(
         preparation.is_prepared() && preparation.issues.empty() &&
             preparation.projected_build_units.size() == 2 &&

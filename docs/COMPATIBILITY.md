@@ -23,6 +23,8 @@ MoguetはArch Linux向けの **pacman-first wrapper** として扱う。日常�
 | plain `-S` Auto | official packageはbinary repository、source preferenceがあるofficial packageはofficial source-build、officialにないtargetはAURへ分類する | pacman単独のbinary repository searchにAUR/source-build分類を補う |
 | `-S --aur` | AUR RPC / PackageBase / AUR build planだけを使い、official packageやsource preferenceへfallbackしない | `--aur`はMoguet selectorでありpacmanへ渡さない |
 | `-S --repo` | official binary repositoryへ限定し、AUR / source-buildへfallbackしない | selectorを除いたargvをpacmanへ渡す |
+| exact target-less `-Syu` Auto | official repository system update成功後にfreshなinstalled foreign inventoryを取得し、normal installed AUR updateを行う。saved source-build preferenceはzero-readで適用しない | ordinary AUR-helper updateとしてrepository transactionと後続AUR transactionをsequentialにorchestrateする |
+| exact target-less `-Syu --repo` | official repository system updateだけを行い、AUR inventory / RPC、source preference、cache / Git / makepkgへ到達しない | semantic `--repo`を除き、compatibleなpacman argumentをrepository phaseへpass-throughする |
 | `-Ss` | official searchとAUR searchを組み合わせる。非対話でprovider / root selectionを開始しない | pacman searchを表示し、MoguetがAUR searchを補完する |
 | `-Si` | officialを優先し、見つからない場合だけAUR metadataを表示する。`--aur` / `--repo`はsourceを限定する | AUR infoはpacman infoではなくtyped AUR metadataを表示する |
 | remote `build` / local `build --local` / `upgrade` | remote package routeとlocal PKGBUILD production routeを、source preference、BuildPlan、makepkg、artifact validation、`pacman -U`を分離したsource lifecycleで扱う | `makepkg -sic`一括委譲へ戻さない |
@@ -57,6 +59,8 @@ revert <pkg>...
 -G <pkg> [--output-dir=DIR]
 -Gp <pkg>
 -S --select [--needed] <query>
+-Syu [--needed]
+-Syu --repo [--needed]
 ```
 <!-- CLI CANONICAL GRAMMAR END -->
 
@@ -71,8 +75,58 @@ multi-targetを維持する。`add-src`ではpackage itemが後続assignmentのs
 scope外optionを指定した場合は黙って無視せず停止する。上記以外のpacman operation formは
 delegated open grammarであり、この一覧をpacman parserのclosed allowlistとして扱わない。
 
+2つのexact target-less `-Syu` formはMoguet-intercepted semantic routeである。Auto formの
+closed compatibility surfaceと、RepoOnly formのcompatibleなdelegated repository tailを
+区別する。RepoOnlyのcanonical syntaxに全pacman optionを列挙しないことは、そのopen
+pass-throughをclosed allowlistへ縮める意味ではない。
+
 `deps`、`plan`、`fetch`、`-G`、`-Gp`は調査・表示・取得段階であり、build / installを
 混ぜない。
+
+<a id="compat-syu-normal-aur-update"></a>
+## Exact target-less `-Syu` compatibility
+
+exact canonical tokenかつtargetを持たない`moguet -Syu`だけをordinary AUR-helper updateとして
+interceptする。actual phase順は次である。
+
+```text
+official repository system update
+  -> success
+  -> fresh installed foreign inventory / exact AUR metadata
+  -> normal AUR plan, provider / relation / artifact preflight
+  -> AUR build / install
+```
+
+repository transactionが失敗した場合、AUR phaseはtyped `NotAttempted`のまま0-callで終了し、
+commandはnon-zeroである。repository成功後にinventory、AUR metadata、plan、provider decision、
+preflightをfreshに取得し、repository前またはdry-runのobservation / prepared capabilityをactual
+authorityとして再利用しない。repository completion後のAUR blocker / query / preparation /
+execution failureはtyped partial failureかつnon-zeroであり、完了済みrepository transactionを
+rollbackしない。cleanup failureはinstall resultからflattenせず、inconsistent aggregateはfail
+closedとしてsuccessを表示しない。repository package stateのauthoritativeなbefore / after
+evidenceを持たないため、AUR `NoUpdates`だけを根拠にoperation全体を`NoOp`と呼ばない。
+
+このnormal AUR phaseはsaved registered / package preferenceをtarget selectionへ使わないだけで
+なく、`${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/`のsnapshot / 列挙 / strict read、
+childからPackageBaseへのfallback read、preference-derived environmentへの適用を行わない。
+valid / invalid / unreadable preferenceやinjected read failureが存在してもconsume / `Absent`化せず、
+このrouteへ影響させない。一方、`upgrade`、`upgrade-aur`、`upgrade-all`のactual / dry-runは
+source-awareなStrict readerとしてsaved preferenceを確認・適用する。`upgrade-aur`のAUR-onlyは
+repository system updateを行わないscopeを表し、saved preferenceを無視する意味ではない。
+
+Auto combined routeでinitially対応するpacman semantic optionは`--needed`だけで、exact ordered
+repository argvへだけ保持し、later AUR installへ伝播しない。他のpacman semantic optionや
+unsupported argument formはrepository mutation前にfail closedし、repository phaseだけを実行して
+AURを黙ってskipしない。full compatible pacman pass-throughが必要なら
+`moguet -Syu --repo`を使う。このRepoOnly formはsemantic selectorをpacmanへforwardせず、
+repository upgradeだけを行い、AUR inventory / RPC、source preference、cache、Git、makepkg、
+source runnerを呼ばない。`moguet -Syu --aur`はunsupportedであり、AUR-only source-aware
+operationのcanonical surfaceは`moguet upgrade-aur`である。`--noconfirm`はprovider ambiguity、
+conflict / replacement、VCS/devel `RequiresCheck`その他のguardを突破しない。
+
+composite化するのは上記exact formだけである。`-Sy`、`-Su`、`-Suy`、`-S -y -u`、
+`-S --refresh --sysupgrade`、target-bearing `-Syu <pkg>`、unknown modifier formはcurrent routingを
+維持し、installed-AUR sweepへ拡張しない。
 
 <a id="compat-dry-run"></a>
 ## Unified dry-run compatibility
@@ -84,6 +138,14 @@ global `--dry-run`は、Moguet-owned supported `-S` install / system-update、`f
 absolute no-mutation boundaryとして、dry-runはstate log / persistent stateのwriteやdirectory作成、cache、workspace、worktree、Git clone / fetch / checkout mutation、`makepkg --printsrcinfo`その他のlocal metadata生成・評価、build output、sudo、pacman transactionの開始・mutation、pacman transaction lock、install、cleanup mutationへ到達しない。local routeは安全な既存descriptorだけを使い、metadata評価が必要ならreadyを推測せず`Blocked`とする。
 
 dry-run observationはapproval token、prepared execution capability、cached provider choiceではない。後続のactual invocationへ渡さず、actual routeはcurrent stateからproduction validationとprovider selectionを再実行する。v2.2.0ではhuman-readable outputだけを提供し、JSON / machine-readable schemaは追加しない。
+
+exact target-less `moguet --dry-run -Syu`はrepository system-update intentとlater normal-AUR
+transaction intentを別childとして表示する。AUR assessmentは現在インストールされている状態に
+基づき、repository update後のfuture stateを保証しないこと、actual executionではrepository
+upgrade成功後にAUR stateをfreshに再評価することを明示する。current AUR assessmentがNoUpdatesでも
+repository intentを持つouter operationを`NoOp`へ落とさない。RepoOnlyの
+`moguet --dry-run -Syu --repo`はrepository intentだけを表示し、AUR / preference authorityへ
+到達しない。どちらもactual capabilityを作成・再利用しない。
 
 diagnostic presentationはtyped stateからlocalizeする一方向のprojectionであり、localized / raw
 stringからclassificationを逆算しない。English / Japaneseともnormal summary、
@@ -113,6 +175,11 @@ normal AUR `UpdateAvailable`はdevel assessmentより優先し、suffix候補や
 v2.5.0のconservative connectionはupstream VCS revisionをquery / 比較せず、`.SRCINFO` / PKGBUILDをproduction detection authorityとして評価せず、devel build provenanceやbaselineを保存しない。current development treeにはIssue #475のtrusted Git remote read-only observer foundationがあるが、production authority producer / callerを持たず、このAUR update routeへ未接続である。installed artifactへ束縛したprovenanceとauthoritative `UpdateAvailable` / `UpToDate`比較はIssue #476のfollow-up contractであり、v2.5.0またはcurrent CLIがfull VCS update trackingを実装済みであるとは扱わない。
 
 official repository package、AURに存在しないforeign package、source preferenceだけで選ばれるpackageはautomatic AUR update対象にしない。
+
+exact target-less `-Syu`のnormal AUR phaseも同じexact inventory / AUR query / plan / provider /
+conflict / replaces / artifact / `RequiresCheck` safety authorityを使うが、saved source preference
+policyだけはIgnoreでzero-I/Oとする。`upgrade-aur`と`upgrade-all`はStrictのままであり、
+normal `-Syu`からsource preference登録packageをsource-build routeへ自動routingしない。
 
 <a id="compat-git-remote-revision-observer"></a>
 ## Trusted Git remote revision observer foundation compatibility
@@ -351,6 +418,11 @@ ${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/<package-name>
 
 unset / emptyの`XDG_CONFIG_HOME`は`$HOME/.config`へfallbackし、明示値はabsoluteかつ安全で既存base directoryでなければfail closedとする。root実行時もroot自身のXDG contextを使い、`SUDO_USER`から別userを推測しない。add / editだけが必要なdirectoryをsafe creation boundary経由で作成し、read / list / build / upgrade / missing delete / revertはdirectoryを作成しない。
 
+explicit `upgrade` / `upgrade-aur` / `upgrade-all`とsource-aware buildはこのauthorityをStrictに
+扱う。exact target-less `-Syu`のactual / dry-runはnormal AUR routeのIgnore policyを使い、
+directory snapshot、strict read、PackageBase fallback read、preference-derived environment適用を
+すべて行わない。preference read failureをconsumeしてmissingへ変換することもしない。
+
 `/etc/jpacker`と`/etc/moguet`をruntimeで作成・参照せず、legacy storeへのfallback、merge、自動copy / rewrite / deleteを行わない。source preference filesystem操作はsudoを使わず、revert後のpacman transactionのsudoとは分離する。詳細は[source-build preference contract](contracts/source-build-preference-xdg.md)を参照する。
 
 <a id="compat-ambiguous-provider"></a>
@@ -387,6 +459,10 @@ source selectionは排他的な3状態である。
 - AurOnly (`--aur`): root targetをAURへ限定し、officialへfallbackしない。
 - RepoOnly (`--repo`): targetをofficial binary repositoryへ限定し、AUR / source-buildへfallbackしない。
 
+exact target-less `-Syu`では、この一般selector taxonomyを専用semantic routeへ投影する。Autoは
+repository + normal AURかつsaved preference Ignore、RepoOnlyはrepository-onlyかつfull compatible
+pacman pass-throughである。AurOnlyはinvalidであり、`-Syu --aur`をAUR-only aliasとして追加しない。
+
 `--aur`と`--repo`の同時指定はconflictとして、pacman、sudo、AUR RPC、git、makepkg、cache mutationより前に停止する。scope外のoperationでselectorを認識した場合も黙って無視しない。selectorはpacman option value待ち、`--`後のopaque operand、`--` markerより優先されず、通常位置のtokenだけを消費する。
 
 ## pacman由来 operationのpass-through
@@ -401,7 +477,7 @@ MoguetがAUR / source-buildへ介入しない場合、次のoperationは基本�
 - `-F`系
 - `-T`系
 
-`-Sc`は`sudo pacman -Sc`へ委譲し、Moguet build/cacheは削除しない。Moguetのbuild/cacheをcleanしたい場合は`clean`を使う。`-Syu` / `-Sy` / `-Su`はpacman-compatible system upgradeとし、registered source preferenceの全体走査は`upgrade`へ混ぜない。
+`-Sc`は`sudo pacman -Sc`へ委譲し、Moguet build/cacheは削除しない。Moguetのbuild/cacheをcleanしたい場合は`clean`を使う。exact target-less `-Syu`だけは上記combined semantic routeまたは明示RepoOnly routeとしてinterceptする。`-Sy`、`-Su`、alternate / separated modifier、target-bearing form等はcurrent delegated routingを維持する。`-Syu`からregistered source preferenceを走査・適用せず、source-awareな全体走査は明示的な`upgrade*` commandへ分離する。
 
 read-only queryのpacman標準出力・標準エラーはできるだけ保ち、Moguetが主要なexternal commandを実行する場合はcommandを実行前に表示する。pacmanのtransaction ownerはpacman、source artifact build ownerはmakepkg、source repository retrieval ownerはgitである。
 
@@ -429,6 +505,10 @@ pacman-onlyではpacmanへ、separated source-buildではbuild-only makepkgとty
 
 pacman-onlyではordered pacman argvへ保持する。対応済み`-S`でsource routeが生じる場合は、build skipではなく検証済みartifactへ渡すtyped `pacman -U`のinstall-only policyとして1回だけ扱い、makepkgへ渡さない。selection、metadata、provider、artifact、safety guardは省略しない。
 
+Auto combined `-Syu`ではinitially唯一対応するpacman semantic optionであり、repository phaseの
+exact ordered argvへだけ保持する。later normal-AUR transactionへ`needed` policyを伝播しない。
+RepoOnly `-Syu --repo`ではcompatible pacman pass-throughの一部としてrepository phaseへ保持する。
+
 ### AUR / source-buildで単純pass-throughできないoption
 
 `--asdeps`、`--asexplicit`、`--ignore`、`--ignoregroup`、`--overwrite`、`--config`、`--dbpath`、`--root`、`--sysroot`、`--cachedir`、`--gpgdir`、`--hookdir`、`--logfile`、`--print-format`、`--nodeps` / `--assume-installed`、`--dbonly` / `--noscriptlet`、`--downloadonly`、`--print`は、source-buildで同じ意味を保てないため、対応範囲外ではmutation前に停止する。pacmanが見ているworldとMoguetのmetadata / installed state / cacheがずれるoptionを黙って変換しない。
@@ -440,6 +520,9 @@ pacman-onlyではordered pacman argvへ保持する。対応済み`-S`でsource 
 ## Exit code、partial completion、failure
 
 - pacmanへ直接委譲したcommandはpacmanの終了codeを返す。
+- exact target-less Auto `-Syu`はrepository + normal AUR aggregateのtyped resultを使い、complete successは0、repository failure、repository完了後のAUR blocker / failure、inconsistent resultはnon-zeroとする。
+- repository failureではAURをnot attemptedとして示す。repository完了後のAUR failureではrepository completionを隠さずpartial completionとして示し、rollbackを行わない。
+- AUR install resultとcleanup failureをflattenせず、AUR `NoUpdates`だけをwhole-operation `NoOp`へ昇格しない。
 - integrated searchはofficialまたはAURのmatchを表示できた場合に成功とするが、query failureをempty resultへflattenしない。
 - `plan` / inspectionのwarningと、plan作成自体のfailureを区別する。
 - build / install / cleanup、package transaction、source phaseのfailureはpartial completionとunattempted targetを保持し、successへ丸めない。

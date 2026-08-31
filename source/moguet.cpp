@@ -33,6 +33,7 @@
 #include "runtime_diagnostic.hpp"
 #include "shell_words.hpp"
 #include "source_install.hpp"
+#include "system_aur_update_operation.hpp"
 #include "user_config.hpp"
 #include "xdg_directory_safety.hpp"
 #include "xdg_paths.hpp"
@@ -245,6 +246,37 @@ int run_moguet(int argc, char* argv[]) {
     // state, export/Git, local evaluator, cache, or executor boundary.
     if(parsed.cli_overrides.dry_run) {
         return run_dry_run(parsed, g_config);
+    }
+
+    // POLICY(#505): only the shared exact targetless classifier may create
+    // the composite capability. Auto option rejection and source-build option
+    // rejection both finish before the repository transaction or state log.
+    const SyncInvocationRouteClassification sync_invocation_route =
+        classify_sync_invocation_route(parsed);
+    std::optional<PreparedSystemAurUpdateOperation>
+        prepared_system_aur_update;
+    if(const auto* auto_candidate =
+           std::get_if<AutoSystemUpdateRouteCandidate>(
+               &sync_invocation_route)) {
+        try {
+            require_supported_production_source_build_options(g_config);
+            std::optional<CompatibleSystemAurUpdateRequest> request =
+                make_compatible_system_aur_update_request(
+                    *auto_candidate);
+            if(!request.has_value()) {
+                throw std::logic_error(
+                    localization::format_translated_message(
+                        // TRANSLATORS: The placeholder is the AUR project identity.
+                        "The combined system and {} update request is incompatible.",
+                        "AUR"));
+            }
+            prepared_system_aur_update.emplace(
+                prepare_system_aur_update_operation(
+                    std::move(request.value())));
+        } catch(const std::exception& error) {
+            Logger::error(error.what());
+            return 1;
+        }
     }
 
     // POLICY(#271): exact operation-local selectorをgeneric build option
@@ -589,6 +621,18 @@ int run_moguet(int argc, char* argv[]) {
                 return 0;
             }
 
+            if(prepared_system_aur_update.has_value()) {
+                return cmd_system_aur_update(
+                    std::move(prepared_system_aur_update.value()),
+                    g_config);
+            }
+            if(const auto* repo_only = std::get_if<
+                   RepoOnlySystemUpdateRouteCandidate>(
+                   &sync_invocation_route)) {
+                return execute_ordered_repository_sync_transaction(
+                    repo_only->ordered_pacman_args, g_config);
+            }
+
             bool requests_refresh = pacman_operation_requests_refresh(operation, flags);
             bool is_sync = operation.starts_with("-S");
             bool is_query = operation.starts_with("-Q");
@@ -694,6 +738,15 @@ int main(int argc, char* argv[]) {
         Logger::error("Failed to initialize the Moguet message catalog.");
         return 1;
     }
+#ifdef MOGUET_ENABLE_SYSTEM_AUR_UPDATE_PRESENTATION_TEST_HOOKS
+    const char* system_aur_presentation_case =
+        std::getenv("MOGUET_TEST_SYSTEM_AUR_PRESENTATION_CASE");
+    if(system_aur_presentation_case &&
+       system_aur_presentation_case[0] != '\0') {
+        return run_system_aur_update_presentation_test(
+            system_aur_presentation_case);
+    }
+#endif
 #ifdef MOGUET_ENABLE_APP_CONFIG_TEST_HOOKS
     const char* app_config_test_case = std::getenv("MOGUET_TEST_APP_CONFIG_CASE");
     if(app_config_test_case && std::string(app_config_test_case) == "parse-failure-cli-overrides") {
@@ -731,12 +784,10 @@ void print_help() {
     print_help_entry(
         cli_operation_syntax(OperationId::Upgrade),
         localization::translate_message(
-            "Update the system and rebuild configured source packages"));
+            "Run the source-aware system update and apply saved source-build preferences"));
     print_help_continuation(
-        localization::format_translated_message(
-            // TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-            "Check registered source-build preferences after {}",
-            cli_authority::PACMAN_SYSTEM_UPGRADE_SYNTAX));
+        localization::translate_message(
+            "Update repository packages before rebuilding configured source packages"));
     print_help_entry(
         cli_operation_syntax(OperationId::UpgradeAur),
         localization::format_translated_message(
@@ -744,9 +795,9 @@ void print_help() {
             "Update installed {} packages only", "AUR"));
     print_help_continuation(
         localization::format_translated_message(
-            // TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-            "Do not run {}; source-build preferences are optional",
-            cli_authority::PACMAN_SYSTEM_UPGRADE_SYNTAX));
+            // TRANSLATORS: The placeholder is the AUR project identity.
+            "Do not update repository packages; apply saved source-build preferences for matching {} packages",
+            "AUR"));
     print_help_entry(
         cli_operation_syntax(OperationId::UpgradeAll),
         localization::format_translated_message(
@@ -758,6 +809,8 @@ void print_help() {
             // TRANSLATORS: The placeholder is the literal PackageBase identity.
             "Give explicit source preferences priority and avoid duplicate package/{} builds",
             "PackageBase"));
+    print_help_continuation(localization::translate_message(
+        "Apply saved source-build preferences as a source-aware workflow"));
     print_help_continuation(localization::translate_message(
         "Do not accept target operands"));
     print_help_entry(
@@ -852,13 +905,27 @@ void print_help() {
             "Require an interactive terminal; install selected repository roots first, then build selected {} roots only if that transaction succeeds",
             "AUR"));
     print_help_entry(
-        cli_authority::PACMAN_SYSTEM_UPGRADE_SYNTAX,
-        localization::translate_message("Upgrade the system"));
-    print_help_continuation(
+        cli_special_operation_syntax(
+            SpecialOperationId::SystemAurUpdate),
         localization::format_translated_message(
-            // TRANSLATORS: The placeholder is the literal pacman program identity.
-            "Remain compatible with {}; do not scan all source-build preferences",
-            "pacman"));
+            // TRANSLATORS: The placeholder is the AUR project identity.
+            "Upgrade official repository packages and normal installed {} packages",
+            "AUR"));
+    print_help_continuation(
+        localization::translate_message(
+            "Do not read or apply saved source-build preferences"));
+    print_help_continuation(localization::format_translated_message(
+        // TRANSLATORS: The placeholder is the AUR project identity.
+        "Run repository and {} phases sequentially; a later failure does not roll back the repository upgrade",
+        "AUR"));
+    print_help_entry(
+        cli_special_operation_syntax(
+            SpecialOperationId::SystemRepositoryUpdate),
+        localization::translate_message(
+            "Run the repository system upgrade only"));
+    print_help_continuation(localization::format_translated_message(
+        // TRANSLATORS: The placeholder is the pacman program identity.
+        "Allow the full {}-compatible repository argument tail", "pacman"));
     print_help_entry(
         cli_authority::PACMAN_SYNC_SEARCH_SYNTAX,
         localization::translate_message("Search for packages"));
@@ -888,6 +955,10 @@ void print_help() {
         "Reject unsupported routes and do not create state, cache, or workspaces"));
     print_help_continuation(localization::translate_message(
         "Show assessed conflict/replacement blockers before any supported mutation"));
+    print_help_continuation(localization::format_translated_message(
+        // TRANSLATORS: The placeholders are the literal -Syu token and AUR project identity.
+        "For {}, assess the current installed {} state; actual execution re-evaluates it after the repository upgrade succeeds",
+        "-Syu", "AUR"));
     print_help_entry(
         cli_option_syntax(OptionId::Edit),
         localization::format_translated_message(
@@ -965,12 +1036,16 @@ void print_help() {
             // TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
             "Limit {}, {}, and {} to {}; do not fall back to repositories",
             "-S", "-Ss", "-Si", "AUR"));
+    print_help_continuation(localization::format_translated_message(
+        // TRANSLATORS: The placeholders are literal -Syu, upgrade-aur, and AUR identities.
+        "Do not use with {}; use {} for an {}-only source-aware update",
+        "-Syu", "upgrade-aur", "AUR"));
     print_help_entry(
         cli_option_syntax(OptionId::Repo),
         localization::format_translated_message(
-            // TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
-            "Limit {}, {}, and {} to official binary repositories; do not use {} or source builds",
-            "-S", "-Ss", "-Si", "AUR"));
+            // TRANSLATORS: -S, -Ss, -Si, -Syu, and AUR are literal CLI/project identities.
+            "Limit {}, {}, and {} to official binary repositories; with {}, run the repository system upgrade only; do not use {} or source builds",
+            "-S", "-Ss", "-Si", "-Syu", "AUR"));
     std::cout << std::endl;
     print_help_section(localization::translate_message("CONFIGURATION"));
     print_help_entry(

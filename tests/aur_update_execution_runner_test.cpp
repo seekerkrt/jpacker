@@ -357,7 +357,8 @@ AurUpdateSourceBuildPreparation prepare_fixture(
     preparation_stub::set_database_paths(database_paths);
     AurUpdateSourceBuildPreparation preparation =
         prepare_aur_update_source_build_invocation(
-            preflight, needed, config);
+            preflight, SavedSourcePreferencePolicy::Strict, needed,
+            config);
     expect(
         preparation.is_prepared(),
         preparation.issues.empty()
@@ -820,7 +821,8 @@ void test_later_fatal_preflight_blocks_cache_provider_and_first_work_item() {
 
     AurUpdateSourceBuildPreparation preparation =
         prepare_aur_update_source_build_invocation(
-            later_repository_provider_preflight(), false, config);
+            later_repository_provider_preflight(),
+            SavedSourcePreferencePolicy::Strict, false, config);
     expect(!preparation.is_prepared() &&
                !preparation.invocation.has_value() &&
                preparation.issues.size() == 1 &&

@@ -629,6 +629,12 @@ AurUpdateQueryResult query_installed_aur_updates() {
                            test_scenario);
 }
 
+AurUpdateQueryResult query_aur_updates_for_foreign_inventory(
+    ForeignPackageInventory) {
+    throw std::logic_error(
+        "System AUR update queries are outside the upgrade-aur command fixture.");
+}
+
 AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
     const AurUpdatePlan& update_plan) {
     append_event("preflight");
@@ -767,8 +773,14 @@ bool AurUpdateSourceBuildPreparation::is_blocked() const noexcept {
 
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     const AurUpdateExecutionPreflight& preflight,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
     bool needed,
     const AppConfig& config) {
+    if(saved_source_preference_policy !=
+       SavedSourcePreferencePolicy::Strict) {
+        throw std::logic_error(
+            "upgrade-aur command did not request strict saved source preferences.");
+    }
     append_event(
         "prepare needed=" + std::string(bool_text(needed)) + " " +
         config_snapshot(config));
@@ -1639,14 +1651,43 @@ bool PreparedFilteredAurUpdateOperation::is_blocked() const noexcept {
     return valid_ && !is_prepared() && !is_noop();
 }
 
+bool FilteredAurUpdateObservation::is_ready() const noexcept {
+    return false;
+}
+
+bool FilteredAurUpdateObservation::is_noop() const noexcept {
+    return false;
+}
+
+bool FilteredAurUpdateObservation::is_blocked() const noexcept {
+    return true;
+}
+
+FilteredAurUpdateObservation observe_filtered_aur_update_operation(
+    AurUpdateQueryResult,
+    FilteredAurUpdateExplicitSourceSatisfaction,
+    SavedSourcePreferencePolicy,
+    const AppConfig&) {
+    throw std::logic_error(
+        "System AUR dry-run observation is outside the upgrade-aur command fixture.");
+}
+
 PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
     AurUpdateQueryResult query_result,
-    std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
+    FilteredAurUpdateExplicitSourceSatisfaction
+        explicit_source_satisfaction,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
     const AppConfig& config,
     std::optional<ValidatedCacheRoot> cache_root) {
-    if(!explicit_sources.empty()) {
+    if(!std::holds_alternative<NoExplicitSourceSatisfaction>(
+           explicit_source_satisfaction)) {
         throw std::logic_error(
-            "AUR update command stub only supports an empty explicit source set.");
+            "AUR update command stub requires no explicit source satisfaction.");
+    }
+    if(saved_source_preference_policy !=
+       SavedSourcePreferencePolicy::Strict) {
+        throw std::logic_error(
+            "AUR update command stub requires strict saved source preferences.");
     }
     if(cache_root.has_value()) {
         throw std::logic_error(
@@ -1663,7 +1704,8 @@ PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
 
     AurUpdateSourceBuildPreparation legacy_preparation =
         prepare_aur_update_source_build_invocation(
-            prepared.preflight, false, config);
+            prepared.preflight, saved_source_preference_policy, false,
+            config);
     prepared.preparation.emplace(std::move(legacy_preparation));
     return prepared;
 }

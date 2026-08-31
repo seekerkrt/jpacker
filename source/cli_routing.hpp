@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 enum class PkgbuildExportMode {
@@ -46,6 +47,63 @@ struct SourceSyncOptions {
     bool needed = false;
 };
 
+enum class AutoSystemUpdatePacmanIncompatibilityKind {
+    UnsupportedOption,
+    UnsupportedArgumentForm,
+};
+
+struct CompatibleAutoSystemUpdatePacmanArguments {
+    bool operator==(
+        const CompatibleAutoSystemUpdatePacmanArguments&) const = default;
+};
+
+struct IncompatibleAutoSystemUpdatePacmanArguments {
+    AutoSystemUpdatePacmanIncompatibilityKind kind;
+    std::string token;
+
+    bool operator==(
+        const IncompatibleAutoSystemUpdatePacmanArguments&) const = default;
+};
+
+using AutoSystemUpdatePacmanCompatibility = std::variant<
+    CompatibleAutoSystemUpdatePacmanArguments,
+    IncompatibleAutoSystemUpdatePacmanArguments>;
+
+// targetless canonical `-Syu` Auto routeのcomposite request。
+// ordered_pacman_argsはparser authorityのexact copyであり、ここで再構築・filterしない。
+struct AutoSystemUpdateRouteCandidate {
+    AutoSystemUpdatePacmanCompatibility pacman_compatibility;
+    std::vector<std::string> ordered_pacman_args;
+    bool repository_needed = false;
+
+    bool operator==(const AutoSystemUpdateRouteCandidate&) const = default;
+};
+
+// RepoOnly repository-only executionへ接続するため、
+// semantic selectorを除いたfull ordered pacman pass-throughを保持する。
+struct RepoOnlySystemUpdateRouteCandidate {
+    std::vector<std::string> ordered_pacman_args;
+    bool repository_needed = false;
+
+    bool operator==(
+        const RepoOnlySystemUpdateRouteCandidate&) const = default;
+};
+
+struct InvalidAurOnlySystemUpdateRoute {
+    bool operator==(
+        const InvalidAurOnlySystemUpdateRoute&) const = default;
+};
+
+struct OtherSyncRoute {
+    bool operator==(const OtherSyncRoute&) const = default;
+};
+
+using SyncInvocationRouteClassification = std::variant<
+    AutoSystemUpdateRouteCandidate,
+    RepoOnlySystemUpdateRouteCandidate,
+    InvalidAurOnlySystemUpdateRoute,
+    OtherSyncRoute>;
+
 // `--select`のpre-query validationで確定したowned request。
 // queryはASCII whitespace trim済みで、pacman argvへは戻さない。
 struct RootPackageSelectionInvocation {
@@ -70,6 +128,10 @@ bool parsed_has_semantic_pacman_option(
     const ParsedCliArguments& parsed, const std::string& option);
 SourceSyncOptions parse_source_sync_options(const ParsedCliArguments& parsed);
 SourceSelectableSyncOperation source_selectable_sync_operation(
+    const ParsedCliArguments& parsed);
+// parse済みsemantic stateだけからcanonical targetless `-Syu` routeを分類する。
+// production execution、validation、dry-run、public projectionは同じ結果を共有できる。
+SyncInvocationRouteClassification classify_sync_invocation_route(
     const ParsedCliArguments& parsed);
 // nulloptならvalid。messageの表示と終了statusはrunnerが所有する。
 std::optional<std::string> validate_source_selection_operation(

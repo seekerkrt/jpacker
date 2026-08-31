@@ -10,12 +10,16 @@
 struct AurUpdateQueryFailure {
     std::vector<std::string> package_names;
     std::string diagnostic;
+
+    bool operator==(const AurUpdateQueryFailure&) const = default;
 };
 
 // 1 invocation分のread-only query結果。presentationや終了statusの判断はcallerが所有する。
 struct AurUpdateQueryResult {
     AurUpdatePlan plan;
     std::vector<AurUpdateQueryFailure> recoverable_failures;
+
+    bool operator==(const AurUpdateQueryResult&) const = default;
 };
 
 AurUpdateQueryResult query_installed_aur_updates();

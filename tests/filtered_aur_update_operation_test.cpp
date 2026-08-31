@@ -1,21 +1,35 @@
 #include "app_config.hpp"
 #include "artifact_install_executor.hpp"
+#include "commands_sync.hpp"
 #include "filtered_aur_update_operation.hpp"
 #include "stubs/aur-update-execution-preflight/preflight_stub.hpp"
 #include "stubs/aur-update-execution-preparation/preparation_stub.hpp"
 #include "stubs/aur-update-execution-runner/execution_stub.hpp"
 #include "stubs/filtered-aur-update-operation/query_stub.hpp"
+#include "system_aur_update_operation.hpp"
 
 #include <algorithm>
 #include <exception>
+#include <filesystem>
+#include <functional>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+template <typename T>
+concept HasCacheCapability = requires(T value) { value.cache_root; };
+
+template <typename T>
+concept HasReviewedStateCapability = requires(T value) {
+    value.reviewed_state_preflight;
+};
 
 static_assert(!std::is_default_constructible_v<
               PreparedFilteredAurUpdateOperation>);
@@ -25,6 +39,72 @@ static_assert(std::is_nothrow_move_constructible_v<
               PreparedFilteredAurUpdateOperation>);
 static_assert(!std::is_move_assignable_v<
               PreparedFilteredAurUpdateOperation>);
+static_assert(!std::is_copy_constructible_v<
+              PreparedSystemAurUpdateOperation>);
+static_assert(std::is_nothrow_move_constructible_v<
+              PreparedSystemAurUpdateOperation>);
+static_assert(!std::is_move_assignable_v<
+              PreparedSystemAurUpdateOperation>);
+static_assert(!std::is_constructible_v<
+              PreparedFilteredAurUpdateOperation,
+              FilteredAurUpdateObservation>);
+static_assert(!std::is_constructible_v<
+              PreparedSystemAurUpdateOperation,
+              SystemAurUpdateDryRunObservation>);
+static_assert(!std::is_constructible_v<
+              PreparedProductionSourceBuildInvocation,
+              ProductionSourceBuildPreparationObservation>);
+static_assert(!HasCacheCapability<ProductionSourceBuildWorkItemObservation>);
+static_assert(!HasReviewedStateCapability<SourceBuildRequestObservation>);
+
+namespace system_aur_update_repository_test_stub {
+
+struct State {
+    int command_exit_status = 0;
+    std::vector<std::vector<std::string>> ordered_argument_calls;
+    std::vector<bool> no_confirm_calls;
+    std::function<void()> after_success;
+};
+
+State g_state;
+
+void reset() {
+    g_state = State{};
+}
+
+void set_command_exit_status(int status) {
+    g_state.command_exit_status = status;
+}
+
+void set_after_success(std::function<void()> callback) {
+    g_state.after_success = std::move(callback);
+}
+
+const std::vector<std::vector<std::string>>& ordered_argument_calls() {
+    return g_state.ordered_argument_calls;
+}
+
+const std::vector<bool>& no_confirm_calls() {
+    return g_state.no_confirm_calls;
+}
+
+} // namespace system_aur_update_repository_test_stub
+
+int execute_ordered_repository_sync_transaction(
+    const std::vector<std::string>& ordered_pacman_args,
+    const AppConfig& config) {
+    namespace repository_stub =
+        system_aur_update_repository_test_stub;
+    repository_stub::g_state.ordered_argument_calls.push_back(
+        ordered_pacman_args);
+    repository_stub::g_state.no_confirm_calls.push_back(
+        config.no_confirm);
+    const int status = repository_stub::g_state.command_exit_status;
+    if(status == 0 && repository_stub::g_state.after_success) {
+        repository_stub::g_state.after_success();
+    }
+    return status;
+}
 
 namespace {
 
@@ -32,6 +112,7 @@ namespace preflight_stub = aur_update_execution_preflight_test_stub;
 namespace preparation_stub = aur_update_execution_preparation_test_stub;
 namespace execution_stub = aur_update_execution_runner_test_stub;
 namespace query_stub = filtered_aur_update_operation_query_test_stub;
+namespace repository_stub = system_aur_update_repository_test_stub;
 
 void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
@@ -52,10 +133,28 @@ void expect_exception(Callable callable, const std::string& context) {
 }
 
 void reset_stubs() {
+    repository_stub::reset();
     query_stub::reset();
     preflight_stub::reset_preflight_stub();
     preparation_stub::reset();
     execution_stub::reset();
+}
+
+PreparedFilteredAurUpdateOperation prepare_strict_filtered_aur_update_operation(
+    AurUpdateQueryResult query_result,
+    FilteredAurUpdateExplicitSourceSatisfaction
+        explicit_source_satisfaction,
+    const AppConfig& config,
+    std::optional<ValidatedCacheRoot> cache_root = std::nullopt) {
+    return ::prepare_filtered_aur_update_operation(
+        std::move(query_result), std::move(explicit_source_satisfaction),
+        SavedSourcePreferencePolicy::Strict, config,
+        std::move(cache_root));
+}
+
+UpgradeAllExplicitSourceSatisfaction explicit_satisfaction(
+    std::vector<UpgradeAllExplicitSourceIdentity> identities) {
+    return UpgradeAllExplicitSourceSatisfaction{std::move(identities)};
 }
 
 AurUpdatePlanEntry update_entry(
@@ -424,6 +523,10 @@ void expect_no_mutation(const std::string& context) {
     expect(
         execution_stub::event_history().empty(),
         context + ": source-build lifecycle event was emitted");
+    expect(
+        execution_stub::invocation_event_history().empty(),
+        context +
+            ": provider/cache/source invocation event was emitted");
 }
 
 void expect_statuses(
@@ -523,12 +626,2014 @@ void expect_success_lifecycle(
     }
 }
 
+PreparedSystemAurUpdateOperation prepare_system_aur_update_fixture(
+    std::vector<std::string> ordered_pacman_args = {"-Syu"}) {
+    AutoSystemUpdateRouteCandidate candidate{
+        CompatibleAutoSystemUpdatePacmanArguments{},
+        std::move(ordered_pacman_args)};
+    std::optional<CompatibleSystemAurUpdateRequest> request =
+        make_compatible_system_aur_update_request(
+            std::move(candidate));
+    expect(
+        request.has_value(),
+        "Compatible system+AUR fixture request was rejected");
+
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_operation(
+            std::move(request.value()));
+    expect(
+        prepared.is_valid(),
+        "System+AUR fixture did not create a valid prepared operation");
+    return prepared;
+}
+
+SystemAurUpdateDryRunRequest make_auto_system_aur_dry_run_request(
+    std::vector<std::string> ordered_pacman_args = {"-Syu"},
+    bool repository_needed = false) {
+    std::optional<SystemAurUpdateDryRunRequest> request =
+        SystemAurUpdateDryRunRequest::from_auto_candidate(
+            AutoSystemUpdateRouteCandidate{
+                CompatibleAutoSystemUpdatePacmanArguments{},
+                std::move(ordered_pacman_args), repository_needed});
+    expect(
+        request.has_value(),
+        "Compatible system+AUR dry-run fixture request was rejected");
+    return std::move(request.value());
+}
+
+const FilteredAurUpdateObservation& require_system_aur_dry_run_child(
+    const SystemAurUpdateDryRunObservation& observation,
+    const char* context) {
+    expect(
+        observation.aur_observation.has_value(),
+        std::string(context) +
+            ": dry-run aggregate lost its current-state AUR observation");
+    return observation.aur_observation.value();
+}
+
+void expect_no_system_aur_dry_run_mutation(const std::string& context) {
+    expect(
+        repository_stub::ordered_argument_calls().empty() &&
+            repository_stub::no_confirm_calls().empty(),
+        context + ": repository transaction was executed");
+    expect(
+        execution_stub::call_history().empty(),
+        context + ": source-build executor was called");
+    expect(
+        execution_stub::event_history().empty(),
+        context + ": checkout/build/install/cleanup event was emitted");
+    expect(
+        execution_stub::invocation_event_history().empty(),
+        context +
+            ": provider/cache/source invocation event was emitted");
+}
+
+void expect_no_system_aur_later_authority(
+    const std::string& context) {
+    expect(
+        query_stub::repository_configuration_calls() == 0 &&
+            query_stub::inventory_calls() == 0 &&
+            query_stub::info_many_call_history().empty() &&
+            query_stub::info_strict_call_history().empty() &&
+            query_stub::vercmp_call_history().empty(),
+        context + ": fresh inventory or AUR query was called");
+    expect(
+        preflight_stub::resolver_call_count() == 0,
+        context + ": provider/preflight resolver was called");
+    expect(
+        preparation_stub::strict_preference_read_history().empty() &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0 &&
+            preparation_stub::supported_options_guard_history().empty() &&
+            preparation_stub::pkgdest_guard_history().empty() &&
+            preparation_stub::database_call_count() == 0 &&
+            preparation_stub::reviewed_state_preflight_call_count() == 0,
+        context + ": AUR source preparation authority was called");
+    expect_no_mutation(context);
+}
+
+void require_no_pre_repository_authority() {
+    if(query_stub::repository_configuration_calls() != 0 ||
+       query_stub::inventory_calls() != 0 ||
+       !query_stub::info_many_call_history().empty() ||
+       preflight_stub::resolver_call_count() != 0 ||
+       !preparation_stub::strict_preference_read_history().empty() ||
+       preparation_stub::
+               source_preference_directory_snapshot_call_count() !=
+           0 ||
+       preparation_stub::database_call_count() != 0 ||
+       !execution_stub::call_history().empty()) {
+        throw std::logic_error(
+            "System+AUR authority was prepared before repository success");
+    }
+}
+
+execution_stub::ExpectedExecution expected_system_aur_execution(
+    std::size_t work_item_index,
+    const std::string& package_name,
+    const std::string& package_base,
+    InstalledPackageReason installed_reason,
+    const AppConfig& config,
+    PacmanDatabasePaths database_paths =
+        PacmanDatabasePaths{"/stub/root", "/stub/database"}) {
+    const DesiredInstallReason desired_reason =
+        installed_reason == InstalledPackageReason::Explicit
+            ? DesiredInstallReason::Explicit
+            : DesiredInstallReason::Dependency;
+    return execution_stub::ExpectedExecution{
+        work_item_index,
+        package_base,
+        {RequiredPackageArtifactTarget{
+            package_base, package_name, desired_reason}},
+        false,
+        std::move(database_paths),
+        config};
+}
+
+std::vector<PackageBaseSourceBuildSelectedResult>
+selected_system_aur_child(
+    const std::string& package_name,
+    InstalledPackageReason installed_reason,
+    ArtifactInstallExecutionOutcome outcome =
+        ArtifactInstallExecutionOutcome::Installed) {
+    return {PackageBaseSourceBuildSelectedResult{
+        ArtifactPackageIdentity{package_name, "2.0-1"},
+        installed_reason == InstalledPackageReason::Explicit
+            ? DesiredInstallReason::Explicit
+            : DesiredInstallReason::Dependency,
+        outcome}};
+}
+
+const FilteredAurUpdateExecutionResult& require_system_aur_child(
+    const SystemAurUpdateOperationResult& result,
+    const char* context) {
+    expect(
+        result.aur.operation_result.has_value(),
+        std::string(context) +
+            ": aggregate lost its filtered AUR child");
+    return result.aur.operation_result.value();
+}
+
+bool has_preflight_issue(
+    const AurUpdateExecutionTarget& target,
+    AurUpdateExecutionReason reason) {
+    return std::any_of(
+        target.issues.begin(), target.issues.end(),
+        [reason](const AurUpdateExecutionIssue& issue) {
+            return issue.reason == reason;
+        });
+}
+
+void enqueue_exact_update_query(
+    const std::vector<RootSpec>& roots,
+    const std::string& version_relation = "1") {
+    std::map<std::string, AurPackageInfo> packages;
+    for(const RootSpec& root : roots) {
+        packages.emplace(
+            root.package_name,
+            package_info(root.package_name, root.package_base));
+    }
+    query_stub::enqueue_info_many_result(std::move(packages));
+    for(std::size_t index = 0; index < roots.size(); ++index) {
+        query_stub::enqueue_vercmp_result(version_relation);
+    }
+}
+
+ForeignPackageInventory inventory_for_roots(
+    const std::vector<RootSpec>& roots,
+    InstalledPackageReason reason = InstalledPackageReason::Explicit,
+    const std::string& version = "1.0-1") {
+    ForeignPackageInventory inventory;
+    inventory.reserve(roots.size());
+    for(const RootSpec& root : roots) {
+        inventory.push_back(
+            InstalledPackageMetadata{root.package_name, version, reason});
+    }
+    return inventory;
+}
+
+BuildPlan root_plan_with_selected_repository_provider(
+    const RootSpec& root,
+    const std::string& dependency,
+    const ProvidedDependency& provider) {
+    BuildPlan plan = root_plan({root});
+    plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+        root.package_name,
+        root.package_base,
+        dependency,
+        PackageRole::RuntimeDependency,
+        DependencyKind::Provided,
+        std::nullopt,
+        std::nullopt,
+        provider,
+        ProviderResolutionKind::UserSelected});
+    return plan;
+}
+
+void test_system_aur_dry_run_auto_observes_current_update_without_capability() {
+    reset_stubs();
+    const RootSpec root{"dry-current-child", "dry-current-base"};
+    const PacmanRepositoryConfiguration current_configuration{
+        PacmanDatabasePaths{"/dry/root", "/dry/database"},
+        {"dry-current-repository"}};
+    query_stub::set_repository_configuration(current_configuration);
+    query_stub::set_foreign_inventory(
+        inventory_for_roots(
+            {root}, InstalledPackageReason::Dependency, "1.0-7"));
+    enqueue_exact_update_query({root});
+    return_build_plan(root_plan({root}), {root.package_name});
+    preparation_stub::enqueue_source_preference_result(
+        root.package_name,
+        SourcePreferenceFailure{
+            SourcePreferenceFailureKind::UnsupportedFileType,
+            "/stub/preferences/dry-current-child",
+            std::nullopt,
+            std::filesystem::file_type::directory,
+            "must remain unread"});
+    preparation_stub::enqueue_source_preference_result(
+        root.package_base,
+        SourcePreferenceFailure{
+            SourcePreferenceFailureKind::ReadFailed,
+            "/stub/preferences/dry-current-base",
+            std::make_error_code(std::errc::io_error),
+            std::nullopt,
+            "must remain unread"});
+
+    AppConfig config;
+    config.no_confirm = true;
+    config.editor = "dry-current-editor";
+    config.provider_selection =
+        make_provider_selection_session(config.no_confirm);
+    SystemAurUpdateDryRunObservation observation =
+        observe_system_aur_update_dry_run(
+            make_auto_system_aur_dry_run_request(
+                {"-Syu", "--needed"}, true),
+            config);
+    const FilteredAurUpdateObservation& child =
+        require_system_aur_dry_run_child(
+            observation, "system+AUR current update observation");
+    expect(
+        observation.request.mode() ==
+                SystemAurUpdateDryRunMode::Auto &&
+            observation.request.ordered_pacman_args() ==
+                std::vector<std::string>{"-Syu", "--needed"} &&
+            observation.request.repository_needed() &&
+            observation.aur_observation_basis ==
+                std::optional<SystemAurUpdateDryRunAurObservationBasis>{
+                    SystemAurUpdateDryRunAurObservationBasis::
+                        CurrentInstalledState} &&
+            observation.actual_authority_refresh ==
+                std::optional<SystemAurUpdateDryRunActualAuthorityRefresh>{
+                    SystemAurUpdateDryRunActualAuthorityRefresh::
+                        AfterRepositorySuccess} &&
+            observation.explicit_source_satisfaction.has_value() &&
+            observation.saved_source_preference_policy ==
+                std::optional<SavedSourcePreferencePolicy>{
+                    SavedSourcePreferencePolicy::Ignore},
+        "Auto dry-run lost route, freshness, or Ignore authority");
+    expect(
+        observation.is_ready() && !observation.is_blocked() &&
+            observation.has_current_aur_update_intent() &&
+            observation.issues.empty() && child.is_ready() &&
+            !child.is_noop() && !child.is_blocked(),
+        "Current AUR update candidate was not a ready observation");
+    expect(
+        observation.repository_configuration.has_value() &&
+            observation.repository_configuration->database_paths.root_dir ==
+                current_configuration.database_paths.root_dir &&
+            observation.repository_configuration->database_paths.db_path ==
+                current_configuration.database_paths.db_path &&
+            observation.repository_configuration->repository_names ==
+                current_configuration.repository_names &&
+            observation.foreign_inventory.size() == 1 &&
+            observation.foreign_inventory.front().name ==
+                root.package_name &&
+            observation.foreign_inventory.front().version == "1.0-7" &&
+            observation.foreign_inventory.front().reason ==
+                InstalledPackageReason::Dependency &&
+            child.original_query_result().plan.entries.size() == 1 &&
+            child.original_query_result()
+                .plan.entries.front()
+                .aur_package.has_value() &&
+            child.original_query_result()
+                    .plan.entries.front()
+                    .aur_package->package_base == root.package_base,
+        "Auto dry-run lost current installed or exact AUR identity");
+    expect(
+        query_stub::repository_configuration_calls() == 1 &&
+            query_stub::inventory_calls() == 1 &&
+            query_stub::info_many_call_history() ==
+                std::vector<std::vector<std::string>>{
+                    {root.package_name}} &&
+            query_stub::vercmp_call_history().size() == 1 &&
+            preflight_stub::resolver_calls() ==
+                std::vector<std::vector<std::string>>{
+                    {root.package_name}},
+        "Auto dry-run did not use one exact current-state query/preflight");
+
+    const AurUpdateSourceBuildObservation& source_observation =
+        child.source_build_preflight().value();
+    expect(
+        source_observation.is_ready() &&
+            source_observation.production_preflight.has_value() &&
+            source_observation.production_preflight->work_items.size() ==
+                1,
+        "Auto dry-run did not retain a capability-free source observation");
+    const ProductionSourceBuildWorkItemObservation& work_item =
+        source_observation.production_preflight->work_items.front();
+    expect(
+        work_item.request.package_name == root.package_name &&
+            work_item.request.checkout_name == root.package_base &&
+            !work_item.request.needed &&
+            work_item.request.custom_environment
+                .ordered_assignments.empty() &&
+            work_item.required_targets.size() == 1 &&
+            work_item.required_targets.front().package_name ==
+                root.package_name &&
+            work_item.required_targets.front().desired_reason ==
+                DesiredInstallReason::Dependency &&
+            child.upgrade_all_plan.explicit_sources.empty() &&
+            work_item.request.reviewed_state ==
+                ReviewedSourceFatalStateObservationStatus::Completed,
+        "Auto dry-run minted cache authority or changed observed work-item identity");
+    expect(
+        preparation_stub::strict_preference_read_history().empty() &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0 &&
+            preparation_stub::supported_options_guard_history() ==
+                std::vector<bool>{false} &&
+            preparation_stub::pkgdest_guard_history().size() == 2 &&
+            std::all_of(
+                preparation_stub::pkgdest_guard_history().begin(),
+                preparation_stub::pkgdest_guard_history().end(),
+                [](const SourceBuildEnvironment& environment) {
+                    return environment.ordered_assignments.empty();
+                }) &&
+            preparation_stub::database_call_count() == 1 &&
+            preparation_stub::reviewed_state_preflight_call_count() == 1,
+        "Auto dry-run crossed saved preference IO or skipped read-only safety");
+    expect_no_system_aur_dry_run_mutation(
+        "system+AUR current update observation");
+
+    const StrictSourcePreferenceResult unread_child_failure =
+        read_source_preference_strict(root.package_name);
+    const StrictSourcePreferenceResult unread_base_failure =
+        read_source_preference_strict(root.package_base);
+    expect(
+        std::holds_alternative<SourcePreferenceFailure>(
+            unread_child_failure) &&
+            std::get<SourcePreferenceFailure>(unread_child_failure).kind ==
+                SourcePreferenceFailureKind::UnsupportedFileType &&
+            std::holds_alternative<SourcePreferenceFailure>(
+                unread_base_failure) &&
+            std::get<SourcePreferenceFailure>(unread_base_failure).kind ==
+                SourcePreferenceFailureKind::ReadFailed &&
+            preparation_stub::strict_preference_read_history() ==
+                std::vector<std::string>{
+                    root.package_name, root.package_base},
+        "Ignore consumed or normalized an injected preference failure");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+}
+
+void test_system_aur_dry_run_auto_current_no_updates_is_not_blocked() {
+    reset_stubs();
+    const RootSpec root{"dry-current", "dry-current"};
+    query_stub::set_foreign_inventory(
+        inventory_for_roots(
+            {root}, InstalledPackageReason::Explicit, "2.0-1"));
+    enqueue_exact_update_query({root}, "0");
+
+    const AppConfig config;
+    SystemAurUpdateDryRunObservation observation =
+        observe_system_aur_update_dry_run(
+            make_auto_system_aur_dry_run_request(), config);
+    const FilteredAurUpdateObservation& child =
+        require_system_aur_dry_run_child(
+            observation, "system+AUR current no-updates observation");
+    expect(
+        observation.is_ready() && !observation.is_blocked() &&
+            !observation.has_current_aur_update_intent() &&
+            child.is_noop() && !child.is_ready() &&
+            child.original_query_result().plan.entries.size() == 1 &&
+            child.original_query_result()
+                    .plan.entries.front()
+                    .classification ==
+                AurUpdateClassification::UpToDate,
+        "Current AUR no-updates state was flattened to a blocker or update intent");
+    expect(
+        query_stub::repository_configuration_calls() == 1 &&
+            query_stub::inventory_calls() == 1 &&
+            query_stub::info_many_call_history() ==
+                std::vector<std::vector<std::string>>{
+                    {root.package_name}} &&
+            preflight_stub::resolver_call_count() == 0 &&
+            preparation_stub::strict_preference_read_history().empty() &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0 &&
+            preparation_stub::supported_options_guard_history().empty() &&
+            preparation_stub::pkgdest_guard_history().empty() &&
+            preparation_stub::reviewed_state_preflight_call_count() == 0 &&
+            preparation_stub::database_call_count() == 0,
+        "No-updates observation crossed unrelated planning/preference authority");
+    expect_no_system_aur_dry_run_mutation(
+        "system+AUR current no-updates observation");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+}
+
+void test_system_aur_dry_run_repo_only_observes_repository_intent_only() {
+    reset_stubs();
+    query_stub::set_repository_configuration_failure(
+        PackageMetadataFailure{
+            PackageMetadataErrorCode::QueryFailed,
+            "repo-only must not consume repository configuration"});
+    query_stub::set_foreign_inventory_failure(PackageMetadataFailure{
+        PackageMetadataErrorCode::QueryFailed,
+        "repo-only must not consume foreign inventory"});
+    preflight_stub::set_resolver_handler(
+        [](const std::vector<std::string>&) -> BuildPlan {
+            throw std::logic_error(
+                "RepoOnly dry-run reached AUR provider authority");
+        });
+    preparation_stub::fail_supported_options_guard(
+        "RepoOnly dry-run reached source preparation");
+    preparation_stub::enqueue_source_preference_result(
+        "repo-only-trap",
+        SourcePreferenceFailure{
+            SourcePreferenceFailureKind::ReadFailed,
+            "/stub/preferences/repo-only-trap",
+            std::make_error_code(std::errc::io_error),
+            std::nullopt,
+            "must remain unread"});
+
+    AppConfig config;
+    config.no_confirm = true;
+    SystemAurUpdateDryRunObservation observation =
+        observe_system_aur_update_dry_run(
+            SystemAurUpdateDryRunRequest{
+                RepoOnlySystemUpdateRouteCandidate{
+                    {"-Syu", "--config", "repo-only.conf"}, true}},
+            config);
+    expect(
+        observation.request.mode() ==
+                SystemAurUpdateDryRunMode::RepoOnly &&
+            observation.request.ordered_pacman_args() ==
+                std::vector<std::string>{
+                    "-Syu", "--config", "repo-only.conf"} &&
+            observation.request.repository_needed() &&
+            observation.is_ready() && !observation.is_blocked() &&
+            !observation.has_current_aur_update_intent() &&
+            observation.issues.empty(),
+        "RepoOnly dry-run lost exact repository-only request semantics");
+    expect(
+        !observation.aur_observation_basis.has_value() &&
+            !observation.actual_authority_refresh.has_value() &&
+            !observation.explicit_source_satisfaction.has_value() &&
+            !observation.saved_source_preference_policy.has_value() &&
+            !observation.repository_configuration.has_value() &&
+            observation.foreign_inventory.empty() &&
+            !observation.aur_observation.has_value(),
+        "RepoOnly dry-run retained AUR observation authority");
+    expect_no_system_aur_later_authority(
+        "system+AUR RepoOnly dry-run");
+    expect_no_system_aur_dry_run_mutation(
+        "system+AUR RepoOnly dry-run");
+
+    const StrictSourcePreferenceResult unread_failure =
+        read_source_preference_strict("repo-only-trap");
+    expect(
+        std::holds_alternative<SourcePreferenceFailure>(
+            unread_failure) &&
+            preparation_stub::strict_preference_read_history() ==
+                std::vector<std::string>{"repo-only-trap"},
+        "RepoOnly dry-run consumed the saved preference failure trap");
+}
+
+void test_system_aur_dry_run_requires_check_stays_blocked() {
+    reset_stubs();
+    const RootSpec root{"dry-manual-check-git", "dry-manual-check-base"};
+    query_stub::set_foreign_inventory(
+        inventory_for_roots({root}));
+    query_stub::enqueue_info_many_result(
+        {{root.package_name,
+          package_info(
+              root.package_name, root.package_base, "1.0-1")}});
+    query_stub::enqueue_vercmp_result("0");
+
+    AppConfig config;
+    config.no_confirm = true;
+    config.provider_selection =
+        make_provider_selection_session(config.no_confirm);
+    SystemAurUpdateDryRunObservation observation =
+        observe_system_aur_update_dry_run(
+            make_auto_system_aur_dry_run_request(), config);
+    const FilteredAurUpdateObservation& child =
+        require_system_aur_dry_run_child(
+            observation, "system+AUR dry-run RequiresCheck");
+    expect(
+        observation.is_blocked() && !observation.is_ready() &&
+            !observation.has_current_aur_update_intent() &&
+            observation.issues.empty() && child.is_blocked() &&
+            child.execution_preflight().targets.size() == 1 &&
+            has_preflight_issue(
+                child.execution_preflight().targets.front(),
+                AurUpdateExecutionReason::DevelRequiresCheck) &&
+            child.execution_preflight()
+                    .targets.front()
+                    .issues.front()
+                    .devel_requires_check_reason ==
+                DevelRequiresCheckReason::SuffixCandidateOnly,
+        "Dry-run RequiresCheck was flattened or bypassed by --noconfirm");
+    expect(
+        preflight_stub::resolver_call_count() == 0 &&
+            preparation_stub::strict_preference_read_history().empty() &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0 &&
+            preparation_stub::supported_options_guard_history().empty() &&
+            preparation_stub::pkgdest_guard_history().empty() &&
+            preparation_stub::reviewed_state_preflight_call_count() == 0 &&
+            preparation_stub::database_call_count() == 0,
+        "Dry-run RequiresCheck crossed later preference/preparation authority");
+    expect_no_system_aur_dry_run_mutation(
+        "system+AUR dry-run RequiresCheck");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+}
+
+void test_system_aur_dry_run_ambiguous_provider_is_not_auto_selected() {
+    reset_stubs();
+    const RootSpec root{"dry-ambiguous-root", "dry-ambiguous-root"};
+    query_stub::set_foreign_inventory(
+        inventory_for_roots({root}));
+    enqueue_exact_update_query({root});
+    BuildPlan plan = root_plan({root});
+    plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+        root.package_name,
+        root.package_base,
+        "dry-virtual-dependency",
+        PackageRole::RuntimeDependency,
+        DependencyKind::AmbiguousProvider,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt});
+    plan.ambiguous_providers.push_back(AmbiguousProvidedDependency{
+        "dry-virtual-dependency",
+        {ProvidedDependency::from_repository(
+             "extra", "dry-provider-a"),
+         ProvidedDependency::from_aur("dry-provider-b")}});
+    return_build_plan(std::move(plan), {root.package_name});
+
+    AppConfig config;
+    config.no_confirm = true;
+    config.provider_selection =
+        make_provider_selection_session(config.no_confirm);
+    SystemAurUpdateDryRunObservation observation =
+        observe_system_aur_update_dry_run(
+            make_auto_system_aur_dry_run_request(), config);
+    const FilteredAurUpdateObservation& child =
+        require_system_aur_dry_run_child(
+            observation, "system+AUR dry-run ambiguous provider");
+    expect(
+        observation.is_blocked() && !observation.is_ready() &&
+            child.is_blocked() &&
+            child.execution_preflight().targets.size() == 1 &&
+            has_preflight_issue(
+                child.execution_preflight().targets.front(),
+                AurUpdateExecutionReason::AmbiguousProvider),
+        "Dry-run ambiguous provider did not remain a typed blocker");
+    expect(
+        preflight_stub::resolver_selection_callback_presence() ==
+                std::vector<bool>{true} &&
+            preparation_stub::strict_preference_read_history().empty() &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0 &&
+            preparation_stub::supported_options_guard_history().empty() &&
+            preparation_stub::pkgdest_guard_history().empty() &&
+            preparation_stub::reviewed_state_preflight_call_count() == 0 &&
+            preparation_stub::database_call_count() == 0,
+        "Dry-run --noconfirm selected an ambiguous provider or crossed preference IO");
+    expect_no_system_aur_dry_run_mutation(
+        "system+AUR dry-run ambiguous provider");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+}
+
+void test_system_aur_dry_run_fatal_query_failure_is_typed_and_blocks() {
+    reset_stubs();
+    const RootSpec root{"dry-query-failed", "dry-query-failed"};
+    query_stub::set_foreign_inventory(
+        inventory_for_roots({root}));
+    query_stub::enqueue_info_many_result(
+        {{root.package_name, package_info(root.package_name)}});
+    query_stub::enqueue_vercmp_failure(
+        "fixture fatal dry-run version comparison failure");
+
+    const AppConfig config;
+    SystemAurUpdateDryRunObservation observation =
+        observe_system_aur_update_dry_run(
+            make_auto_system_aur_dry_run_request(), config);
+    expect(
+        observation.is_blocked() && !observation.is_ready() &&
+            observation.issues.size() == 1 &&
+            observation.issues.front().kind ==
+                SystemAurUpdateDryRunIssueKind::AurQueryFailure &&
+            observation.issues.front().diagnostic ==
+                "fixture fatal dry-run version comparison failure" &&
+            !observation.aur_observation.has_value(),
+        "Dry-run fatal query failure was erased or failed open");
+    expect(
+        preflight_stub::resolver_call_count() == 0 &&
+            preparation_stub::strict_preference_read_history().empty() &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0 &&
+            preparation_stub::supported_options_guard_history().empty() &&
+            preparation_stub::pkgdest_guard_history().empty() &&
+            preparation_stub::reviewed_state_preflight_call_count() == 0 &&
+            preparation_stub::database_call_count() == 0,
+        "Dry-run query failure reached provider/preference/preparation authority");
+    expect_no_system_aur_dry_run_mutation(
+        "system+AUR dry-run query failure");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+}
+
+void test_system_aur_dry_run_identity_mismatch_blocks_before_mutation() {
+    reset_stubs();
+    const RootSpec root{"dry-identity-root", "dry-identity-root"};
+    query_stub::set_foreign_inventory(
+        inventory_for_roots({root}));
+    enqueue_exact_update_query({root});
+    BuildPlan plan = root_plan({root});
+    plan.root_targets.front().requested_name = "dry-wrong-root";
+    plan.package_targets.front().roots.front() =
+        plan.root_targets.front();
+    return_build_plan(std::move(plan), {root.package_name});
+
+    const AppConfig config;
+    SystemAurUpdateDryRunObservation observation =
+        observe_system_aur_update_dry_run(
+            make_auto_system_aur_dry_run_request(), config);
+    const FilteredAurUpdateObservation& child =
+        require_system_aur_dry_run_child(
+            observation, "system+AUR dry-run identity mismatch");
+    expect(
+        observation.is_blocked() && child.is_blocked() &&
+            has_operation_issue(
+                child.operation_issues(),
+                FilteredAurUpdateOperationIssueKind::
+                    BuildPlanRootIndexMissing) &&
+            has_operation_issue(
+                child.operation_issues(),
+                FilteredAurUpdateOperationIssueKind::
+                    PreflightInvocationIdentityMismatch) &&
+            child.execution_preflight().targets.size() == 1 &&
+            child.execution_preflight().targets.front().status ==
+                AurUpdateExecutionTargetStatus::Incomplete,
+        "Dry-run exact identity mismatch was not retained as a blocker");
+    expect(
+        preparation_stub::strict_preference_read_history().empty() &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0 &&
+            preparation_stub::supported_options_guard_history().empty() &&
+            preparation_stub::pkgdest_guard_history().empty() &&
+            preparation_stub::reviewed_state_preflight_call_count() == 0 &&
+            preparation_stub::database_call_count() == 0,
+        "Dry-run identity mismatch crossed preference/preparation authority");
+    expect_no_system_aur_dry_run_mutation(
+        "system+AUR dry-run identity mismatch");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+}
+
+void test_system_aur_dry_run_preparation_blocker_stops_before_mutation() {
+    reset_stubs();
+    const RootSpec root{
+        "dry-preparation-blocked", "dry-preparation-blocked"};
+    query_stub::set_foreign_inventory(
+        inventory_for_roots({root}));
+    enqueue_exact_update_query({root});
+    return_build_plan(root_plan({root}), {root.package_name});
+    preparation_stub::fail_supported_options_guard(
+        "fixture dry-run preparation failure");
+
+    const AppConfig config;
+    SystemAurUpdateDryRunObservation observation =
+        observe_system_aur_update_dry_run(
+            make_auto_system_aur_dry_run_request(), config);
+    const FilteredAurUpdateObservation& child =
+        require_system_aur_dry_run_child(
+            observation, "system+AUR dry-run preparation blocker");
+    const AurUpdateSourceBuildObservation& source_observation =
+        child.source_build_preflight().value();
+    expect(
+        observation.is_blocked() && child.is_blocked() &&
+            source_observation.is_blocked() &&
+            !source_observation.production_preflight.has_value() &&
+            !source_observation.issues.empty() &&
+            source_observation.issues.front().reason ==
+                AurUpdatePreparationReason::
+                    GenericPreparationInconsistent,
+        "Dry-run preparation failure was flattened or failed open");
+    expect(
+        preparation_stub::supported_options_guard_history() ==
+                std::vector<bool>{false} &&
+            preparation_stub::strict_preference_read_history().empty() &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0 &&
+            preparation_stub::pkgdest_guard_history().empty() &&
+            preparation_stub::reviewed_state_preflight_call_count() == 0 &&
+            preparation_stub::database_call_count() == 0,
+        "Dry-run preparation blocker crossed saved preference or DB authority");
+    expect_no_system_aur_dry_run_mutation(
+        "system+AUR dry-run preparation blocker");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+}
+
+void test_system_aur_dry_run_world_is_not_reused_by_actual_world() {
+    reset_stubs();
+    const RootSpec dry_root{"dry-world-a-child", "dry-world-a-base"};
+    ProvidedDependency dry_provider =
+        ProvidedDependency::from_repository(
+            "world-a-repository", "dry-provider-a",
+            "dry-virtual", "dry-virtual=1", "1.0-1");
+    dry_provider.package_base = "dry-provider-a-base";
+    query_stub::set_repository_configuration(
+        PacmanRepositoryConfiguration{
+            PacmanDatabasePaths{"/world-a/root", "/world-a/database"},
+            {"world-a-repository"}});
+    query_stub::set_foreign_inventory(
+        inventory_for_roots(
+            {dry_root}, InstalledPackageReason::Explicit, "1.0-a"));
+    enqueue_exact_update_query({dry_root});
+    return_build_plan(
+        root_plan_with_selected_repository_provider(
+            dry_root, "dry-virtual", dry_provider),
+        {dry_root.package_name});
+
+    AppConfig dry_config;
+    dry_config.editor = "world-a-editor";
+    dry_config.provider_selection =
+        make_provider_selection_session(dry_config.no_confirm);
+    const std::shared_ptr<ProviderSelectionSession> dry_session =
+        dry_config.provider_selection;
+    SystemAurUpdateDryRunObservation dry_observation =
+        observe_system_aur_update_dry_run(
+            make_auto_system_aur_dry_run_request(), dry_config);
+    const FilteredAurUpdateObservation& dry_child =
+        require_system_aur_dry_run_child(
+            dry_observation, "system+AUR dry world A");
+    expect(
+        dry_observation.is_ready() && dry_child.is_ready() &&
+            dry_observation.foreign_inventory.size() == 1 &&
+            dry_observation.foreign_inventory.front().name ==
+                dry_root.package_name &&
+            dry_child.source_build_preflight()
+                ->production_preflight.has_value() &&
+            dry_child.source_build_preflight()
+                    ->production_preflight
+                    ->selected_repository_providers ==
+                std::vector<ProvidedDependency>{dry_provider} &&
+            dry_child.source_build_preflight()
+                    ->production_preflight->work_items.front()
+                    .request.checkout_name == dry_root.package_base,
+        "Dry world A did not retain its own current-state observation");
+    expect(
+        query_stub::repository_configuration_calls() == 1 &&
+            query_stub::inventory_calls() == 1 &&
+            query_stub::info_many_call_history() ==
+                std::vector<std::vector<std::string>>{
+                    {dry_root.package_name}} &&
+            preflight_stub::resolver_calls() ==
+                std::vector<std::vector<std::string>>{
+                    {dry_root.package_name}},
+        "Dry world A did not perform one exact current-state observation");
+    expect_no_system_aur_dry_run_mutation(
+        "system+AUR dry world A");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+
+    const RootSpec actual_root{
+        "actual-world-b-child", "actual-world-b-base"};
+    ProvidedDependency actual_provider =
+        ProvidedDependency::from_repository(
+            "world-b-repository", "actual-provider-b",
+            "actual-virtual", "actual-virtual=1", "1.0-1");
+    actual_provider.package_base = "actual-provider-b-base";
+    AppConfig actual_config;
+    actual_config.no_confirm = true;
+    actual_config.editor = "world-b-editor";
+    actual_config.provider_selection =
+        make_provider_selection_session(actual_config.no_confirm);
+    const std::shared_ptr<ProviderSelectionSession> actual_session =
+        actual_config.provider_selection;
+    expect(
+        dry_session && actual_session &&
+            dry_session.get() != actual_session.get(),
+        "Dry and actual invocations unexpectedly share a provider session");
+
+    repository_stub::set_after_success(
+        [actual_root, actual_provider, actual_config] {
+            query_stub::set_repository_configuration(
+                PacmanRepositoryConfiguration{
+                    PacmanDatabasePaths{
+                        "/world-b/root", "/world-b/database"},
+                    {"world-b-repository"}});
+            query_stub::set_foreign_inventory(
+                inventory_for_roots(
+                    {actual_root},
+                    InstalledPackageReason::Dependency, "1.0-b"));
+            enqueue_exact_update_query({actual_root});
+            return_build_plan(
+                root_plan_with_selected_repository_provider(
+                    actual_root, "actual-virtual",
+                    actual_provider),
+                {actual_root.package_name});
+            preparation_stub::set_database_paths(
+                PacmanDatabasePaths{
+                    "/actual/root", "/actual/database"});
+            execution_stub::enqueue_success(
+                expected_system_aur_execution(
+                    0, actual_root.package_name,
+                    actual_root.package_base,
+                    InstalledPackageReason::Dependency,
+                    actual_config,
+                    PacmanDatabasePaths{
+                        "/actual/root", "/actual/database"}),
+                actual_root.package_base,
+                selected_system_aur_child(
+                    actual_root.package_name,
+                    InstalledPackageReason::Dependency));
+        });
+
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture(
+            {"-Syu", "--needed"});
+    expect(
+        repository_stub::ordered_argument_calls().empty() &&
+            query_stub::repository_configuration_calls() == 1 &&
+            query_stub::inventory_calls() == 1 &&
+            query_stub::info_many_call_history() ==
+                std::vector<std::vector<std::string>>{
+                    {dry_root.package_name}} &&
+            preflight_stub::resolver_calls() ==
+                std::vector<std::vector<std::string>>{
+                    {dry_root.package_name}} &&
+            preparation_stub::database_call_count() == 1 &&
+            execution_stub::call_history().empty() &&
+            execution_stub::event_history().empty() &&
+            execution_stub::invocation_event_history().empty(),
+        "Actual outer preparation reused or reopened dry-run authority before repository success");
+    SystemAurUpdateOperationResult actual_result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), actual_config);
+    const FilteredAurUpdateExecutionResult& actual_child =
+        require_system_aur_child(
+            actual_result, "system+AUR fresh actual world B");
+
+    expect(
+        dry_observation.foreign_inventory.front().name ==
+                dry_root.package_name &&
+            dry_child.original_query_result()
+                    .plan.entries.front()
+                    .installed_name == dry_root.package_name &&
+            actual_result.foreign_inventory.inventory.size() == 1 &&
+            actual_result.foreign_inventory.inventory.front().name ==
+                actual_root.package_name &&
+            actual_result.foreign_inventory.inventory.front().version ==
+                "1.0-b" &&
+            actual_result.foreign_inventory.inventory.front().reason ==
+                InstalledPackageReason::Dependency &&
+            actual_child.query_result.plan.entries.front().installed_name ==
+                actual_root.package_name &&
+            actual_child.query_result.plan.entries.front().installed_version ==
+                "1.0-b" &&
+            actual_child.execution.has_value() &&
+            actual_child.execution
+                    ->selected_repository_provider_transaction
+                    .selected_providers ==
+                std::vector<ProvidedDependency>{actual_provider} &&
+            actual_child.execution
+                    ->selected_repository_provider_transaction
+                    .selected_providers !=
+                std::vector<ProvidedDependency>{dry_provider},
+        "Actual invocation reused dry-run inventory or AUR query evidence");
+    expect(
+        query_stub::repository_configuration_calls() == 2 &&
+            query_stub::inventory_calls() == 2 &&
+            query_stub::inventory_configuration_history().size() == 2 &&
+            query_stub::inventory_configuration_history()
+                    .at(0)
+                    .repository_names ==
+                std::vector<std::string>{"world-a-repository"} &&
+            query_stub::inventory_configuration_history()
+                    .at(1)
+                    .repository_names ==
+                std::vector<std::string>{"world-b-repository"} &&
+            query_stub::info_many_call_history() ==
+                std::vector<std::vector<std::string>>{
+                    {dry_root.package_name},
+                    {actual_root.package_name}} &&
+            preflight_stub::resolver_calls() ==
+                std::vector<std::vector<std::string>>{
+                    {dry_root.package_name},
+                    {actual_root.package_name}},
+        "Actual invocation did not freshly query world B after repository success");
+    expect(
+        repository_stub::ordered_argument_calls() ==
+                std::vector<std::vector<std::string>>{
+                    {"-Syu", "--needed"}} &&
+            execution_stub::call_history().size() == 1 &&
+            execution_stub::call_history().front().package_name ==
+                actual_root.package_name &&
+            execution_stub::call_history().front().package_base ==
+                actual_root.package_base &&
+            execution_stub::call_history()
+                    .front()
+                    .database_paths.root_dir == "/actual/root" &&
+            execution_stub::call_history()
+                    .front()
+                    .database_paths.db_path == "/actual/database" &&
+            execution_stub::call_history().front().config.editor ==
+                actual_config.editor &&
+            execution_stub::call_history()
+                    .front()
+                    .config.provider_selection.get() ==
+                actual_session.get() &&
+            execution_stub::call_history()
+                    .front()
+                    .config.provider_selection.get() !=
+                dry_session.get() &&
+            std::find(
+                execution_stub::invocation_event_history().begin(),
+                execution_stub::invocation_event_history().end(),
+                execution_stub::InvocationEventKind::
+                    RepositoryProviderTransaction) !=
+                execution_stub::invocation_event_history().end(),
+        "Actual invocation reused dry-run source/session preparation");
+    expect(
+        actual_result.is_success() &&
+            actual_result.package_state_change() ==
+                PackageStateChange::Changed &&
+            preparation_stub::strict_preference_read_history().empty() &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0 &&
+            preparation_stub::database_call_count() == 2,
+        "Fresh actual world B did not complete with Ignore semantics");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+}
+
+void test_system_aur_repository_failure_stops_all_later_authority() {
+    reset_stubs();
+    const AppConfig config;
+
+    AutoSystemUpdateRouteCandidate incompatible_candidate{
+        IncompatibleAutoSystemUpdatePacmanArguments{
+            AutoSystemUpdatePacmanIncompatibilityKind::UnsupportedOption,
+            "--config"},
+        {"-Syu", "--config", "fixture.conf"}};
+    expect(
+        !make_compatible_system_aur_update_request(
+             std::move(incompatible_candidate))
+             .has_value(),
+        "Incompatible Auto request entered the coordinator capability");
+
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture(
+            {"-Syu", "--needed"});
+    expect(
+        repository_stub::ordered_argument_calls().empty(),
+        "System+AUR preparation executed the repository request");
+    expect_no_system_aur_later_authority(
+        "system+AUR outer preparation");
+
+    repository_stub::set_command_exit_status(37);
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+
+    expect(
+        repository_stub::ordered_argument_calls() ==
+                std::vector<std::vector<std::string>>{
+                    {"-Syu", "--needed"}} &&
+            result.repository.ordered_pacman_args ==
+                std::vector<std::string>{"-Syu", "--needed"} &&
+            result.repository.command_exit_status ==
+                std::optional<int>{37},
+        "Repository failure lost exact ordered request/exit evidence");
+    expect(
+        result.repository.status ==
+                SystemAurUpdateRepositoryPhaseStatus::Failed &&
+            result.foreign_inventory.status ==
+                SystemAurUpdateForeignInventoryPhaseStatus::NotAttempted &&
+            result.foreign_inventory.not_attempted_reason ==
+                std::optional<SystemAurUpdateNotAttemptedReason>{
+                    SystemAurUpdateNotAttemptedReason::RepositoryFailure} &&
+            result.query.status ==
+                SystemAurUpdateQueryPhaseStatus::NotAttempted &&
+            result.aur.status ==
+                SystemAurUpdateAurPhaseStatus::NotAttempted &&
+            result.aur.not_attempted_reason ==
+                std::optional<SystemAurUpdateNotAttemptedReason>{
+                    SystemAurUpdateNotAttemptedReason::RepositoryFailure},
+        "Repository failure did not retain typed later NotAttempted phases");
+    expect(
+        result.status ==
+                SystemAurUpdateOperationStatus::StoppedOnRepositoryFailure &&
+            !result.is_success() &&
+            !result.has_partial_completion() &&
+            result.has_not_attempted_phase() &&
+            !result.has_inconsistency(),
+        "Repository failure aggregate semantics differ");
+    expect_no_system_aur_later_authority(
+        "system+AUR repository failure");
+
+    result.foreign_inventory.inventory.push_back(
+        InstalledPackageMetadata{
+            "impossible-post-failure-inventory",
+            "1.0-1",
+            InstalledPackageReason::Explicit});
+    SystemAurUpdateOperationResult malformed =
+        reduce_system_aur_update_result(std::move(result));
+    expect(
+        malformed.status ==
+                SystemAurUpdateOperationStatus::InconsistentResult &&
+            malformed.has_inconsistency() &&
+            malformed.foreign_inventory.inventory.size() == 1,
+        "Repository failure tail accepted or erased later inventory payload");
+}
+
+void test_system_aur_success_without_aur_updates_is_not_false_noop() {
+    reset_stubs();
+    query_stub::set_foreign_inventory(
+        ForeignPackageInventory{{"pre-repository-foreign",
+                                 "1.0-1",
+                                 InstalledPackageReason::Explicit}});
+    repository_stub::set_after_success([] {
+        require_no_pre_repository_authority();
+        query_stub::set_foreign_inventory({});
+    });
+
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    expect_no_system_aur_later_authority(
+        "system+AUR no-update preparation");
+
+    const AppConfig config;
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    const FilteredAurUpdateExecutionResult& child =
+        require_system_aur_child(result, "system+AUR no updates");
+
+    expect(
+        query_stub::repository_configuration_calls() == 1 &&
+            query_stub::inventory_calls() == 1 &&
+            query_stub::info_many_call_history().empty(),
+        "No-update path did not obtain exactly one fresh empty inventory");
+    expect(
+        result.repository.status ==
+                SystemAurUpdateRepositoryPhaseStatus::Completed &&
+            result.foreign_inventory.status ==
+                SystemAurUpdateForeignInventoryPhaseStatus::Completed &&
+            result.foreign_inventory.inventory.empty() &&
+            result.query.status ==
+                SystemAurUpdateQueryPhaseStatus::Completed &&
+            result.aur.status ==
+                SystemAurUpdateAurPhaseStatus::NoUpdates &&
+            child.reduced_operation_result.status ==
+                AurUpdateOperationStatus::NoUpdates,
+        "No-update path lost completed phase evidence");
+    expect(
+        result.is_success() &&
+            result.status == SystemAurUpdateOperationStatus::Completed &&
+            result.package_state_change() == PackageStateChange::Unknown &&
+            !result.has_partial_completion() &&
+            !result.has_not_attempted_phase(),
+        "Repository success + AUR NoUpdates was flattened to a false no-op or failure");
+    expect_no_mutation("system+AUR no updates");
+}
+
+void test_system_aur_inventory_failure_is_partial() {
+    reset_stubs();
+    query_stub::set_foreign_inventory_failure(PackageMetadataFailure{
+        PackageMetadataErrorCode::QueryFailed,
+        "fixture foreign inventory failure"});
+    const AppConfig config;
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+
+    expect(
+        result.repository.status ==
+                SystemAurUpdateRepositoryPhaseStatus::Completed &&
+            result.foreign_inventory.status ==
+                SystemAurUpdateForeignInventoryPhaseStatus::Failed &&
+            result.foreign_inventory.failure.has_value() &&
+            result.query.status ==
+                SystemAurUpdateQueryPhaseStatus::NotAttempted &&
+            result.query.not_attempted_reason ==
+                std::optional<SystemAurUpdateNotAttemptedReason>{
+                    SystemAurUpdateNotAttemptedReason::
+                        ForeignInventoryFailure} &&
+            result.aur.status ==
+                SystemAurUpdateAurPhaseStatus::NotAttempted &&
+            result.aur.not_attempted_reason ==
+                std::optional<SystemAurUpdateNotAttemptedReason>{
+                    SystemAurUpdateNotAttemptedReason::
+                        ForeignInventoryFailure},
+        "Inventory failure did not retain typed failure/NotAttempted evidence");
+    expect(
+        !result.is_success() && result.has_partial_completion() &&
+            result.has_not_attempted_phase() &&
+            result.has_query_failure() &&
+            result.status ==
+                SystemAurUpdateOperationStatus::StoppedBeforeAurExecution,
+        "Inventory failure aggregate semantics differ");
+    expect(
+        query_stub::repository_configuration_calls() == 1 &&
+            query_stub::inventory_calls() == 1 &&
+            query_stub::info_many_call_history().empty() &&
+            preflight_stub::resolver_call_count() == 0 &&
+            execution_stub::call_history().empty(),
+        "Inventory failure reached AUR query/preflight/execution");
+
+    result.query.query_result = AurUpdateQueryResult{};
+    SystemAurUpdateOperationResult malformed =
+        reduce_system_aur_update_result(std::move(result));
+    expect(
+        malformed.status ==
+                SystemAurUpdateOperationStatus::InconsistentResult &&
+            malformed.has_inconsistency() &&
+            malformed.query.query_result.has_value(),
+        "Inventory failure tail accepted or erased later query payload");
+}
+
+void test_system_aur_query_failure_is_retained() {
+    reset_stubs();
+    query_stub::set_foreign_inventory({{"query-failed",
+                                        "1.0-1",
+                                        InstalledPackageReason::Explicit}});
+    query_stub::enqueue_info_many_failure(
+        "fixture coordinator AUR transport failure");
+    const AppConfig config;
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    const FilteredAurUpdateExecutionResult& child =
+        require_system_aur_child(result, "system+AUR query failure");
+
+    expect(
+        result.query.status ==
+                SystemAurUpdateQueryPhaseStatus::Failed &&
+            result.query.query_result.has_value() &&
+            result.query.query_result->recoverable_failures.size() == 1 &&
+            child.has_query_failure() &&
+            child.query_result.recoverable_failures.front().diagnostic ==
+                "fixture coordinator AUR transport failure" &&
+            result.aur.status ==
+                SystemAurUpdateAurPhaseStatus::BlockedBeforeExecution,
+        "Recoverable AUR query failure was flattened or lost");
+    expect(
+        !result.is_success() && result.has_partial_completion() &&
+            result.has_query_failure() &&
+            result.status ==
+                SystemAurUpdateOperationStatus::StoppedBeforeAurExecution &&
+            result.stopped_phase ==
+                SystemAurUpdateOperationPhase::AurQuery,
+        "AUR query failure aggregate semantics differ");
+    expect_no_mutation("system+AUR query failure");
+    query_stub::require_script_consumed();
+}
+
+void test_system_aur_fatal_query_failure_stops_before_preflight() {
+    reset_stubs();
+    query_stub::set_foreign_inventory({{"fatal-query",
+                                        "1.0-1",
+                                        InstalledPackageReason::Explicit}});
+    query_stub::enqueue_info_many_result({{"fatal-query",
+                                           package_info("fatal-query", "fatal-query-base")}});
+    query_stub::enqueue_vercmp_failure(
+        "fixture fatal version comparison failure");
+
+    const AppConfig config;
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    expect(
+        result.repository.status ==
+                SystemAurUpdateRepositoryPhaseStatus::Completed &&
+            result.foreign_inventory.status ==
+                SystemAurUpdateForeignInventoryPhaseStatus::Completed &&
+            result.query.status ==
+                SystemAurUpdateQueryPhaseStatus::Failed &&
+            !result.query.query_result.has_value() &&
+            result.query.diagnostic ==
+                std::optional<std::string>{
+                    "fixture fatal version comparison failure"} &&
+            result.aur.status ==
+                SystemAurUpdateAurPhaseStatus::NotAttempted &&
+            result.aur.not_attempted_reason ==
+                std::optional<SystemAurUpdateNotAttemptedReason>{
+                    SystemAurUpdateNotAttemptedReason::AurQueryFailure},
+        "Fatal AUR query failure lost typed phase/NotAttempted evidence");
+    expect(
+        result.status ==
+                SystemAurUpdateOperationStatus::StoppedBeforeAurExecution &&
+            result.stopped_phase ==
+                SystemAurUpdateOperationPhase::AurQuery &&
+            result.has_partial_completion() &&
+            result.has_not_attempted_phase() &&
+            result.has_query_failure() &&
+            !result.is_success() &&
+            preflight_stub::resolver_call_count() == 0 &&
+            preparation_stub::database_call_count() == 0 &&
+            execution_stub::call_history().empty(),
+        "Fatal AUR query failure reached later authority or failed open");
+    query_stub::require_script_consumed();
+}
+
+void test_system_aur_requires_check_stays_blocked() {
+    reset_stubs();
+    query_stub::set_foreign_inventory({{"manual-check-git",
+                                        "1.0-1",
+                                        InstalledPackageReason::Explicit}});
+    query_stub::enqueue_info_many_result({{"manual-check-git",
+                                           package_info(
+                                               "manual-check-git", "manual-check-base", "1.0-1")}});
+    query_stub::enqueue_vercmp_result("0");
+
+    AppConfig config;
+    config.no_confirm = true;
+    config.provider_selection =
+        make_provider_selection_session(config.no_confirm);
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    const FilteredAurUpdateExecutionResult& child =
+        require_system_aur_child(result, "system+AUR RequiresCheck");
+
+    expect(
+        result.repository.status ==
+                SystemAurUpdateRepositoryPhaseStatus::Completed &&
+            result.aur.status ==
+                SystemAurUpdateAurPhaseStatus::BlockedBeforeExecution &&
+            child.reduced_operation_result.status ==
+                AurUpdateOperationStatus::BlockedBeforeExecution &&
+            child.preflight.targets.size() == 1 &&
+            has_preflight_issue(
+                child.preflight.targets.front(),
+                AurUpdateExecutionReason::DevelRequiresCheck),
+        "RequiresCheck was flattened or bypassed after repository success");
+    expect(
+        !result.is_success() && result.has_partial_completion() &&
+            execution_stub::call_history().empty() &&
+            preparation_stub::strict_preference_read_history().empty(),
+        "RequiresCheck reached mutation or saved preference IO");
+    query_stub::require_script_consumed();
+}
+
+void test_system_aur_ambiguous_provider_is_not_auto_selected() {
+    reset_stubs();
+    const RootSpec root{"ambiguous-root", "ambiguous-root"};
+    query_stub::set_foreign_inventory(
+        inventory_for_roots({root}));
+    enqueue_exact_update_query({root});
+    BuildPlan plan = root_plan({root});
+    plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+        root.package_name,
+        root.package_base,
+        "virtual-dependency",
+        PackageRole::RuntimeDependency,
+        DependencyKind::AmbiguousProvider,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt});
+    plan.ambiguous_providers.push_back(AmbiguousProvidedDependency{
+        "virtual-dependency",
+        {ProvidedDependency::from_repository(
+             "extra", "provider-a"),
+         ProvidedDependency::from_aur("provider-b")}});
+    return_build_plan(std::move(plan), {root.package_name});
+
+    AppConfig config;
+    config.no_confirm = true;
+    config.provider_selection =
+        make_provider_selection_session(config.no_confirm);
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    const FilteredAurUpdateExecutionResult& child =
+        require_system_aur_child(result, "system+AUR ambiguous provider");
+
+    expect(
+        result.aur.status ==
+                SystemAurUpdateAurPhaseStatus::BlockedBeforeExecution &&
+            child.preflight.targets.size() == 1 &&
+            has_preflight_issue(
+                child.preflight.targets.front(),
+                AurUpdateExecutionReason::AmbiguousProvider),
+        "Ambiguous provider did not remain a typed blocker");
+    expect(
+        preflight_stub::resolver_selection_callback_presence() ==
+                std::vector<bool>{true} &&
+            execution_stub::call_history().empty() &&
+            result.has_partial_completion(),
+        "--noconfirm bypassed ambiguity or lost repository partial completion");
+    query_stub::require_script_consumed();
+}
+
+void test_system_aur_preparation_failure_is_partial() {
+    reset_stubs();
+    const RootSpec root{"preparation-failed", "preparation-failed"};
+    query_stub::set_foreign_inventory(
+        inventory_for_roots({root}));
+    enqueue_exact_update_query({root});
+    return_build_plan(root_plan({root}), {root.package_name});
+    preparation_stub::fail_supported_options_guard(
+        "fixture coordinator preparation failure");
+
+    const AppConfig config;
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    const FilteredAurUpdateExecutionResult& child =
+        require_system_aur_child(result, "system+AUR preparation failure");
+
+    expect(
+        result.aur.status ==
+                SystemAurUpdateAurPhaseStatus::BlockedBeforeExecution &&
+            child.reduced_operation_result.status ==
+                AurUpdateOperationStatus::BlockedBeforeExecution &&
+            !child.reduced_operation_result.preparation_issues.empty() &&
+            !result.is_success() &&
+            result.has_partial_completion(),
+        "AUR preparation failure was flattened after repository success");
+    expect(
+        preparation_stub::supported_options_guard_history() ==
+                std::vector<bool>{false} &&
+            preparation_stub::strict_preference_read_history().empty() &&
+            execution_stub::call_history().empty(),
+        "Preparation failure crossed Ignore or mutation boundaries");
+    query_stub::require_script_consumed();
+}
+
+void test_system_aur_unexpected_preparation_exception_keeps_phase() {
+    reset_stubs();
+    const RootSpec root{"preparation-exception", "preparation-exception"};
+    query_stub::set_foreign_inventory(
+        inventory_for_roots({root}));
+    enqueue_exact_update_query({root});
+    preflight_stub::set_resolver_handler(
+        [](const std::vector<std::string>&) -> BuildPlan {
+            throw std::logic_error(
+                "fixture unexpected filtered preparation exception");
+        });
+
+    const AppConfig config;
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    expect(
+        result.status ==
+                SystemAurUpdateOperationStatus::InconsistentResult &&
+            result.stopped_phase ==
+                SystemAurUpdateOperationPhase::AurPreparation &&
+            result.aur.status ==
+                SystemAurUpdateAurPhaseStatus::InconsistentResult &&
+            result.aur.diagnostic ==
+                std::optional<std::string>{
+                    "fixture unexpected filtered preparation exception"} &&
+            !result.aur.operation_result.has_value() &&
+            result.has_inconsistency() &&
+            result.has_partial_completion() &&
+            !result.is_success() &&
+            execution_stub::call_history().empty(),
+        "Unexpected filtered preparation exception lost its typed phase or failed open");
+    query_stub::require_script_consumed();
+}
+
+void test_system_aur_unexpected_execution_exception_keeps_phase() {
+    reset_stubs();
+    const RootSpec root{"execution-exception", "execution-exception"};
+    query_stub::set_foreign_inventory(
+        inventory_for_roots({root}));
+    enqueue_exact_update_query({root});
+    return_build_plan(root_plan({root}), {root.package_name});
+    execution_stub::fail_cache_activation(TrustedCacheFailure{
+        TrustedCacheStage::RootRevalidation,
+        TrustedCacheErrorCode::ConcurrentReplacement,
+        std::nullopt});
+
+    const AppConfig config;
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    expect(
+        result.status ==
+                SystemAurUpdateOperationStatus::InconsistentResult &&
+            result.stopped_phase ==
+                SystemAurUpdateOperationPhase::AurExecution &&
+            result.aur.status ==
+                SystemAurUpdateAurPhaseStatus::InconsistentResult &&
+            result.aur.diagnostic.has_value() &&
+            !result.aur.diagnostic->empty() &&
+            !result.aur.operation_result.has_value() &&
+            result.has_inconsistency() &&
+            result.has_partial_completion() &&
+            !result.is_success() &&
+            execution_stub::call_history().empty() &&
+            execution_stub::invocation_event_history() ==
+                std::vector<execution_stub::InvocationEventKind>{
+                    execution_stub::InvocationEventKind::CacheActivation},
+        "Unexpected filtered execution exception lost its typed phase or failed open");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+}
+
+void test_system_aur_success_uses_only_post_repository_inventory_and_ignore() {
+    reset_stubs();
+    const RootSpec post_repository_root{
+        "foreign-b-child", "foreign-b-base"};
+    query_stub::set_repository_configuration(
+        PacmanRepositoryConfiguration{
+            PacmanDatabasePaths{"/before/root", "/before/database"},
+            {"before-repository"}});
+    query_stub::set_foreign_inventory({{"foreign-a",
+                                        "9.0-1",
+                                        InstalledPackageReason::Explicit}});
+
+    AppConfig config;
+    config.no_confirm = true;
+    config.provider_selection =
+        make_provider_selection_session(config.no_confirm);
+    repository_stub::set_after_success([post_repository_root, config] {
+        require_no_pre_repository_authority();
+        query_stub::set_repository_configuration(
+            PacmanRepositoryConfiguration{
+                PacmanDatabasePaths{
+                    "/after/root", "/after/database"},
+                {"after-repository"}});
+        query_stub::set_foreign_inventory({{post_repository_root.package_name,
+                                            "1.0-7",
+                                            InstalledPackageReason::Dependency}});
+        preparation_stub::set_database_paths(
+            PacmanDatabasePaths{"/stub/root", "/stub/database"});
+        enqueue_exact_update_query({post_repository_root});
+        return_build_plan(
+            root_plan({post_repository_root}),
+            {post_repository_root.package_name});
+        preparation_stub::enqueue_source_preference_result(
+            post_repository_root.package_name,
+            SourcePreferenceLoaded{
+                .entry_path = "/stub/preferences/foreign-b-child",
+                .environment = SourceBuildEnvironment{
+                    std::vector<SourceEnvironmentAssignment>{
+                        {"CFLAGS", "-O3"}}},
+                .warnings = {"must remain unread"},
+                .raw_contents = {},
+                .identity = std::nullopt,
+            });
+        preparation_stub::enqueue_source_preference_result(
+            post_repository_root.package_base,
+            SourcePreferenceFailure{
+                SourcePreferenceFailureKind::ReadFailed,
+                "/stub/preferences/foreign-b-base",
+                std::make_error_code(std::errc::io_error),
+                std::nullopt,
+                "must remain unread"});
+        execution_stub::enqueue_success(
+            expected_system_aur_execution(
+                0,
+                post_repository_root.package_name,
+                post_repository_root.package_base,
+                InstalledPackageReason::Dependency,
+                config),
+            post_repository_root.package_base,
+            selected_system_aur_child(
+                post_repository_root.package_name,
+                InstalledPackageReason::Dependency));
+    });
+
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture(
+            {"-Syu", "--needed"});
+    expect_no_system_aur_later_authority(
+        "system+AUR fresh inventory preparation");
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    const FilteredAurUpdateExecutionResult& child =
+        require_system_aur_child(result, "system+AUR fresh inventory");
+
+    expect(
+        repository_stub::ordered_argument_calls() ==
+                std::vector<std::vector<std::string>>{
+                    {"-Syu", "--needed"}} &&
+            repository_stub::no_confirm_calls() ==
+                std::vector<bool>{true},
+        "Repository phase lost exact ordered args or noconfirm policy");
+    expect(
+        query_stub::repository_configuration_calls() == 1 &&
+            query_stub::inventory_calls() == 1 &&
+            query_stub::inventory_configuration_history().size() == 1 &&
+            query_stub::inventory_configuration_history()
+                    .front()
+                    .repository_names ==
+                std::vector<std::string>{"after-repository"} &&
+            query_stub::info_many_call_history() ==
+                std::vector<std::vector<std::string>>{
+                    {post_repository_root.package_name}},
+        "Fresh inventory/query did not use post-repository configuration and identity");
+    expect(
+        result.foreign_inventory.inventory.size() == 1 &&
+            result.foreign_inventory.inventory.front().name ==
+                post_repository_root.package_name &&
+            result.foreign_inventory.inventory.front().version ==
+                "1.0-7" &&
+            result.foreign_inventory.inventory.front().reason ==
+                InstalledPackageReason::Dependency &&
+            child.query_result.plan.entries.size() == 1 &&
+            child.query_result.plan.entries.front().installed_name ==
+                post_repository_root.package_name &&
+            child.query_result.plan.entries.front().installed_version ==
+                "1.0-7" &&
+            child.query_result.plan.entries.front().install_reason ==
+                InstalledPackageReason::Dependency &&
+            child.query_result.plan.entries.front().aur_package.has_value() &&
+            child.query_result.plan.entries.front()
+                    .aur_package->package_base ==
+                post_repository_root.package_base,
+        "Fresh inventory lost installed version/reason or exact AUR PackageBase identity");
+    expect(
+        preparation_stub::strict_preference_read_history().empty() &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0 &&
+            preparation_stub::database_call_count() == 1 &&
+            preparation_stub::reviewed_state_preflight_call_count() == 1 &&
+            preparation_stub::pkgdest_guard_history().size() == 2 &&
+            std::all_of(
+                preparation_stub::pkgdest_guard_history().begin(),
+                preparation_stub::pkgdest_guard_history().end(),
+                [](const SourceBuildEnvironment& environment) {
+                    return environment.ordered_assignments.empty();
+                }),
+        "Coordinator did not preserve Ignore zero-I/O and downstream safety");
+    expect(
+        child.upgrade_all_plan.explicit_sources.empty() &&
+            execution_stub::call_history().size() == 1 &&
+            !execution_stub::call_history().front().needed &&
+            execution_stub::call_history()
+                    .front()
+                    .ordered_required_targets.front()
+                    .desired_reason ==
+                DesiredInstallReason::Dependency,
+        "NoExplicit/--needed/install-reason policy changed in AUR runner");
+    expect(
+        result.is_success() &&
+            result.package_state_change() == PackageStateChange::Changed &&
+            child.reduced_operation_result.targets.front().status ==
+                AurUpdateOperationTargetStatus::Updated,
+        "Successful system+AUR update did not preserve child success");
+
+    const StrictSourcePreferenceResult unread_failure =
+        read_source_preference_strict(
+            post_repository_root.package_base);
+    expect(
+        std::holds_alternative<SourcePreferenceFailure>(
+            unread_failure) &&
+            preparation_stub::strict_preference_read_history() ==
+                std::vector<std::string>{
+                    post_repository_root.package_base},
+        "Ignore consumed the injected PackageBase preference failure");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+}
+
+void test_system_aur_work_item_failure_preserves_inner_partial() {
+    reset_stubs();
+    const std::vector<RootSpec> roots{
+        {"first-updated", "first-updated"},
+        {"middle-failed", "middle-failed"},
+        {"last-not-attempted", "last-not-attempted"}};
+    query_stub::set_foreign_inventory(
+        inventory_for_roots(roots));
+    enqueue_exact_update_query(roots);
+    return_build_plan(root_plan(roots),
+                      {roots[0].package_name,
+                       roots[1].package_name,
+                       roots[2].package_name});
+    const AppConfig config;
+    execution_stub::enqueue_success(
+        expected_system_aur_execution(
+            0, roots[0].package_name, roots[0].package_base,
+            InstalledPackageReason::Explicit, config),
+        roots[0].package_base,
+        selected_system_aur_child(
+            roots[0].package_name,
+            InstalledPackageReason::Explicit));
+    execution_stub::enqueue_phase_failure(
+        expected_system_aur_execution(
+            1, roots[1].package_name, roots[1].package_base,
+            InstalledPackageReason::Explicit, config),
+        SeparatedPackageBaseSourceBuildFailurePhase::Build,
+        "fixture coordinator work-item failure");
+
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    const FilteredAurUpdateExecutionResult& child =
+        require_system_aur_child(result, "system+AUR work-item failure");
+
+    expect(
+        result.aur.status ==
+                SystemAurUpdateAurPhaseStatus::StoppedOnWorkItemFailure &&
+            result.status ==
+                SystemAurUpdateOperationStatus::StoppedOnAurFailure &&
+            result.has_partial_completion() &&
+            result.has_not_attempted_phase() &&
+            !result.is_success(),
+        "AUR work-item failure aggregate semantics differ");
+    expect(
+        child.reduced_operation_result.targets.size() == 3 &&
+            child.reduced_operation_result.targets[0].status ==
+                AurUpdateOperationTargetStatus::Updated &&
+            child.reduced_operation_result.targets[1].status ==
+                AurUpdateOperationTargetStatus::Failed &&
+            child.reduced_operation_result.targets[2].status ==
+                AurUpdateOperationTargetStatus::NotAttempted &&
+            child.reduced_operation_result.execution_work_items.size() ==
+                3 &&
+            child.reduced_operation_result.execution_work_items[0].status ==
+                AurUpdateWorkItemExecutionStatus::Updated &&
+            child.reduced_operation_result.execution_work_items[1].status ==
+                AurUpdateWorkItemExecutionStatus::Failed &&
+            child.reduced_operation_result.execution_work_items[2].status ==
+                AurUpdateWorkItemExecutionStatus::NotAttempted,
+        "Updated/Failed/NotAttempted inner partial was flattened");
+    expect(
+        execution_stub::call_history().size() == 2,
+        "AUR work-item failure did not fail fast");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+}
+
+void test_system_aur_cleanup_failure_preserves_child_phase() {
+    reset_stubs();
+    const std::vector<RootSpec> roots{
+        {"cleanup-failed", "cleanup-failed"},
+        {"cleanup-pending", "cleanup-pending"}};
+    query_stub::set_foreign_inventory(
+        inventory_for_roots(roots));
+    enqueue_exact_update_query(roots);
+    return_build_plan(
+        root_plan(roots),
+        {roots[0].package_name, roots[1].package_name});
+    const AppConfig config;
+    execution_stub::enqueue_cleanup_failure(
+        expected_system_aur_execution(
+            0, roots[0].package_name, roots[0].package_base,
+            InstalledPackageReason::Explicit, config),
+        roots[0].package_base,
+        selected_system_aur_child(
+            roots[0].package_name,
+            InstalledPackageReason::Explicit),
+        {},
+        "fixture coordinator cleanup failure");
+
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    const FilteredAurUpdateExecutionResult& child =
+        require_system_aur_child(result, "system+AUR cleanup failure");
+
+    expect(
+        result.aur.status ==
+                SystemAurUpdateAurPhaseStatus::
+                    StoppedAfterCleanupFailure &&
+            result.status ==
+                SystemAurUpdateOperationStatus::
+                    StoppedAfterAurCleanupFailure &&
+            result.has_cleanup_failure() &&
+            result.has_partial_completion() &&
+            result.has_not_attempted_phase(),
+        "Cleanup child failure aggregate semantics differ");
+    expect(
+        child.reduced_operation_result.targets[0].status ==
+                AurUpdateOperationTargetStatus::UpdatedCleanupFailed &&
+            child.reduced_operation_result.targets[1].status ==
+                AurUpdateOperationTargetStatus::NotAttempted &&
+            child.reduced_operation_result.execution_work_items[0].status ==
+                AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed &&
+            child.reduced_operation_result.execution_work_items[1].status ==
+                AurUpdateWorkItemExecutionStatus::NotAttempted,
+        "Cleanup/NotAttempted child phase information was flattened");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+}
+
+void test_system_aur_reducer_fails_closed_on_malformed_child() {
+    reset_stubs();
+    repository_stub::set_after_success([] {
+        require_no_pre_repository_authority();
+        query_stub::set_foreign_inventory({});
+    });
+    const AppConfig config;
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    expect(result.is_success(),
+           "Malformed-child fixture did not start from success");
+
+    const std::size_t repository_call_count =
+        repository_stub::ordered_argument_calls().size();
+    SystemAurUpdateOperationResult replay =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    expect(
+        replay.status ==
+                SystemAurUpdateOperationStatus::InconsistentResult &&
+            replay.repository.status ==
+                SystemAurUpdateRepositoryPhaseStatus::NotAttempted &&
+            replay.repository.not_attempted_reason ==
+                std::optional<SystemAurUpdateNotAttemptedReason>{
+                    SystemAurUpdateNotAttemptedReason::
+                        PriorAggregateInconsistency} &&
+            replay.foreign_inventory.not_attempted_reason ==
+                replay.repository.not_attempted_reason &&
+            replay.query.not_attempted_reason ==
+                replay.repository.not_attempted_reason &&
+            replay.aur.not_attempted_reason ==
+                replay.repository.not_attempted_reason &&
+            repository_stub::ordered_argument_calls().size() ==
+                repository_call_count,
+        "Consumed coordinator capability did not retain PriorInconsistency without replaying repository work");
+
+    result.aur.operation_result->reduced_operation_result.status =
+        AurUpdateOperationStatus::InconsistentResult;
+    SystemAurUpdateOperationResult malformed =
+        reduce_system_aur_update_result(std::move(result));
+    expect(
+        malformed.status ==
+                SystemAurUpdateOperationStatus::InconsistentResult &&
+            malformed.aur.status ==
+                SystemAurUpdateAurPhaseStatus::InconsistentResult &&
+            malformed.has_inconsistency() &&
+            malformed.has_partial_completion() &&
+            !malformed.is_success() &&
+            malformed.aur.operation_result->reduced_operation_result.status ==
+                AurUpdateOperationStatus::InconsistentResult,
+        "Malformed child result failed open or was flattened");
+}
+
+void test_system_aur_reducer_correlates_exact_query_snapshot() {
+    reset_stubs();
+    const RootSpec root{"query-correlated", "query-correlated-base"};
+    query_stub::set_foreign_inventory(
+        inventory_for_roots({root}));
+    enqueue_exact_update_query({root});
+    return_build_plan(root_plan({root}), {root.package_name});
+    const AppConfig config;
+    execution_stub::enqueue_success(
+        expected_system_aur_execution(
+            0, root.package_name, root.package_base,
+            InstalledPackageReason::Explicit, config),
+        root.package_base,
+        selected_system_aur_child(
+            root.package_name,
+            InstalledPackageReason::Explicit));
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    expect(result.is_success(),
+           "Query-correlation fixture did not start from success");
+
+    result.query.query_result->plan.entries.front()
+        .aur_package->package_base = "forged-outer-base";
+    SystemAurUpdateOperationResult inconsistent =
+        reduce_system_aur_update_result(std::move(result));
+    expect(
+        inconsistent.status ==
+                SystemAurUpdateOperationStatus::InconsistentResult &&
+            inconsistent.aur.status ==
+                SystemAurUpdateAurPhaseStatus::InconsistentResult &&
+            inconsistent.has_inconsistency() &&
+            inconsistent.has_partial_completion() &&
+            !inconsistent.is_success() &&
+            inconsistent.query.query_result->plan.entries.front()
+                    .aur_package->package_base ==
+                "forged-outer-base" &&
+            inconsistent.aur.operation_result->query_result.plan.entries
+                    .front()
+                    .aur_package->package_base ==
+                root.package_base,
+        "Outer/child query snapshot mismatch failed open or lost evidence");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+}
+
+void test_system_aur_reducer_correlates_inventory_and_query() {
+    reset_stubs();
+    repository_stub::set_after_success([] {
+        require_no_pre_repository_authority();
+        query_stub::set_foreign_inventory({});
+    });
+    const AppConfig config;
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    expect(result.is_success(),
+           "Inventory-correlation fixture did not start from success");
+
+    result.foreign_inventory.inventory.push_back(
+        InstalledPackageMetadata{
+            "stale-pre-repository-foreign",
+            "9.0-1",
+            InstalledPackageReason::Dependency});
+    SystemAurUpdateOperationResult inconsistent =
+        reduce_system_aur_update_result(std::move(result));
+    expect(
+        inconsistent.status ==
+                SystemAurUpdateOperationStatus::InconsistentResult &&
+            inconsistent.has_inconsistency() &&
+            inconsistent.has_partial_completion() &&
+            !inconsistent.is_success() &&
+            inconsistent.foreign_inventory.inventory.front().name ==
+                "stale-pre-repository-foreign" &&
+            inconsistent.query.query_result->plan.entries.empty(),
+        "Fresh inventory/query mismatch failed open or lost evidence");
+}
+
+void test_system_aur_reducer_correlates_compatible_request() {
+    reset_stubs();
+    repository_stub::set_after_success([] {
+        require_no_pre_repository_authority();
+        query_stub::set_foreign_inventory({});
+    });
+    const AppConfig config;
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    expect(result.is_success(),
+           "Repository-request correlation fixture did not start from success");
+
+    result.repository.ordered_pacman_args.clear();
+    SystemAurUpdateOperationResult inconsistent =
+        reduce_system_aur_update_result(std::move(result));
+    expect(
+        inconsistent.status ==
+                SystemAurUpdateOperationStatus::InconsistentResult &&
+            inconsistent.has_inconsistency() &&
+            inconsistent.has_partial_completion() &&
+            !inconsistent.is_success() &&
+            inconsistent.repository.ordered_pacman_args.empty() &&
+            inconsistent.repository.compatible_request
+                    ->ordered_pacman_args() ==
+                std::vector<std::string>{"-Syu"},
+        "Compatible request/executed argv mismatch failed open or lost evidence");
+}
+
+void test_system_aur_reducer_preserves_contradictory_not_attempted_reason() {
+    reset_stubs();
+    repository_stub::set_after_success([] {
+        require_no_pre_repository_authority();
+        query_stub::set_foreign_inventory({});
+    });
+    const AppConfig config;
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    expect(result.is_success(),
+           "NotAttempted-reason fixture did not start from success");
+
+    result.aur.not_attempted_reason =
+        SystemAurUpdateNotAttemptedReason::RepositoryFailure;
+    SystemAurUpdateOperationResult inconsistent =
+        reduce_system_aur_update_result(std::move(result));
+    expect(
+        inconsistent.status ==
+                SystemAurUpdateOperationStatus::InconsistentResult &&
+            inconsistent.aur.status ==
+                SystemAurUpdateAurPhaseStatus::InconsistentResult &&
+            inconsistent.has_inconsistency() &&
+            inconsistent.aur.not_attempted_reason ==
+                std::optional<SystemAurUpdateNotAttemptedReason>{
+                    SystemAurUpdateNotAttemptedReason::RepositoryFailure} &&
+            !inconsistent.is_success(),
+        "Contradictory AUR NotAttempted reason was erased or failed open");
+}
+
+void test_system_aur_reducer_rejects_contradictory_child_phase_status() {
+    reset_stubs();
+    repository_stub::set_after_success([] {
+        require_no_pre_repository_authority();
+        query_stub::set_foreign_inventory({});
+    });
+    const AppConfig config;
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    expect(result.is_success(),
+           "Contradictory child-status fixture did not start from success");
+
+    result.aur.status =
+        SystemAurUpdateAurPhaseStatus::StoppedOnWorkItemFailure;
+    SystemAurUpdateOperationResult inconsistent =
+        reduce_system_aur_update_result(std::move(result));
+    expect(
+        inconsistent.status ==
+                SystemAurUpdateOperationStatus::InconsistentResult &&
+            inconsistent.aur.status ==
+                SystemAurUpdateAurPhaseStatus::InconsistentResult &&
+            inconsistent.has_inconsistency() &&
+            inconsistent.has_partial_completion() &&
+            !inconsistent.is_success() &&
+            inconsistent.aur.operation_result->reduced_operation_result.status ==
+                AurUpdateOperationStatus::NoUpdates,
+        "Contradictory child-derived AUR phase status failed open or lost evidence");
+}
+
+void test_system_aur_reducer_rejects_unknown_query_phase_status() {
+    reset_stubs();
+    repository_stub::set_after_success([] {
+        require_no_pre_repository_authority();
+        query_stub::set_foreign_inventory({});
+    });
+    const AppConfig config;
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    expect(result.is_success(),
+           "Unknown query-status fixture did not start from success");
+
+    result.query.status =
+        static_cast<SystemAurUpdateQueryPhaseStatus>(99);
+    SystemAurUpdateOperationResult inconsistent =
+        reduce_system_aur_update_result(std::move(result));
+    expect(
+        inconsistent.status ==
+                SystemAurUpdateOperationStatus::InconsistentResult &&
+            inconsistent.has_inconsistency() &&
+            inconsistent.has_partial_completion() &&
+            !inconsistent.is_success() &&
+            inconsistent.query.status ==
+                static_cast<SystemAurUpdateQueryPhaseStatus>(99),
+        "Unknown query phase status failed open or lost evidence");
+}
+
 void test_empty_query_plan_is_normal_noop() {
     reset_stubs();
     const AppConfig config;
 
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation({}, {}, config);
+        prepare_strict_filtered_aur_update_operation(
+            {}, NoExplicitSourceSatisfaction{}, config);
     expect(prepared.is_noop(), "Empty query was not prepared as a no-op");
     expect(prepared.filtered_plan().entries.empty(),
            "Empty query produced filtered targets");
@@ -547,7 +2652,7 @@ void test_empty_query_plan_is_normal_noop() {
     expect_no_mutation("empty query");
 }
 
-void test_real_query_wrapper_and_empty_explicit_set_match_legacy_path() {
+void test_real_query_wrapper_and_no_explicit_satisfaction_match_legacy_path() {
     reset_stubs();
     const ForeignPackageInventory inventory{{"legacy-root", "1.0-1", InstalledPackageReason::Explicit}};
     query_stub::set_foreign_inventory(inventory);
@@ -578,10 +2683,10 @@ void test_real_query_wrapper_and_empty_explicit_set_match_legacy_path() {
         make_provider_selection_session(config.no_confirm);
 
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
-            std::move(query), {}, config);
+        prepare_strict_filtered_aur_update_operation(
+            std::move(query), NoExplicitSourceSatisfaction{}, config);
     expect(prepared.is_prepared(),
-           "Empty explicit set did not prepare the legacy AUR update");
+           "No-explicit satisfaction did not prepare the legacy AUR update");
     expect(
         preflight_stub::resolver_selection_callback_presence() ==
             std::vector<bool>{true},
@@ -593,10 +2698,17 @@ void test_real_query_wrapper_and_empty_explicit_set_match_legacy_path() {
                        .selected_build_units.size() == 1 &&
                prepared.source_build_preparation()
                    ->externally_satisfied_build_units.empty(),
-           "Empty explicit set changed legacy selection semantics");
+           "No-explicit satisfaction changed legacy selection semantics");
     expect(preparation_stub::supported_options_guard_history() ==
                std::vector<bool>{true},
            "rm_deps option did not reach preparation");
+    expect(
+        preparation_stub::strict_preference_read_history() ==
+                std::vector<std::string>{"legacy-root"} &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0,
+        "Strict normal-AUR preparation changed preference IO");
 
     enqueue_installed(prepared, config, 1);
     FilteredAurUpdateExecutionResult result =
@@ -611,6 +2723,70 @@ void test_real_query_wrapper_and_empty_explicit_set_match_legacy_path() {
         execution_stub::call_history(), {"legacy-root"}, config,
         "legacy-equivalent operation");
     execution_stub::require_script_consumed();
+}
+
+void test_ignore_policy_reaches_filtered_preparation_without_preference_io() {
+    reset_stubs();
+    return_build_plan(
+        root_plan(
+            {{"ignore-filtered-child", "ignore-filtered-base"}}),
+        {"ignore-filtered-child"});
+    preparation_stub::enqueue_source_preference_result(
+        "ignore-filtered-child",
+        SourcePreferenceLoaded{
+            .entry_path =
+                "/stub/preferences/ignore-filtered-child",
+            .environment = SourceBuildEnvironment{
+                std::vector<SourceEnvironmentAssignment>{
+                    {"CFLAGS", "-O3"}}},
+            .warnings = {"must remain unread"},
+            .raw_contents = {},
+            .identity = std::nullopt,
+        });
+    preparation_stub::enqueue_source_preference_result(
+        "ignore-filtered-base",
+        SourcePreferenceFailure{
+            SourcePreferenceFailureKind::ReadFailed,
+            "/stub/preferences/ignore-filtered-base",
+            std::make_error_code(std::errc::io_error),
+            std::nullopt,
+            "must remain unread"});
+
+    const AppConfig config;
+    PreparedFilteredAurUpdateOperation prepared =
+        ::prepare_filtered_aur_update_operation(
+            query_result({update_entry(
+                "ignore-filtered-child", "ignore-filtered-base")}),
+            NoExplicitSourceSatisfaction{},
+            SavedSourcePreferencePolicy::Ignore, config);
+    expect(
+        prepared.is_prepared() &&
+            prepared.source_build_preparation()->warnings.empty(),
+        "Filtered Ignore did not prepare a normal AUR work item");
+    const ProductionSourceBuildWorkItem& work_item =
+        require_production_invocation(prepared).work_items.front();
+    expect(
+        work_item.request.package_name == "ignore-filtered-child" &&
+            work_item.request.checkout_name ==
+                "ignore-filtered-base" &&
+            work_item.request.custom_environment
+                .ordered_assignments.empty() &&
+            work_item.required_targets.size() == 1 &&
+            work_item.required_targets.front().package_name ==
+                "ignore-filtered-child" &&
+            work_item.required_targets.front().package_base ==
+                "ignore-filtered-base" &&
+            work_item.required_targets.front().desired_reason ==
+                DesiredInstallReason::Explicit,
+        "Filtered Ignore changed environment, identity, or install reason");
+    expect(
+        preparation_stub::strict_preference_read_history().empty() &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0 &&
+            preparation_stub::database_call_count() == 1 &&
+            preparation_stub::reviewed_state_preflight_call_count() == 1,
+        "Filtered Ignore crossed preference IO or skipped generic safety");
 }
 
 void test_explicit_inventory_query_core_bypasses_inventory_wrapper() {
@@ -634,8 +2810,8 @@ void test_explicit_inventory_query_core_bypasses_inventory_wrapper() {
         {"latest-root"});
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
-            std::move(query), {}, config);
+        prepare_strict_filtered_aur_update_operation(
+            std::move(query), NoExplicitSourceSatisfaction{}, config);
     enqueue_no_change(prepared, config, 1);
     FilteredAurUpdateExecutionResult result =
         execute_prepared_filtered_aur_update_operation(
@@ -649,9 +2825,10 @@ void test_package_name_target_exclusion() {
     reset_stubs();
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({update_entry("name-match", "aur-base")}),
-            {explicit_source("name-match", "source-base")},
+            explicit_satisfaction(
+                {explicit_source("name-match", "source-base")}),
             config);
 
     expect(prepared.is_noop(), "Package-name exclusion was not a no-op");
@@ -686,9 +2863,10 @@ void test_package_base_target_exclusion() {
     reset_stubs();
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({update_entry("suite-cli", "suite")}),
-            {explicit_source("source-suite", "suite")},
+            explicit_satisfaction(
+                {explicit_source("source-suite", "suite")}),
             config);
 
     expect(prepared.is_noop(), "PackageBase exclusion was not a no-op");
@@ -713,10 +2891,11 @@ void test_split_package_targets_share_exclusion_attribution() {
     reset_stubs();
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({update_entry("suite-cli", "suite"),
                           update_entry("suite-lib", "suite")}),
-            {explicit_source("suite-source", "suite")},
+            explicit_satisfaction(
+                {explicit_source("suite-source", "suite")}),
             config);
 
     expect(prepared.is_noop(), "Split-package exclusion was not a no-op");
@@ -746,12 +2925,13 @@ void test_original_filtered_and_preflight_index_mapping() {
         root_plan({{"beta", "beta"}}), {"beta"});
 
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({current_entry("current"),
                           update_entry("alpha", "alpha-base"),
                           non_aur_entry("foreign"),
                           update_entry("beta")}),
-            {explicit_source("alpha", "source-alpha")},
+            explicit_satisfaction(
+                {explicit_source("alpha", "source-alpha")}),
             config);
 
     expect(
@@ -827,9 +3007,10 @@ void test_transitive_external_satisfaction_keeps_selected_root_executable() {
     return_build_plan(std::move(plan), {"application"});
 
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({update_entry("application")}),
-            {explicit_source("external-library", "external-library")},
+            explicit_satisfaction({explicit_source(
+                "external-library", "external-library")}),
             config);
     expect(prepared.is_prepared(),
            "Selected root with external dependency was blocked");
@@ -894,9 +3075,10 @@ void test_multiple_child_external_satisfaction_keeps_set_snapshot() {
     return_build_plan(std::move(plan), {"application"});
 
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({update_entry("application")}),
-            {explicit_source("split-source", "split-suite")},
+            explicit_satisfaction(
+                {explicit_source("split-source", "split-suite")}),
             config);
     expect(
         prepared.is_prepared(),
@@ -972,10 +3154,11 @@ void test_one_external_unit_shared_by_multiple_roots() {
     return_build_plan(std::move(plan), {"first-root", "second-root"});
 
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({update_entry("first-root"),
                           update_entry("second-root")}),
-            {explicit_source("shared-library", "shared-library")},
+            explicit_satisfaction({explicit_source(
+                "shared-library", "shared-library")}),
             config);
     expect(prepared.is_prepared(), "Shared external fixture did not prepare");
     expect(prepared.source_build_preparation()
@@ -1025,8 +3208,8 @@ void test_query_recoverable_failure_is_retained_and_blocks_mutation() {
 
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
-            std::move(query), {}, config);
+        prepare_strict_filtered_aur_update_operation(
+            std::move(query), NoExplicitSourceSatisfaction{}, config);
     expect(prepared.is_blocked(),
            "Recoverable query failure did not block incomplete planning");
     expect(has_planner_issue(
@@ -1056,12 +3239,13 @@ void test_requires_check_blocks_mixed_operation_before_mutation() {
     const AppConfig config;
 
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        ::prepare_filtered_aur_update_operation(
             query_result({
                 classified_update_entry("normal-update-git"),
                 requires_check_entry("manual-check-git"),
             }),
-            {}, config);
+            NoExplicitSourceSatisfaction{},
+            SavedSourcePreferencePolicy::Ignore, config);
 
     expect(
         prepared.is_blocked(),
@@ -1095,6 +3279,13 @@ void test_requires_check_blocks_mixed_operation_before_mutation() {
             prepared.target_and_build_unit_plan(),
             UpgradeAllPlanningIssueKind::IncompleteAurTarget),
         "RequiresCheck did not remain a typed planning blocker");
+    expect(
+        preparation_stub::strict_preference_read_history().empty() &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0 &&
+            preparation_stub::database_call_count() == 0,
+        "Ignore policy let RequiresCheck cross a preparation authority boundary");
 
     FilteredAurUpdateExecutionResult result =
         execute_prepared_filtered_aur_update_operation(
@@ -1124,9 +3315,9 @@ void test_planner_issue_blocks_mutation_but_keeps_disposition() {
     reset_stubs();
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({unavailable_entry("incomplete-target")}),
-            {}, config);
+            NoExplicitSourceSatisfaction{}, config);
     expect(prepared.is_blocked(), "Incomplete planner target was not blocked");
     expect(prepared.target_and_build_unit_plan()
                        .target_dispositions.size() == 1 &&
@@ -1156,8 +3347,10 @@ void test_initial_preflight_identity_blocker_stops_before_mutation() {
 
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
-            query_result({update_entry("identity-root")}), {}, config);
+        ::prepare_filtered_aur_update_operation(
+            query_result({update_entry("identity-root")}),
+            NoExplicitSourceSatisfaction{},
+            SavedSourcePreferencePolicy::Ignore, config);
     expect(prepared.is_blocked(),
            "Initial preflight identity mismatch was not blocked");
     expect(has_operation_issue(
@@ -1174,6 +3367,9 @@ void test_initial_preflight_identity_blocker_stops_before_mutation() {
                AurUpdateExecutionTargetStatus::Incomplete,
            "Initial preflight mismatch did not remain typed incomplete");
     expect(preparation_stub::strict_preference_read_history().empty() &&
+               preparation_stub::
+                       source_preference_directory_snapshot_call_count() ==
+                   0 &&
                preparation_stub::database_call_count() == 0,
            "Preflight blocker crossed preparation external boundaries");
 
@@ -1190,8 +3386,9 @@ void test_preflight_blocker_stops_before_mutation() {
 
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
-            query_result({update_entry("blocked-root")}), {}, config);
+        prepare_strict_filtered_aur_update_operation(
+            query_result({update_entry("blocked-root")}),
+            NoExplicitSourceSatisfaction{}, config);
     expect(prepared.is_blocked() &&
                prepared.source_build_preparation()->is_blocked(),
            "Preflight blocker did not block preparation");
@@ -1219,9 +3416,9 @@ void test_preparation_blocker_stops_before_mutation() {
     AppConfig config;
     config.rm_deps = true;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({update_entry("preparation-root")}),
-            {}, config);
+            NoExplicitSourceSatisfaction{}, config);
     expect(prepared.is_blocked() &&
                prepared.source_build_preparation()->is_blocked() &&
                !prepared.source_build_preparation()->issues.empty(),
@@ -1247,10 +3444,10 @@ void test_all_updated() {
         {"updated-a", "updated-b"});
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({update_entry("updated-a"),
                           update_entry("updated-b")}),
-            {}, config);
+            NoExplicitSourceSatisfaction{}, config);
     enqueue_installed(prepared, config, 2);
 
     FilteredAurUpdateExecutionResult result =
@@ -1277,10 +3474,10 @@ void test_all_no_change() {
         {"same-a", "same-b"});
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({update_entry("same-a"),
                           update_entry("same-b")}),
-            {}, config);
+            NoExplicitSourceSatisfaction{}, config);
     enqueue_no_change(prepared, config, 2);
 
     FilteredAurUpdateExecutionResult result =
@@ -1304,12 +3501,12 @@ void test_same_package_base_children_execute_once_with_mixed_outcomes() {
         {"split-runtime", "split-cli"});
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({update_entry(
                               "split-runtime", "split-suite",
                               InstalledPackageReason::Dependency),
                           update_entry("split-cli", "split-suite")}),
-            {}, config);
+            NoExplicitSourceSatisfaction{}, config);
     expect(
         prepared.is_prepared(),
         "Same-PackageBase targets did not prepare" +
@@ -1420,11 +3617,11 @@ void test_ordinary_failure_partial_completion_and_not_attempted() {
         {"first-success", "middle-failure", "last-pending"});
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({update_entry("first-success"),
                           update_entry("middle-failure"),
                           update_entry("last-pending")}),
-            {}, config);
+            NoExplicitSourceSatisfaction{}, config);
     enqueue_installed(prepared, config, 1);
     execution_stub::enqueue_phase_failure(
         expected_execution_at(prepared, 1, config),
@@ -1460,10 +3657,10 @@ void test_cleanup_failure_partial_completion_and_not_attempted() {
         {"cleanup-failure", "cleanup-pending"});
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({update_entry("cleanup-failure"),
                           update_entry("cleanup-pending")}),
-            {}, config);
+            NoExplicitSourceSatisfaction{}, config);
     const std::string package_base = require_production_invocation(prepared)
                                          .work_items.front()
                                          .request.checkout_name;
@@ -1507,8 +3704,9 @@ void test_preflight_invocation_index_out_of_range() {
     return_build_plan(std::move(plan), {"range-root"});
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
-            query_result({update_entry("range-root")}), {}, config);
+        prepare_strict_filtered_aur_update_operation(
+            query_result({update_entry("range-root")}),
+            NoExplicitSourceSatisfaction{}, config);
     expect(prepared.is_blocked(),
            "Out-of-range preflight invocation unexpectedly prepared");
     expect(has_operation_issue(
@@ -1540,10 +3738,10 @@ void test_preflight_invocation_identity_mismatch() {
         std::move(plan), {"identity-a", "identity-b"});
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({update_entry("identity-a"),
                           update_entry("identity-b")}),
-            {}, config);
+            NoExplicitSourceSatisfaction{}, config);
     expect(prepared.is_blocked(),
            "Mismatched preflight invocation unexpectedly prepared");
     expect(has_operation_issue(
@@ -1572,9 +3770,9 @@ void test_build_unit_order_identity_mismatch_blocks_mutation() {
     return_build_plan(std::move(plan), {"correlation-root"});
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
+        prepare_strict_filtered_aur_update_operation(
             query_result({update_entry("correlation-root")}),
-            {}, config);
+            NoExplicitSourceSatisfaction{}, config);
     expect(prepared.is_blocked(),
            "Build-unit order identity mismatch unexpectedly prepared");
     expect(has_operation_issue(
@@ -1603,8 +3801,9 @@ void test_projection_payload_private_snapshot_drift_blocks_mutation() {
         {"payload-root"});
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
-            query_result({update_entry("payload-root")}), {}, config);
+        prepare_strict_filtered_aur_update_operation(
+            query_result({update_entry("payload-root")}),
+            NoExplicitSourceSatisfaction{}, config);
     expect(prepared.is_prepared(), "Projection drift fixture did not prepare");
 
     BuildPlanArtifactTargetProjectionIssue projection_issue{
@@ -1663,8 +3862,9 @@ void test_prepared_operation_replay_is_rejected() {
         {"one-shot-root"});
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
-            query_result({update_entry("one-shot-root")}), {}, config);
+        prepare_strict_filtered_aur_update_operation(
+            query_result({update_entry("one-shot-root")}),
+            NoExplicitSourceSatisfaction{}, config);
     enqueue_installed(prepared, config, 1);
     FilteredAurUpdateExecutionResult first =
         execute_prepared_filtered_aur_update_operation(
@@ -1690,8 +3890,9 @@ void test_reducer_inconsistency_is_retained() {
         {"reducer-root"});
     const AppConfig config;
     PreparedFilteredAurUpdateOperation prepared =
-        prepare_filtered_aur_update_operation(
-            query_result({update_entry("reducer-root")}), {}, config);
+        prepare_strict_filtered_aur_update_operation(
+            query_result({update_entry("reducer-root")}),
+            NoExplicitSourceSatisfaction{}, config);
     expect(prepared.is_prepared(), "Reducer fixture did not prepare");
 
     enqueue_installed(prepared, config, 1);
@@ -1729,10 +3930,100 @@ void run_case(const std::string& name, Callable callable) {
 
 int main() {
     try {
+        run_case(
+            "system+AUR dry-run Auto current update observation",
+            test_system_aur_dry_run_auto_observes_current_update_without_capability);
+        run_case(
+            "system+AUR dry-run Auto current no updates",
+            test_system_aur_dry_run_auto_current_no_updates_is_not_blocked);
+        run_case(
+            "system+AUR dry-run RepoOnly zero AUR authority",
+            test_system_aur_dry_run_repo_only_observes_repository_intent_only);
+        run_case(
+            "system+AUR dry-run RequiresCheck",
+            test_system_aur_dry_run_requires_check_stays_blocked);
+        run_case(
+            "system+AUR dry-run ambiguous provider",
+            test_system_aur_dry_run_ambiguous_provider_is_not_auto_selected);
+        run_case(
+            "system+AUR dry-run fatal query failure",
+            test_system_aur_dry_run_fatal_query_failure_is_typed_and_blocks);
+        run_case(
+            "system+AUR dry-run identity mismatch",
+            test_system_aur_dry_run_identity_mismatch_blocks_before_mutation);
+        run_case(
+            "system+AUR dry-run preparation blocker",
+            test_system_aur_dry_run_preparation_blocker_stops_before_mutation);
+        run_case(
+            "system+AUR dry world is not reused by actual world",
+            test_system_aur_dry_run_world_is_not_reused_by_actual_world);
+        run_case(
+            "system+AUR repository failure stops later authority",
+            test_system_aur_repository_failure_stops_all_later_authority);
+        run_case(
+            "system+AUR no updates is successful but not a false no-op",
+            test_system_aur_success_without_aur_updates_is_not_false_noop);
+        run_case(
+            "system+AUR inventory failure is partial",
+            test_system_aur_inventory_failure_is_partial);
+        run_case(
+            "system+AUR query failure is retained",
+            test_system_aur_query_failure_is_retained);
+        run_case(
+            "system+AUR fatal query failure",
+            test_system_aur_fatal_query_failure_stops_before_preflight);
+        run_case(
+            "system+AUR RequiresCheck stays blocked",
+            test_system_aur_requires_check_stays_blocked);
+        run_case(
+            "system+AUR ambiguous provider is not auto-selected",
+            test_system_aur_ambiguous_provider_is_not_auto_selected);
+        run_case(
+            "system+AUR preparation failure is partial",
+            test_system_aur_preparation_failure_is_partial);
+        run_case(
+            "system+AUR unexpected preparation exception phase",
+            test_system_aur_unexpected_preparation_exception_keeps_phase);
+        run_case(
+            "system+AUR unexpected execution exception phase",
+            test_system_aur_unexpected_execution_exception_keeps_phase);
+        run_case(
+            "system+AUR post-repository freshness and Ignore",
+            test_system_aur_success_uses_only_post_repository_inventory_and_ignore);
+        run_case(
+            "system+AUR inner work-item partial is retained",
+            test_system_aur_work_item_failure_preserves_inner_partial);
+        run_case(
+            "system+AUR cleanup phase is retained",
+            test_system_aur_cleanup_failure_preserves_child_phase);
+        run_case(
+            "system+AUR malformed child fails closed",
+            test_system_aur_reducer_fails_closed_on_malformed_child);
+        run_case(
+            "system+AUR exact query snapshot correlation",
+            test_system_aur_reducer_correlates_exact_query_snapshot);
+        run_case(
+            "system+AUR inventory/query correlation",
+            test_system_aur_reducer_correlates_inventory_and_query);
+        run_case(
+            "system+AUR compatible request correlation",
+            test_system_aur_reducer_correlates_compatible_request);
+        run_case(
+            "system+AUR contradictory NotAttempted reason",
+            test_system_aur_reducer_preserves_contradictory_not_attempted_reason);
+        run_case(
+            "system+AUR contradictory child phase status",
+            test_system_aur_reducer_rejects_contradictory_child_phase_status);
+        run_case(
+            "system+AUR unknown query phase status",
+            test_system_aur_reducer_rejects_unknown_query_phase_status);
         run_case("empty query plan", test_empty_query_plan_is_normal_noop);
         run_case(
-            "real query wrapper and empty explicit legacy equivalence",
-            test_real_query_wrapper_and_empty_explicit_set_match_legacy_path);
+            "real query wrapper and no-explicit legacy equivalence",
+            test_real_query_wrapper_and_no_explicit_satisfaction_match_legacy_path);
+        run_case(
+            "Ignore filtered preparation has zero preference IO",
+            test_ignore_policy_reaches_filtered_preparation_without_preference_io);
         run_case(
             "explicit inventory query core",
             test_explicit_inventory_query_core_bypasses_inventory_wrapper);

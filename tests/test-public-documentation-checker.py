@@ -16,10 +16,12 @@ sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 from check_public_documentation import (  # noqa: E402
     assert_semantic_text_contract,
     check_reviewed_source_documentation,
+    check_system_aur_update_documentation,
     exact_man_public_surface,
     expected_surface,
     reviewed_source_documentation_contracts,
     reviewed_source_runtime_help_contracts,
+    system_aur_update_documentation_contracts,
 )
 from generate_completions import load_schema  # noqa: E402
 
@@ -98,6 +100,48 @@ def expect_reviewed_source_documentation_rejected(
         try:
             with redirect_stderr(diagnostic):
                 check_reviewed_source_documentation(fixture_root)
+        except SystemExit as error:
+            if (
+                error.code == 1
+                and "public-documentation-check:" in diagnostic.getvalue()
+            ):
+                print(f"  ok: rejected {label}")
+                return
+            fail(f"{label} returned unexpected status {error.code!r}")
+    fail(f"{label} unexpectedly passed")
+
+
+def copy_system_aur_update_documentation_fixture(directory: str) -> Path:
+    fixture_root = Path(directory)
+    for source in system_aur_update_documentation_contracts(REPOSITORY_ROOT):
+        relative = source.relative_to(REPOSITORY_ROOT)
+        destination = fixture_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            source.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    return fixture_root
+
+
+def expect_system_aur_update_documentation_rejected(
+    label: str,
+    relative_path: str,
+    old: str,
+    new: str,
+) -> None:
+    with tempfile.TemporaryDirectory(
+        prefix="moguet-system-aur-doc-checker-"
+    ) as directory:
+        fixture_root = copy_system_aur_update_documentation_fixture(directory)
+        path = fixture_root / relative_path
+        path.write_text(
+            replace_once(path.read_text(encoding="utf-8"), old, new),
+            encoding="utf-8",
+        )
+        diagnostic = io.StringIO()
+        try:
+            with redirect_stderr(diagnostic):
+                check_system_aur_update_documentation(fixture_root)
         except SystemExit as error:
             if (
                 error.code == 1
@@ -188,6 +232,35 @@ def main() -> int:
     ) as directory:
         check_reviewed_source_documentation(
             copy_reviewed_source_documentation_fixture(directory)
+        )
+
+    with tempfile.TemporaryDirectory(
+        prefix="moguet-system-aur-doc-checker-"
+    ) as directory:
+        check_system_aur_update_documentation(
+            copy_system_aur_update_documentation_fixture(directory)
+        )
+
+    system_aur_mutations = (
+        (
+            "ordinary -Syu reverted to repository-only wording",
+            "README.md",
+            "ordinary AUR-helper update",
+            "repository-only update",
+        ),
+        (
+            "completion reverted to old -Syu behavior",
+            "completions/descriptions/en.json",
+            (
+                '"-Syu": "Update repository packages and normal installed '
+                'AUR packages without saved source-build preferences"'
+            ),
+            '"-Syu": "Upgrade the system"',
+        ),
+    )
+    for label, relative_path, old, new in system_aur_mutations:
+        expect_system_aur_update_documentation_rejected(
+            label, relative_path, old, new
         )
 
     quoted_pkgbuild_help_entry = (
@@ -319,7 +392,8 @@ def main() -> int:
         len(mutations)
         + len(reviewed_source_mutations)
         + len(runtime_help_mutations)
-        + 2
+        + len(system_aur_mutations)
+        + 3
     )
     print(
         "public-documentation-checker-test: "

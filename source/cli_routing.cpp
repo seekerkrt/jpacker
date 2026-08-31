@@ -12,6 +12,11 @@
 
 namespace {
 
+// POLICY(#505): composite candidateのsemantic authorityはexact tokenだけとする。
+// cli_authority側の同綴りはpublic grammar identityであり、classifierの
+// target/selector/option semanticsやparser allowlistを置き換えない。
+constexpr std::string_view CANONICAL_SYSTEM_UPDATE_OPERATION = "-Syu";
+
 std::string package_source_selection_option(PackageSourceSelection selection) {
     switch(selection) {
         case PackageSourceSelection::Auto:
@@ -99,6 +104,33 @@ bool local_source_build_accepts_global_option(
             return false;
     }
     return false;
+}
+
+AutoSystemUpdatePacmanCompatibility
+classify_auto_system_update_pacman_arguments(
+    const ParsedCliArguments& parsed) {
+    for(const ParsedCliToken& token : parsed.tokens) {
+        switch(token.role) {
+            case CliTokenRole::PacmanOption:
+                if(token.value == "--needed") break;
+                return IncompatibleAutoSystemUpdatePacmanArguments{
+                    AutoSystemUpdatePacmanIncompatibilityKind::
+                        UnsupportedOption,
+                    token.value};
+            case CliTokenRole::PacmanOptionValue:
+            case CliTokenRole::EndOfOptions:
+            case CliTokenRole::OpaqueOperand:
+                return IncompatibleAutoSystemUpdatePacmanArguments{
+                    AutoSystemUpdatePacmanIncompatibilityKind::
+                        UnsupportedArgumentForm,
+                    token.value};
+            case CliTokenRole::MoguetGlobalOption:
+            case CliTokenRole::Operation:
+            case CliTokenRole::Target:
+                break;
+        }
+    }
+    return CompatibleAutoSystemUpdatePacmanArguments{};
 }
 
 [[noreturn]] void reject_local_source_build_operand_count() {
@@ -259,6 +291,30 @@ SourceSelectableSyncOperation source_selectable_sync_operation(const ParsedCliAr
     return SourceSelectableSyncOperation::Install;
 }
 
+SyncInvocationRouteClassification classify_sync_invocation_route(
+    const ParsedCliArguments& parsed) {
+    if(parsed.operation != CANONICAL_SYSTEM_UPDATE_OPERATION ||
+       !parsed.targets.empty()) {
+        return OtherSyncRoute{};
+    }
+
+    switch(parsed.source_selection) {
+        case PackageSourceSelection::Auto:
+            return AutoSystemUpdateRouteCandidate{
+                classify_auto_system_update_pacman_arguments(parsed),
+                parsed.ordered_pacman_args,
+                parsed_has_semantic_pacman_option(parsed, "--needed")};
+        case PackageSourceSelection::RepoOnly:
+            return RepoOnlySystemUpdateRouteCandidate{
+                parsed.ordered_pacman_args,
+                parsed_has_semantic_pacman_option(parsed, "--needed")};
+        case PackageSourceSelection::AurOnly:
+            return InvalidAurOnlySystemUpdateRoute{};
+    }
+    throw std::logic_error(localization::translate_message(
+        "Unknown package source selection."));
+}
+
 bool pacman_operation_requests_refresh(
     const std::string& operation, const std::vector<std::string>& flags) {
     auto short_option_requests_refresh = [](const std::string& option) {
@@ -286,6 +342,15 @@ bool pacman_operation_requests_refresh(
 std::optional<std::string> validate_source_selection_operation(
     const ParsedCliArguments& parsed) {
     if(parsed.source_selection == PackageSourceSelection::Auto) return std::nullopt;
+
+    // POLICY(#505): only the shared exact targetless classifier may promote
+    // --repo into the repository-only system-update escape hatch. Other
+    // refresh-bearing selector forms keep their previous rejection.
+    if(parsed.source_selection == PackageSourceSelection::RepoOnly &&
+       std::holds_alternative<RepoOnlySystemUpdateRouteCandidate>(
+           classify_sync_invocation_route(parsed))) {
+        return std::nullopt;
+    }
 
     const std::string selector = package_source_selection_option(parsed.source_selection);
     const bool requests_refresh = pacman_operation_requests_refresh(parsed.operation, parsed.flags);
@@ -423,6 +488,26 @@ bool local_source_build_requested(const ParsedCliArguments& parsed) {
 
 DryRunOperation classify_dry_run_operation(
     const ParsedCliArguments& parsed) {
+    const SyncInvocationRouteClassification system_update_route =
+        classify_sync_invocation_route(parsed);
+    if(const auto* auto_candidate =
+           std::get_if<AutoSystemUpdateRouteCandidate>(
+               &system_update_route)) {
+        return std::holds_alternative<
+                   CompatibleAutoSystemUpdatePacmanArguments>(
+                   auto_candidate->pacman_compatibility)
+                   ? DryRunOperation::SyncSystemUpdate
+                   : DryRunOperation::Unsupported;
+    }
+    if(std::holds_alternative<RepoOnlySystemUpdateRouteCandidate>(
+           system_update_route)) {
+        return DryRunOperation::SyncSystemUpdate;
+    }
+    if(std::holds_alternative<InvalidAurOnlySystemUpdateRoute>(
+           system_update_route)) {
+        return DryRunOperation::Unsupported;
+    }
+
     if(parsed.operation.size() >= 2 &&
        parsed.operation[0] == '-' && parsed.operation[1] == 'S') {
         bool requests_system_update = false;
@@ -455,6 +540,7 @@ DryRunOperation classify_dry_run_operation(
         if(parsed.source_selection == PackageSourceSelection::RepoOnly) {
             return DryRunOperation::Unsupported;
         }
+
         if(!requests_system_update && parsed.targets.empty() &&
            parsed.source_selection == PackageSourceSelection::Auto &&
            !parsed.root_package_selection_requested) {

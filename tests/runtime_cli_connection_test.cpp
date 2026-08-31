@@ -1,8 +1,10 @@
 #include "cli_runtime_contract.hpp"
+#include "cli_routing.hpp"
 #include "runtime_diagnostic.hpp"
 
 #include <array>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -35,6 +37,29 @@ ParsedCliArguments invocation(
     }
     parsed.targets = std::move(operands);
     return parsed;
+}
+
+std::optional<ParsedCliArguments> parse_invocation(
+    const std::vector<std::string>& arguments) {
+    std::vector<std::string> argv{"moguet"};
+    argv.insert(argv.end(), arguments.begin(), arguments.end());
+
+    std::vector<char*> raw_argv;
+    raw_argv.reserve(argv.size());
+    for(std::string& argument : argv)
+        raw_argv.push_back(argument.data());
+
+    return parse_cli_arguments(
+        static_cast<int>(raw_argv.size()), raw_argv.data());
+}
+
+ParsedCliArguments require_parsed_invocation(
+    const std::vector<std::string>& arguments,
+    const std::string& context) {
+    std::optional<ParsedCliArguments> parsed =
+        parse_invocation(arguments);
+    expect(parsed.has_value(), context + ": parser rejected invocation");
+    return std::move(parsed.value());
 }
 
 ParsedCliArguments with_pacman_option(
@@ -218,10 +243,241 @@ void test_runtime_help_connection() {
         "-G <pkg> [--output-dir=DIR]",
         "-Gp <pkg>",
         "-S --select [--needed] <query>",
+        "-Syu [--needed]",
+        "-Syu --repo [--needed]",
     };
     expect(
         cli_canonical_grammar() == canonical,
         "Canonical public grammar projection differs");
+}
+
+void test_system_update_runtime_authority() {
+    using cli_authority::DelegatedPacmanTailPolicy;
+    using cli_authority::GrammarOwnership;
+    using cli_authority::SpecialOperationId;
+
+    const ParsedCliArguments automatic =
+        require_parsed_invocation({"-Syu"}, "automatic system update");
+    const ResolvedCliRuntimeContract automatic_contract =
+        resolve_cli_runtime_contract(automatic);
+    expect(
+        automatic_contract.special_operation ==
+                &cli_authority::special_operation_spec(
+                    SpecialOperationId::SystemAurUpdate) &&
+            automatic_contract.owner == GrammarOwnership::InterceptedPacman &&
+            automatic_contract.special_operation->dry_run_support ==
+                cli_authority::DryRunSupport::Supported &&
+            automatic_contract.special_operation
+                    ->delegated_pacman_tail_policy ==
+                DelegatedPacmanTailPolicy::None,
+        "Automatic -Syu runtime authority differs");
+    expect_valid(automatic, "automatic system update runtime contract");
+
+    const ParsedCliArguments repo_only = require_parsed_invocation(
+        {"-Syu", "--repo", "--config", "custom.conf"},
+        "repository-only system update");
+    const ResolvedCliRuntimeContract repo_contract =
+        resolve_cli_runtime_contract(repo_only);
+    expect(
+        repo_contract.special_operation ==
+                &cli_authority::special_operation_spec(
+                    SpecialOperationId::SystemRepositoryUpdate) &&
+            repo_contract.owner == GrammarOwnership::InterceptedPacman &&
+            repo_contract.special_operation
+                    ->delegated_pacman_tail_policy ==
+                DelegatedPacmanTailPolicy::RepositoryOnly,
+        "Repository-only -Syu runtime authority differs");
+    expect_valid(repo_only, "repository-only delegated tail");
+    expect(
+        !validate_source_selection_operation(repo_only).has_value(),
+        "Repository-only exact -Syu selector was rejected");
+
+    const ParsedCliArguments unsupported_option =
+        require_parsed_invocation(
+            {"-Syu", "--config", "custom.conf"},
+            "unsupported automatic option");
+    expect_issue(
+        unsupported_option,
+        CliInvocationIssueKind::UnsupportedAutoSystemUpdateOption,
+        DiagnosticClass::Unsupported,
+        "unsupported automatic option gate");
+    const std::string unsupported_message = cli_invocation_issue_message(
+        validate_cli_invocation_contract(unsupported_option)
+            .diagnostic->reason);
+    expect(
+        unsupported_message.find("moguet -Syu --repo") !=
+                std::string::npos &&
+            unsupported_message.find("custom.conf") == std::string::npos,
+        "Unsupported automatic option diagnostic is unsafe or lacks migration guidance");
+
+    const ParsedCliArguments unsupported_argument =
+        require_parsed_invocation(
+            {"-Syu", "--"}, "unsupported automatic argument form");
+    expect_issue(
+        unsupported_argument,
+        CliInvocationIssueKind::
+            UnsupportedAutoSystemUpdateArgumentForm,
+        DiagnosticClass::Unsupported,
+        "unsupported automatic argument-form gate");
+
+    const ParsedCliArguments target_bearing =
+        require_parsed_invocation(
+            {"-Syu", "package"}, "target-bearing delegated update");
+    const ResolvedCliRuntimeContract delegated_contract =
+        resolve_cli_runtime_contract(target_bearing);
+    expect(
+        delegated_contract.special_operation ==
+                &cli_authority::special_operation_spec(
+                    SpecialOperationId::DelegatedPacmanGrammar) &&
+            delegated_contract.is_delegated(),
+        "Target-bearing -Syu was promoted into the composite route");
+
+    const ParsedCliArguments aur_only =
+        require_parsed_invocation({"-Syu", "--aur"}, "invalid AUR-only update");
+    expect(
+        validate_source_selection_operation(aur_only).has_value(),
+        "-Syu --aur became a public AUR-only route");
+}
+
+void test_sync_invocation_route_classification() {
+    struct RouteCase {
+        std::string context;
+        std::vector<std::string> arguments;
+        SyncInvocationRouteClassification expected;
+    };
+
+    const std::vector<RouteCase> operation_cases = {
+        {"canonical auto",
+         {"-Syu"},
+         AutoSystemUpdateRouteCandidate{
+             CompatibleAutoSystemUpdatePacmanArguments{}, {"-Syu"}, false}},
+        {"refresh only", {"-Sy"}, OtherSyncRoute{}},
+        {"sysupgrade only", {"-Su"}, OtherSyncRoute{}},
+        {"modifier order variation", {"-Suy"}, OtherSyncRoute{}},
+        {"separated short modifiers",
+         {"-S", "-y", "-u"},
+         OtherSyncRoute{}},
+        {"separated long modifiers",
+         {"-S", "--refresh", "--sysupgrade"},
+         OtherSyncRoute{}},
+        {"target-bearing canonical form",
+         {"-Syu", "package"},
+         OtherSyncRoute{}},
+        {"unknown modifier", {"-Syux"}, OtherSyncRoute{}},
+    };
+
+    const std::vector<RouteCase> selector_and_option_cases = {
+        {"repo-only candidate",
+         {"-Syu", "--repo"},
+         RepoOnlySystemUpdateRouteCandidate{{"-Syu"}, false}},
+        {"repo-only full ordered pass-through",
+         {"-Syu", "--repo", "--config", "custom.conf"},
+         RepoOnlySystemUpdateRouteCandidate{
+             {"-Syu", "--config", "custom.conf"}, false}},
+        {"invalid AUR-only route",
+         {"-Syu", "--aur"},
+         InvalidAurOnlySystemUpdateRoute{}},
+        {"compatible needed option",
+         {"-Syu", "--needed"},
+         AutoSystemUpdateRouteCandidate{
+             CompatibleAutoSystemUpdatePacmanArguments{},
+             {"-Syu", "--needed"},
+             true}},
+        {"unsupported value-taking option",
+         {"-Syu", "--config", "custom.conf"},
+         AutoSystemUpdateRouteCandidate{
+             IncompatibleAutoSystemUpdatePacmanArguments{
+                 AutoSystemUpdatePacmanIncompatibilityKind::
+                     UnsupportedOption,
+                 "--config"},
+             {"-Syu", "--config", "custom.conf"},
+             false}},
+        {"unsupported operand marker",
+         {"-Syu", "--"},
+         AutoSystemUpdateRouteCandidate{
+             IncompatibleAutoSystemUpdatePacmanArguments{
+                 AutoSystemUpdatePacmanIncompatibilityKind::
+                     UnsupportedArgumentForm,
+                 "--"},
+             {"-Syu", "--"},
+             false}},
+        {"opaque operand is target-bearing",
+         {"-Syu", "--", "--repo"},
+         OtherSyncRoute{}},
+        {"selector spelling as option value",
+         {"-Syu", "--config", "--repo"},
+         AutoSystemUpdateRouteCandidate{
+             IncompatibleAutoSystemUpdatePacmanArguments{
+                 AutoSystemUpdatePacmanIncompatibilityKind::
+                     UnsupportedOption,
+                 "--config"},
+             {"-Syu", "--config", "--repo"},
+             false}},
+        {"AUR selector spelling as option value",
+         {"-Syu", "--config", "--aur"},
+         AutoSystemUpdateRouteCandidate{
+             IncompatibleAutoSystemUpdatePacmanArguments{
+                 AutoSystemUpdatePacmanIncompatibilityKind::
+                     UnsupportedOption,
+                 "--config"},
+             {"-Syu", "--config", "--aur"},
+             false}},
+        {"leading semantic selector is not forwarded",
+         {"--repo", "-Syu", "--needed"},
+         RepoOnlySystemUpdateRouteCandidate{
+             {"-Syu", "--needed"}, true}},
+    };
+
+    for(const RouteCase& route_case : operation_cases) {
+        const ParsedCliArguments parsed = require_parsed_invocation(
+            route_case.arguments, route_case.context);
+        expect(
+            classify_sync_invocation_route(parsed) ==
+                route_case.expected,
+            route_case.context + ": route classification differs");
+    }
+    for(const RouteCase& route_case : selector_and_option_cases) {
+        const ParsedCliArguments parsed = require_parsed_invocation(
+            route_case.arguments, route_case.context);
+        expect(
+            classify_sync_invocation_route(parsed) ==
+                route_case.expected,
+            route_case.context + ": route classification differs");
+    }
+
+    const ParsedCliArguments opaque_selector =
+        require_parsed_invocation(
+            {"-Syu", "--", "--repo"},
+            "opaque selector lexical priority");
+    expect(
+        opaque_selector.source_selection ==
+                PackageSourceSelection::Auto &&
+            opaque_selector.tokens.back().role ==
+                CliTokenRole::OpaqueOperand &&
+            opaque_selector.ordered_pacman_args ==
+                std::vector<std::string>{"-Syu", "--", "--repo"},
+        "opaque selector spelling changed parser semantic state");
+
+    const ParsedCliArguments semantic_aur =
+        require_parsed_invocation(
+            {"-Syu", "--aur"},
+            "semantic AUR selector non-forwarding");
+    expect(
+        semantic_aur.source_selection ==
+                PackageSourceSelection::AurOnly &&
+            semantic_aur.ordered_pacman_args ==
+                std::vector<std::string>{"-Syu"},
+        "semantic AUR selector leaked into ordered pacman arguments");
+
+    std::ostringstream parse_diagnostic;
+    std::streambuf* previous_stderr =
+        std::cerr.rdbuf(parse_diagnostic.rdbuf());
+    const std::optional<ParsedCliArguments> conflicting =
+        parse_invocation({"-Syu", "--aur", "--repo"});
+    std::cerr.rdbuf(previous_stderr);
+    expect(
+        !conflicting.has_value(),
+        "conflicting source selectors were parsed for classification");
 }
 
 void test_typed_runtime_diagnostic_connection() {
@@ -296,6 +552,19 @@ void test_typed_runtime_diagnostic_connection() {
     expect(
         cancelled.message.starts_with("Cancelled: "),
         "Runtime presentation classified a localized/raw string");
+
+    const std::string unsafe_detail =
+        std::string{"日本語\\path\n"} +
+        std::string{"\x1b", 1} +
+        "escape" +
+        std::string{"\xe2\x80\xae", 3} +
+        std::string{"\xef\xbb\xbf", 3} +
+        std::string{"\xff", 1};
+    expect(
+        terminal_safe_runtime_diagnostic_detail(unsafe_detail) ==
+            "日本語\\x5Cpath\\x0A\\x1Bescape"
+            "\\xE2\\x80\\xAE\\xEF\\xBB\\xBF\\xFF",
+        "Runtime diagnostic detail did not escape terminal controls, bidi/BOM, or invalid UTF-8");
 }
 
 } // namespace
@@ -306,6 +575,10 @@ int main() {
         std::cout << "  ok: runtime operand contract connection\n";
         test_runtime_help_connection();
         std::cout << "  ok: runtime help metadata connection\n";
+        test_sync_invocation_route_classification();
+        std::cout << "  ok: sync invocation route classification\n";
+        test_system_update_runtime_authority();
+        std::cout << "  ok: system update runtime authority\n";
         test_typed_runtime_diagnostic_connection();
         std::cout << "  ok: typed runtime diagnostic connection\n";
         std::cout << "Runtime CLI connection tests: all checks passed\n";
