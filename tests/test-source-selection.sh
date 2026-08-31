@@ -707,7 +707,18 @@ for selector in --aur --repo; do
         assert_command_log_empty
         assert_request_log_empty
     else
-        assert_unsupported_operation "$selector" -Syu
+        unsupported_index=$((unsupported_index + 1))
+        setup_case repository-system-update-$unsupported_index
+        prepare_preference_store
+        printf '%s\n' 'INVALID PREFERENCE' > \
+            "$preference_dir/clean-root"
+        chmod 600 "$preference_dir/clean-root"
+        run_ok --noconfirm -Syu --repo --config custom.conf
+        assert_command "sudo pacman -Syu --noconfirm --config custom.conf"
+        assert_command_count 1
+        assert_request_log_empty
+        assert_cache_root_absent
+        assert_not_contains "Loading custom build flags" "$output_file"
         assert_unsupported_operation "$selector" -Sy sync-target
     fi
     assert_unsupported_operation "$selector" -Sc

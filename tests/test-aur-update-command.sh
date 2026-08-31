@@ -57,6 +57,7 @@ setup_case() {
     export MOGUET_TEST_AUR_UPDATE_SCENARIO=$scenario_name
     export MOGUET_TEST_PACMAN_EXIT_CODE=91
     export MOGUET_TEST_SUDO_EXIT_CODE=92
+    unset MOGUET_TEST_SYSTEM_AUR_PRESENTATION_CASE
     case_count=$((case_count + 1))
 }
 
@@ -741,12 +742,25 @@ assert_contains \
 assert_pipeline_absent
 assert_cache_absent
 
-# Existing system routes remain exact and never enter the new pipeline.
-setup_case syu-routing-unchanged no-installed-foreign
+# Repository-only system routes remain exact and never enter the AUR pipeline.
+setup_case syu-repository-routing no-installed-foreign
 export MOGUET_TEST_SUDO_EXIT_CODE=0
-run_status 0 -Syu
+run_status 0 -Syu --repo
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_pipeline_absent
+
+setup_case syu-inconsistent-presentation no-installed-foreign
+export MOGUET_TEST_SYSTEM_AUR_PRESENTATION_CASE=inconsistent
+run_status 1 -Syu
+assert_contains \
+    "The repository and AUR update result is inconsistent; no success was reported." \
+    "$stderr_file"
+assert_not_contains "The repository system upgrade completed." "$stdout_file"
+assert_not_contains \
+    "The repository system upgrade and normal AUR update completed." \
+    "$stdout_file"
+assert_pipeline_absent
+assert_no_external_mutation
 
 setup_case upgrade-routing-unchanged no-installed-foreign
 export MOGUET_TEST_SUDO_EXIT_CODE=0
@@ -754,7 +768,7 @@ run_status 0 upgrade
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_pipeline_absent
 
-if [ "$case_count" -ne 49 ]; then
+if [ "$case_count" -ne 50 ]; then
     fail_case "internal test case count changed: $case_count"
 fi
 echo "AUR update command integration tests passed ($case_count cases)."

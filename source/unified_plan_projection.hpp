@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 struct AurUpdateExecutionPreflight;
@@ -19,6 +20,9 @@ struct AurUpdateQueryResult;
 struct AurUpdateSourceBuildPreparation;
 class PreparedFilteredAurUpdateOperation;
 class PreparedUpgradeAllAurPreflight;
+struct SystemAurUpdateDryRunObservation;
+class SystemAurUpdateUnifiedPlanProjection;
+struct SystemAurUpdateUnifiedPlanProjectionTestAccess;
 
 struct FetchUnifiedPlanProjectionInput {
     std::reference_wrapper<const FetchPreparation> source;
@@ -125,14 +129,20 @@ public:
     ~UnifiedPlanProjection() = default;
 
     [[nodiscard]] const UnifiedPlanObservationResult& observation_result()
-        const noexcept;
+        const noexcept {
+        return observation_result_.value();
+    }
 
 private:
     explicit UnifiedPlanProjection(
         std::vector<BuildPlanArtifactTargetProjectionResult>
             artifact_target_projections,
         std::vector<ProjectedBuildPlanArtifactTargets>
-            route_artifact_targets);
+            route_artifact_targets)
+        : artifact_target_projections_(
+              std::move(artifact_target_projections)),
+          route_artifact_targets_(std::move(route_artifact_targets)) {
+    }
 
     std::vector<BuildPlanArtifactTargetProjectionResult>
         artifact_target_projections_;
@@ -180,6 +190,118 @@ private:
     project_upgrade_all_unified_plan(
         const UpgradeAllOperationProjectionAuthority& prepared,
         const PreparedUpgradeAllAurPreflight& aur_preflight);
+    friend std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>
+    project_system_aur_update_unified_plan(
+        const SystemAurUpdateDryRunObservation& observation);
+    friend struct SystemAurUpdateUnifiedPlanProjectionTestAccess;
+};
+
+enum class SystemAurUpdateUnifiedPlanStatus {
+    Ready,
+    Blocked,
+};
+
+enum class SystemAurUpdateUnifiedPlanMode {
+    Auto,
+    RepoOnly,
+};
+
+enum class SystemAurUpdateUnifiedPlanPhase {
+    RepositorySystemTransactionIntent,
+    CurrentForeignInventoryObservation,
+    CurrentNormalAurAssessment,
+    PotentialLaterAurTransactions,
+};
+
+enum class SystemAurUpdateUnifiedPlanFreshness {
+    CurrentInstalledState,
+};
+
+enum class SystemAurUpdateUnifiedPlanActualRefresh {
+    AfterRepositorySuccess,
+};
+
+enum class SystemAurUpdateUnifiedPlanTransactionRelationship {
+    SeparateSequentialTransactions,
+};
+
+// Route-specific aggregate keeps the repository system intent observable even
+// when the current-state AUR child is Blocked. The child observations remain
+// separate, so no atomic transaction is projected.
+class SystemAurUpdateUnifiedPlanProjection final {
+public:
+    SystemAurUpdateUnifiedPlanProjection(
+        const SystemAurUpdateUnifiedPlanProjection&) = delete;
+    SystemAurUpdateUnifiedPlanProjection& operator=(
+        const SystemAurUpdateUnifiedPlanProjection&) = delete;
+    SystemAurUpdateUnifiedPlanProjection(
+        SystemAurUpdateUnifiedPlanProjection&&) = delete;
+    SystemAurUpdateUnifiedPlanProjection& operator=(
+        SystemAurUpdateUnifiedPlanProjection&&) = delete;
+    ~SystemAurUpdateUnifiedPlanProjection() = default;
+
+    SystemAurUpdateUnifiedPlanStatus status() const noexcept {
+        return status_;
+    }
+    SystemAurUpdateUnifiedPlanMode mode() const noexcept {
+        return mode_;
+    }
+    const std::vector<SystemAurUpdateUnifiedPlanPhase>& phases()
+        const noexcept {
+        return phases_;
+    }
+    const UnifiedPlanProjection& repository_projection() const noexcept {
+        return *repository_projection_;
+    }
+    const UnifiedPlanProjection* aur_projection() const noexcept {
+        return aur_projection_.get();
+    }
+    std::optional<SystemAurUpdateUnifiedPlanFreshness> freshness()
+        const noexcept {
+        return freshness_;
+    }
+    std::optional<SystemAurUpdateUnifiedPlanActualRefresh> actual_refresh()
+        const noexcept {
+        return actual_refresh_;
+    }
+    std::optional<SystemAurUpdateUnifiedPlanTransactionRelationship>
+    transaction_relationship() const noexcept {
+        return transaction_relationship_;
+    }
+
+private:
+    SystemAurUpdateUnifiedPlanProjection(
+        SystemAurUpdateUnifiedPlanStatus status,
+        SystemAurUpdateUnifiedPlanMode mode,
+        std::vector<SystemAurUpdateUnifiedPlanPhase> phases,
+        std::unique_ptr<UnifiedPlanProjection> repository_projection,
+        std::unique_ptr<UnifiedPlanProjection> aur_projection,
+        std::optional<SystemAurUpdateUnifiedPlanFreshness> freshness,
+        std::optional<SystemAurUpdateUnifiedPlanActualRefresh>
+            actual_refresh,
+        std::optional<SystemAurUpdateUnifiedPlanTransactionRelationship>
+            transaction_relationship)
+        : status_(status), mode_(mode), phases_(std::move(phases)),
+          repository_projection_(std::move(repository_projection)),
+          aur_projection_(std::move(aur_projection)),
+          freshness_(freshness), actual_refresh_(actual_refresh),
+          transaction_relationship_(transaction_relationship) {
+    }
+
+    SystemAurUpdateUnifiedPlanStatus status_;
+    SystemAurUpdateUnifiedPlanMode mode_;
+    std::vector<SystemAurUpdateUnifiedPlanPhase> phases_;
+    std::unique_ptr<UnifiedPlanProjection> repository_projection_;
+    std::unique_ptr<UnifiedPlanProjection> aur_projection_;
+    std::optional<SystemAurUpdateUnifiedPlanFreshness> freshness_;
+    std::optional<SystemAurUpdateUnifiedPlanActualRefresh> actual_refresh_;
+    std::optional<SystemAurUpdateUnifiedPlanTransactionRelationship>
+        transaction_relationship_;
+
+    friend std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>
+    project_system_aur_update_unified_plan(
+        const SystemAurUpdateDryRunObservation& observation);
+    friend struct SystemAurUpdateUnifiedPlanProjectionTestAccess;
 };
 
 std::unique_ptr<UnifiedPlanProjection> project_root_package_unified_plan(
@@ -204,3 +326,12 @@ std::unique_ptr<UnifiedPlanProjection> project_upgrade_all_unified_plan(
 std::unique_ptr<UnifiedPlanProjection> project_upgrade_all_unified_plan(
     const UpgradeAllOperationProjectionAuthority& prepared,
     const PreparedUpgradeAllAurPreflight& aur_preflight);
+std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>
+project_system_aur_update_unified_plan(
+    const SystemAurUpdateDryRunObservation& observation);
+std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>
+project_system_aur_update_unified_plan(
+    SystemAurUpdateDryRunObservation&& observation) = delete;
+std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>
+project_system_aur_update_unified_plan(
+    const SystemAurUpdateDryRunObservation&& observation) = delete;

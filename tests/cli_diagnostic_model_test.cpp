@@ -461,6 +461,11 @@ void test_rich_cli_option_and_ownership_contract() {
         special_operation_spec(SpecialOperationId::PkgbuildPrint);
     const SpecialOperationSpec& select_operation =
         special_operation_spec(SpecialOperationId::SyncSelect);
+    const SpecialOperationSpec& system_repository_update =
+        special_operation_spec(
+            SpecialOperationId::SystemRepositoryUpdate);
+    const SpecialOperationSpec& system_aur_update =
+        special_operation_spec(SpecialOperationId::SystemAurUpdate);
     const SpecialOperationSpec& delegated =
         special_operation_spec(
             SpecialOperationId::DelegatedPacmanGrammar);
@@ -497,6 +502,85 @@ void test_rich_cli_option_and_ownership_contract() {
             find_special_operation("-S", select_needed_context) ==
                 &select_operation,
         "Plain -S was collapsed into the closed -S --select form");
+
+    const std::array<OptionId, 1> system_repo_context = {
+        OptionId::Repo};
+    const OptionRelationContract* system_repo_selector =
+        system_repository_update.option_relations.find(
+            OptionId::Repo);
+    const OptionRelationContract* system_repo_needed =
+        system_repository_update.option_relations.find(
+            OptionId::Needed);
+    const OptionRelationContract* system_auto_needed =
+        system_aur_update.option_relations.find(OptionId::Needed);
+    expect(
+        find_special_operation("-Syu") == &system_aur_update &&
+            find_special_operation("-Syu", system_repo_context) ==
+                &system_repository_update &&
+            system_repository_update.owner ==
+                GrammarOwnership::InterceptedPacman &&
+            system_repository_update.semantic_scope ==
+                OperationSemanticScope::RepositorySystemUpgrade &&
+            system_repository_update.dry_run_support ==
+                DryRunSupport::Supported &&
+            system_repository_update.delegated_pacman_tail_policy ==
+                DelegatedPacmanTailPolicy::RepositoryOnly &&
+            system_repo_selector != nullptr &&
+            system_repo_selector->requirement ==
+                OptionRelationRequirement::Required &&
+            system_repo_selector->public_syntax ==
+                OptionPublicSyntax::Required &&
+            system_repo_selector->forwarding_targets ==
+                option_forwarding_target(
+                    OptionForwardingTarget::None) &&
+            system_repo_needed != nullptr &&
+            system_repo_needed->forwarding_targets ==
+                option_forwarding_target(
+                    OptionForwardingTarget::Pacman) &&
+            system_repository_update.option_relations.contains(
+                OptionId::DryRun) &&
+            !system_repository_update.option_relations.contains(
+                OptionId::Aur) &&
+            !system_repository_update.option_relations.contains(
+                OptionId::Edit),
+        "Repository-only -Syu structured authority differs");
+    expect(
+        system_aur_update.owner ==
+                GrammarOwnership::InterceptedPacman &&
+            system_aur_update.semantic_scope ==
+                OperationSemanticScope::SystemAndNormalAurUpgrade &&
+            system_aur_update.dry_run_support ==
+                DryRunSupport::Supported &&
+            system_aur_update.exit_contract_identity ==
+                "exit.partial-mutation" &&
+            system_aur_update.delegated_pacman_tail_policy ==
+                DelegatedPacmanTailPolicy::None &&
+            system_auto_needed != nullptr &&
+            system_auto_needed->occurrence ==
+                OptionOccurrence::RepeatIdempotent &&
+            system_auto_needed->forwarding_occurrence ==
+                OptionForwardingOccurrence::PreserveAll &&
+            has_option_forwarding_target(
+                system_auto_needed->forwarding_targets,
+                OptionForwardingTarget::Pacman) &&
+            !has_option_forwarding_target(
+                system_auto_needed->forwarding_targets,
+                OptionForwardingTarget::FinalInstallPacman) &&
+            system_aur_update.option_relations.contains(
+                OptionId::DryRun) &&
+            system_aur_update.option_relations.contains(
+                OptionId::NoConfirm) &&
+            system_aur_update.option_relations.contains(
+                OptionId::Edit) &&
+            system_aur_update.option_relations.contains(
+                OptionId::BuildMode) &&
+            !system_aur_update.option_relations.contains(
+                OptionId::Repo) &&
+            !system_aur_update.option_relations.contains(
+                OptionId::Aur) &&
+            !system_aur_update.option_relations.contains(
+                OptionId::RmDeps),
+        "Automatic -Syu structured authority differs");
 
     const OptionRelationContract* select_relation =
         select_operation.option_relations.find(OptionId::Select);

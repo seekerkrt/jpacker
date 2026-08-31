@@ -24,6 +24,8 @@ struct AurUpdateRemotePackage {
     std::string package_base;
     std::string version;
     AurVersionRelation version_relation = AurVersionRelation::Unavailable;
+
+    bool operator==(const AurUpdateRemotePackage&) const = default;
 };
 
 // AUR上に対象packageが存在しないことを確認できた状態。
@@ -97,11 +99,15 @@ struct AurUpdatePlanEntry {
           devel_classification(std::move(devel_classification_value)),
           devel_assessment(std::move(devel_assessment_value)) {
     }
+
+    bool operator==(const AurUpdatePlanEntry&) const = default;
 };
 
 // installed inventoryの順序を保った、表示や将来のupdate workflow向けのpure plan。
 struct AurUpdatePlan {
     std::vector<AurUpdatePlanEntry> entries;
+
+    bool operator==(const AurUpdatePlan&) const = default;
 };
 
 AurUpdatePlanEntry classify_aur_update(const AurUpdatePlanInput& input);

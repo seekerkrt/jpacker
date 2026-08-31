@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.5.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-30 18:13+0900\n"
+"POT-Creation-Date: 2026-08-31 15:08+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -1331,15 +1331,13 @@ msgid "{} update preflight contains an unexpected target status."
 msgstr "{} 更新の事前検査に予期しない対象状態が含まれています。"
 
 #. TRANSLATORS: The placeholders are the literal service
-#. name "AUR" and internal type name "BuildPlan",
-#. respectively.
+#. name "AUR" and internal type name "BuildPlan".
 #, c++-format
 msgid "Executable {} update preflight has no combined {}."
 msgstr "実行可能な {} 更新の事前検査に統合された {} がありません。"
 
 #. TRANSLATORS: The placeholders are the literal service
-#. name "AUR" and internal type name "BuildPlan",
-#. respectively.
+#. name "AUR" and internal type name "BuildPlan".
 #, c++-format
 msgid "Executable {} update {} has an empty execution order."
 msgstr "実行可能な {} 更新の {} に実行順序がありません。"
@@ -1355,6 +1353,18 @@ msgstr "汎用の本番用ソースビルド準備が予期せず失敗しまし
 
 msgid "Generic production source-build preparation failed with an unknown exception."
 msgstr "汎用の本番用ソースビルド準備が不明な例外で失敗しました。"
+
+#. TRANSLATORS: {} is the literal service name "AUR".
+#, c++-format
+msgid "Observed {} update source-build preflight correlation is inconsistent."
+msgstr "観測した {} 更新のソースビルド事前検査相関に整合性がありません。"
+
+#, c++-format
+msgid "Generic production source-build observation failed unexpectedly: {}"
+msgstr "汎用の本番用ソースビルド観測が予期せず失敗しました: {}"
+
+msgid "Generic production source-build observation failed with an unknown exception."
+msgstr "汎用の本番用ソースビルド観測が不明な例外で失敗しました。"
 
 #. TRANSLATORS: {} is the literal service name "AUR".
 #, c++-format
@@ -1994,6 +2004,14 @@ msgstr "不正な環境変数代入です: {}"
 #, c++-format
 msgid "Unknown operation: {}"
 msgstr "不明な操作です: {}"
+
+#, c++-format
+msgid "A {} option is not supported for the combined {} route. Use {} for a repository-only system upgrade with full {} pass-through."
+msgstr "{}オプションは複合{}経路では対応していません。{}を使用すると、{}引数を完全に引き継ぐリポジトリ専用システム更新になります。"
+
+#, c++-format
+msgid "A {} argument form is not supported for the combined {} route. Use {} for a repository-only system upgrade with full {} pass-through."
+msgstr "{}引数形式は複合{}経路では対応していません。{}を使用すると、{}引数を完全に引き継ぐリポジトリ専用システム更新になります。"
 
 #, c++-format
 msgid "Operation {} does not accept target operands."
@@ -3463,6 +3481,63 @@ msgstr "準備済みリポジトリトランザクションに{}引数があり�
 msgid "{} failed."
 msgstr "{}に失敗しました。"
 
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository system upgrade completed, but the fresh installed-package inventory for {} could not be obtained."
+msgstr "リポジトリのシステム更新は完了しましたが、{}向けの最新インストール済みパッケージ一覧を取得できませんでした。"
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository system upgrade completed, but the fresh {} update query failed."
+msgstr "リポジトリのシステム更新は完了しましたが、最新状態での{}更新照会に失敗しました。"
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository system upgrade completed, but the {} update was blocked before execution."
+msgstr "リポジトリのシステム更新は完了しましたが、{}更新は実行前に停止しました。"
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository system upgrade completed, but the {} update could not start."
+msgstr "リポジトリのシステム更新は完了しましたが、{}更新を開始できませんでした。"
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository system upgrade completed, but the {} update failed."
+msgstr "リポジトリのシステム更新は完了しましたが、{}更新に失敗しました。"
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository system upgrade completed, but {} cleanup failed after a package transaction."
+msgstr "リポジトリのシステム更新は完了しましたが、パッケージトランザクション後の{}後処理に失敗しました。"
+
+msgid "The completed repository system upgrade was not rolled back."
+msgstr "完了済みのリポジトリシステム更新はロールバックされていません。"
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository and {} update result is inconsistent; no success was reported."
+msgstr "リポジトリ更新と{}更新の結果に整合性がないため、成功として報告しません。"
+
+msgid "The repository system upgrade failed."
+msgstr "リポジトリのシステム更新に失敗しました。"
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The {} update was not attempted."
+msgstr "{}更新は試行されませんでした。"
+
+msgid "The repository system upgrade completed."
+msgstr "リポジトリのシステム更新が完了しました。"
+
+msgid "The repository system upgrade was not attempted."
+msgstr "リポジトリのシステム更新は試行されませんでした。"
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository system upgrade and normal {} update completed."
+msgstr "リポジトリのシステム更新と通常の{}更新が完了しました。"
+
 #, c++-format
 msgid "Cannot combine {} refresh with {} info fallback for unqualified target: {}"
 msgstr "リポジトリ未修飾の対象では、{}のデータベース更新と{}情報への代替検索を併用できません: {}"
@@ -4779,6 +4854,14 @@ msgstr "dry-runの投影で無効な観測結果が生成されました。"
 msgid "Dry-run observation has an unknown status."
 msgstr "dry-run観測結果のstatusが不明です。"
 
+#, c++-format
+msgid "System and {} update dry-run projection did not produce an observation."
+msgstr "システム/{}更新のdry-run投影で観測結果が生成されませんでした。"
+
+#, c++-format
+msgid "System and {} update dry-run route is not executable."
+msgstr "システム/{}更新のdry-run経路は実行可能ではありません。"
+
 msgid "System/source upgrade preflight has no projection authority."
 msgstr "システム/ソース更新の事前検査に投影authorityがありません。"
 
@@ -5133,6 +5216,11 @@ msgstr "{}は通常ユーザーとして実行してください。{}は必要�
 msgid "Failed to load the user configuration because of an unknown error."
 msgstr "不明なエラーによりユーザー設定を読み込めませんでした。"
 
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "The combined system and {} update request is incompatible."
+msgstr "複合システム/{}更新リクエストには互換性がありません。"
+
 #, c++-format
 msgid "Started {} v{}."
 msgstr "{} v{}を起動しました。"
@@ -5156,23 +5244,21 @@ msgstr "操作"
 msgid "Build one remote package or local {} root without saving a preference"
 msgstr "設定を保存せず、リモートパッケージ1件またはローカル{}ルート1件をビルド"
 
-msgid "Update the system and rebuild configured source packages"
-msgstr "システムを更新し、設定済みソースパッケージを再ビルド"
+msgid "Run the source-aware system update and apply saved source-build preferences"
+msgstr "保存済みソースビルド設定を適用するソース対応システム更新を実行"
 
-#. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-#, c++-format
-msgid "Check registered source-build preferences after {}"
-msgstr "{}の後に登録済みソースビルド設定を確認"
+msgid "Update repository packages before rebuilding configured source packages"
+msgstr "設定済みソースパッケージの再ビルド前にリポジトリパッケージを更新"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
 #, c++-format
 msgid "Update installed {} packages only"
 msgstr "インストール済みの{}パッケージだけを更新"
 
-#. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
+#. TRANSLATORS: The placeholder is the AUR project identity.
 #, c++-format
-msgid "Do not run {}; source-build preferences are optional"
-msgstr "{}は実行しません。ソースビルド設定は任意です"
+msgid "Do not update repository packages; apply saved source-build preferences for matching {} packages"
+msgstr "リポジトリパッケージは更新せず、該当する{}パッケージへ保存済みソースビルド設定を適用"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
 #, c++-format
@@ -5183,6 +5269,9 @@ msgstr "システム、登録済みのソースパッケージ、その他のイ
 #, c++-format
 msgid "Give explicit source preferences priority and avoid duplicate package/{} builds"
 msgstr "明示的なソースビルド設定を優先し、パッケージ/{}単位での重複ビルドを回避"
+
+msgid "Apply saved source-build preferences as a source-aware workflow"
+msgstr "ソース対応ワークフローとして保存済みソースビルド設定を適用"
 
 msgid "Do not accept target operands"
 msgstr "対象引数は受け付けません"
@@ -5264,13 +5353,26 @@ msgstr "インストールするルートパッケージを対話形式で検索
 msgid "Require an interactive terminal; install selected repository roots first, then build selected {} roots only if that transaction succeeds"
 msgstr "対話端末が必要。選択したリポジトリのルートを先にインストールし、そのトランザクションが成功した場合だけ選択した {} のルートをビルド"
 
-msgid "Upgrade the system"
-msgstr "システムをアップグレード"
-
-#. TRANSLATORS: The placeholder is the literal pacman program identity.
+#. TRANSLATORS: The placeholder is the AUR project identity.
 #, c++-format
-msgid "Remain compatible with {}; do not scan all source-build preferences"
-msgstr "{}互換を維持し、登録済みソースビルド設定をすべて走査しません"
+msgid "Upgrade official repository packages and normal installed {} packages"
+msgstr "公式リポジトリパッケージと通常のインストール済み{}パッケージを更新"
+
+msgid "Do not read or apply saved source-build preferences"
+msgstr "保存済みソースビルド設定を読み取りも適用もしません"
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "Run repository and {} phases sequentially; a later failure does not roll back the repository upgrade"
+msgstr "リポジトリ段階と{}段階を順番に実行し、後続の失敗でもリポジトリ更新をロールバックしません"
+
+msgid "Run the repository system upgrade only"
+msgstr "リポジトリのシステム更新だけを実行"
+
+#. TRANSLATORS: The placeholder is the pacman program identity.
+#, c++-format
+msgid "Allow the full {}-compatible repository argument tail"
+msgstr "{}互換のリポジトリ引数をすべて許可"
 
 msgid "Search for packages"
 msgstr "パッケージを検索"
@@ -5300,6 +5402,11 @@ msgstr "未対応経路を拒否し、state、cache、workspaceを作成しま�
 
 msgid "Show assessed conflict/replacement blockers before any supported mutation"
 msgstr "対応する変更の前に判定済みの競合/置換ブロッカーを表示"
+
+#. TRANSLATORS: The placeholders are the literal -Syu token and AUR project identity.
+#, c++-format
+msgid "For {}, assess the current installed {} state; actual execution re-evaluates it after the repository upgrade succeeds"
+msgstr "{}では現在インストールされている{}状態を評価し、実行時はリポジトリ更新成功後に再評価します"
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
 #, c++-format
@@ -5367,10 +5474,15 @@ msgstr "分離されたソースビルドでは未対応です。依存パッケ
 msgid "Limit {}, {}, and {} to {}; do not fall back to repositories"
 msgstr "{}、{}、{}を{}に限定し、リポジトリへフォールバックしません"
 
-#. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
+#. TRANSLATORS: The placeholders are literal -Syu, upgrade-aur, and AUR identities.
 #, c++-format
-msgid "Limit {}, {}, and {} to official binary repositories; do not use {} or source builds"
-msgstr "{}、{}、{}を公式バイナリリポジトリに限定し、{}やソースビルドを使用しません"
+msgid "Do not use with {}; use {} for an {}-only source-aware update"
+msgstr "{}とは併用できません。{}を使用すると{}専用のソース対応更新になります"
+
+#. TRANSLATORS: -S, -Ss, -Si, -Syu, and AUR are literal CLI/project identities.
+#, c++-format
+msgid "Limit {}, {}, and {} to official binary repositories; with {}, run the repository system upgrade only; do not use {} or source builds"
+msgstr "{}、{}、{}を公式バイナリリポジトリに限定し、{}ではリポジトリのシステム更新だけを実行して、{}やソースビルドを使用しません"
 
 msgid "CONFIGURATION"
 msgstr "設定"
@@ -7259,6 +7371,20 @@ msgstr "列挙中にソース設定エントリがなくなりました: {}"
 msgid "Source preference entry changed before removal: {}"
 msgstr "削除前にソース設定エントリが変更されました: {}"
 
+msgid "Repository configuration observation failed with an unknown exception."
+msgstr "リポジトリ設定の観測が不明な例外で失敗しました。"
+
+msgid "Foreign package inventory observation failed with an unknown exception."
+msgstr "foreignパッケージ一覧の観測が不明な例外で失敗しました。"
+
+#, c++-format
+msgid "{} query failed with an unknown exception."
+msgstr "{}照会が不明な例外で失敗しました。"
+
+#, c++-format
+msgid "{} assessment failed with an unknown exception."
+msgstr "{}評価が不明な例外で失敗しました。"
+
 msgid "The system upgrade failed with an unknown exception."
 msgstr "システム更新が不明な例外で失敗しました。"
 
@@ -8297,18 +8423,35 @@ msgstr "ソースインストール方針が利用できない必要アーティ
 msgid "{} required artifact #{}: {}; target: {}/{}; install reason: {}"
 msgstr "{} 必要アーティファクト #{}: {}、対象: {}/{}、インストール理由: {}"
 
-msgid "Transaction intents:"
-msgstr "トランザクション方針:"
-
 msgid "Repository package transaction"
 msgstr "リポジトリパッケージトランザクション"
+
+msgid "Repository system transaction intent"
+msgstr "リポジトリシステムトランザクション方針"
+
+#, c++-format
+msgid "Later normal {} dependency/provider transaction intent"
+msgstr "後続の通常{}依存関係/プロバイダートランザクション方針"
+
+msgid "A repository transaction intent stage is not supported by the renderer."
+msgstr "リポジトリトランザクション方針の段階はレンダラーでサポートされていません。"
+
+msgid "Source-built artifact install boundary"
+msgstr "ソースビルド済みアーティファクトのインストール境界"
+
+#, c++-format
+msgid "Later normal {} build/install transaction intent"
+msgstr "後続の通常{}ビルド/インストールトランザクション方針"
+
+msgid "A source transaction intent stage is not supported by the renderer."
+msgstr "ソーストランザクション方針の段階はレンダラーでサポートされていません。"
+
+msgid "Transaction intents:"
+msgstr "トランザクション方針:"
 
 #, c++-format
 msgid "  {}. {} ({} policy: {})"
 msgstr "  {}. {}（{}ポリシー: {}）"
-
-msgid "Source-built artifact install boundary"
-msgstr "ソースビルド済みアーティファクトのインストール境界"
 
 #, c++-format
 msgid "A {} resolution failure kind is not supported by the renderer."
@@ -8775,6 +8918,14 @@ msgid "{} source preparation failure ({}); update plan indices: {}; roots: {}; p
 msgstr "{} source preparation失敗（{}）、update plan index: {}、root: {}、package: {}、{}: {}、typed nested detail: {}、診断: {}"
 
 #, c++-format
+msgid "A filtered {} observation issue kind is not supported by the renderer."
+msgstr "絞り込み済み{}観測問題の種別はレンダラーでサポートされていません。"
+
+#, c++-format
+msgid "A system/{} dry-run issue kind is not supported by the renderer."
+msgstr "システム/{} dry-run問題の種別はレンダラーでサポートされていません。"
+
+#, c++-format
 msgid "An {} route preflight blocker has no affected identity or diagnostic detail."
 msgstr "{}経路事前検査ブロッカーに影響対象の識別情報も診断詳細もありません。"
 
@@ -8785,6 +8936,18 @@ msgstr "{}経路の事前検査失敗（{}）; パッケージ: {}; {}: {}; 依�
 #, c++-format
 msgid "{} route preflight failure ({}); package: {}; {}: {}; dependency: {}; artifact projection: {}; diagnostic: {}"
 msgstr "{}経路の事前検査失敗（{}）; パッケージ: {}; {}: {}; 依存関係: {}; アーティファクト投影: {}; 診断: {}"
+
+#, c++-format
+msgid "A filtered {} observation issue is missing its diagnostic."
+msgstr "絞り込み済み{}観測問題に診断がありません。"
+
+#, c++-format
+msgid "Filtered {} observation inconsistency ({}); package: {}; {}: {}; diagnostic: {}"
+msgstr "絞り込み済み{}観測の不整合（{}）、パッケージ: {}、{}: {}、診断: {}"
+
+#, c++-format
+msgid "System/{} current-state observation failure ({}); details: {}"
+msgstr "システム/{}の現在状態観測に失敗（{}）、詳細: {}"
 
 msgid "A system package snapshot issue is missing its package metadata failure."
 msgstr "システムパッケージスナップショットの問題にパッケージメタデータ失敗がありません。"
@@ -8924,6 +9087,87 @@ msgstr "統合プラン:"
 #, c++-format
 msgid "  Status: {}"
 msgstr "  状態: {}"
+
+#, c++-format
+msgid "A system/{} aggregate status is not supported by the renderer."
+msgstr "システム/{}集約状態はレンダラーでサポートされていません。"
+
+msgid "Repository system update plan:"
+msgstr "リポジトリのシステム更新プラン:"
+
+#, c++-format
+msgid "System + normal {} update plan:"
+msgstr "システム + 通常{}更新プラン:"
+
+msgid "Repository update phase:"
+msgstr "リポジトリ更新の段階:"
+
+msgid "Combined update phases:"
+msgstr "複合更新の段階:"
+
+msgid "official repository system-upgrade intent"
+msgstr "公式リポジトリのシステム更新方針"
+
+#, c++-format
+msgid "current installed foreign/{} state observation"
+msgstr "現在インストールされているforeign/{}状態の観測"
+
+#, c++-format
+msgid "current-state normal {} assessment"
+msgstr "現在状態に基づく通常{}評価"
+
+#, c++-format
+msgid "potential later normal {} build/install intents"
+msgstr "後続する可能性がある通常{}ビルド/インストール方針"
+
+#, c++-format
+msgid "A system/{} conceptual phase is not supported by the renderer."
+msgstr "システム/{}の概念上の段階はレンダラーでサポートされていません。"
+
+#, c++-format
+msgid "  Phase {}: {}"
+msgstr "  段階 {}: {}"
+
+msgid "Freshness:"
+msgstr "鮮度:"
+
+#, c++-format
+msgid "System/{} freshness or transaction semantics are incomplete."
+msgstr "システム/{}の鮮度またはトランザクションの意味が不完全です。"
+
+msgid "  unsupported"
+msgstr "  未対応"
+
+#, c++-format
+msgid "  {} assessment is based on the current installed state."
+msgstr "  {}の評価は現在インストールされている状態に基づきます。"
+
+#, c++-format
+msgid "  Actual execution re-evaluates {} state after the repository upgrade succeeds."
+msgstr "  実際の実行では、リポジトリ更新が成功した後に{}状態を再評価します。"
+
+#, c++-format
+msgid "  The repository system transaction and later normal {} transactions are separate intents."
+msgstr "  リポジトリシステムトランザクションと後続の通常{}トランザクションは別の方針です。"
+
+#, c++-format
+msgid "A system/{} projection mode is not supported by the renderer."
+msgstr "システム/{}投影モードはレンダラーでサポートされていません。"
+
+msgid "Repository system phase:"
+msgstr "リポジトリシステム段階:"
+
+#, c++-format
+msgid "System/{} projection has no repository child observation."
+msgstr "システム/{}投影にリポジトリ側の子観測がありません。"
+
+#, c++-format
+msgid "Current-state normal {} phase:"
+msgstr "現在状態に基づく通常{}段階:"
+
+#, c++-format
+msgid "System/{} projection has no current-state {} child observation."
+msgstr "システム/{}投影に現在状態の{}子観測がありません。"
 
 #. TRANSLATORS: The placeholder is the literal XDG standard identity.
 #, c++-format
@@ -9098,6 +9342,21 @@ msgstr "{}のデフォルト状態ログを段階{}で安全に使用できま�
 
 msgid "Unknown state log error code."
 msgstr "不明な状態ログエラーコードです。"
+
+#, c++-format
+#~ msgid "Check registered source-build preferences after {}"
+#~ msgstr "{}の後に登録済みソースビルド設定を確認"
+
+#, c++-format
+#~ msgid "Do not run {}; source-build preferences are optional"
+#~ msgstr "{}は実行しません。ソースビルド設定は任意です"
+
+#~ msgid "Upgrade the system"
+#~ msgstr "システムをアップグレード"
+
+#, c++-format
+#~ msgid "Remain compatible with {}; do not scan all source-build preferences"
+#~ msgstr "{}互換を維持し、登録済みソースビルド設定をすべて走査しません"
 
 #, c++-format
 #~ msgid "{} returned malformed package artifact identity."

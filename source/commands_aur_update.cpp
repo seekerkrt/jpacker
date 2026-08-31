@@ -470,7 +470,8 @@ PreparedFilteredAurUpdateOperation prepare_upgrade_aur_operation(
 
     AurUpdateQueryResult query_result = query_installed_aur_updates();
     return prepare_filtered_aur_update_operation(
-        std::move(query_result), {}, config);
+        std::move(query_result), NoExplicitSourceSatisfaction{},
+        SavedSourcePreferencePolicy::Strict, config);
 }
 
 int cmd_upgrade_aur(
@@ -482,7 +483,12 @@ int cmd_upgrade_aur(
 
     // POLICY(#281): upgrade-aur presentationはlegacy reducer resultを正本にし、
     // filtered boundary固有のplanner/mapping detailをcommand outputへ追加しない。
+    present_filtered_aur_update_execution_result(result);
+    return result.is_success() ? 0 : 1;
+}
+
+void present_filtered_aur_update_execution_result(
+    const FilteredAurUpdateExecutionResult& result) {
     print_operation_result(
         result.query_result, result.reduced_operation_result);
-    return result.is_success() ? 0 : 1;
 }

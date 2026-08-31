@@ -109,6 +109,7 @@ KNOWN_FORWARDING_TARGETS = frozenset(
 KNOWN_FORWARDING_OCCURRENCES = frozenset(
     {"none", "preserve-all", "consolidate-single"}
 )
+KNOWN_DELEGATED_TAIL_POLICIES = frozenset({"none", "repository-only"})
 PRIMARY_OPERAND_KINDS = frozenset({"package", "directory", "query"})
 ASSIGNMENT_PRIMARY_OPERAND_KINDS = frozenset({"package", "directory"})
 CANONICAL_GRAMMAR_ATOM_BOUNDARIES = frozenset("[](){}|,")
@@ -165,6 +166,7 @@ class Form:
     operand_ordering: str
     operand_terms: tuple[OperandTerm, ...]
     option_relations: tuple[OptionRelation, ...]
+    delegated_tail_policy: str = "none"
 
     @property
     def option_ids(self) -> tuple[int, ...]:
@@ -412,7 +414,7 @@ def parse_exported_schema(exported_schema: str) -> CliSchema:
                 existing,
                 open_grammar=existing.open_grammar or mode == "open",
             )
-        elif record == "FORM" and len(fields) == 7:
+        elif record == "FORM" and len(fields) == 8:
             token = fields[1]
             if (token, "closed") not in operation_modes:
                 fail(f"grammar form has no closed operation projection: {token!r}")
@@ -423,7 +425,13 @@ def parse_exported_schema(exported_schema: str) -> CliSchema:
                 operand_ordering=fields[4],
                 operand_terms=parse_operand_terms(fields[5]),
                 option_relations=parse_option_relations(fields[6]),
+                delegated_tail_policy=fields[7],
             )
+            if form.delegated_tail_policy not in KNOWN_DELEGATED_TAIL_POLICIES:
+                fail(
+                    "unsupported delegated tail policy projection: "
+                    f"{form.delegated_tail_policy!r}"
+                )
             operations[token] = replace(existing, forms=existing.forms + (form,))
         elif record == "DELEGATED" and len(fields) == 5:
             if delegated_form is not None:
@@ -434,6 +442,7 @@ def parse_exported_schema(exported_schema: str) -> CliSchema:
                 operand_ordering=fields[2],
                 operand_terms=parse_operand_terms(fields[3]),
                 option_relations=parse_option_relations(fields[4]),
+                delegated_tail_policy="none",
             )
         elif record == "TERMINAL" and len(fields) == 2:
             terminal_tokens.append(fields[1])
@@ -547,10 +556,21 @@ def unique_completion_tokens(options: tuple[Option, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(option.completion_token for option in options))
 
 
-def union_form_ids(forms: tuple[Form, ...]) -> tuple[int, ...]:
+def completion_ids_for_form(schema: CliSchema, form: Form) -> tuple[int, ...]:
+    identities = form.option_ids
+    if form.delegated_tail_policy != "none":
+        identities = identities + schema.delegated_option_ids
+    return tuple(dict.fromkeys(identities))
+
+
+def union_completion_form_ids(
+    schema: CliSchema, forms: tuple[Form, ...]
+) -> tuple[int, ...]:
     return tuple(
         dict.fromkeys(
-            identity for form in forms for identity in form.option_ids
+            identity
+            for form in forms
+            for identity in completion_ids_for_form(schema, form)
         )
     )
 
@@ -833,6 +853,49 @@ def validate_relation_projection(
             )
 
 
+def validate_delegated_tail_projection(
+    operation: Operation,
+    form: Form,
+    options_by_identity: dict[int, Option],
+) -> None:
+    if form.delegated_tail_policy == "none":
+        return
+    if form.delegated_tail_policy != "repository-only":
+        fail(
+            "unsupported delegated tail policy projection: "
+            f"{form.delegated_tail_policy!r}"
+        )
+    if not operation.open_grammar:
+        fail(
+            "repository-only delegated tail has no open pacman fallback: "
+            f"{form.syntax}"
+        )
+    repository_relation = next(
+        (
+            relation
+            for relation in form.option_relations
+            if relation.identity in options_by_identity
+            and options_by_identity[relation.identity].token == "--repo"
+        ),
+        None,
+    )
+    if repository_relation is None or repository_relation.requirement != "required":
+        fail(
+            "repository-only delegated tail lacks required --repo selector: "
+            f"{form.syntax}"
+        )
+    if (
+        repository_relation.public_syntax != "required"
+        or repository_relation.semantic_effects != ("moguet-control",)
+        or repository_relation.forwarding_targets != ("none",)
+        or repository_relation.forwarding_occurrence != "none"
+    ):
+        fail(
+            "repository-only delegated tail forwards or misclassifies --repo: "
+            f"{form.syntax}"
+        )
+
+
 def validate_end_of_options_relation(
     schema: CliSchema,
     options_by_identity: dict[int, Option],
@@ -893,6 +956,9 @@ def validate_schema_projection(schema: CliSchema) -> None:
             validate_operand_projection(operation, form)
             validate_relation_projection(
                 form, options_by_identity, option_tokens_by_identity
+            )
+            validate_delegated_tail_projection(
+                operation, form, options_by_identity
             )
             public_syntax_ids.update(
                 relation.identity
@@ -1106,14 +1172,35 @@ def render_bash(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
                 for identity in selected.selector_ids
             )
             selected_tokens = unique_completion_tokens(
-                options_for_ids(schema, selected.option_ids)
+                options_for_ids(
+                    schema, completion_ids_for_form(schema, selected)
+                )
             )
             default_tokens = unique_completion_tokens(
-                options_for_ids(schema, default.option_ids)
+                options_for_ids(
+                    schema, completion_ids_for_form(schema, default)
+                )
             )
             union_tokens = unique_completion_tokens(
-                options_for_ids(schema, union_form_ids(operation.forms))
+                options_for_ids(
+                    schema,
+                    union_completion_form_ids(schema, operation.forms),
+                )
             )
+            if operation.open_grammar:
+                operand_branch = (
+                    f"            elif _moguet_has_operand {shell_quote(operation.token)}; then\n"
+                    f"                candidates=({bash_array(delegated_tokens)})\n"
+                )
+            else:
+                operand_branch = (
+                    f"            elif _moguet_has_operand {shell_quote(operation.token)}; then\n"
+                    f"                if _moguet_form_prefix_valid {shell_quote(operation.token)} {default_index}; then\n"
+                    f"                    candidates=({bash_array(default_tokens)})\n"
+                    f"                else\n"
+                    f"                    candidates=()\n"
+                    f"                fi\n"
+                )
             operation_cases.append(
                 f"        {operation.token})\n"
                 f"            if {selector_checks}; then\n"
@@ -1122,12 +1209,7 @@ def render_bash(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
                 f"                else\n"
                 f"                    candidates=()\n"
                 f"                fi\n"
-                f"            elif _moguet_has_operand {shell_quote(operation.token)}; then\n"
-                f"                if _moguet_form_prefix_valid {shell_quote(operation.token)} {default_index}; then\n"
-                f"                    candidates=({bash_array(default_tokens)})\n"
-                f"                else\n"
-                f"                    candidates=()\n"
-                f"                fi\n"
+                f"{operand_branch}"
                 f"            else\n"
                 f"                candidates=({bash_array(union_tokens)})\n"
                 f"            fi\n"
@@ -1140,7 +1222,9 @@ def render_bash(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
                 for identity in form.selector_ids
             )
             selected_tokens = unique_completion_tokens(
-                options_for_ids(schema, form.option_ids)
+                options_for_ids(
+                    schema, completion_ids_for_form(schema, form)
+                )
             )
             preselection_ids = tuple(
                 dict.fromkeys(schema.delegated_option_ids + form.selector_ids)
@@ -1164,7 +1248,9 @@ def render_bash(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
         elif operation.forms:
             form = operation.forms[0]
             tokens = unique_completion_tokens(
-                options_for_ids(schema, form.option_ids)
+                options_for_ids(
+                    schema, completion_ids_for_form(schema, form)
+                )
             )
             operation_cases.append(
                 f"        {operation.token})\n"
@@ -1357,14 +1443,35 @@ def render_zsh(schema: CliSchema, descriptions: Descriptions, locale: str) -> st
                 for identity in selected.selector_ids
             )
             selected_tokens = unique_completion_tokens(
-                options_for_ids(schema, selected.option_ids)
+                options_for_ids(
+                    schema, completion_ids_for_form(schema, selected)
+                )
             )
             default_tokens = unique_completion_tokens(
-                options_for_ids(schema, default.option_ids)
+                options_for_ids(
+                    schema, completion_ids_for_form(schema, default)
+                )
             )
             union_tokens = unique_completion_tokens(
-                options_for_ids(schema, union_form_ids(operation.forms))
+                options_for_ids(
+                    schema,
+                    union_completion_form_ids(schema, operation.forms),
+                )
             )
+            if operation.open_grammar:
+                operand_branch = (
+                    f"            elif _moguet_has_operand {shell_quote(operation.token)}; then\n"
+                    f"                reply=({zsh_case_values(delegated_tokens)})\n"
+                )
+            else:
+                operand_branch = (
+                    f"            elif _moguet_has_operand {shell_quote(operation.token)}; then\n"
+                    f"                if _moguet_form_prefix_valid {shell_quote(operation.token)} {default_index}; then\n"
+                    f"                    reply=({zsh_case_values(default_tokens)})\n"
+                    f"                else\n"
+                    f"                    reply=()\n"
+                    f"                fi\n"
+                )
             operation_cases.append(
                 f"        {operation.token})\n"
                 f"            if {selector_checks}; then\n"
@@ -1373,12 +1480,7 @@ def render_zsh(schema: CliSchema, descriptions: Descriptions, locale: str) -> st
                 f"                else\n"
                 f"                    reply=()\n"
                 f"                fi\n"
-                f"            elif _moguet_has_operand {shell_quote(operation.token)}; then\n"
-                f"                if _moguet_form_prefix_valid {shell_quote(operation.token)} {default_index}; then\n"
-                f"                    reply=({zsh_case_values(default_tokens)})\n"
-                f"                else\n"
-                f"                    reply=()\n"
-                f"                fi\n"
+                f"{operand_branch}"
                 f"            else\n"
                 f"                reply=({zsh_case_values(union_tokens)})\n"
                 f"            fi\n"
@@ -1391,7 +1493,9 @@ def render_zsh(schema: CliSchema, descriptions: Descriptions, locale: str) -> st
                 for identity in form.selector_ids
             )
             selected_tokens = unique_completion_tokens(
-                options_for_ids(schema, form.option_ids)
+                options_for_ids(
+                    schema, completion_ids_for_form(schema, form)
+                )
             )
             preselection_ids = tuple(
                 dict.fromkeys(schema.delegated_option_ids + form.selector_ids)
@@ -1415,7 +1519,9 @@ def render_zsh(schema: CliSchema, descriptions: Descriptions, locale: str) -> st
         elif operation.forms:
             form = operation.forms[0]
             tokens = unique_completion_tokens(
-                options_for_ids(schema, form.option_ids)
+                options_for_ids(
+                    schema, completion_ids_for_form(schema, form)
+                )
             )
             operation_cases.append(
                 f"        {operation.token})\n"
@@ -1656,18 +1762,32 @@ def render_fish(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
                 f"            __moguet_has_option_id {identity}; and set selected true"
                 for identity in selected.selector_ids
             )
+            selected_ids = completion_ids_for_form(schema, selected)
+            default_ids = completion_ids_for_form(schema, default)
+            union_ids = union_completion_form_ids(
+                schema, operation.forms
+            )
+            if operation.open_grammar:
+                operand_branch = (
+                    f"            else if __moguet_has_operand {fish_quote(operation.token)}\n"
+                    f"                {fish_contains(delegated_ids)}\n"
+                )
+            else:
+                operand_branch = (
+                    f"            else if __moguet_has_operand {fish_quote(operation.token)}\n"
+                    f"                __moguet_form_prefix_valid {fish_quote(operation.token)} {default_index}; or return 1\n"
+                    f"                {fish_contains(default_ids)}\n"
+                )
             allow_cases.append(
                 f"        case {fish_quote(operation.token)}\n"
                 f"            set -l selected false\n"
                 f"{selector_test}\n"
                 f"            if test $selected = true\n"
                 f"                __moguet_form_prefix_valid {fish_quote(operation.token)} {selected_index}; or return 1\n"
-                f"                {fish_contains(selected.option_ids)}\n"
-                f"            else if __moguet_has_operand {fish_quote(operation.token)}\n"
-                f"                __moguet_form_prefix_valid {fish_quote(operation.token)} {default_index}; or return 1\n"
-                f"                {fish_contains(default.option_ids)}\n"
+                f"                {fish_contains(selected_ids)}\n"
+                f"{operand_branch}"
                 f"            else\n"
-                f"                {fish_contains(union_form_ids(operation.forms))}\n"
+                f"                {fish_contains(union_ids)}\n"
                 f"            end"
             )
         elif operation.forms and operation.open_grammar:
@@ -1685,7 +1805,7 @@ def render_fish(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
                 f"{selector_test}\n"
                 f"            if test $selected = true\n"
                 f"                __moguet_form_prefix_valid {fish_quote(operation.token)} 0; or return 1\n"
-                f"                {fish_contains(form.option_ids)}\n"
+                f"                {fish_contains(completion_ids_for_form(schema, form))}\n"
                 f"            else\n"
                 f"                {fish_contains(preselection_ids)}\n"
                 f"            end"
@@ -1695,7 +1815,7 @@ def render_fish(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
             allow_cases.append(
                 f"        case {fish_quote(operation.token)}\n"
                 f"            __moguet_form_prefix_valid {fish_quote(operation.token)} 0; or return 1\n"
-                f"            {fish_contains(form.option_ids)}"
+                f"            {fish_contains(completion_ids_for_form(schema, form))}"
             )
         else:
             allow_cases.append(

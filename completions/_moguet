@@ -19,6 +19,8 @@
 #   -G <pkg> [--output-dir=DIR]
 #   -Gp <pkg>
 #   -S --select [--needed] <query>
+#   -Syu [--needed]
+#   -Syu --repo [--needed]
 
 _moguet_option_id() {
     REPLY=
@@ -180,6 +182,14 @@ _moguet_form_prefix_valid() {
             (( ${#operands[@]} <= 1 )) && return 0
             return 1
             ;;
+        -Syu:0)
+            (( ${#operands[@]} <= 0 )) && return 0
+            return 1
+            ;;
+        -Syu:1)
+            (( ${#operands[@]} <= 0 )) && return 0
+            return 1
+            ;;
         *) return 1 ;;
     esac
 }
@@ -332,7 +342,19 @@ _moguet_collect_candidates() {
                 reply=(--needed --noconfirm --select)
             fi
             ;;
-        -Syu) reply=(--needed --noconfirm) ;;
+        -Syu)
+            if _moguet_has_option_id 12; then
+                if _moguet_form_prefix_valid -Syu 1; then
+                    reply=(--repo --needed --noconfirm --dry-run)
+                else
+                    reply=()
+                fi
+            elif _moguet_has_operand -Syu; then
+                reply=(--needed --noconfirm)
+            else
+                reply=(--edit --noedit --diff --nodiff --noconfirm --dry-run --build-mode= --rebuild --cleanbuild --needed --repo)
+            fi
+            ;;
         -Ss) reply=(--needed --noconfirm) ;;
         -Si) reply=(--needed --noconfirm) ;;
         -Qua) reply=(--needed --noconfirm) ;;
@@ -348,9 +370,9 @@ _moguet_description() {
     REPLY=
     case "$1" in
         build) REPLY='Build one remote package or local PKGBUILD root without saving a preference' ;;
-        upgrade) REPLY='Update the system and rebuild configured source packages' ;;
-        upgrade-aur) REPLY='Update installed AUR packages only' ;;
-        upgrade-all) REPLY='Update the system, registered source packages, and remaining installed AUR packages' ;;
+        upgrade) REPLY='Run the source-aware system update and apply saved source-build preferences' ;;
+        upgrade-aur) REPLY='Update only installed AUR packages while applying saved source-build preferences' ;;
+        upgrade-all) REPLY='Run the full source-aware repository, configured-source, and remaining-AUR update' ;;
         clean) REPLY='Clean package and build caches' ;;
         deps) REPLY='Classify AUR dependencies for one or more packages' ;;
         plan) REPLY='Show the AUR build-order plan for one or more packages' ;;
@@ -363,7 +385,7 @@ _moguet_description() {
         -G) REPLY='Export one AUR PackageBase repository without building or installing' ;;
         -Gp) REPLY='Print one AUR PackageBase PKGBUILD without keeping a checkout' ;;
         -S) REPLY='Install packages' ;;
-        -Syu) REPLY='Upgrade the system' ;;
+        -Syu) REPLY='Update repository packages and normal installed AUR packages without saved source-build preferences' ;;
         -Ss) REPLY='Search for packages' ;;
         -Si) REPLY='Show package information' ;;
         -Qua) REPLY='Check AUR and foreign-package updates' ;;
@@ -383,11 +405,11 @@ _moguet_description() {
         --rmdeps) REPLY='Unsupported for separated source builds; no dependency cleanup is performed' ;;
         --select) REPLY='Interactively select source-aware package candidates for plain -S' ;;
         --aur) REPLY='Limit supported sync operations to AUR' ;;
-        --repo) REPLY='Limit supported sync operations to official binary repositories' ;;
+        --repo) REPLY='Use only official binary repositories; with -Syu, run the repository system upgrade only' ;;
         --local) REPLY='Use one local PKGBUILD directory as the build root' ;;
         --output-dir=) REPLY='Select an existing export parent for -G' ;;
         --recursive) REPLY='Resolve dependencies recursively' ;;
-        --needed) REPLY='Skip reinstall at final package installation' ;;
+        --needed) REPLY='Preserve pacman --needed semantics at the installation phase owned by the selected route' ;;
     esac
 }
 

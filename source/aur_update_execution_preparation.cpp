@@ -865,6 +865,8 @@ bool collect_work_item_drafts(
         draft.work_item.artifact_lifecycle_intent =
             ArtifactLifecycleIntent::PackageBaseSet;
         draft.work_item.uses_system_update_baseline = false;
+        draft.work_item.configured_repository_order =
+            plan.configured_repository_order;
         attach_selected_repository_providers(draft.work_item, plan);
 
         bool unit_is_consistent = true;
@@ -1151,6 +1153,22 @@ void consume_strict_source_preferences(
     }
 }
 
+void apply_saved_source_preference_policy(
+    SavedSourcePreferencePolicy policy,
+    std::vector<UpdateWorkItemDraft>& drafts,
+    AurUpdateSourceBuildPreparation& preparation) {
+    switch(policy) {
+        case SavedSourcePreferencePolicy::Strict:
+            consume_strict_source_preferences(drafts, preparation);
+            return;
+        case SavedSourcePreferencePolicy::Ignore:
+            // POLICY(#505): normal AUR work starts with the draft's empty
+            // custom environment and never calls the saved-preference authority.
+            return;
+    }
+    throw std::logic_error("Unknown saved source preference policy.");
+}
+
 void validate_static_work_items(
     const std::vector<UpdateWorkItemDraft>& drafts,
     AurUpdateSourceBuildPreparation& preparation) {
@@ -1207,8 +1225,9 @@ snapshot_work_item_attributions(
     return attributions;
 }
 
+template <typename Observation>
 bool has_update_target_snapshot(
-    const AurUpdateSourceBuildPreparation& preparation,
+    const Observation& preparation,
     std::size_t update_plan_index) noexcept {
     return std::any_of(
         preparation.affected_update_targets.begin(),
@@ -1218,8 +1237,9 @@ bool has_update_target_snapshot(
         });
 }
 
+template <typename Observation>
 bool has_root_snapshot(
-    const AurUpdateSourceBuildPreparation& preparation,
+    const Observation& preparation,
     const RootTargetIdentity& root) noexcept {
     return std::find(
                preparation.affected_roots.begin(),
@@ -1262,8 +1282,9 @@ bool is_exact_first_seen_union(
     return aggregate_index == aggregate.size();
 }
 
+template <typename Observation>
 bool has_exact_projected_build_unit_correlation(
-    const AurUpdateSourceBuildPreparation& preparation) noexcept {
+    const Observation& preparation) noexcept {
     if(preparation.projected_build_units.size() !=
        preparation.build_unit_selection.entries.size()) {
         return false;
@@ -1390,9 +1411,10 @@ bool has_exact_external_compatibility_fields(
            !external.desired_install_reason.has_value();
 }
 
+template <typename Observation>
 bool has_exact_build_unit_selection_correlation(
     const std::vector<AurUpdatePreparedWorkItemAttribution>& attributions,
-    const AurUpdateSourceBuildPreparation& preparation) noexcept {
+    const Observation& preparation) noexcept {
     if(!has_exact_projected_build_unit_correlation(preparation)) return false;
 
     std::size_t selected_index = 0;
@@ -1485,11 +1507,11 @@ bool has_exact_build_unit_selection_correlation(
                preparation.externally_satisfied_build_units.size();
 }
 
+template <typename WorkItem, typename Observation>
 bool has_exact_prepared_correlation(
-    const PreparedProductionSourceBuildInvocation& production_invocation,
+    const std::vector<WorkItem>& work_items,
     const std::vector<AurUpdatePreparedWorkItemAttribution>& attributions,
-    const AurUpdateSourceBuildPreparation& preparation) noexcept {
-    const auto& work_items = production_invocation.work_items;
+    const Observation& preparation) noexcept {
     if(work_items.empty() || attributions.size() != work_items.size() ||
        preparation.affected_update_targets.empty() ||
        preparation.affected_roots.empty() ||
@@ -1499,7 +1521,7 @@ bool has_exact_prepared_correlation(
     }
 
     for(std::size_t index = 0; index < work_items.size(); ++index) {
-        const ProductionSourceBuildWorkItem& work_item = work_items[index];
+        const WorkItem& work_item = work_items[index];
         const AurUpdatePreparedWorkItemAttribution& attribution =
             attributions[index];
         if(attribution.build_plan_order_index >=
@@ -1620,7 +1642,7 @@ PreparedAurUpdateSourceBuildInvocation::
 bool AurUpdateSourceBuildPreparation::is_prepared() const noexcept {
     return invocation.has_value() && invocation->is_valid() && issues.empty() &&
            has_exact_prepared_correlation(
-               invocation->production_invocation_,
+               invocation->production_invocation_.work_items,
                invocation->work_item_attributions(), *this);
 }
 
@@ -1632,6 +1654,21 @@ bool AurUpdateSourceBuildPreparation::is_blocked() const noexcept {
     return !invocation.has_value() && !issues.empty();
 }
 
+bool AurUpdateSourceBuildObservation::is_ready() const noexcept {
+    return production_preflight.has_value() && issues.empty() &&
+           has_exact_prepared_correlation(
+               production_preflight->work_items,
+               work_item_attributions, *this);
+}
+
+bool AurUpdateSourceBuildObservation::is_noop() const noexcept {
+    return !production_preflight.has_value() && issues.empty();
+}
+
+bool AurUpdateSourceBuildObservation::is_blocked() const noexcept {
+    return !production_preflight.has_value() && !issues.empty();
+}
+
 void seed_aur_update_source_build_cache(
     AurUpdateSourceBuildPreparation& preparation,
     const ValidatedCacheRoot& cache_root) {
@@ -1640,15 +1677,25 @@ void seed_aur_update_source_build_cache(
         preparation.invocation->production_invocation_, cache_root);
 }
 
-AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
+namespace {
+
+struct AurUpdateSourceBuildDraftPreparation {
+    AurUpdateSourceBuildPreparation observation;
+    std::vector<UpdateWorkItemDraft> drafts;
+};
+
+AurUpdateSourceBuildDraftPreparation
+prepare_aur_update_source_build_drafts(
     const AurUpdateExecutionPreflight& preflight,
     const AurUpdateBuildUnitSelection& build_unit_selection,
-    bool needed,
-    const AppConfig& config) {
+    SavedSourcePreferencePolicy saved_source_preference_policy,
+    bool needed) {
     AurUpdateSourceBuildPreparation preparation;
     preparation.build_unit_selection = build_unit_selection;
 
-    // Blocking preflightとnormal no-opはstrict readerやDB resolverへ進めない。
+    // Blocking preflight and normal no-op never reach preference or DB
+    // authority. The same snapshot feeds both executable preparation and the
+    // capability-free dry-run observation.
     retain_skipped_preflight_inconsistencies(preflight, preparation);
     if(has_blocking_preflight_targets(preflight) ||
        std::any_of(
@@ -1657,9 +1704,11 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
                return !is_known_status(target.status);
            })) {
         retain_preflight_blockers(preflight, preparation);
-        return preparation;
+        return {std::move(preparation), {}};
     }
-    if(!preparation.issues.empty()) return preparation;
+    if(!preparation.issues.empty()) {
+        return {std::move(preparation), {}};
+    }
     if(!has_executable_preflight_targets(preflight)) {
         if(!build_unit_selection.entries.empty() ||
            (preflight.build_plan.has_value() &&
@@ -1673,16 +1722,19 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
                     "{} update preflight has build-unit selection without an executable target.",
                     AUR_SERVICE_NAME));
         }
-        return preparation;
+        return {std::move(preparation), {}};
     }
 
-    retain_executable_preflight_inconsistencies(
-        preflight, preparation);
-    if(!preparation.issues.empty()) return preparation;
+    retain_executable_preflight_inconsistencies(preflight, preparation);
+    if(!preparation.issues.empty()) {
+        return {std::move(preparation), {}};
+    }
 
     for(const auto& target : preflight.targets) {
-        if(target.status == AurUpdateExecutionTargetStatus::Executable) continue;
-        if(target.status == AurUpdateExecutionTargetStatus::Skipped) continue;
+        if(target.status == AurUpdateExecutionTargetStatus::Executable ||
+           target.status == AurUpdateExecutionTargetStatus::Skipped) {
+            continue;
+        }
 
         AurUpdatePreparationIssue issue = make_localized_preparation_issue(
             AurUpdatePreparationReason::PreflightInconsistent,
@@ -1693,7 +1745,9 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
         attribute_issue_to_target(issue, target);
         preparation.issues.push_back(std::move(issue));
     }
-    if(!preparation.issues.empty()) return preparation;
+    if(!preparation.issues.empty()) {
+        return {std::move(preparation), {}};
+    }
 
     if(!preflight.build_plan.has_value()) {
         for(const auto& target : preflight.targets) {
@@ -1705,14 +1759,12 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
             AurUpdatePreparationReason::BuildPlanMissing,
             localization::format_translated_message(
                 // TRANSLATORS: The placeholders are the literal service
-                // name "AUR" and internal type name "BuildPlan",
-                // respectively.
+                // name "AUR" and internal type name "BuildPlan".
                 "Executable {} update preflight has no combined {}.",
-                AUR_SERVICE_NAME,
-                BUILD_PLAN_TYPE_NAME));
+                AUR_SERVICE_NAME, BUILD_PLAN_TYPE_NAME));
         attribute_issue_to_all_executable_targets(issue, preparation);
         preparation.issues.push_back(std::move(issue));
-        return preparation;
+        return {std::move(preparation), {}};
     }
 
     const BuildPlan& plan = *preflight.build_plan;
@@ -1726,28 +1778,21 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
             AurUpdatePreparationReason::BuildPlanOrderEmpty,
             localization::format_translated_message(
                 // TRANSLATORS: The placeholders are the literal service
-                // name "AUR" and internal type name "BuildPlan",
-                // respectively.
+                // name "AUR" and internal type name "BuildPlan".
                 "Executable {} update {} has an empty execution order.",
-                AUR_SERVICE_NAME,
-                BUILD_PLAN_TYPE_NAME));
+                AUR_SERVICE_NAME, BUILD_PLAN_TYPE_NAME));
         attribute_issue_to_all_executable_targets(issue, preparation);
         preparation.issues.push_back(std::move(issue));
-        return preparation;
+        return {std::move(preparation), {}};
     }
 
     std::vector<ExecutableRootBinding> bindings;
     if(!collect_executable_root_bindings(
-           preflight, plan, preparation, bindings)) {
-        return preparation;
-    }
-    if(!require_root_package_attribution(
-           bindings, plan, preparation)) {
-        return preparation;
-    }
-    if(!validate_build_unit_selection(
+           preflight, plan, preparation, bindings) ||
+       !require_root_package_attribution(bindings, plan, preparation) ||
+       !validate_build_unit_selection(
            plan, build_unit_selection, preparation)) {
-        return preparation;
+        return {std::move(preparation), {}};
     }
 
     std::vector<UpdateWorkItemDraft> drafts;
@@ -1755,14 +1800,65 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     if(!collect_work_item_drafts(
            plan, build_unit_selection, bindings, preparation, drafts,
            needed)) {
-        return preparation;
+        return {std::move(preparation), {}};
     }
 
-    consume_strict_source_preferences(drafts, preparation);
-    if(!preparation.issues.empty()) return preparation;
+    apply_saved_source_preference_policy(
+        saved_source_preference_policy, drafts, preparation);
+    if(!preparation.issues.empty()) {
+        return {std::move(preparation), {}};
+    }
 
     validate_static_work_items(drafts, preparation);
-    if(!preparation.issues.empty()) return preparation;
+    if(!preparation.issues.empty()) {
+        return {std::move(preparation), {}};
+    }
+    return {std::move(preparation), std::move(drafts)};
+}
+
+void retain_generic_preparation_failure(
+    AurUpdateSourceBuildPreparation& preparation,
+    AurUpdatePreparationIssue issue) {
+    attribute_issue_to_all_executable_targets(issue, preparation);
+    preparation.issues.push_back(std::move(issue));
+}
+
+AurUpdateSourceBuildObservation make_source_build_observation(
+    AurUpdateSourceBuildPreparation preparation,
+    std::vector<AurUpdatePreparedWorkItemAttribution> attributions = {},
+    std::optional<ProductionSourceBuildPreparationObservation>
+        production_preflight = std::nullopt) {
+    return AurUpdateSourceBuildObservation{
+        std::move(preparation.issues),
+        std::move(preparation.warnings),
+        std::move(preparation.affected_update_targets),
+        std::move(preparation.affected_roots),
+        std::move(preparation.build_unit_selection),
+        std::move(preparation.projected_build_units),
+        std::move(preparation.externally_satisfied_build_units),
+        std::move(attributions),
+        std::move(production_preflight)};
+}
+
+} // namespace
+
+AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
+    const AurUpdateExecutionPreflight& preflight,
+    const AurUpdateBuildUnitSelection& build_unit_selection,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
+    bool needed,
+    const AppConfig& config) {
+    AurUpdateSourceBuildDraftPreparation draft_preparation =
+        prepare_aur_update_source_build_drafts(
+            preflight, build_unit_selection,
+            saved_source_preference_policy, needed);
+    AurUpdateSourceBuildPreparation preparation =
+        std::move(draft_preparation.observation);
+    std::vector<UpdateWorkItemDraft> drafts =
+        std::move(draft_preparation.drafts);
+    if(!preparation.issues.empty() || drafts.empty()) {
+        return preparation;
+    }
 
     try {
         // POLICY(#267): generic preparationをinvocation全体で一度だけ呼び、
@@ -1773,7 +1869,8 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
             prepare_production_source_build_invocation(
                 release_work_items(std::move(drafts)), config);
         if(!has_exact_prepared_correlation(
-               production_invocation, attributions, preparation)) {
+               production_invocation.work_items, attributions,
+               preparation)) {
             throw std::logic_error(localization::format_translated_message(
                 // TRANSLATORS: {} is the literal service name "AUR".
                 "Prepared {} update source-build invocation correlation is inconsistent.",
@@ -1826,12 +1923,98 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     return preparation;
 }
 
+AurUpdateSourceBuildObservation observe_aur_update_source_build_preparation(
+    const AurUpdateExecutionPreflight& preflight,
+    const AurUpdateBuildUnitSelection& build_unit_selection,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
+    bool needed,
+    const AppConfig& config) {
+    AurUpdateSourceBuildDraftPreparation draft_preparation =
+        prepare_aur_update_source_build_drafts(
+            preflight, build_unit_selection,
+            saved_source_preference_policy, needed);
+    AurUpdateSourceBuildPreparation preparation =
+        std::move(draft_preparation.observation);
+    if(!preparation.issues.empty() ||
+       draft_preparation.drafts.empty()) {
+        return make_source_build_observation(
+            std::move(preparation));
+    }
+
+    try {
+        std::vector<AurUpdatePreparedWorkItemAttribution> attributions =
+            snapshot_work_item_attributions(draft_preparation.drafts);
+        ProductionSourceBuildPreparationObservation production_preflight =
+            observe_production_source_build_preparation(
+                release_work_items(
+                    std::move(draft_preparation.drafts)),
+                config);
+        if(!has_exact_prepared_correlation(
+               production_preflight.work_items, attributions,
+               preparation)) {
+            throw std::logic_error(
+                localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal service name "AUR".
+                    "Observed {} update source-build preflight correlation is inconsistent.",
+                    AUR_SERVICE_NAME));
+        }
+        return make_source_build_observation(
+            std::move(preparation), std::move(attributions),
+            std::move(production_preflight));
+    } catch(const ReviewedSourceProductionError& error) {
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
+            AurUpdatePreparationReason::GenericPreparationInconsistent,
+            error.what());
+        issue.reviewed_source_failure = error.failure();
+        retain_generic_preparation_failure(
+            preparation, std::move(issue));
+    } catch(const PackageMetadataError& error) {
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
+            AurUpdatePreparationReason::PacmanDatabaseUnavailable,
+            error.failure().diagnostic);
+        issue.package_metadata_failure = error.failure();
+        retain_generic_preparation_failure(
+            preparation, std::move(issue));
+    } catch(const std::exception& error) {
+        retain_generic_preparation_failure(
+            preparation,
+            make_localized_preparation_issue(
+                AurUpdatePreparationReason::
+                    GenericPreparationInconsistent,
+                localization::format_translated_message(
+                    "Generic production source-build observation failed unexpectedly: {}",
+                    error.what())));
+    } catch(...) {
+        retain_generic_preparation_failure(
+            preparation,
+            make_localized_preparation_issue(
+                AurUpdatePreparationReason::
+                    GenericPreparationInconsistent,
+                "Generic production source-build observation failed with an unknown exception."));
+    }
+    return make_source_build_observation(std::move(preparation));
+}
+
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     const AurUpdateExecutionPreflight& preflight,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
     bool needed,
     const AppConfig& config) {
     const AurUpdateBuildUnitSelection build_unit_selection =
         make_all_selected_build_unit_selection(preflight);
     return prepare_aur_update_source_build_invocation(
-        preflight, build_unit_selection, needed, config);
+        preflight, build_unit_selection, saved_source_preference_policy,
+        needed, config);
+}
+
+AurUpdateSourceBuildObservation observe_aur_update_source_build_preparation(
+    const AurUpdateExecutionPreflight& preflight,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
+    bool needed,
+    const AppConfig& config) {
+    const AurUpdateBuildUnitSelection build_unit_selection =
+        make_all_selected_build_unit_selection(preflight);
+    return observe_aur_update_source_build_preparation(
+        preflight, build_unit_selection, saved_source_preference_policy,
+        needed, config);
 }

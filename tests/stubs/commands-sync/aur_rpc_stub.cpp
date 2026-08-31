@@ -72,7 +72,9 @@ std::optional<AurPackageInfo> fixture_info(const std::string& package_name) {
        package_name == "plan-a" || package_name == "plan-b" ||
        package_name == "source-a" || package_name == "source-b" ||
        package_name == "forced-official" || package_name == "mixed-aur" ||
-       package_name == "aur-presented" || package_name == "scope-aur") {
+       package_name == "aur-presented" || package_name == "scope-aur" ||
+       package_name == "system-update-a" ||
+       package_name == "system-devel-git") {
         return package_info(package_name);
     }
     if(package_name == "constraint-block-root") {

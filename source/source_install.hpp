@@ -295,6 +295,58 @@ struct PreparedProductionSourceBuildInvocation {
         local_source_authority = std::nullopt;
 };
 
+enum class ReviewedSourceFatalStateObservationStatus {
+    Inapplicable,
+    Completed,
+};
+
+// Value-only request snapshot. The single-consumption reviewed-state slot is
+// deliberately replaced with its completed/inapplicable observation status.
+struct SourceBuildRequestObservation {
+    std::string package_name;
+    std::string checkout_name;
+    std::string git_url;
+    SourceBuildEnvironment custom_environment;
+    SourceEnvironmentEmptyValuePolicy empty_value_policy =
+        SourceEnvironmentEmptyValuePolicy::Omit;
+    std::optional<SourceUpdateBaseline> update_baseline;
+    std::optional<SourceInstalledSnapshot> installed_snapshot;
+    bool only_if_updated = false;
+    bool needed = false;
+    std::optional<PackageBaseIdentity> aur_review_identity;
+    ReviewedSourceFatalStateObservationStatus reviewed_state =
+        ReviewedSourceFatalStateObservationStatus::Inapplicable;
+};
+
+// Value-only work-item projection. It intentionally has neither cache_root nor
+// a ReviewedSourceFatalStatePreflightSlot and cannot be passed to an executor.
+struct ProductionSourceBuildWorkItemObservation {
+    SourceBuildRequestObservation request;
+    std::vector<RequiredPackageArtifactTarget> required_targets;
+    std::vector<ProvidedDependency> selected_repository_providers;
+    std::vector<std::size_t> build_plan_dependency_edge_indices;
+    std::vector<std::size_t>
+        selected_repository_provider_edge_indices;
+    RequiredTargetProvenance required_target_provenance =
+        RequiredTargetProvenance::Unspecified;
+    ArtifactLifecycleIntent artifact_lifecycle_intent =
+        ArtifactLifecycleIntent::Unspecified;
+    std::optional<ResolvedRepositorySourceBuildIdentity>
+        repository_identity;
+    bool uses_system_update_baseline = false;
+    std::optional<std::vector<std::string>>
+        configured_repository_order;
+};
+
+// Read-only production preflight snapshot. Unlike
+// PreparedProductionSourceBuildInvocation, this type is not accepted by any
+// executor and never retains a cache capability.
+struct ProductionSourceBuildPreparationObservation {
+    std::vector<ProductionSourceBuildWorkItemObservation> work_items;
+    std::vector<ProvidedDependency> selected_repository_providers;
+    PacmanDatabasePaths database_paths;
+};
+
 enum class ProductionSourceBuildWorkItemStatus {
     NotAttempted,
     Succeeded,
@@ -931,6 +983,45 @@ void preflight_local_source_build_dependencies(
 PreparedProductionSourceBuildInvocation prepare_production_source_build_invocation(
     std::vector<ProductionSourceBuildWorkItem> work_items,
     const AppConfig& config);
+
+// Runs the same mutation-free static, reviewed-source, and pacman-database
+// preflight without minting an invocation that execution can consume.
+ProductionSourceBuildPreparationObservation
+observe_production_source_build_preparation(
+    std::vector<ProductionSourceBuildWorkItem> work_items,
+    const AppConfig& config);
+
+inline ProductionSourceBuildWorkItemObservation
+make_production_source_build_work_item_observation(
+    const ProductionSourceBuildWorkItem& work_item) {
+    const bool requires_reviewed_state =
+        work_item.request.aur_review_identity.has_value();
+
+    return ProductionSourceBuildWorkItemObservation{
+        SourceBuildRequestObservation{
+            work_item.request.package_name,
+            work_item.request.checkout_name,
+            work_item.request.git_url,
+            work_item.request.custom_environment,
+            work_item.request.empty_value_policy,
+            work_item.request.update_baseline,
+            work_item.request.installed_snapshot,
+            work_item.request.only_if_updated,
+            work_item.request.needed,
+            work_item.request.aur_review_identity,
+            requires_reviewed_state
+                ? ReviewedSourceFatalStateObservationStatus::Completed
+                : ReviewedSourceFatalStateObservationStatus::Inapplicable},
+        work_item.required_targets,
+        work_item.selected_repository_providers,
+        work_item.build_plan_dependency_edge_indices,
+        work_item.selected_repository_provider_edge_indices,
+        work_item.required_target_provenance,
+        work_item.artifact_lifecycle_intent,
+        work_item.repository_identity,
+        work_item.uses_system_update_baseline,
+        work_item.configured_repository_order};
+}
 
 // Generic production preparationのnonempty契約は維持し、local root ownerが
 // 存在するこの境界だけremote AUR dependency 0件を許可する。

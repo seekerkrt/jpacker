@@ -191,12 +191,12 @@ for moguet_option in \
     assert_only_command "pacman -Q filesystem"
 done
 
-# custom upgradeとgeneric -Syuの既存routingを保ち、upgrade-aurはpacmanへ委譲しない。
+# custom upgradeと明示RepoOnly routingを保ち、upgrade-aurはpacmanへ委譲しない。
 run_ok "$tmp_dir/custom-upgrade.out" upgrade
 assert_only_two_commands \
     "pacman-conf --verbose RootDir DBPath" \
     "sudo pacman -Syu"
-run_ok "$tmp_dir/generic-system-upgrade.out" -Syu
+run_ok "$tmp_dir/repository-system-upgrade.out" -Syu --repo
 assert_only_command "sudo pacman -Syu"
 run_fail "$tmp_dir/upgrade-aur-target.out" upgrade-aur unexpected-target
 assert_contains "Operation upgrade-aur does not accept target operands." "$tmp_dir/upgrade-aur-target.out"

@@ -54,7 +54,7 @@ require_commands_sync_pacman_argument_tail() {
             --config=*)
                 shift
                 ;;
-            --noconfirm|--needed|--refresh)
+            --noconfirm|--needed|--refresh|--sysupgrade|-y|-u)
                 shift
                 ;;
             -*)
@@ -73,7 +73,7 @@ require_commands_sync_sudo_argv() {
         -U)
             is_typed_pacman_install "$@" || exit 2
             ;;
-        -S|-Ss|-Ssy|-Si|-Syu)
+        -S|-Ss|-Ssy|-Si|-Sy|-Su|-Suy|-Syu|-Syux)
             shift 2
             require_commands_sync_pacman_argument_tail "$@"
             ;;

@@ -106,6 +106,56 @@ void add_selected_repository_provider(
     }
 }
 
+struct ProductionSourceBuildPreparationState {
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    std::vector<ProvidedDependency> selected_repository_providers;
+    PacmanDatabasePaths database_paths;
+    std::optional<ValidatedCacheRoot> cache_root;
+};
+
+ProductionSourceBuildPreparationState
+prepare_production_source_build_preparation_state(
+    std::vector<ProductionSourceBuildWorkItem> work_items,
+    const AppConfig& config) {
+    if(work_items.empty()) {
+        throw std::invalid_argument(
+            "Production source-build invocation must contain at least one work item.");
+    }
+
+    // POLICY(#242): exact order is rmdeps, inherited PKGDEST, all source
+    // environments, static identity/role, reviewed state, then database paths.
+    // Every step remains mutation-free.
+    require_supported_separated_install_options(config.rm_deps);
+    require_unclaimed_artifact_pkgdest(SourceBuildEnvironment{});
+    for(const auto& work_item : work_items) {
+        require_unclaimed_artifact_pkgdest(
+            work_item.request.custom_environment);
+    }
+    for(const auto& work_item : work_items) {
+        require_static_production_source_build_work_item(work_item);
+    }
+    for(auto& work_item : work_items) {
+        if(work_item.request.reviewed_state_preflight) {
+            throw std::logic_error(
+                "Production source-build work item already contains a reviewed-state preflight observation.");
+        }
+        work_item.request.reviewed_state_preflight =
+            preflight_reviewed_source_fatal_state_for_production(
+                work_item.request);
+    }
+
+    std::optional<ValidatedCacheRoot> supplied_cache_root =
+        shared_prepared_cache_root(work_items);
+    std::vector<ProvidedDependency> selected_repository_providers =
+        collect_selected_repository_providers(work_items);
+    PacmanDatabasePaths database_paths = resolve_pacman_database_paths();
+    return ProductionSourceBuildPreparationState{
+        std::move(work_items),
+        std::move(selected_repository_providers),
+        std::move(database_paths),
+        std::move(supplied_cache_root)};
+}
+
 } // namespace
 
 void require_static_production_source_build_work_item(
@@ -313,45 +363,46 @@ void require_supported_production_source_build_options(
 PreparedProductionSourceBuildInvocation prepare_production_source_build_invocation(
     std::vector<ProductionSourceBuildWorkItem> work_items,
     const AppConfig& config) {
-    if(work_items.empty()) {
-        throw std::invalid_argument(
-            "Production source-build invocation must contain at least one work item.");
-    }
-
-    // POLICY(#242): exact orderはrmdeps → inherited PKGDEST → all source
-    // environments → static identity/role → database paths。ここまではworkspace、
-    // checkout、makepkg、metadata session、sudoを開始しない。
-    require_supported_separated_install_options(config.rm_deps);
-    require_unclaimed_artifact_pkgdest(SourceBuildEnvironment{});
-    for(const auto& work_item : work_items) {
-        require_unclaimed_artifact_pkgdest(
-            work_item.request.custom_environment);
-    }
-    for(const auto& work_item : work_items) {
-        require_static_production_source_build_work_item(work_item);
-    }
-    for(auto& work_item : work_items) {
-        if(work_item.request.reviewed_state_preflight) {
-            throw std::logic_error(
-                "Production source-build work item already contains a reviewed-state preflight observation.");
-        }
-        work_item.request.reviewed_state_preflight =
-            preflight_reviewed_source_fatal_state_for_production(
-                work_item.request);
-    }
-
-    // Explicit build/sync routeがnetwork前に準備済みならcapabilityを保持する。
-    // Update preparationはfilesystem mutationを行わず、execution ownerがactivateする。
-    std::optional<ValidatedCacheRoot> supplied_cache_root =
-        shared_prepared_cache_root(work_items);
-    std::vector<ProvidedDependency> selected_repository_providers =
-        collect_selected_repository_providers(work_items);
-    PacmanDatabasePaths database_paths = resolve_pacman_database_paths();
+    ProductionSourceBuildPreparationState state =
+        prepare_production_source_build_preparation_state(
+            std::move(work_items), config);
     return PreparedProductionSourceBuildInvocation{
-        std::move(work_items),
-        std::move(selected_repository_providers),
-        std::move(database_paths),
-        std::move(supplied_cache_root)};
+        std::move(state.work_items),
+        std::move(state.selected_repository_providers),
+        std::move(state.database_paths),
+        std::move(state.cache_root)};
+}
+
+ProductionSourceBuildPreparationObservation
+observe_production_source_build_preparation(
+    std::vector<ProductionSourceBuildWorkItem> work_items,
+    const AppConfig& config) {
+    if(std::any_of(
+           work_items.begin(), work_items.end(),
+           [](const ProductionSourceBuildWorkItem& work_item) {
+               return work_item.cache_root.has_value();
+           })) {
+        throw std::logic_error(
+            "Read-only source-build observation received a cache capability.");
+    }
+    ProductionSourceBuildPreparationState state =
+        prepare_production_source_build_preparation_state(
+            std::move(work_items), config);
+    if(state.cache_root.has_value()) {
+        throw std::logic_error(
+            "Read-only source-build observation received a cache capability.");
+    }
+    std::vector<ProductionSourceBuildWorkItemObservation>
+        observed_work_items;
+    observed_work_items.reserve(state.work_items.size());
+    for(const ProductionSourceBuildWorkItem& work_item : state.work_items) {
+        observed_work_items.push_back(
+            make_production_source_build_work_item_observation(work_item));
+    }
+    return ProductionSourceBuildPreparationObservation{
+        std::move(observed_work_items),
+        std::move(state.selected_repository_providers),
+        std::move(state.database_paths)};
 }
 
 void preflight_local_source_build_dependencies(

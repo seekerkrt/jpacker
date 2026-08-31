@@ -2,7 +2,9 @@
 
 #include "app_config.hpp"
 #include "aur_rpc.hpp"
+#include "aur_update_cli_presentation.hpp"
 #include "cli_routing.hpp"
+#include "commands_aur_update.hpp"
 #include "dependency_plan.hpp"
 #include "diagnostic_projection.hpp"
 #include "localization.hpp"
@@ -17,6 +19,7 @@
 #include "shell_words.hpp"
 #include "source_install.hpp"
 #include "source_preference.hpp"
+#include "system_aur_update_operation.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -1543,10 +1546,8 @@ int execute_prepared_sync_install(
     }
 
     if(prepared.repository_transaction_required) {
-        if(run_command(
-               "sudo pacman " +
-               join_pacman_args(
-                   prepared.repository_pacman_args, config)) != 0) {
+        if(execute_ordered_repository_sync_transaction(
+               prepared.repository_pacman_args, config) != 0) {
             throw std::runtime_error(
                 localization::format_translated_message(
                     "{} failed.", "Pacman"));
@@ -1564,22 +1565,189 @@ int execute_prepared_sync_install(
     return 0;
 }
 
+int execute_ordered_repository_sync_transaction(
+    const std::vector<std::string>& ordered_pacman_args,
+    const AppConfig& config) {
+    if(ordered_pacman_args.empty()) {
+        throw std::logic_error(localization::format_translated_message(
+            "Prepared repository transaction has no {} arguments.",
+            "pacman"));
+    }
+    return run_command(
+        "sudo pacman " +
+        join_pacman_args(ordered_pacman_args, config));
+}
+
+namespace {
+
+void report_system_aur_partial_failure(
+    const SystemAurUpdateOperationResult& result) {
+    switch(result.status) {
+        case SystemAurUpdateOperationStatus::StoppedBeforeAurExecution:
+            switch(result.stopped_phase) {
+                case SystemAurUpdateOperationPhase::ForeignInventory:
+                    Logger::error(localization::format_translated_message(
+                        // TRANSLATORS: AUR is a runtime project identity.
+                        "The repository system upgrade completed, but the fresh installed-package inventory for {} could not be obtained.",
+                        "AUR"));
+                    break;
+                case SystemAurUpdateOperationPhase::AurQuery:
+                    Logger::error(localization::format_translated_message(
+                        // TRANSLATORS: AUR is a runtime project identity.
+                        "The repository system upgrade completed, but the fresh {} update query failed.",
+                        "AUR"));
+                    break;
+                case SystemAurUpdateOperationPhase::AurPreparation:
+                    Logger::error(localization::format_translated_message(
+                        // TRANSLATORS: AUR is a runtime project identity.
+                        "The repository system upgrade completed, but the {} update was blocked before execution.",
+                        "AUR"));
+                    break;
+                case SystemAurUpdateOperationPhase::None:
+                case SystemAurUpdateOperationPhase::Repository:
+                case SystemAurUpdateOperationPhase::AurExecution:
+                case SystemAurUpdateOperationPhase::Reduction:
+                    Logger::error(localization::format_translated_message(
+                        // TRANSLATORS: AUR is a runtime project identity.
+                        "The repository system upgrade completed, but the {} update could not start.",
+                        "AUR"));
+                    break;
+            }
+            break;
+        case SystemAurUpdateOperationStatus::StoppedOnAurFailure:
+            Logger::error(localization::format_translated_message(
+                // TRANSLATORS: AUR is a runtime project identity.
+                "The repository system upgrade completed, but the {} update failed.",
+                "AUR"));
+            break;
+        case SystemAurUpdateOperationStatus::
+            StoppedAfterAurCleanupFailure:
+            Logger::error(localization::format_translated_message(
+                // TRANSLATORS: AUR is a runtime project identity.
+                "The repository system upgrade completed, but {} cleanup failed after a package transaction.",
+                "AUR"));
+            break;
+        case SystemAurUpdateOperationStatus::Completed:
+        case SystemAurUpdateOperationStatus::StoppedOnRepositoryFailure:
+        case SystemAurUpdateOperationStatus::InconsistentResult:
+            break;
+    }
+    Logger::warn(localization::translate_message(
+        "The completed repository system upgrade was not rolled back."));
+}
+
+} // namespace
+
+void present_system_aur_update_operation_result(
+    SystemAurUpdateOperationResult result) {
+    const SystemAurUpdateOperationResult authority =
+        reduce_system_aur_update_result(std::move(result));
+
+    // Validate the nested presenter before emitting the repository success
+    // fact. A malformed child must fail closed without leaking a success line.
+    if(authority.aur.operation_result.has_value()) {
+        static_cast<void>(format_aur_update_cli_presentation(
+            authority.aur.operation_result->reduced_operation_result));
+    }
+
+    // Incoherent child/aggregate state must not emit any success summary.
+    if(authority.has_inconsistency() ||
+       authority.status ==
+           SystemAurUpdateOperationStatus::InconsistentResult) {
+        Logger::error(localization::format_translated_message(
+            // TRANSLATORS: AUR is a runtime project identity.
+            "The repository and {} update result is inconsistent; no success was reported.",
+            "AUR"));
+        return;
+    }
+
+    switch(authority.repository.status) {
+        case SystemAurUpdateRepositoryPhaseStatus::Failed:
+            Logger::error(localization::translate_message(
+                "The repository system upgrade failed."));
+            std::cout << localization::format_translated_message(
+                             // TRANSLATORS: AUR is a runtime project identity.
+                             "The {} update was not attempted.", "AUR")
+                      << std::endl;
+            return;
+        case SystemAurUpdateRepositoryPhaseStatus::Completed:
+            std::cout << localization::translate_message(
+                             "The repository system upgrade completed.")
+                      << std::endl;
+            break;
+        case SystemAurUpdateRepositoryPhaseStatus::NotAttempted:
+            Logger::error(localization::translate_message(
+                "The repository system upgrade was not attempted."));
+            return;
+    }
+
+    if(authority.aur.operation_result.has_value()) {
+        present_filtered_aur_update_execution_result(
+            authority.aur.operation_result.value());
+    }
+
+    if(authority.status == SystemAurUpdateOperationStatus::Completed) {
+        std::cout << localization::format_translated_message(
+                         // TRANSLATORS: AUR is a runtime project identity.
+                         "The repository system upgrade and normal {} update completed.",
+                         "AUR")
+                  << std::endl;
+        return;
+    }
+    report_system_aur_partial_failure(authority);
+}
+
+int cmd_system_aur_update(
+    PreparedSystemAurUpdateOperation prepared,
+    const AppConfig& config) {
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    const bool is_success = result.is_success();
+    present_system_aur_update_operation_result(std::move(result));
+    return is_success ? 0 : 1;
+}
+
+#ifdef MOGUET_ENABLE_SYSTEM_AUR_UPDATE_PRESENTATION_TEST_HOOKS
+int run_inconsistent_system_aur_update_presentation_test() {
+    std::optional<CompatibleSystemAurUpdateRequest> request =
+        make_compatible_system_aur_update_request(
+            AutoSystemUpdateRouteCandidate{
+                CompatibleAutoSystemUpdatePacmanArguments{},
+                {"-Syu"},
+                false});
+    if(!request.has_value()) {
+        throw std::logic_error(
+            "Test-only system/AUR request construction failed.");
+    }
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_operation(
+            std::move(request.value()));
+    PreparedSystemAurUpdateOperation retained(
+        std::move(prepared));
+    if(!retained.is_valid() || prepared.is_valid()) {
+        throw std::logic_error(
+            "Test-only system/AUR capability move state is inconsistent.");
+    }
+    return cmd_system_aur_update(
+        std::move(prepared), AppConfig{});
+}
+#endif
+
 int cmd_sync_install(
     const ParsedCliArguments& parsed, bool is_sys_upgrade,
     PackageSourceSelection source_selection, const AppConfig& config) {
     if(source_selection == PackageSourceSelection::RepoOnly) {
         // POLICY(#168): RepoOnly is one ordered binary repository transaction; no classification probe.
-        return run_command(
-            "sudo pacman " +
-            join_pacman_args(parsed.ordered_pacman_args, config));
+        return execute_ordered_repository_sync_transaction(
+            parsed.ordered_pacman_args, config);
     }
 
     const bool system_update = is_sys_upgrade;
     if(source_selection == PackageSourceSelection::Auto &&
        parsed.targets.empty() && !system_update) {
-        return run_command(
-            "sudo pacman " +
-            join_pacman_args(parsed.ordered_pacman_args, config));
+        return execute_ordered_repository_sync_transaction(
+            parsed.ordered_pacman_args, config);
     }
 
     SyncInstallPreparation preparation = prepare_sync_install(

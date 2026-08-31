@@ -6,7 +6,9 @@
 #include "package_relation_assessment_fixture.hpp"
 #include "source_install.hpp"
 #include "stubs/local-dependency-plan/query_stub.hpp"
+#include "system_aur_update_operation.hpp"
 #include "system_source_upgrade.hpp"
+#include "unified_plan_projection.hpp"
 #include "unified_plan_renderer.hpp"
 #include "upgrade_all_operation.hpp"
 
@@ -15,6 +17,7 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -22,6 +25,65 @@
 #include <system_error>
 #include <utility>
 #include <vector>
+
+struct SystemAurUpdateUnifiedPlanProjectionTestAccess {
+    static std::unique_ptr<UnifiedPlanProjection> make_child_projection(
+        UnifiedPlanObservationInput input) {
+        UnifiedPlanObservationResult observation_result =
+            make_unified_plan_observation(std::move(input));
+        if(!observation_result.is_valid() ||
+           observation_result.observation() == nullptr) {
+            throw std::logic_error(
+                "System/AUR renderer child fixture is invalid.");
+        }
+
+        auto projection = std::unique_ptr<UnifiedPlanProjection>(
+            new UnifiedPlanProjection(
+                std::vector<BuildPlanArtifactTargetProjectionResult>{},
+                std::vector<ProjectedBuildPlanArtifactTargets>{}));
+        projection->observation_result_.emplace(
+            std::move(observation_result));
+        return projection;
+    }
+
+    static std::unique_ptr<SystemAurUpdateUnifiedPlanProjection> make_auto(
+        SystemAurUpdateUnifiedPlanStatus status,
+        std::unique_ptr<UnifiedPlanProjection> repository_projection,
+        std::unique_ptr<UnifiedPlanProjection> aur_projection) {
+        return std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>(
+            new SystemAurUpdateUnifiedPlanProjection(
+                status, SystemAurUpdateUnifiedPlanMode::Auto,
+                {SystemAurUpdateUnifiedPlanPhase::
+                     RepositorySystemTransactionIntent,
+                 SystemAurUpdateUnifiedPlanPhase::
+                     CurrentForeignInventoryObservation,
+                 SystemAurUpdateUnifiedPlanPhase::
+                     CurrentNormalAurAssessment,
+                 SystemAurUpdateUnifiedPlanPhase::
+                     PotentialLaterAurTransactions},
+                std::move(repository_projection),
+                std::move(aur_projection),
+                SystemAurUpdateUnifiedPlanFreshness::
+                    CurrentInstalledState,
+                SystemAurUpdateUnifiedPlanActualRefresh::
+                    AfterRepositorySuccess,
+                SystemAurUpdateUnifiedPlanTransactionRelationship::
+                    SeparateSequentialTransactions));
+    }
+
+    static std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>
+    make_repo_only(
+        std::unique_ptr<UnifiedPlanProjection> repository_projection) {
+        return std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>(
+            new SystemAurUpdateUnifiedPlanProjection(
+                SystemAurUpdateUnifiedPlanStatus::Ready,
+                SystemAurUpdateUnifiedPlanMode::RepoOnly,
+                {SystemAurUpdateUnifiedPlanPhase::
+                     RepositorySystemTransactionIntent},
+                std::move(repository_projection), nullptr, std::nullopt,
+                std::nullopt, std::nullopt));
+    }
+};
 
 namespace {
 
@@ -93,6 +155,65 @@ const UnifiedPlanObservation& expect_valid(
         result.observation() != nullptr,
         std::string(context) + " has no observation");
     return *result.observation();
+}
+
+std::unique_ptr<UnifiedPlanProjection>
+make_repository_system_transaction_child() {
+    UnifiedPlanObservationInput input;
+    input.status = UnifiedPlanObservationStatus::Ready;
+    RepositoryPackageTransactionIntent transaction;
+    transaction.policy.needed = true;
+    transaction.stage =
+        UnifiedPlanTransactionIntentStage::RepositorySystemUpgrade;
+    transaction.targets.push_back(RepositorySystemUpgradeIntent{});
+    input.transaction_intents.push_back(std::move(transaction));
+    return SystemAurUpdateUnifiedPlanProjectionTestAccess::
+        make_child_projection(std::move(input));
+}
+
+std::unique_ptr<UnifiedPlanProjection> make_empty_aur_child(
+    UnifiedPlanObservationStatus status) {
+    UnifiedPlanObservationInput input;
+    input.status = status;
+    return SystemAurUpdateUnifiedPlanProjectionTestAccess::
+        make_child_projection(std::move(input));
+}
+
+std::unique_ptr<UnifiedPlanProjection> make_ready_aur_child(
+    const BuildPlan& plan,
+    const RequiredPackageArtifactTarget& required_artifact,
+    const ProvidedDependency& repository_provider) {
+    UnifiedPlanObservationInput input;
+    input.status = UnifiedPlanObservationStatus::Ready;
+    input.roots.emplace_back(
+        RootTargetIdentity{0, "normal-aur-child"},
+        AurRootPackageIdentity{"normal-aur-child", "normal-aur-base"},
+        UnifiedPlanRootRouteKind::AurSourceBuild);
+    input.build_units.push_back(
+        AurPackageBaseBuildUnitReference(std::cref(plan), 0));
+    input.required_artifacts.emplace_back(
+        AurPackageBaseBuildUnitReference(std::cref(plan), 0),
+        std::cref(required_artifact));
+
+    RepositoryPackageTransactionIntent provider_transaction;
+    provider_transaction.stage =
+        UnifiedPlanTransactionIntentStage::LaterNormalAur;
+    provider_transaction.targets.push_back(
+        RepositoryProviderInstallIntent{
+            UnifiedPlanBorrowedAuthorityReference<ProvidedDependency>(
+                repository_provider)});
+    input.transaction_intents.push_back(
+        std::move(provider_transaction));
+
+    SourceBuiltArtifactInstallBoundaryIntent artifact_transaction;
+    artifact_transaction.stage =
+        UnifiedPlanTransactionIntentStage::LaterNormalAur;
+    artifact_transaction.targets.push_back(
+        SourceRootArtifactInstallIntent{0});
+    input.transaction_intents.push_back(
+        std::move(artifact_transaction));
+    return SystemAurUpdateUnifiedPlanProjectionTestAccess::
+        make_child_projection(std::move(input));
 }
 
 LocalSourceRootObservationIdentity local_source_identity() {
@@ -2617,6 +2738,217 @@ void test_slice_five_route_authority_rendering() {
         "standalone remote source requested package");
 }
 
+void test_system_aur_update_route_rendering() {
+    BuildPlan aur_plan;
+    aur_plan.order.push_back(BuildPlanEntry{
+        "normal-aur-base", {"normal-aur-child"}});
+    const RequiredPackageArtifactTarget required_artifact{
+        "normal-aur-base", "normal-aur-child",
+        DesiredInstallReason::Explicit};
+    const ProvidedDependency repository_provider =
+        ProvidedDependency::from_repository(
+            "extra", 1, "normal-aur-provider");
+
+    std::unique_ptr<SystemAurUpdateUnifiedPlanProjection> ready =
+        SystemAurUpdateUnifiedPlanProjectionTestAccess::make_auto(
+            SystemAurUpdateUnifiedPlanStatus::Ready,
+            make_repository_system_transaction_child(),
+            make_ready_aur_child(
+                aur_plan, required_artifact, repository_provider));
+    const UnifiedPlanRenderingResult ready_rendered =
+        render_system_aur_update_unified_plan(*ready);
+
+    expect(
+        ready_rendered.is_complete(),
+        "system/AUR Ready rendering is incomplete");
+    expect(
+        ready->status() == SystemAurUpdateUnifiedPlanStatus::Ready &&
+            ready->aur_projection() != nullptr,
+        "system/AUR Ready fixture lost its separate AUR child");
+    expect_contains(
+        ready_rendered.text,
+        "System + normal AUR update plan:\n  Status: Ready",
+        "system/AUR aggregate Ready status");
+    expect_contains(
+        ready_rendered.text,
+        "Current-state normal AUR phase:\nUnified plan:\n  Status: Ready",
+        "system/AUR current-state Ready child");
+    expect_contains(
+        ready_rendered.text,
+        "AUR assessment is based on the current installed state.",
+        "system/AUR current-state freshness");
+    expect_contains(
+        ready_rendered.text,
+        "Actual execution re-evaluates AUR state after the repository upgrade succeeds.",
+        "system/AUR post-repository refresh");
+    expect_contains(
+        ready_rendered.text,
+        "The repository system transaction and later normal AUR transactions are separate intents.",
+        "system/AUR separate transaction relationship");
+
+    const std::string phase_one =
+        "Phase 1: official repository system-upgrade intent";
+    const std::string phase_two =
+        "Phase 2: current installed foreign/AUR state observation";
+    const std::string phase_three =
+        "Phase 3: current-state normal AUR assessment";
+    const std::string phase_four =
+        "Phase 4: potential later normal AUR build/install intents";
+    expect_before(
+        ready_rendered.text, phase_one, phase_two,
+        "system/AUR conceptual phase 1/2 order");
+    expect_before(
+        ready_rendered.text, phase_two, phase_three,
+        "system/AUR conceptual phase 2/3 order");
+    expect_before(
+        ready_rendered.text, phase_three, phase_four,
+        "system/AUR conceptual phase 3/4 order");
+
+    expect_before(
+        ready_rendered.text, "Repository system phase:",
+        "Repository system transaction intent",
+        "system/AUR repository heading/intent order");
+    expect_before(
+        ready_rendered.text, "Repository system transaction intent",
+        "Current-state normal AUR phase:",
+        "system/AUR repository and AUR section separation");
+    expect_before(
+        ready_rendered.text, "Current-state normal AUR phase:",
+        "Later normal AUR dependency/provider transaction intent",
+        "system/AUR later provider intent ownership");
+    expect_before(
+        ready_rendered.text,
+        "Later normal AUR dependency/provider transaction intent",
+        "Later normal AUR build/install transaction intent",
+        "system/AUR later transaction intent order");
+
+    std::unique_ptr<SystemAurUpdateUnifiedPlanProjection> no_op_child =
+        SystemAurUpdateUnifiedPlanProjectionTestAccess::make_auto(
+            SystemAurUpdateUnifiedPlanStatus::Ready,
+            make_repository_system_transaction_child(),
+            make_empty_aur_child(UnifiedPlanObservationStatus::NoOp));
+    const UnifiedPlanRenderingResult no_op_rendered =
+        render_system_aur_update_unified_plan(*no_op_child);
+    expect(
+        no_op_rendered.is_complete(),
+        "system/AUR NoOp-child rendering is incomplete");
+    expect(
+        no_op_child->status() ==
+            SystemAurUpdateUnifiedPlanStatus::Ready,
+        "current AUR NoOp flattened the combined route to NoOp");
+    expect_contains(
+        no_op_rendered.text,
+        "System + normal AUR update plan:\n  Status: Ready",
+        "system/AUR NoOp-child aggregate status");
+    expect_contains(
+        no_op_rendered.text,
+        "Current-state normal AUR phase:\nUnified plan:\n  Status: NoOp",
+        "system/AUR NoOp child status");
+    expect_contains(
+        no_op_rendered.text, "Repository system transaction intent",
+        "system/AUR NoOp-child repository intent");
+
+    const std::string unsafe_diagnostic =
+        std::string("query-before\nquery-after\rcr-after\ttab-after") +
+        std::string("\x1b", 1) + "[31mred-after" +
+        std::string("\x07", 1) + "bel-after" +
+        std::string("\x7f", 1) + "del-after";
+    const std::string escaped_diagnostic =
+        "query-before\\x0Aquery-after\\x0Dcr-after\\x09tab-after"
+        "\\x1B[31mred-after\\x07bel-after\\x7Fdel-after";
+    const SystemAurUpdateDryRunIssue query_failure{
+        SystemAurUpdateDryRunIssueKind::AurQueryFailure,
+        std::nullopt, unsafe_diagnostic};
+    UnifiedPlanObservationInput blocked_child_input;
+    blocked_child_input.status = UnifiedPlanObservationStatus::Blocked;
+    blocked_child_input.blockers.push_back(
+        RoutePreflightUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<
+                SystemAurUpdateDryRunIssue>(query_failure)});
+    std::unique_ptr<SystemAurUpdateUnifiedPlanProjection> blocked =
+        SystemAurUpdateUnifiedPlanProjectionTestAccess::make_auto(
+            SystemAurUpdateUnifiedPlanStatus::Blocked,
+            make_repository_system_transaction_child(),
+            SystemAurUpdateUnifiedPlanProjectionTestAccess::
+                make_child_projection(std::move(blocked_child_input)));
+    const UnifiedPlanRenderingResult blocked_rendered =
+        render_system_aur_update_unified_plan(*blocked);
+    expect(
+        blocked_rendered.is_complete(),
+        "system/AUR Blocked-child rendering is incomplete");
+    expect_contains(
+        blocked_rendered.text,
+        "System + normal AUR update plan:\n  Status: Blocked",
+        "system/AUR aggregate Blocked status");
+    expect_before(
+        blocked_rendered.text, "Repository system transaction intent",
+        "Current-state normal AUR phase:",
+        "system/AUR Blocked child retained repository intent");
+    expect_contains(
+        blocked_rendered.text,
+        "System/AUR current-state observation failure",
+        "system/AUR typed blocker");
+    expect_contains(
+        blocked_rendered.text, escaped_diagnostic,
+        "system/AUR terminal-safe blocker diagnostic");
+    expect_not_contains(
+        blocked_rendered.text, "query-before\nquery-after",
+        "system/AUR raw blocker newline");
+    expect_no_reflected_terminal_controls(
+        blocked_rendered.text,
+        "system/AUR blocker diagnostic");
+
+    std::unique_ptr<SystemAurUpdateUnifiedPlanProjection> repo_only =
+        SystemAurUpdateUnifiedPlanProjectionTestAccess::make_repo_only(
+            make_repository_system_transaction_child());
+    const UnifiedPlanRenderingResult repo_only_rendered =
+        render_system_aur_update_unified_plan(*repo_only);
+    expect(
+        repo_only_rendered.is_complete(),
+        "system/AUR RepoOnly rendering is incomplete");
+    expect(
+        repo_only->aur_projection() == nullptr,
+        "system/AUR RepoOnly fixture retained an AUR child");
+    expect_contains(
+        repo_only_rendered.text,
+        "Repository system update plan:\n  Status: Ready",
+        "system/AUR RepoOnly aggregate status");
+    expect_contains(
+        repo_only_rendered.text,
+        "Repository update phase:\n  Phase 1: official repository system-upgrade intent",
+        "system/AUR RepoOnly phase heading");
+    expect_contains(
+        repo_only_rendered.text,
+        "Phase 1: official repository system-upgrade intent",
+        "system/AUR RepoOnly repository phase");
+    expect_contains(
+        repo_only_rendered.text, "Repository system transaction intent",
+        "system/AUR RepoOnly repository intent");
+    expect_not_contains(
+        repo_only_rendered.text, "Current-state normal AUR phase:",
+        "system/AUR RepoOnly AUR section");
+    expect_not_contains(
+        repo_only_rendered.text, "System + normal AUR update plan:",
+        "system/AUR RepoOnly combined title");
+    expect_not_contains(
+        repo_only_rendered.text, "Combined update phases:",
+        "system/AUR RepoOnly combined phase heading");
+    expect_not_contains(
+        repo_only_rendered.text, "Freshness:",
+        "system/AUR RepoOnly freshness section");
+    expect_not_contains(
+        repo_only_rendered.text,
+        "AUR assessment is based on the current installed state.",
+        "system/AUR RepoOnly freshness wording");
+    expect_not_contains(
+        repo_only_rendered.text,
+        "potential later normal AUR build/install intents",
+        "system/AUR RepoOnly later AUR phase");
+    expect_not_contains(
+        repo_only_rendered.text, "Phase 2:",
+        "system/AUR RepoOnly later phase");
+}
+
 void test_rendering_issue_is_isolated_from_execution_status() {
     UnifiedPlanObservationInput input;
     input.status = UnifiedPlanObservationStatus::Ready;
@@ -2675,6 +3007,7 @@ int main() {
         test_blocked_partial_build_unit_is_incomplete_rendering();
         test_blocked_prepared_build_unit_missing_preference_is_not_duplicated();
         test_slice_five_route_authority_rendering();
+        test_system_aur_update_route_rendering();
         test_rendering_issue_is_isolated_from_execution_status();
         std::cout << "unified plan renderer tests passed" << std::endl;
         return 0;

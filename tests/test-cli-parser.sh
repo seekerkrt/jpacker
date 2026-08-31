@@ -56,6 +56,7 @@ setup_case() {
     command_log=$case_dir/commands.log
     output_file=$case_dir/output
     repository_metadata_state=$case_dir/repository-metadata.state
+    foreign_inventory_state=$case_dir/foreign-inventory.state
 
     mkdir -p \
         "$case_dir/home" \
@@ -65,12 +66,14 @@ setup_case() {
     chmod 0700 "$case_dir/xdg-config"
     : > "$command_log"
     : > "$repository_metadata_state"
+    : > "$foreign_inventory_state"
     export HOME=$case_dir/home
     export XDG_CONFIG_HOME=$case_dir/xdg-config
     export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_COMMAND_LOG=$command_log
     export MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE=$repository_metadata_state
+    export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$foreign_inventory_state
     export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
     export MOGUET_TEST_PACMAN_EXIT_CODE=0
     export MOGUET_TEST_SUDO_EXIT_CODE=0
@@ -318,7 +321,13 @@ assert_dry_run_rendered() {
         cat "$command_log" >&2
         exit 1
     fi
-    assert_contains "Unified plan:" "$output_file"
+    if ! grep -Fx -- "Unified plan:" "$output_file" >/dev/null &&
+       ! grep -Fx -- "System + normal AUR update plan:" "$output_file" >/dev/null
+    then
+        echo "supported dry-run did not render a recognized plan" >&2
+        sed -n '1,240p' "$output_file" >&2
+        exit 1
+    fi
     assert_not_contains "Started Moguet v" "$output_file"
     assert_storage_roots_absent
     assert_no_mutation_commands

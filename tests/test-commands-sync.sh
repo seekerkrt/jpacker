@@ -67,6 +67,8 @@ setup_case() {
     unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
     unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
     unset MOGUET_TEST_PACKAGE_METADATA_STATE_FILE
+    unset MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE
+    unset MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG
     unset MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE
     unset MOGUET_TEST_PACMAN_MAIN_COMMAND
     unset MOGUET_TEST_PACMAN_MAIN_OUTPUT
@@ -772,6 +774,190 @@ if ! cmp -s "$installed_after_success" "$installed_state"; then
     echo "fake pacman -U did not publish installed state in case $case_name" >&2
     exit 1
 fi
+assert_cleanup_partial_success_fixture "$install_success_log"
+
+# Issue #505: exact targetless -Syu is a sequential repository + normal AUR
+# update, while --repo remains the full repository-only escape hatch.
+setup_case system-aur-update-unsupported-option-before-mutation
+run_status 1 -Syu --config custom.conf
+assert_contains "A pacman option is not supported for the combined -Syu route." "$output_file"
+assert_contains "moguet -Syu --repo" "$output_file"
+assert_command_log_empty
+assert_state_log_absent
+
+setup_case system-aur-update-rmdeps-before-mutation
+run_status 1 -Syu --rmdeps
+assert_contains "--rmdeps" "$output_file"
+assert_command_log_empty
+assert_state_log_absent
+
+setup_case system-aur-update-aur-selector-rejected
+run_status 1 -Syu --aur
+assert_contains "Cannot combine --aur with pacman refresh for operation -Syu." "$output_file"
+assert_command_log_empty
+assert_state_log_absent
+
+setup_case system-repository-update-full-pass-through
+write_source_preference system-update-a 'INVALID PREFERENCE'
+export MOGUET_TEST_SUDO_MAIN_STATUS=17
+run_status 17 --noconfirm -Syu --repo --config custom.conf
+assert_event_at 1 "sudo pacman -Syu --noconfirm --config custom.conf"
+assert_event_count 1 "sudo pacman -Syu --noconfirm --config custom.conf"
+assert_event_prefix_absent '^aur '
+assert_event_prefix_absent '^pacman-conf '
+assert_event_prefix_absent '^alpm '
+assert_event_prefix_absent '^(git|makepkg) '
+assert_not_contains "Loading custom build flags" "$output_file"
+
+setup_case noncanonical-system-update-routes-stay-existing
+export MOGUET_TEST_SUDO_MAIN_STATUS=0
+run_status 0 -Sy
+assert_event_at 1 "sudo pacman -Sy"
+assert_event_count 1 "sudo pacman -Sy"
+assert_event_prefix_absent '^aur info-many'
+
+setup_case noncanonical-sysupgrade-only-stays-existing
+export MOGUET_TEST_SUDO_MAIN_STATUS=0
+run_status 0 -Su
+assert_event_at 1 "sudo pacman -Su"
+assert_event_count 1 "sudo pacman -Su"
+assert_event_prefix_absent '^aur info-many'
+
+setup_case noncanonical-modifier-order-stays-existing
+export MOGUET_TEST_SUDO_MAIN_STATUS=0
+run_status 0 -Suy
+assert_event_at 1 "sudo pacman -Suy"
+assert_event_count 1 "sudo pacman -Suy"
+assert_event_prefix_absent '^aur info-many'
+
+setup_case noncanonical-separated-modifiers-stay-existing
+export MOGUET_TEST_SUDO_MAIN_STATUS=0
+run_status 0 -S -y -u
+assert_event_at 1 "sudo pacman -S -y -u"
+assert_event_count 1 "sudo pacman -S -y -u"
+assert_event_prefix_absent '^aur info-many'
+
+setup_case noncanonical-separated-long-modifiers-stay-existing
+export MOGUET_TEST_SUDO_MAIN_STATUS=0
+run_status 0 -S --refresh --sysupgrade
+assert_event_at 1 "sudo pacman -S --refresh --sysupgrade"
+assert_event_count 1 "sudo pacman -S --refresh --sysupgrade"
+assert_event_prefix_absent '^aur info-many'
+
+setup_case unknown-system-modifier-stays-delegated
+export MOGUET_TEST_SUDO_MAIN_STATUS=0
+run_status 0 -Syux
+assert_event_at 1 "sudo pacman -Syux"
+assert_event_count 1 "sudo pacman -Syux"
+assert_event_prefix_absent '^aur info-many'
+
+setup_case system-aur-update-repository-failure-stops-fresh-authority
+foreign_inventory=$case_dir/foreign-inventory.state
+printf 'system-update-a 0.9-1 explicit\n' > "$foreign_inventory"
+export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$foreign_inventory
+export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+export MOGUET_TEST_SUDO_MAIN_STATUS=42
+run_status 1 --noedit --nodiff --noconfirm -Syu
+assert_event_at 1 "sudo pacman -Syu --noconfirm"
+assert_event_count 1 "sudo pacman -Syu --noconfirm"
+assert_event_prefix_absent '^aur '
+assert_event_prefix_absent '^pacman-conf '
+assert_event_prefix_absent '^alpm '
+assert_event_prefix_absent '^(git|makepkg) '
+assert_contains "The repository system upgrade failed." "$output_file"
+assert_contains "The AUR update was not attempted." "$output_file"
+
+setup_case system-aur-update-no-updates-is-not-whole-noop
+foreign_inventory=$case_dir/foreign-inventory.state
+: > "$foreign_inventory"
+export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$foreign_inventory
+export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+export MOGUET_TEST_SUDO_MAIN_STATUS=0
+run_status 0 --noedit --nodiff --noconfirm -Syu
+assert_event_at 1 "sudo pacman -Syu --noconfirm"
+assert_event_before "sudo pacman -Syu --noconfirm" "pacman-conf --verbose RootDir DBPath"
+assert_event_prefix_absent '^aur '
+assert_event_prefix_absent '^(git|makepkg) '
+assert_contains "The repository system upgrade completed." "$output_file"
+assert_contains "AUR update: no updates" "$output_file"
+assert_not_contains "No changes are required." "$output_file"
+
+setup_case system-aur-update-success-is-fresh-and-ignores-preference
+foreign_inventory=$case_dir/foreign-inventory.state
+printf 'system-update-a 0.9-1 explicit\n' > "$foreign_inventory"
+write_source_preference system-update-a 'INVALID PREFERENCE'
+export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$foreign_inventory
+export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+export MOGUET_TEST_SUDO_MAIN_STATUS=0
+run_status 0 --noedit --nodiff --noconfirm -Syu --needed
+repository_update='sudo pacman -Syu --noconfirm --needed'
+assert_event_at 1 "$repository_update"
+assert_event_before "$repository_update" "pacman-conf --verbose RootDir DBPath"
+assert_event_before "pacman-conf --verbose RootDir DBPath" "aur info-many system-update-a"
+assert_event_before "aur info-many system-update-a" "git clone https://aur.archlinux.org/system-update-a.git system-update-a"
+assert_event_pattern '^sudo pacman -U --noconfirm -- .*/system-update-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_event_pattern_count 0 '^sudo pacman -U --noconfirm --needed '
+assert_not_contains "Loading custom build flags" "$output_file"
+assert_not_contains "Applying custom build flags" "$output_file"
+assert_contains "The repository system upgrade completed." "$output_file"
+assert_contains "AUR update: completed" "$output_file"
+assert_contains "The repository system upgrade and normal AUR update completed." "$output_file"
+
+setup_case system-aur-update-requires-check-is-partial
+foreign_inventory=$case_dir/foreign-inventory.state
+printf 'system-devel-git 1.0-1 explicit\n' > "$foreign_inventory"
+write_source_preference system-devel-git 'INVALID PREFERENCE'
+export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$foreign_inventory
+export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+export MOGUET_TEST_SUDO_MAIN_STATUS=0
+run_status 1 --noedit --nodiff --noconfirm -Syu
+assert_event_at 1 "sudo pacman -Syu --noconfirm"
+assert_event_before "sudo pacman -Syu --noconfirm" "aur info-many system-devel-git"
+assert_event_prefix_absent '^(git|makepkg) '
+assert_event_pattern_count 0 '^sudo pacman -U '
+assert_contains "The repository system upgrade completed." "$output_file"
+assert_contains "devel update requires check" "$output_file"
+assert_contains "The completed repository system upgrade was not rolled back." "$output_file"
+
+setup_case system-aur-update-work-failure-is-partial
+foreign_inventory=$case_dir/foreign-inventory.state
+printf 'system-update-a 0.9-1 explicit\n' > "$foreign_inventory"
+export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$foreign_inventory
+export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+export MOGUET_TEST_SUDO_MAIN_STATUS=0
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=42
+export MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
+run_status 1 --noedit --nodiff --noconfirm -Syu
+assert_event_at 1 "sudo pacman -Syu --noconfirm"
+assert_event "makepkg -sc --noconfirm"
+assert_event_pattern_count 0 '^sudo pacman -U '
+assert_contains "The repository system upgrade completed." "$output_file"
+assert_contains "The repository system upgrade completed, but the AUR update failed." "$output_file"
+assert_contains "The completed repository system upgrade was not rolled back." "$output_file"
+
+setup_case system-aur-update-cleanup-failure-is-distinct
+foreign_inventory=$case_dir/foreign-inventory.state
+installed_state=$XDG_CACHE_HOME/installed-state
+installed_after_success=$XDG_CACHE_HOME/installed-after-success
+install_success_log=$XDG_CACHE_HOME/pacman-u-success.log
+printf 'system-update-a 0.9-1 explicit\n' > "$foreign_inventory"
+: > "$installed_state"
+printf 'system-update-a 1.0-1\n' > "$installed_after_success"
+: > "$install_success_log"
+export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$foreign_inventory
+export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+export MOGUET_TEST_PACKAGE_METADATA_STATE_FILE=$installed_state
+export MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE=$installed_after_success
+export MOGUET_TEST_PACMAN_U_SUCCESS_LOG=$install_success_log
+export MOGUET_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U=1
+export MOGUET_TEST_SUDO_MAIN_STATUS=0
+run_status 1 --noedit --nodiff --noconfirm -Syu
+assert_event_at 1 "sudo pacman -Syu --noconfirm"
+assert_event_pattern_count 1 '^sudo pacman -U --noconfirm -- '
+assert_contains "updated, but cleanup failed" "$output_file"
+assert_contains "AUR update cleanup failed after a package transaction." "$output_file"
+assert_contains "The repository system upgrade completed, but AUR cleanup failed after a package transaction." "$output_file"
+assert_contains "The completed repository system upgrade was not rolled back." "$output_file"
 assert_cleanup_partial_success_fixture "$install_success_log"
 
 setup_case auto-install-targetless-pacman-pass-through

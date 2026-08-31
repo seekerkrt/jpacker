@@ -9,6 +9,7 @@
 #include "package_metadata.hpp"
 #include "root_package_route_projection.hpp"
 #include "root_package_search.hpp"
+#include "system_aur_update_operation.hpp"
 #include "system_source_upgrade.hpp"
 #include "upgrade_all_operation.hpp"
 
@@ -271,11 +272,14 @@ void append_prepared_remote_source_work(
 }
 
 void append_source_artifact_transaction(
-    UnifiedPlanObservationInput& observation, bool needed) {
+    UnifiedPlanObservationInput& observation, bool needed,
+    UnifiedPlanTransactionIntentStage stage =
+        UnifiedPlanTransactionIntentStage::RouteOwned) {
     if(observation.required_artifacts.empty()) return;
 
     SourceBuiltArtifactInstallBoundaryIntent transaction;
     transaction.needed = needed;
+    transaction.stage = stage;
     transaction.targets.reserve(observation.required_artifacts.size());
     for(std::size_t index = 0;
         index < observation.required_artifacts.size(); ++index) {
@@ -324,6 +328,187 @@ bool same_aur_update_entry(
            lhs.classification == rhs.classification &&
            lhs.devel_classification == rhs.devel_classification &&
            lhs.devel_assessment == rhs.devel_assessment;
+}
+
+bool source_observation_matches_ready_preflight(
+    const AurUpdateSourceBuildObservation& source,
+    const AurUpdateExecutionPreflight& preflight) noexcept {
+    if(!source.issues.empty() || !source.warnings.empty() ||
+       !source.production_preflight.has_value() ||
+       !source.externally_satisfied_build_units.empty() ||
+       !preflight.build_plan.has_value() ||
+       source.affected_roots != preflight.build_plan->root_targets) {
+        return false;
+    }
+
+    std::vector<const AurUpdateExecutionTarget*> executable_targets;
+    for(const AurUpdateExecutionTarget& target : preflight.targets) {
+        if(target.status == AurUpdateExecutionTargetStatus::Executable) {
+            executable_targets.push_back(&target);
+        }
+    }
+    if(executable_targets.empty() ||
+       executable_targets.size() != source.affected_update_targets.size() ||
+       source.projected_build_units.size() !=
+           preflight.build_plan->order.size() ||
+       source.build_unit_selection.entries.size() !=
+           preflight.build_plan->order.size() ||
+       source.work_item_attributions.size() !=
+           source.production_preflight->work_items.size() ||
+       source.work_item_attributions.empty()) {
+        return false;
+    }
+    for(std::size_t index = 0; index < executable_targets.size(); ++index) {
+        const AurUpdateExecutionTarget& expected = *executable_targets[index];
+        const AurUpdateExecutionTarget& actual =
+            source.affected_update_targets[index];
+        if(actual.status != AurUpdateExecutionTargetStatus::Executable ||
+           actual.update_plan_index != expected.update_plan_index ||
+           actual.build_plan_root_index != expected.build_plan_root_index ||
+           actual.desired_install_reason != expected.desired_install_reason ||
+           !same_aur_update_entry(actual.update, expected.update)) {
+            return false;
+        }
+    }
+    const auto expected_providers_for_package_base =
+        [&preflight](const std::string& package_base) {
+            std::vector<ProvidedDependency> providers;
+            for(const BuildPlanDependencyEdge& edge :
+                preflight.build_plan->dependency_edges) {
+                if(edge.parent_package_base != package_base ||
+                   edge.kind != DependencyKind::Provided ||
+                   edge.provider_resolution !=
+                       ProviderResolutionKind::UserSelected ||
+                   !edge.resolved_provider.has_value() ||
+                   !std::holds_alternative<RepositoryProviderOrigin>(
+                       edge.resolved_provider->origin)) {
+                    continue;
+                }
+                const ProvidedDependency& provider =
+                    *edge.resolved_provider;
+                if(std::none_of(
+                       providers.begin(), providers.end(),
+                       [&provider](const ProvidedDependency& existing) {
+                           return same_provider_identity(
+                               existing, provider);
+                       })) {
+                    providers.push_back(provider);
+                }
+            }
+            return providers;
+        };
+    std::vector<ProvidedDependency> expected_providers;
+    for(const BuildPlanEntry& unit : preflight.build_plan->order) {
+        for(const ProvidedDependency& provider :
+            expected_providers_for_package_base(unit.package_base)) {
+            if(std::none_of(
+                   expected_providers.begin(), expected_providers.end(),
+                   [&provider](const ProvidedDependency& existing) {
+                       return same_provider_identity(existing, provider);
+                   })) {
+                expected_providers.push_back(provider);
+            }
+        }
+    }
+    if(source.production_preflight->selected_repository_providers !=
+       expected_providers) {
+        return false;
+    }
+
+    for(std::size_t index = 0;
+        index < source.production_preflight->work_items.size(); ++index) {
+        const ProductionSourceBuildWorkItemObservation& work_item =
+            source.production_preflight->work_items[index];
+        const AurUpdatePreparedWorkItemAttribution& attribution =
+            source.work_item_attributions[index];
+        if(attribution.invocation_work_item_index != index ||
+           attribution.build_plan_order_index >=
+               preflight.build_plan->order.size() ||
+           attribution.build_plan_order_index >=
+               source.projected_build_units.size()) {
+            return false;
+        }
+        const BuildPlanEntry& plan_unit =
+            preflight.build_plan
+                ->order[attribution.build_plan_order_index];
+        const AurUpdateProjectedBuildUnit& projected_unit =
+            source.projected_build_units
+                [attribution.build_plan_order_index];
+        const std::vector<ProvidedDependency> expected_work_item_providers =
+            expected_providers_for_package_base(plan_unit.package_base);
+        const PackageBaseIdentity* reviewed_identity =
+            work_item.request.aur_review_identity.has_value()
+                ? &*work_item.request.aur_review_identity
+                : nullptr;
+        const SourceLocationIdentity* reviewed_location =
+            reviewed_identity != nullptr
+                ? &reviewed_identity->source().location()
+                : nullptr;
+        if(work_item.request.reviewed_state !=
+               ReviewedSourceFatalStateObservationStatus::Completed ||
+           reviewed_identity == nullptr || reviewed_location == nullptr ||
+           reviewed_identity->source().kind() != PackageSourceKind::Aur ||
+           reviewed_location->kind() != SourceLocationKind::GitRemote ||
+           reviewed_location->state() != SourceLocationState::Known ||
+           reviewed_location->value() == nullptr ||
+           *reviewed_location->value() != work_item.request.git_url ||
+           reviewed_identity->package_base() !=
+               work_item.request.checkout_name ||
+           work_item.request.checkout_name != plan_unit.package_base ||
+           attribution.package_base != plan_unit.package_base ||
+           work_item.request.package_name != attribution.package_name ||
+           work_item.required_target_provenance !=
+               RequiredTargetProvenance::AurBuildPlanProjection ||
+           work_item.artifact_lifecycle_intent !=
+               ArtifactLifecycleIntent::PackageBaseSet ||
+           work_item.repository_identity.has_value() ||
+           work_item.uses_system_update_baseline ||
+           work_item.request.only_if_updated || work_item.request.needed ||
+           !work_item.request.custom_environment
+                .ordered_assignments.empty() ||
+           work_item.configured_repository_order !=
+               preflight.build_plan->configured_repository_order ||
+           work_item.selected_repository_providers !=
+               expected_work_item_providers ||
+           work_item.required_targets.size() !=
+               attribution.required_target_attributions.size() ||
+           attribution.required_target_attributions.size() !=
+               projected_unit.required_target_attributions.size()) {
+            return false;
+        }
+        for(std::size_t child_index = 0;
+            child_index < work_item.required_targets.size(); ++child_index) {
+            const RequiredPackageArtifactTarget& observed =
+                work_item.required_targets[child_index];
+            const RequiredPackageArtifactTarget& attributed =
+                attribution.required_target_attributions[child_index]
+                    .required_target;
+            const RequiredPackageArtifactTarget& projected =
+                projected_unit.required_target_attributions[child_index]
+                    .required_target;
+            if(observed.package_base != attributed.package_base ||
+               observed.package_name != attributed.package_name ||
+               observed.desired_reason != attributed.desired_reason ||
+               observed.package_base != projected.package_base ||
+               observed.package_name != projected.package_name ||
+               observed.desired_reason != projected.desired_reason) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool source_observation_matches_noop(
+    const AurUpdateSourceBuildObservation& source) noexcept {
+    return source.issues.empty() && source.warnings.empty() &&
+           source.affected_update_targets.empty() &&
+           source.affected_roots.empty() &&
+           source.build_unit_selection.entries.empty() &&
+           source.projected_build_units.empty() &&
+           source.externally_satisfied_build_units.empty() &&
+           source.work_item_attributions.empty() &&
+           !source.production_preflight.has_value();
 }
 
 bool has_package_role(
@@ -1495,6 +1680,21 @@ void append_aur_update_preparation_blockers(
     }
 }
 
+void append_aur_update_observation_blockers(
+    const AurUpdateSourceBuildObservation& preparation,
+    const AurUpdateExecutionPreflight& preflight,
+    UnifiedPlanObservationInput& observation) {
+    for(const AurUpdatePreparationIssue& issue : preparation.issues) {
+        if(is_already_projected_blocking_preflight_wrapper(
+               issue, preflight)) {
+            continue;
+        }
+        observation.blockers.push_back(RoutePreflightUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<
+                AurUpdatePreparationIssue>(issue)});
+    }
+}
+
 void append_phase(
     UnifiedPlanObservationInput& observation,
     UnifiedPlanObservationPhase phase,
@@ -2186,16 +2386,6 @@ void append_blocked_upgrade_all(
 
 } // namespace
 
-UnifiedPlanProjection::UnifiedPlanProjection(
-    std::vector<BuildPlanArtifactTargetProjectionResult>
-        artifact_target_projections,
-    std::vector<ProjectedBuildPlanArtifactTargets>
-        route_artifact_targets)
-    : artifact_target_projections_(
-          std::move(artifact_target_projections)),
-      route_artifact_targets_(std::move(route_artifact_targets)) {
-}
-
 std::unique_ptr<UnifiedPlanProjection> UnifiedPlanProjection::make(
     std::vector<BuildPlanArtifactTargetProjectionResult>
         artifact_target_projections,
@@ -2220,11 +2410,6 @@ std::unique_ptr<UnifiedPlanProjection> UnifiedPlanProjection::make(
     projection->observation_result_.emplace(
         make_unified_plan_observation(std::move(observation_input)));
     return projection;
-}
-
-const UnifiedPlanObservationResult&
-UnifiedPlanProjection::observation_result() const noexcept {
-    return observation_result_.value();
 }
 
 std::unique_ptr<UnifiedPlanProjection> project_root_package_unified_plan(
@@ -3546,4 +3731,263 @@ std::unique_ptr<UnifiedPlanProjection> project_upgrade_all_unified_plan(
             std::cref(prepared), std::nullopt, std::nullopt,
             std::cref(aur_preflight.issues()), std::nullopt,
             std::cref(aur_preflight)});
+}
+
+std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>
+project_system_aur_update_unified_plan(
+    const SystemAurUpdateDryRunObservation& combined) {
+    if(combined.request.ordered_pacman_args().empty()) {
+        reject_inconsistent_input(
+            "System/AUR dry-run observation has no repository request.");
+    }
+
+    UnifiedPlanObservationInput repository_observation;
+    repository_observation.status = UnifiedPlanObservationStatus::Ready;
+    RepositoryPackageTransactionIntent repository_transaction;
+    repository_transaction.policy.needed =
+        combined.request.repository_needed();
+    repository_transaction.stage =
+        UnifiedPlanTransactionIntentStage::RepositorySystemUpgrade;
+    repository_transaction.targets.push_back(
+        RepositorySystemUpgradeIntent{});
+    repository_observation.transaction_intents.push_back(
+        std::move(repository_transaction));
+    append_phase(
+        repository_observation,
+        UnifiedPlanObservationPhase::RequestDiscovery,
+        UnifiedPlanAuthorityOwner::Moguet);
+    append_phase(
+        repository_observation,
+        UnifiedPlanObservationPhase::ExecutionProjection,
+        UnifiedPlanAuthorityOwner::Moguet);
+    append_phase(
+        repository_observation,
+        UnifiedPlanObservationPhase::RepositoryTransaction,
+        UnifiedPlanAuthorityOwner::Pacman);
+    std::unique_ptr<UnifiedPlanProjection> repository_projection =
+        UnifiedPlanProjection::make(
+            {}, std::move(repository_observation));
+
+    if(combined.request.mode() ==
+       SystemAurUpdateDryRunMode::RepoOnly) {
+        if(combined.request.ordered_pacman_args().empty() ||
+           !combined.issues.empty() ||
+           combined.aur_observation_basis.has_value() ||
+           combined.actual_authority_refresh.has_value() ||
+           combined.explicit_source_satisfaction.has_value() ||
+           combined.saved_source_preference_policy.has_value() ||
+           combined.repository_configuration.has_value() ||
+           !combined.foreign_inventory.empty() ||
+           combined.aur_observation.has_value()) {
+            reject_inconsistent_input(
+                "Repo-only system update observation retained AUR authority.");
+        }
+        return std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>(
+            new SystemAurUpdateUnifiedPlanProjection(
+                SystemAurUpdateUnifiedPlanStatus::Ready,
+                SystemAurUpdateUnifiedPlanMode::RepoOnly,
+                {SystemAurUpdateUnifiedPlanPhase::
+                     RepositorySystemTransactionIntent},
+                std::move(repository_projection), nullptr,
+                std::nullopt, std::nullopt, std::nullopt));
+    }
+
+    if(combined.aur_observation_basis !=
+           std::optional<SystemAurUpdateDryRunAurObservationBasis>{
+               SystemAurUpdateDryRunAurObservationBasis::
+                   CurrentInstalledState} ||
+       combined.actual_authority_refresh !=
+           std::optional<SystemAurUpdateDryRunActualAuthorityRefresh>{
+               SystemAurUpdateDryRunActualAuthorityRefresh::
+                   AfterRepositorySuccess} ||
+       !combined.explicit_source_satisfaction.has_value() ||
+       combined.saved_source_preference_policy !=
+           std::optional<SavedSourcePreferencePolicy>{
+               SavedSourcePreferencePolicy::Ignore} ||
+       (combined.aur_observation.has_value() &&
+        !combined.repository_configuration.has_value())) {
+        reject_inconsistent_input(
+            "System/AUR dry-run observation has invalid freshness or source policy.");
+    }
+
+    UnifiedPlanObservationInput aur_observation;
+    aur_observation.route_preflight_authorities.push_back(
+        UnifiedPlanBorrowedAuthorityReference<
+            SystemAurUpdateDryRunObservation>(combined));
+    for(const SystemAurUpdateDryRunIssue& issue : combined.issues) {
+        aur_observation.blockers.push_back(
+            RoutePreflightUnifiedPlanBlocker{
+                UnifiedPlanBorrowedAuthorityReference<
+                    SystemAurUpdateDryRunIssue>(issue)});
+    }
+
+    std::vector<BuildPlanArtifactTargetProjectionResult> projections;
+    std::vector<ProjectedBuildPlanArtifactTargets> route_artifact_targets;
+    if(combined.aur_observation.has_value()) {
+        const FilteredAurUpdateObservation& filtered =
+            *combined.aur_observation;
+        if(!filtered.source_build_preflight().has_value()) {
+            reject_inconsistent_input(
+                "System/AUR filtered observation lacks source-build safety authority.");
+        }
+        const AurUpdateQueryResult& query =
+            filtered.original_query_result();
+        if(combined.foreign_inventory.size() !=
+           query.plan.entries.size()) {
+            reject_inconsistent_input(
+                "System/AUR foreign inventory and query counts differ.");
+        }
+        for(std::size_t index = 0;
+            index < combined.foreign_inventory.size(); ++index) {
+            const InstalledPackageMetadata& installed =
+                combined.foreign_inventory[index];
+            const AurUpdatePlanEntry& entry = query.plan.entries[index];
+            if(installed.name != entry.installed_name ||
+               installed.version != entry.installed_version ||
+               installed.reason != entry.install_reason) {
+                reject_inconsistent_input(
+                    "System/AUR foreign inventory and query identities differ.");
+            }
+        }
+        const AurUpdateExecutionPreflight& preflight =
+            filtered.execution_preflight();
+        const std::vector<std::string>* repository_order =
+            validate_aur_update_input(query, preflight);
+        if(repository_order != nullptr &&
+           *repository_order !=
+               combined.repository_configuration->repository_names) {
+            reject_inconsistent_input(
+                "System/AUR current inventory and AUR plan used different repository configurations.");
+        }
+        if(repository_order != nullptr) {
+            aur_observation.configured_repository_order.emplace(
+                std::cref(*repository_order));
+        }
+        aur_observation.route_preflight_authorities.push_back(
+            UnifiedPlanBorrowedAuthorityReference<
+                FilteredAurUpdateObservation>(filtered));
+        append_aur_update_roots_and_blockers(
+            query, preflight, aur_observation);
+        for(const FilteredAurUpdateOperationIssue& issue :
+            filtered.operation_issues()) {
+            aur_observation.blockers.push_back(
+                RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                        FilteredAurUpdateOperationIssue>(issue)});
+        }
+        append_aur_update_observation_blockers(
+            *filtered.source_build_preflight(), preflight,
+            aur_observation);
+
+        const BuildPlan* plan = preflight.build_plan.has_value()
+                                    ? &*preflight.build_plan
+                                    : nullptr;
+        if(plan != nullptr) {
+            projections.push_back(
+                project_build_plan_required_artifact_targets(*plan));
+            route_artifact_targets = project_aur_update_artifact_targets(
+                preflight, projections.front());
+            aur_observation.dependency_authorities.push_back(
+                UnifiedPlanDependencyAuthorityReference::from_build_plan(
+                    *plan));
+            append_build_plan_blockers(*plan, aur_observation);
+            if(projections.front().failure() != nullptr) {
+                append_artifact_projection(
+                    *plan, projections.front(), aur_observation);
+            } else {
+                append_artifact_units(
+                    *plan, route_artifact_targets, aur_observation);
+            }
+        }
+
+        if(!aur_observation.blockers.empty()) {
+            aur_observation.status = UnifiedPlanObservationStatus::Blocked;
+        } else if(!has_executable_update_targets(preflight)) {
+            if(!source_observation_matches_noop(
+                   *filtered.source_build_preflight())) {
+                reject_inconsistent_input(
+                    "System/AUR no-update source observation is inconsistent.");
+            }
+            aur_observation.status = UnifiedPlanObservationStatus::NoOp;
+        } else {
+            if(!source_observation_matches_ready_preflight(
+                   *filtered.source_build_preflight(), preflight)) {
+                reject_inconsistent_input(
+                    "System/AUR executable source observation is inconsistent.");
+            }
+            aur_observation.status = UnifiedPlanObservationStatus::Ready;
+            RepositoryPackageTransactionIntent later_repository_transaction;
+            later_repository_transaction.stage =
+                UnifiedPlanTransactionIntentStage::LaterNormalAur;
+            if(plan != nullptr) {
+                append_repository_dependency_intents(
+                    *plan, later_repository_transaction);
+            }
+            if(!later_repository_transaction.targets.empty()) {
+                aur_observation.transaction_intents.push_back(
+                    std::move(later_repository_transaction));
+            }
+            append_source_artifact_transaction(
+                aur_observation, false,
+                UnifiedPlanTransactionIntentStage::LaterNormalAur);
+        }
+        append_aur_update_phases(query, plan, aur_observation);
+    } else {
+        if(combined.issues.empty()) {
+            reject_inconsistent_input(
+                "System/AUR observation lost AUR authority without a typed failure.");
+        }
+        aur_observation.status = UnifiedPlanObservationStatus::Blocked;
+        append_phase(
+            aur_observation,
+            UnifiedPlanObservationPhase::RequestDiscovery,
+            UnifiedPlanAuthorityOwner::Moguet);
+        append_phase(
+            aur_observation,
+            UnifiedPlanObservationPhase::MetadataDiscovery,
+            UnifiedPlanAuthorityOwner::Libalpm);
+        append_phase(
+            aur_observation,
+            UnifiedPlanObservationPhase::ExecutionProjection,
+            UnifiedPlanAuthorityOwner::Moguet);
+    }
+
+    if(aur_observation.status == UnifiedPlanObservationStatus::Blocked &&
+       aur_observation.blockers.empty()) {
+        reject_inconsistent_input(
+            "System/AUR dry-run status differs from its AUR child authority.");
+    }
+
+    std::unique_ptr<UnifiedPlanProjection> aur_projection =
+        UnifiedPlanProjection::make(
+            std::move(projections),
+            std::move(route_artifact_targets),
+            std::move(aur_observation));
+    if(aur_projection->observation_result().observation() == nullptr) {
+        reject_inconsistent_input(
+            "System/AUR projection produced an invalid AUR child.");
+    }
+    const SystemAurUpdateUnifiedPlanStatus status =
+        aur_projection->observation_result().observation()->status() ==
+                UnifiedPlanObservationStatus::Blocked
+            ? SystemAurUpdateUnifiedPlanStatus::Blocked
+            : SystemAurUpdateUnifiedPlanStatus::Ready;
+    return std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>(
+        new SystemAurUpdateUnifiedPlanProjection(
+            status, SystemAurUpdateUnifiedPlanMode::Auto,
+            {SystemAurUpdateUnifiedPlanPhase::
+                 RepositorySystemTransactionIntent,
+             SystemAurUpdateUnifiedPlanPhase::
+                 CurrentForeignInventoryObservation,
+             SystemAurUpdateUnifiedPlanPhase::
+                 CurrentNormalAurAssessment,
+             SystemAurUpdateUnifiedPlanPhase::
+                 PotentialLaterAurTransactions},
+            std::move(repository_projection),
+            std::move(aur_projection),
+            SystemAurUpdateUnifiedPlanFreshness::CurrentInstalledState,
+            SystemAurUpdateUnifiedPlanActualRefresh::
+                AfterRepositorySuccess,
+            SystemAurUpdateUnifiedPlanTransactionRelationship::
+                SeparateSequentialTransactions));
 }

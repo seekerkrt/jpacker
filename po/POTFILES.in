@@ -52,6 +52,7 @@ source/separated_source_build.cpp
 source/source_build.cpp
 source/source_install.cpp
 source/source_preference.cpp
+source/system_aur_update_operation.cpp
 source/system_source_upgrade.cpp
 source/trusted_cache.cpp
 source/trusted_git.cpp

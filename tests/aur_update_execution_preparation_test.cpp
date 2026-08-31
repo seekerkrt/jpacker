@@ -36,6 +36,7 @@ static_assert(
 using FilteredPreparationFunction = AurUpdateSourceBuildPreparation (*)(
     const AurUpdateExecutionPreflight&,
     const AurUpdateBuildUnitSelection&,
+    SavedSourcePreferencePolicy,
     bool,
     const AppConfig&);
 static_assert(std::is_same_v<
@@ -50,6 +51,26 @@ namespace stub = aur_update_execution_preparation_test_stub;
 
 void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
+}
+
+// Existing cases are the Strict regression ledger. Ignore cases call the
+// policy-bearing production overload explicitly.
+AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
+    const AurUpdateExecutionPreflight& preflight,
+    bool needed,
+    const AppConfig& config) {
+    return ::prepare_aur_update_source_build_invocation(
+        preflight, SavedSourcePreferencePolicy::Strict, needed, config);
+}
+
+AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
+    const AurUpdateExecutionPreflight& preflight,
+    const AurUpdateBuildUnitSelection& build_unit_selection,
+    bool needed,
+    const AppConfig& config) {
+    return ::prepare_aur_update_source_build_invocation(
+        preflight, build_unit_selection,
+        SavedSourcePreferencePolicy::Strict, needed, config);
 }
 
 SourceBuildEnvironment environment(
@@ -1195,6 +1216,11 @@ void test_selected_repository_provider_is_attached_to_parent_build_unit() {
 
 void test_same_package_base_projection_retains_exact_child_attribution() {
     stub::reset();
+    const SourceBuildEnvironment expected_environment =
+        environment({{"CXXFLAGS", "-O3"}});
+    stub::enqueue_source_preference_result(
+        "split-suite",
+        loaded_preference("split-suite", expected_environment));
     const AppConfig config;
     const AurUpdateSourceBuildPreparation preparation =
         prepare_aur_update_source_build_invocation(
@@ -1291,6 +1317,11 @@ void test_same_package_base_projection_retains_exact_child_attribution() {
             work_item.required_targets[1].desired_reason ==
                 DesiredInstallReason::Explicit,
         "Same-PackageBase work item lost ordered child identity or reason");
+    expect(
+        same_environment(
+            work_item.request.custom_environment,
+            expected_environment),
+        "Same-PackageBase strict preference environment was not applied");
     const AurUpdatePreparedWorkItemAttribution& attribution =
         preparation.invocation->work_item_attributions().front();
     expect(
@@ -1665,6 +1696,235 @@ void test_unknown_package_root_attribution_is_global() {
         "Order-count attribution failure lost its primary diagnostic");
 }
 
+void expect_ignore_preference_boundary(
+    const AurUpdateSourceBuildPreparation& preparation,
+    std::size_t expected_work_item_count,
+    const std::string& context) {
+    expect_result_invariant(preparation, context);
+    expect(
+        preparation.is_prepared() && preparation.issues.empty() &&
+            preparation.warnings.empty(),
+        context + ": Ignore did not produce a clean prepared result");
+    expect(
+        preparation.invocation.has_value(),
+        context + ": Ignore lost the prepared invocation");
+
+    const PreparedProductionSourceBuildInvocation& invocation =
+        preparation.invocation->production_invocation_for_test();
+    expect(
+        invocation.work_items.size() == expected_work_item_count,
+        context + ": Ignore changed work-item count");
+    for(const ProductionSourceBuildWorkItem& work_item :
+        invocation.work_items) {
+        expect(
+            work_item.request.custom_environment.ordered_assignments.empty(),
+            context + ": Ignore retained a preference-derived environment");
+    }
+    expect(
+        stub::strict_preference_read_history().empty(),
+        context + ": Ignore reached the strict preference reader");
+    expect(
+        stub::source_preference_directory_snapshot_call_count() == 0,
+        context + ": Ignore enumerated the preference directory");
+    expect(
+        stub::supported_options_guard_history() ==
+                std::vector<bool>{false} &&
+            stub::database_call_count() == 1 &&
+            stub::reviewed_state_preflight_call_count() ==
+                expected_work_item_count,
+        context + ": Ignore skipped a generic preparation authority");
+    expect(
+        stub::pkgdest_guard_history().size() ==
+                expected_work_item_count + 1 &&
+            std::all_of(
+                stub::pkgdest_guard_history().begin(),
+                stub::pkgdest_guard_history().end(),
+                [](const SourceBuildEnvironment& environment) {
+                    return environment.ordered_assignments.empty();
+                }),
+        context + ": Ignore changed PKGDEST guard coverage or input");
+}
+
+void test_ignore_saved_source_preferences_without_io_or_environment() {
+    const AppConfig config;
+
+    stub::reset();
+    stub::enqueue_source_preference_result(
+        "ignore-loaded",
+        loaded_preference(
+            "ignore-loaded",
+            environment({{"CFLAGS", "-O3"}}),
+            {"loaded warning must remain unread"}));
+    const AurUpdateSourceBuildPreparation loaded =
+        ::prepare_aur_update_source_build_invocation(
+            single_root_preflight("ignore-loaded"),
+            SavedSourcePreferencePolicy::Ignore, false, config);
+    expect_ignore_preference_boundary(
+        loaded, 1, "Ignore singular loaded preference");
+    expect_work_item(
+        loaded.invocation->production_invocation_for_test()
+            .work_items.front(),
+        "ignore-loaded", SourceBuildEnvironment{},
+        DesiredInstallReason::Explicit, false,
+        "Ignore singular loaded identity");
+
+    struct FailureCase {
+        std::string name;
+        SourcePreferenceFailureKind kind;
+        std::optional<fs::file_type> observed_file_type;
+    };
+    const std::vector<FailureCase> failures = {
+        {"ignore-invalid", SourcePreferenceFailureKind::UnsupportedFileType,
+         fs::file_type::symlink},
+        {"ignore-read-failure", SourcePreferenceFailureKind::ReadFailed,
+         std::nullopt},
+    };
+    for(const FailureCase& failure : failures) {
+        stub::reset();
+        stub::enqueue_source_preference_result(
+            failure.name,
+            preference_failure(
+                failure.name, failure.kind,
+                failure.observed_file_type));
+        const AurUpdateSourceBuildPreparation preparation =
+            ::prepare_aur_update_source_build_invocation(
+                single_root_preflight(failure.name),
+                SavedSourcePreferencePolicy::Ignore, false, config);
+        expect_ignore_preference_boundary(
+            preparation, 1, failure.name);
+    }
+
+    stub::reset();
+    stub::enqueue_source_preference_result(
+        "ignore-split-child", SourcePreferenceAbsent{});
+    stub::enqueue_source_preference_result(
+        "ignore-split-base",
+        loaded_preference(
+            "ignore-split-base",
+            environment({{"MAKEFLAGS", "-j12"}})));
+    const AurUpdateSourceBuildPreparation split =
+        ::prepare_aur_update_source_build_invocation(
+            single_root_preflight(
+                "ignore-split-child",
+                DesiredInstallReason::Explicit,
+                "ignore-split-base"),
+            SavedSourcePreferencePolicy::Ignore, false, config);
+    expect_ignore_preference_boundary(
+        split, 1, "Ignore split-child fallback candidate");
+    const ProductionSourceBuildWorkItem& split_work_item =
+        split.invocation->production_invocation_for_test()
+            .work_items.front();
+    expect(
+        split_work_item.request.package_name == "ignore-split-child" &&
+            split_work_item.request.checkout_name ==
+                "ignore-split-base" &&
+            split_work_item.required_targets.size() == 1 &&
+            split_work_item.required_targets.front().package_name ==
+                "ignore-split-child" &&
+            split_work_item.required_targets.front().package_base ==
+                "ignore-split-base" &&
+            split_work_item.required_targets.front().desired_reason ==
+                DesiredInstallReason::Explicit,
+        "Ignore changed split child, PackageBase, or install reason");
+
+    stub::reset();
+    stub::enqueue_source_preference_result(
+        "split-suite",
+        loaded_preference(
+            "split-suite",
+            environment({{"CXXFLAGS", "-march=native"}})));
+    const AurUpdateSourceBuildPreparation multiple =
+        ::prepare_aur_update_source_build_invocation(
+            same_package_base_multiple_preflight(),
+            SavedSourcePreferencePolicy::Ignore, false, config);
+    expect_ignore_preference_boundary(
+        multiple, 1, "Ignore same-PackageBase multiple child");
+    const ProductionSourceBuildWorkItem& multiple_work_item =
+        multiple.invocation->production_invocation_for_test()
+            .work_items.front();
+    expect(
+        multiple_work_item.request.package_name.empty() &&
+            multiple_work_item.request.checkout_name == "split-suite" &&
+            multiple_work_item.required_targets.size() == 2 &&
+            multiple_work_item.required_targets[0].package_name ==
+                "split-runtime" &&
+            multiple_work_item.required_targets[0].desired_reason ==
+                DesiredInstallReason::Dependency &&
+            multiple_work_item.required_targets[1].package_name ==
+                "split-explicit" &&
+            multiple_work_item.required_targets[1].desired_reason ==
+                DesiredInstallReason::Explicit,
+        "Ignore changed multi-child identity or install reasons");
+}
+
+void test_ignore_preserves_preflight_and_generic_safety_authorities() {
+    struct BlockingCase {
+        std::string name;
+        AurUpdateExecutionReason reason;
+    };
+    const std::vector<BlockingCase> blocking_cases = {
+        {"ambiguous-provider", AurUpdateExecutionReason::AmbiguousProvider},
+        {"conflict-replaces",
+         AurUpdateExecutionReason::ConflictsOrReplacesUnresolved},
+        {"requires-check", AurUpdateExecutionReason::DevelRequiresCheck},
+        {"identity-mismatch", AurUpdateExecutionReason::PackageBaseMismatch},
+    };
+    const AppConfig config;
+    for(const BlockingCase& blocking_case : blocking_cases) {
+        stub::reset();
+        AurUpdateExecutionPreflight preflight =
+            single_root_preflight("ignore-safety-root");
+        preflight.targets.push_back(blocking_target(
+            1, blocking_case.name,
+            AurUpdateExecutionTargetStatus::Unsupported,
+            blocking_case.reason));
+        const AurUpdateSourceBuildPreparation preparation =
+            ::prepare_aur_update_source_build_invocation(
+                preflight, SavedSourcePreferencePolicy::Ignore, false,
+                config);
+        const AurUpdatePreparationIssue& issue = require_issue(
+            preparation, AurUpdatePreparationReason::BlockingPreflight,
+            blocking_case.name);
+        expect(
+            issue.preflight_issue.has_value() &&
+                issue.preflight_issue->reason == blocking_case.reason,
+            blocking_case.name +
+                ": Ignore changed the typed preflight blocker");
+        expect(
+            stub::strict_preference_read_history().empty() &&
+                stub::source_preference_directory_snapshot_call_count() ==
+                    0 &&
+                stub::database_call_count() == 0 &&
+                stub::reviewed_state_preflight_call_count() == 0,
+            blocking_case.name +
+                ": Ignore bypassed the preflight short-circuit boundary");
+    }
+
+    stub::reset();
+    stub::enqueue_source_preference_result(
+        "ignore-reviewed-safety",
+        preference_failure(
+            "ignore-reviewed-safety",
+            SourcePreferenceFailureKind::ReadFailed));
+    stub::fail_reviewed_state_preflight_on_call(
+        1, "scripted reviewed-source safety failure");
+    const AurUpdateSourceBuildPreparation reviewed =
+        ::prepare_aur_update_source_build_invocation(
+            single_root_preflight("ignore-reviewed-safety"),
+            SavedSourcePreferencePolicy::Ignore, false, config);
+    expect_blocked_reason(
+        reviewed,
+        AurUpdatePreparationReason::GenericPreparationInconsistent,
+        "Ignore reviewed-source safety");
+    expect(
+        stub::strict_preference_read_history().empty() &&
+            stub::source_preference_directory_snapshot_call_count() == 0 &&
+            stub::reviewed_state_preflight_call_count() == 1 &&
+            stub::database_call_count() == 0 &&
+            !stub::pkgdest_guard_history().empty(),
+        "Ignore skipped or reordered downstream reviewed/artifact safety");
+}
+
 void test_strict_absent_empty_valid_and_warning_results() {
     const AppConfig config;
 
@@ -1786,6 +2046,13 @@ void test_split_child_uses_package_to_base_preference_fallback() {
     const AppConfig config;
 
     stub::reset();
+    const SourceBuildEnvironment expected_environment =
+        environment({{"MAKEFLAGS", "-j6"}});
+    stub::enqueue_source_preference_result(
+        "split-cli", SourcePreferenceAbsent{});
+    stub::enqueue_source_preference_result(
+        "split-suite",
+        loaded_preference("split-suite", expected_environment));
     AurUpdateSourceBuildPreparation preparation =
         prepare_aur_update_source_build_invocation(
             single_root_preflight(
@@ -1836,6 +2103,11 @@ void test_split_child_uses_package_to_base_preference_fallback() {
             work_item.required_targets.front().desired_reason ==
                 DesiredInstallReason::Explicit,
         "Requested split child work item identity differs");
+    expect(
+        same_environment(
+            work_item.request.custom_environment,
+            expected_environment),
+        "Requested split child PackageBase preference environment was not applied");
 }
 
 void test_pkgdest_conflicts_stop_before_database() {
@@ -2075,6 +2347,12 @@ int main() {
         run_case(
             "unknown package root attribution is global",
             test_unknown_package_root_attribution_is_global);
+        run_case(
+            "Ignore saved preferences has zero IO and empty environments",
+            test_ignore_saved_source_preferences_without_io_or_environment);
+        run_case(
+            "Ignore preserves preflight and generic safety authorities",
+            test_ignore_preserves_preflight_and_generic_safety_authorities);
         run_case(
             "strict absent, empty, valid, and warning results",
             test_strict_absent_empty_valid_and_warning_results);

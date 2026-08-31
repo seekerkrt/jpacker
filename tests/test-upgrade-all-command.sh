@@ -378,9 +378,9 @@ run_status 0 upgrade-aur
 assert_exact_line "AUR update: no updates" "$stdout_file"
 assert_aggregate_absent
 
-setup_case generic-syu no-updates
+setup_case repository-syu no-updates
 export MOGUET_TEST_SUDO_EXIT_CODE=0
-run_status 0 -Syu
+run_status 0 -Syu --repo
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_aggregate_absent
 

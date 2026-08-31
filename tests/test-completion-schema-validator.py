@@ -159,6 +159,8 @@ def exported_schema(
     relations: str = "",
     options: tuple[str, ...] | None = None,
     delegated_relations: str = "",
+    delegated_tail_policy: str = "none",
+    open_operation_token: str = "delegated-example",
     canonical: str | None = None,
 ) -> str:
     lines = [*(options if options is not None else (option_record(),))]
@@ -174,6 +176,7 @@ def exported_schema(
                     operand_ordering,
                     operand_terms,
                     relations,
+                    delegated_tail_policy,
                 )
             )
         )
@@ -181,7 +184,7 @@ def exported_schema(
     if open_grammar:
         lines.extend(
             (
-                "OPERATION\tdelegated-example\topen",
+                f"OPERATION\t{open_operation_token}\topen",
                 "\t".join(
                     (
                         "DELEGATED",
@@ -255,6 +258,44 @@ def expect_current_authority_projection() -> None:
         )
     if sum(option.token == "--" for option in schema.options) != 1:
         fail("current C++ authority did not project exactly one -- OPTION record")
+    system_update = next(
+        (
+            operation
+            for operation in schema.operations
+            if operation.token == "-Syu"
+        ),
+        None,
+    )
+    if system_update is None or not system_update.open_grammar:
+        fail("current C++ authority lacks the -Syu delegated fallback")
+    if len(system_update.forms) != 2:
+        fail("current C++ authority lacks both intercepted -Syu forms")
+    automatic = next(
+        (form for form in system_update.forms if not form.selector_ids),
+        None,
+    )
+    repository_only = next(
+        (form for form in system_update.forms if form.selector_ids),
+        None,
+    )
+    if (
+        automatic is None
+        or repository_only is None
+        or automatic.delegated_tail_policy != "none"
+        or repository_only.delegated_tail_policy != "repository-only"
+    ):
+        fail("current C++ -Syu delegated-tail projection differs")
+    option_by_identity = {option.identity: option for option in schema.options}
+    repository_selectors = {
+        option_by_identity[identity].token
+        for identity in repository_only.selector_ids
+    }
+    automatic_tokens = {
+        option_by_identity[identity].token
+        for identity in automatic.option_ids
+    }
+    if repository_selectors != {"--repo"} or "--aur" in automatic_tokens:
+        fail("current C++ -Syu selector projection differs")
     print("  ok: accepted current C++ delegated authority projection")
 
 
@@ -324,6 +365,36 @@ def main() -> int:
         (
             "delegated end-of-options authority projection",
             delegated_schema(),
+        ),
+        (
+            "repository-only delegated tail projection",
+            exported_schema(
+                open_grammar=True,
+                open_operation_token="fixture",
+                syntax="fixture --repo",
+                relations=(
+                    "3:required:repeat-idempotent:required:"
+                    "moguet-control:none:none"
+                ),
+                options=delegated_options()
+                + (
+                    option_record(
+                        identity=3,
+                        token="--repo",
+                        occurrence="repeat-idempotent",
+                        semantic_scopes="source-selection",
+                        definition_role="syntax-only",
+                    ),
+                ),
+                delegated_relations=",".join(
+                    (
+                        DELEGATED_NEEDED_RELATION,
+                        DELEGATED_END_OF_OPTIONS_RELATION,
+                        DELEGATED_NO_CONFIRM_RELATION,
+                    )
+                ),
+                delegated_tail_policy="repository-only",
+            ),
         ),
         (
             "attached enum option semantics",
@@ -560,6 +631,56 @@ def main() -> int:
                 operand_terms="delegated-pacman-argument:0:*",
             ),
             "invalid delegated operand projection",
+        ),
+        (
+            "unknown delegated tail policy",
+            exported_schema(delegated_tail_policy="unknown-tail"),
+            "unsupported delegated tail policy projection",
+        ),
+        (
+            "repository-only tail without open fallback",
+            exported_schema(delegated_tail_policy="repository-only"),
+            "repository-only delegated tail has no open pacman fallback",
+        ),
+        (
+            "repository-only tail without required selector",
+            exported_schema(
+                open_grammar=True,
+                open_operation_token="fixture",
+                delegated_tail_policy="repository-only",
+            ),
+            "repository-only delegated tail lacks required --repo selector",
+        ),
+        (
+            "repository-only tail forwarding selector",
+            exported_schema(
+                open_grammar=True,
+                open_operation_token="fixture",
+                syntax="fixture --repo",
+                relations=(
+                    "3:required:repeat-idempotent:required:"
+                    "moguet-control+upstream-argument:pacman:preserve-all"
+                ),
+                options=delegated_options()
+                + (
+                    option_record(
+                        identity=3,
+                        token="--repo",
+                        occurrence="repeat-idempotent",
+                        semantic_scopes="source-selection",
+                        definition_role="syntax-only",
+                    ),
+                ),
+                delegated_relations=",".join(
+                    (
+                        DELEGATED_NEEDED_RELATION,
+                        DELEGATED_END_OF_OPTIONS_RELATION,
+                        DELEGATED_NO_CONFIRM_RELATION,
+                    )
+                ),
+                delegated_tail_policy="repository-only",
+            ),
+            "repository-only delegated tail forwards or misclassifies --repo",
         ),
         (
             "unknown option occurrence",

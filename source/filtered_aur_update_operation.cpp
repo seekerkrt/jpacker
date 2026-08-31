@@ -30,6 +30,22 @@ struct FilteredAurUpdateOperationMutableAccess {
         std::vector<FilteredAurUpdateOperationIssue>& issues;
     };
 
+    struct ObservationSnapshot {
+        AurUpdateQueryResult& query_result;
+        FilteredAurUpdateTargetAdapter& target_adapter;
+        UpgradeAllPlan& upgrade_all_plan;
+        AurUpdatePlan& filtered_update_plan;
+        std::vector<std::size_t>& filtered_to_original_query_plan_index;
+        std::vector<std::optional<std::size_t>>&
+            original_query_plan_to_filtered_index;
+        std::vector<FilteredAurUpdateTargetCorrelation>& target_correlations;
+        AurUpdateExecutionPreflight& preflight;
+        std::vector<FilteredAurUpdateBuildUnitCorrelation>&
+            build_unit_correlations;
+        std::optional<AurUpdateSourceBuildObservation>& source_build_observation;
+        std::vector<FilteredAurUpdateOperationIssue>& issues;
+    };
+
     static Snapshot snapshot(PreparedFilteredAurUpdateOperation& operation) {
         return Snapshot{
             operation.query_result,
@@ -44,6 +60,22 @@ struct FilteredAurUpdateOperationMutableAccess {
             operation.preparation,
             operation.issues};
     }
+
+    static ObservationSnapshot snapshot(
+        FilteredAurUpdateObservation& observation) {
+        return ObservationSnapshot{
+            observation.query_result,
+            observation.target_adapter,
+            observation.upgrade_all_plan,
+            observation.filtered_update_plan,
+            observation.filtered_to_original_query_plan_index,
+            observation.original_query_plan_to_filtered_index,
+            observation.target_correlations,
+            observation.preflight,
+            observation.build_unit_correlations,
+            observation.source_build_observation,
+            observation.issues};
+    }
 };
 
 // query payload、pure planner、preflight、preparation/runner/reducerを接続する。
@@ -56,6 +88,17 @@ constexpr std::string_view AUR_UPDATE_PLAN_TYPE_NAME = "AurUpdatePlan";
 constexpr std::string_view BUILD_PLAN_TYPE_NAME = "BuildPlan";
 constexpr std::string_view ROOT_ROLE_NAME = "Root";
 constexpr std::string_view UPGRADE_ALL_COMMAND_NAME = "upgrade-all";
+
+std::vector<UpgradeAllExplicitSourceIdentity>
+materialize_explicit_source_satisfaction(
+    FilteredAurUpdateExplicitSourceSatisfaction satisfaction) {
+    if(std::holds_alternative<NoExplicitSourceSatisfaction>(satisfaction)) {
+        return {};
+    }
+    return std::move(
+        std::get<UpgradeAllExplicitSourceSatisfaction>(satisfaction)
+            .identities);
+}
 
 bool same_remote_package(
     const std::optional<AurUpdateRemotePackage>& lhs,
@@ -630,8 +673,8 @@ BuildUnitAdapterResult adapt_build_plan(
     return result;
 }
 
-void build_filtered_update_plan(
-    PreparedFilteredAurUpdateOperation& operation) {
+template <typename Operation>
+void build_filtered_update_plan(Operation& operation) {
     auto state = FilteredAurUpdateOperationMutableAccess::snapshot(operation);
     const AurUpdatePlan& original_plan = state.query_result.plan;
     state.original_query_plan_to_filtered_index.assign(
@@ -758,8 +801,9 @@ void build_filtered_update_plan(
     }
 }
 
+template <typename Operation>
 bool correlate_root_invocation_identity(
-    PreparedFilteredAurUpdateOperation& operation,
+    Operation& operation,
     const FilteredAurUpdateTargetCorrelation& correlation,
     const RootTargetIdentity& root,
     std::size_t root_index) {
@@ -802,8 +846,8 @@ bool correlate_root_invocation_identity(
     return true;
 }
 
-void correlate_preflight(
-    PreparedFilteredAurUpdateOperation& operation) {
+template <typename Operation>
+void correlate_preflight(Operation& operation) {
     auto state = FilteredAurUpdateOperationMutableAccess::snapshot(operation);
     if(state.preflight.targets.size() !=
        state.filtered_update_plan.entries.size()) {
@@ -1022,8 +1066,8 @@ void correlate_preflight(
     }
 }
 
-bool has_operation_planning_issue(
-    const PreparedFilteredAurUpdateOperation& operation) noexcept {
+template <typename Operation>
+bool has_operation_planning_issue(const Operation& operation) noexcept {
     return !operation.operation_issues().empty() ||
            has_upgrade_all_planning_issues(
                operation.target_and_build_unit_plan());
@@ -1111,6 +1155,23 @@ AurUpdateSourceBuildPreparation make_planning_blocker(
     issue.affected_roots = preparation.affected_roots;
     preparation.issues.push_back(std::move(issue));
     return preparation;
+}
+
+AurUpdateSourceBuildObservation make_planning_observation_blocker(
+    const AurUpdateExecutionPreflight& preflight,
+    const AurUpdateBuildUnitSelection& selection) {
+    AurUpdateSourceBuildPreparation preparation =
+        make_planning_blocker(preflight, selection);
+    return AurUpdateSourceBuildObservation{
+        std::move(preparation.issues),
+        std::move(preparation.warnings),
+        std::move(preparation.affected_update_targets),
+        std::move(preparation.affected_roots),
+        std::move(preparation.build_unit_selection),
+        std::move(preparation.projected_build_units),
+        std::move(preparation.externally_satisfied_build_units),
+        {},
+        std::nullopt};
 }
 
 AurUpdateBuildUnitSelection make_build_unit_selection(
@@ -1575,7 +1636,9 @@ bool PreparedFilteredAurUpdateOperation::is_blocked() const noexcept {
 
 PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
     AurUpdateQueryResult query_result,
-    std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
+    FilteredAurUpdateExplicitSourceSatisfaction
+        explicit_source_satisfaction,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
     const AppConfig& config,
     std::optional<ValidatedCacheRoot> cache_root) {
     PreparedFilteredAurUpdateOperation operation;
@@ -1585,6 +1648,9 @@ PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
     operation.query_result = std::move(query_result);
     operation.target_adapter = adapt_aur_update_plan_for_upgrade_all(
         operation.query_result.plan, operation.issues);
+    std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources =
+        materialize_explicit_source_satisfaction(
+            std::move(explicit_source_satisfaction));
     operation.upgrade_all_plan = make_upgrade_all_target_plan(
         explicit_sources, operation.target_adapter.planner_targets);
 
@@ -1616,7 +1682,7 @@ PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
         operation.issues);
     if(cache_root.has_value()) {
         // Preflight/planning can be non-trivial. Revoke a moved cache root
-        // before strict preference and pacman database preparation begins.
+        // before saved-preference policy and pacman database preparation begins.
         cache_root->require_unchanged_identity();
     }
     if(has_operation_planning_issue(operation) &&
@@ -1625,20 +1691,98 @@ PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
         operation.preparation.emplace(make_planning_blocker(
             operation.preflight, selection));
     } else if(has_operation_planning_issue(operation)) {
-        // preflight blockerは既存typed issueを正本にし、strict reader/DBへ進まない。
+        // preflight blockerは既存typed issueを正本にし、preference authority/DBへ進まない。
         operation.preparation.emplace(
             prepare_aur_update_source_build_invocation(
-                operation.preflight, false, config));
+                operation.preflight, saved_source_preference_policy,
+                false, config));
     } else {
         operation.preparation.emplace(
             prepare_aur_update_source_build_invocation(
-                operation.preflight, selection, false, config));
+                operation.preflight, selection,
+                saved_source_preference_policy, false, config));
     }
     if(cache_root.has_value()) {
         seed_aur_update_source_build_cache(
             operation.preparation.value(), cache_root.value());
     }
     return operation;
+}
+
+bool FilteredAurUpdateObservation::is_ready() const noexcept {
+    return issues.empty() && source_build_observation.has_value() &&
+           source_build_observation->is_ready();
+}
+
+bool FilteredAurUpdateObservation::is_noop() const noexcept {
+    return issues.empty() && source_build_observation.has_value() &&
+           source_build_observation->is_noop();
+}
+
+bool FilteredAurUpdateObservation::is_blocked() const noexcept {
+    return !is_ready() && !is_noop();
+}
+
+FilteredAurUpdateObservation observe_filtered_aur_update_operation(
+    AurUpdateQueryResult query_result,
+    FilteredAurUpdateExplicitSourceSatisfaction
+        explicit_source_satisfaction,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
+    const AppConfig& config) {
+    FilteredAurUpdateObservation observation;
+    observation.query_result = std::move(query_result);
+    observation.target_adapter = adapt_aur_update_plan_for_upgrade_all(
+        observation.query_result.plan, observation.issues);
+    std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources =
+        materialize_explicit_source_satisfaction(
+            std::move(explicit_source_satisfaction));
+    observation.upgrade_all_plan = make_upgrade_all_target_plan(
+        explicit_sources, observation.target_adapter.planner_targets);
+
+    build_filtered_update_plan(observation);
+    observation.preflight = resolve_aur_update_execution_preflight(
+        observation.filtered_update_plan,
+        provider_selection_callback(config));
+    correlate_preflight(observation);
+
+    BuildUnitAdapterResult build_adapter;
+    if(observation.preflight.build_plan.has_value()) {
+        build_adapter = adapt_build_plan(
+            *observation.preflight.build_plan,
+            observation.target_correlations,
+            observation.issues);
+    }
+    observation.build_unit_correlations =
+        std::move(build_adapter.correlations);
+    observation.upgrade_all_plan = complete_upgrade_all_build_unit_plan(
+        observation.upgrade_all_plan, build_adapter.build_units);
+    map_selected_execution_indices(
+        observation.upgrade_all_plan,
+        observation.build_unit_correlations,
+        observation.issues);
+
+    AurUpdateBuildUnitSelection selection = make_build_unit_selection(
+        observation.upgrade_all_plan,
+        observation.build_unit_correlations,
+        observation.issues);
+    if(has_operation_planning_issue(observation) &&
+       has_executable_target(observation.preflight) &&
+       !has_blocking_targets(observation.preflight)) {
+        observation.source_build_observation.emplace(
+            make_planning_observation_blocker(
+                observation.preflight, selection));
+    } else if(has_operation_planning_issue(observation)) {
+        observation.source_build_observation.emplace(
+            observe_aur_update_source_build_preparation(
+                observation.preflight,
+                saved_source_preference_policy, false, config));
+    } else {
+        observation.source_build_observation.emplace(
+            observe_aur_update_source_build_preparation(
+                observation.preflight, selection,
+                saved_source_preference_policy, false, config));
+    }
+    return observation;
 }
 
 void seed_filtered_aur_update_operation_cache(
