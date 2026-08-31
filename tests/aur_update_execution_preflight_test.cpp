@@ -1,4 +1,5 @@
 #include "aur_update_execution_preflight.hpp"
+#include "aur_update_required_devel_relation_projection.hpp"
 #include "dependency_provider.hpp"
 #include "stubs/aur-update-execution-preflight/preflight_stub.hpp"
 
@@ -64,6 +65,39 @@ AurUpdatePlanEntry remote_entry(
                 ? AurVersionRelation::Unavailable
                 : AurVersionRelation::NewerThanInstalled},
         classification};
+}
+
+AurUpdatePlanEntry classified_update_entry(
+    const std::string& package_name,
+    const std::string& package_base = {}) {
+    const std::string resolved_package_base =
+        package_base.empty() ? package_name : package_base;
+    return classify_aur_update(AurUpdatePlanInput{
+        package_name,
+        "1.0-1",
+        InstalledPackageReason::Explicit,
+        AurUpdateRemotePackage{
+            package_name,
+            resolved_package_base,
+            "2.0-1",
+            AurVersionRelation::NewerThanInstalled}});
+}
+
+AurUpdatePlanEntry requires_check_entry(
+    const std::string& package_name,
+    const std::string& package_base = {},
+    const std::string& remote_version = "1.0-1") {
+    const std::string resolved_package_base =
+        package_base.empty() ? package_name : package_base;
+    return classify_aur_update(AurUpdatePlanInput{
+        package_name,
+        "1.0-1",
+        InstalledPackageReason::Explicit,
+        AurUpdateRemotePackage{
+            package_name,
+            resolved_package_base,
+            remote_version,
+            AurVersionRelation::SameAsInstalled}});
 }
 
 AurUpdatePlanEntry entry_without_remote(
@@ -271,6 +305,255 @@ BuildPlanDependencyEdge provided_dependency_edge(
         std::nullopt,
         std::nullopt,
         std::move(provider)};
+}
+
+DependencyRequirement exact_requirement(
+    const std::string& package_name) {
+    return ConsumerDependencyRequirement(
+        package_name, package_name, std::nullopt);
+}
+
+void add_required_package_target(
+    BuildPlan& plan,
+    const std::string& package_name,
+    const std::string& package_base,
+    const std::vector<RootTargetIdentity>& roots,
+    PackageRole role = PackageRole::RuntimeDependency) {
+    add_dependency_target(
+        plan, package_name, package_base, roots, role);
+
+    auto same_base = [&package_base](const BuildPlanEntry& entry) {
+        return entry.package_base == package_base;
+    };
+    auto order = std::find_if(
+        plan.order.begin(), plan.order.end(), same_base);
+    if(order == plan.order.end()) {
+        plan.order.insert(
+            plan.order.begin(), BuildPlanEntry{package_base, {package_name}});
+        return;
+    }
+    if(std::find(
+           order->package_names.begin(), order->package_names.end(),
+           package_name) == order->package_names.end()) {
+        order->package_names.push_back(package_name);
+    }
+}
+
+BuildPlanDependencyEdge typed_aur_exact_edge(
+    const std::string& parent_package_name,
+    const std::string& parent_package_base,
+    const std::string& dependency_package_name,
+    const std::string& dependency_package_base,
+    PackageRole role = PackageRole::RuntimeDependency,
+    const std::string& candidate_version = "1.0-1",
+    ConstraintEvaluation evaluation =
+        ConstraintEvaluation::unconstrained()) {
+    return BuildPlanDependencyEdge{
+        parent_package_name,
+        parent_package_base,
+        dependency_package_name,
+        role,
+        DependencyKind::Aur,
+        dependency_package_name,
+        dependency_package_base,
+        std::nullopt,
+        ProviderResolutionKind::Unique,
+        exact_requirement(dependency_package_name),
+        ResolvedDependencyCandidate{AurResolvedDependencyCandidate{
+            dependency_package_name,
+            dependency_package_base,
+            ObservedVersion::available(
+                ObservedVersionSource::AurExactPackage,
+                candidate_version)}},
+        std::move(evaluation)};
+}
+
+BuildPlanDependencyEdge typed_repository_exact_edge(
+    const std::string& parent_package_name,
+    const std::string& parent_package_base,
+    const std::string& dependency_package_name,
+    const std::string& dependency_package_base,
+    const std::string& candidate_version = "1.0-1") {
+    return BuildPlanDependencyEdge{
+        parent_package_name,
+        parent_package_base,
+        dependency_package_name,
+        PackageRole::RuntimeDependency,
+        DependencyKind::Repo,
+        dependency_package_name,
+        std::nullopt,
+        std::nullopt,
+        ProviderResolutionKind::Unique,
+        exact_requirement(dependency_package_name),
+        ResolvedDependencyCandidate{RepositoryExactPackage{
+            ConfiguredRepositoryIdentity{"extra", 0},
+            dependency_package_name,
+            dependency_package_base,
+            ObservedVersion::available(
+                ObservedVersionSource::RepositoryExactPackage,
+                candidate_version),
+            {},
+            std::optional<std::string>{"x86_64"}}},
+        ConstraintEvaluation::unconstrained()};
+}
+
+BuildPlanDependencyEdge typed_installed_exact_edge(
+    const std::string& parent_package_name,
+    const std::string& parent_package_base,
+    const std::string& dependency_package_name,
+    const std::string& installed_version = "1.0-1") {
+    return BuildPlanDependencyEdge{
+        parent_package_name,
+        parent_package_base,
+        dependency_package_name,
+        PackageRole::RuntimeDependency,
+        DependencyKind::Installed,
+        dependency_package_name,
+        std::nullopt,
+        std::nullopt,
+        ProviderResolutionKind::Unique,
+        exact_requirement(dependency_package_name),
+        ResolvedDependencyCandidate{InstalledExactPackage{
+            dependency_package_name,
+            ObservedVersion::available(
+                ObservedVersionSource::InstalledExactPackage,
+                installed_version)}},
+        ConstraintEvaluation::unconstrained()};
+}
+
+ProvidedDependency typed_aur_provider(
+    const std::string& package_name,
+    const std::string& package_base,
+    const std::string& dependency_name,
+    const std::string& package_version = "1.0-1") {
+    const ProviderCapability capability(
+        dependency_name + "=" + package_version,
+        dependency_name,
+        package_version);
+    return ProvidedDependency::from_aur_constraint_metadata(
+        package_name, package_base,
+        ProviderConstraintMetadata{
+            capability,
+            ObservedVersion::available(
+                ObservedVersionSource::AurExactPackage,
+                package_version),
+            ObservedVersion::available(
+                ObservedVersionSource::AurProviderCapability,
+                package_version)});
+}
+
+ProvidedDependency typed_repository_provider(
+    const std::string& package_name,
+    const std::string& package_base,
+    const std::string& dependency_name,
+    const std::string& package_version = "1.0-1") {
+    const ProviderCapability capability(
+        dependency_name + "=" + package_version,
+        dependency_name,
+        package_version);
+    return ProvidedDependency::from_repository_constraint_metadata(
+        "extra", 0, package_name, package_base, "x86_64",
+        ProviderConstraintMetadata{
+            capability,
+            ObservedVersion::available(
+                ObservedVersionSource::RepositoryExactPackage,
+                package_version),
+            ObservedVersion::available(
+                ObservedVersionSource::RepositoryProviderCapability,
+                package_version)});
+}
+
+BuildPlanDependencyEdge typed_provider_edge(
+    const std::string& parent_package_name,
+    const std::string& parent_package_base,
+    const std::string& dependency_name,
+    const ProvidedDependency& provider,
+    ProviderResolutionKind resolution = ProviderResolutionKind::Unique) {
+    expect(
+        provider.constraint_metadata.has_value(),
+        "Typed provider fixture has no constraint metadata");
+    return BuildPlanDependencyEdge{
+        parent_package_name,
+        parent_package_base,
+        dependency_name,
+        PackageRole::RuntimeDependency,
+        DependencyKind::Provided,
+        std::nullopt,
+        std::nullopt,
+        provider,
+        resolution,
+        exact_requirement(dependency_name),
+        ResolvedDependencyCandidate{ProviderResolvedDependencyCandidate{
+            provider,
+            provider.constraint_metadata->provided_version}},
+        ConstraintEvaluation::unconstrained()};
+}
+
+const AurUpdateExecutionIssue& require_required_devel_issue(
+    const AurUpdateExecutionTarget& target,
+    AurUpdateRequiredDevelTargetRelation relation,
+    std::optional<std::size_t> dependency_edge_index,
+    std::optional<std::size_t> build_plan_order_index) {
+    auto found = std::find_if(
+        target.issues.begin(), target.issues.end(),
+        [relation, dependency_edge_index,
+         build_plan_order_index](const AurUpdateExecutionIssue& issue) {
+            return issue.reason ==
+                       AurUpdateExecutionReason::
+                           RequiredDevelTargetRequiresCheck &&
+                   issue.required_devel_target_blocker.has_value() &&
+                   issue.required_devel_target_blocker->relation == relation &&
+                   issue.required_devel_target_blocker
+                           ->dependency_edge_index ==
+                       dependency_edge_index &&
+                   issue.required_devel_target_blocker
+                           ->build_plan_order_index ==
+                       build_plan_order_index;
+        });
+    if(found == target.issues.end()) {
+        throw std::runtime_error(
+            "Required-devel blocker relation is missing");
+    }
+    return *found;
+}
+
+void expect_required_devel_blocker(
+    const AurUpdateExecutionTarget& target,
+    AurUpdateRequiredDevelTargetRelation relation,
+    std::size_t requires_check_update_plan_index,
+    std::optional<std::size_t> dependency_edge_index,
+    std::optional<std::size_t> build_plan_order_index,
+    const std::string& package_name,
+    const std::string& package_base,
+    const std::vector<PackageRole>& roles,
+    const std::vector<RootTargetIdentity>& affected_roots,
+    const std::string& context) {
+    const AurUpdateExecutionIssue& issue =
+        require_required_devel_issue(
+            target, relation, dependency_edge_index,
+            build_plan_order_index);
+    const AurUpdateRequiredDevelTargetBlocker& blocker =
+        *issue.required_devel_target_blocker;
+    expect(
+        issue.devel_requires_check_reason ==
+                std::optional<DevelRequiresCheckReason>{
+                    DevelRequiresCheckReason::SuffixCandidateOnly} &&
+            issue.package_name ==
+                std::optional<std::string>{package_name} &&
+            issue.package_base ==
+                std::optional<std::string>{package_base} &&
+            blocker.requires_check_update_plan_index ==
+                requires_check_update_plan_index &&
+            blocker.dependency_edge_index == dependency_edge_index &&
+            blocker.build_plan_order_index == build_plan_order_index &&
+            blocker.package_name == package_name &&
+            blocker.package_base ==
+                std::optional<std::string>{package_base} &&
+            blocker.roles == roles &&
+            blocker.devel_requires_check_reason ==
+                DevelRequiresCheckReason::SuffixCandidateOnly &&
+            blocker.affected_roots == affected_roots,
+        context + ": required-devel blocker payload differs");
 }
 
 void return_build_plan(BuildPlan plan) {
@@ -501,6 +784,1215 @@ void test_devel_requires_check_blocks_without_candidate_promotion() {
             has_blocking_targets(preflight) &&
             !can_execute(preflight),
         "Mixed RequiresCheck invocation bypassed all-target preflight");
+}
+
+void test_skip_independent_target_keeps_full_identity_and_update_precedence() {
+    reset_preflight_stub();
+    const AurUpdatePlanEntry update =
+        classified_update_entry("normal-update-git");
+    const AurUpdatePlanEntry requires_check = requires_check_entry(
+        "independent-check-git", "independent-check-base");
+    const AurUpdatePlanEntry current = remote_entry(
+        "current-package", InstalledPackageReason::Explicit,
+        AurUpdateClassification::UpToDate);
+    const AurUpdatePlan update_plan{{update, requires_check, current}};
+    return_build_plan(build_plan_for({
+        {"normal-update-git", "normal-update-git", "normal-update-git"},
+    }));
+
+    const AurUpdateExecutionPreflight preflight =
+        ::resolve_aur_update_execution_preflight(
+            update_plan,
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+
+    expect_single_resolver_call(
+        {"normal-update-git"},
+        "SkipIndependentTarget planner subset");
+    expect(
+        preflight.targets.size() == 3 &&
+            preflight.devel_requires_check_policy ==
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::SkipIndependentTarget},
+        "SkipIndependentTarget lost target order or policy");
+    expect_status(
+        preflight.targets[0], AurUpdateExecutionTargetStatus::Executable,
+        "UpdateAvailable devel target precedence");
+    expect(
+        preflight.targets[0].update.devel_assessment.state() ==
+                DevelUpdateAssessmentState::RequiresCheck &&
+            project_aur_update_effective_state(
+                preflight.targets[0].update) ==
+                AurUpdateEffectiveState::UpdateAvailable,
+        "UpdateAvailable devel assessment was reclassified as a policy skip");
+
+    const AurUpdateExecutionTarget& independent = preflight.targets[1];
+    expect_status(
+        independent, AurUpdateExecutionTargetStatus::Skipped,
+        "Independent RequiresCheck target");
+    expect(
+        independent.update_plan_index == 1 &&
+            independent.update == requires_check &&
+            !independent.build_plan_root_index.has_value() &&
+            !independent.desired_install_reason.has_value() &&
+            independent.skip_kind ==
+                std::optional<AurUpdateExecutionSkipKind>{
+                    AurUpdateExecutionSkipKind::
+                        IndependentDevelRequiresCheck} &&
+            independent.issues.size() == 1 &&
+            independent.issues.front().reason ==
+                AurUpdateExecutionReason::DevelRequiresCheck &&
+            independent.issues.front().devel_requires_check_reason ==
+                std::optional<DevelRequiresCheckReason>{
+                    DevelRequiresCheckReason::SuffixCandidateOnly},
+        "Independent RequiresCheck target lost its exact skip identity");
+    expect_status(
+        preflight.targets[2], AurUpdateExecutionTargetStatus::Skipped,
+        "Normal UpToDate target");
+    expect(
+        preflight.targets[2].skip_kind ==
+                std::optional<AurUpdateExecutionSkipKind>{
+                    AurUpdateExecutionSkipKind::UpToDate} &&
+            has_valid_aur_update_execution_policy_snapshot(preflight) &&
+            has_executable_targets(preflight) &&
+            !has_blocking_targets(preflight) && can_execute(preflight),
+        "Independent RequiresCheck became a blocker or malformed skip");
+
+    reset_preflight_stub();
+    const AurUpdateExecutionPreflight skip_only =
+        ::resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{requires_check}},
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect(
+        resolver_call_count() == 0 && skip_only.targets.size() == 1 &&
+            skip_only.targets.front().status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            skip_only.targets.front().skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    IndependentDevelRequiresCheck &&
+            project_aur_update_effective_state(
+                skip_only.targets.front().update) ==
+                AurUpdateEffectiveState::RequiresCheck &&
+            !has_executable_targets(skip_only) &&
+            !has_blocking_targets(skip_only) && !can_execute(skip_only),
+        "RequiresCheck-only capability was resolved, blocked, or flattened");
+}
+
+void test_required_devel_exact_dependency_is_root_local() {
+    reset_preflight_stub();
+    const RootTargetIdentity affected_root{0, "affected-root"};
+    const RootTargetIdentity clean_root{1, "clean-root"};
+    BuildPlan plan = build_plan_for({
+        {"affected-root", "affected-root", "affected-root"},
+        {"clean-root", "clean-root", "clean-root"},
+    });
+    add_required_package_target(
+        plan, "required-devel-git", "required-devel-base",
+        {affected_root});
+    plan.dependency_edges.push_back(typed_aur_exact_edge(
+        "affected-root", "affected-root", "required-devel-git",
+        "required-devel-base"));
+    return_build_plan(std::move(plan));
+
+    const AurUpdateExecutionPreflight preflight =
+        ::resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{
+                remote_entry(
+                    "affected-root", InstalledPackageReason::Explicit),
+                requires_check_entry(
+                    "required-devel-git", "required-devel-base"),
+                remote_entry(
+                    "clean-root", InstalledPackageReason::Explicit),
+            }},
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+
+    expect_single_resolver_call(
+        {"affected-root", "clean-root"},
+        "Required-devel exact dependency subset");
+    expect_status(
+        preflight.targets[0], AurUpdateExecutionTargetStatus::Incomplete,
+        "Required-devel affected root");
+    expect_status(
+        preflight.targets[1], AurUpdateExecutionTargetStatus::Skipped,
+        "Required-devel skipped target");
+    expect_status(
+        preflight.targets[2], AurUpdateExecutionTargetStatus::Executable,
+        "Required-devel unrelated root");
+    expect(
+        preflight.targets[1].skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    RequiredDevelRequiresCheck &&
+            !has_issue(
+                preflight.targets[2],
+                AurUpdateExecutionReason::
+                    RequiredDevelTargetRequiresCheck),
+        "Required-devel blocker leaked to the skipped or unrelated target");
+    expect_required_devel_blocker(
+        preflight.targets[0],
+        AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+        1, 0, std::nullopt, "required-devel-git", "required-devel-base",
+        {PackageRole::RuntimeDependency}, {affected_root},
+        "AUR exact dependency");
+    expect(
+        !can_execute(preflight) && has_executable_targets(preflight) &&
+            has_blocking_targets(preflight) &&
+            has_complete_aur_update_required_devel_relation_snapshot(
+                preflight),
+        "Root-local blocker bypassed the current global execution barrier");
+}
+
+void test_required_devel_relation_snapshot_complete_equality() {
+    reset_preflight_stub();
+    const RootTargetIdentity affected_root{0, "complete-root"};
+    const RootTargetIdentity unrelated_root{1, "complete-unrelated"};
+    BuildPlan plan = build_plan_for({
+        {"complete-root", "complete-root", "complete-root"},
+        {"complete-unrelated", "complete-unrelated",
+         "complete-unrelated"},
+    });
+    add_required_package_target(
+        plan, "complete-required-git", "complete-required-base",
+        {affected_root});
+    plan.dependency_edges.push_back(typed_aur_exact_edge(
+        "complete-root", "complete-root", "complete-required-git",
+        "complete-required-base"));
+    return_build_plan(std::move(plan));
+
+    const AurUpdateExecutionPreflight baseline =
+        ::resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{
+                remote_entry(
+                    "complete-root", InstalledPackageReason::Explicit),
+                requires_check_entry(
+                    "complete-required-git", "complete-required-base"),
+                remote_entry(
+                    "complete-unrelated",
+                    InstalledPackageReason::Explicit),
+            }},
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect(
+        has_complete_aur_update_required_devel_relation_snapshot(
+            baseline),
+        "Coherent required-devel relation set was rejected");
+
+    const auto required_issue = [](
+                                    AurUpdateExecutionTarget& target,
+                                    AurUpdateRequiredDevelTargetRelation
+                                        relation)
+        -> AurUpdateExecutionIssue& {
+        const auto found = std::find_if(
+            target.issues.begin(), target.issues.end(),
+            [relation](const AurUpdateExecutionIssue& issue) {
+                return issue.required_devel_target_blocker.has_value() &&
+                       issue.required_devel_target_blocker->relation ==
+                           relation;
+            });
+        if(found == target.issues.end()) {
+            throw std::runtime_error(
+                "Required-devel completeness fixture lost a blocker");
+        }
+        return *found;
+    };
+    const auto expect_incomplete = [](
+                                       const AurUpdateExecutionPreflight&
+                                           preflight,
+                                       const std::string& context) {
+        expect(
+            !has_complete_aur_update_required_devel_relation_snapshot(
+                preflight),
+            context + ": malformed relation set was accepted");
+    };
+
+    AurUpdateExecutionPreflight missing = baseline;
+    std::erase_if(
+        missing.targets[0].issues,
+        [](const AurUpdateExecutionIssue& issue) {
+            return issue.reason == AurUpdateExecutionReason::
+                                       RequiredDevelTargetRequiresCheck;
+        });
+    missing.targets[0].status =
+        AurUpdateExecutionTargetStatus::Executable;
+    missing.targets[1].skip_kind =
+        AurUpdateExecutionSkipKind::IndependentDevelRequiresCheck;
+    expect_incomplete(missing, "Missing blockers");
+
+    AurUpdateExecutionPreflight extra = baseline;
+    AurUpdateExecutionIssue fabricated = required_issue(
+        extra.targets[0],
+        AurUpdateRequiredDevelTargetRelation::AurExactDependency);
+    fabricated.required_devel_target_blocker->relation =
+        AurUpdateRequiredDevelTargetRelation::RepositoryExactDependency;
+    extra.targets[0].issues.push_back(std::move(fabricated));
+    expect_incomplete(extra, "Extra blocker");
+
+    AurUpdateExecutionPreflight wrong_relation = baseline;
+    required_issue(
+        wrong_relation.targets[0],
+        AurUpdateRequiredDevelTargetRelation::AurExactDependency)
+        .required_devel_target_blocker->relation =
+        AurUpdateRequiredDevelTargetRelation::RepositoryExactDependency;
+    expect_incomplete(wrong_relation, "Wrong relation");
+
+    AurUpdateExecutionPreflight wrong_roots = baseline;
+    required_issue(
+        wrong_roots.targets[0],
+        AurUpdateRequiredDevelTargetRelation::AurExactDependency)
+        .required_devel_target_blocker->affected_roots =
+        {affected_root, unrelated_root};
+    expect_incomplete(wrong_roots, "Wrong affected roots");
+
+    AurUpdateExecutionPreflight duplicate = baseline;
+    duplicate.targets[0].issues.push_back(required_issue(
+        duplicate.targets[0],
+        AurUpdateRequiredDevelTargetRelation::AurExactDependency));
+    expect_incomplete(duplicate, "Duplicate blocker");
+
+    AurUpdateExecutionPreflight independent_contradiction = baseline;
+    independent_contradiction.targets[1].skip_kind =
+        AurUpdateExecutionSkipKind::IndependentDevelRequiresCheck;
+    expect_incomplete(
+        independent_contradiction,
+        "Required relation with Independent kind");
+
+    reset_preflight_stub();
+    const AurUpdateExecutionPreflight independent =
+        ::resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{requires_check_entry(
+                "complete-independent-git",
+                "complete-independent-base")}},
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect(
+        has_complete_aur_update_required_devel_relation_snapshot(
+            independent),
+        "Independent baseline relation set was rejected");
+    AurUpdateExecutionPreflight required_contradiction = independent;
+    required_contradiction.targets[0].skip_kind =
+        AurUpdateExecutionSkipKind::RequiredDevelRequiresCheck;
+    expect_incomplete(
+        required_contradiction,
+        "Independent target with Required kind");
+
+    reset_preflight_stub();
+    return_build_plan(build_plan_for({
+        {"no-reentry-root", "no-reentry-root", "no-reentry-root"},
+    }));
+    AurUpdateExecutionPreflight fabricated_without_reentry =
+        ::resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{
+                remote_entry(
+                    "no-reentry-root",
+                    InstalledPackageReason::Explicit),
+                requires_check_entry(
+                    "no-reentry-git", "no-reentry-base"),
+            }},
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect(
+        has_complete_aur_update_required_devel_relation_snapshot(
+            fabricated_without_reentry),
+        "No-reentry baseline relation set was rejected");
+    AurUpdateExecutionPreflight combined_installed_drift =
+        fabricated_without_reentry;
+    combined_installed_drift.build_plan->dependency_edges.push_back(
+        BuildPlanDependencyEdge{
+            "no-reentry-root",
+            "no-reentry-root",
+            "no-reentry-git",
+            PackageRole::RuntimeDependency,
+            DependencyKind::Installed,
+            "different-installed-child",
+            std::nullopt,
+            std::nullopt,
+            ProviderResolutionKind::Unique,
+            DependencyRequirement{ConsumerDependencyRequirement(
+                "no-reentry-git", "no-reentry-git", std::nullopt)},
+            ResolvedDependencyCandidate{InstalledExactPackage{
+                "different-installed-child",
+                ObservedVersion::available(
+                    ObservedVersionSource::InstalledExactPackage,
+                    "1.0-1")}},
+            ConstraintEvaluation::unconstrained()});
+    expect_incomplete(
+        combined_installed_drift,
+        "Combined InstalledExact discovery drift");
+
+    fabricated_without_reentry.targets[0].status =
+        AurUpdateExecutionTargetStatus::Incomplete;
+    AurUpdateRequiredDevelTargetBlocker fabricated_blocker{
+        AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+        1,
+        "no-reentry-git",
+        DevelRequiresCheckReason::SuffixCandidateOnly};
+    fabricated_blocker.dependency_edge_index = 0;
+    fabricated_blocker.package_base = "no-reentry-base";
+    fabricated_blocker.roles = {PackageRole::RuntimeDependency};
+    fabricated_blocker.affected_roots = {{0, "no-reentry-root"}};
+    AurUpdateExecutionIssue fabricated_issue{
+        AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck,
+        "no-reentry-git",
+        "no-reentry-base",
+        "no-reentry-git",
+        "Fabricated required-devel blocker without BuildPlan re-entry."};
+    fabricated_issue.devel_requires_check_reason =
+        DevelRequiresCheckReason::SuffixCandidateOnly;
+    fabricated_issue.required_devel_target_blocker =
+        std::move(fabricated_blocker);
+    fabricated_without_reentry.targets[0].issues.push_back(
+        std::move(fabricated_issue));
+    fabricated_without_reentry.targets[1].skip_kind =
+        AurUpdateExecutionSkipKind::RequiredDevelRequiresCheck;
+    expect_incomplete(
+        fabricated_without_reentry,
+        "Fabricated blocker without BuildPlan re-entry");
+}
+
+void test_required_devel_provider_and_repository_reentry_are_source_aware() {
+    const AurUpdatePlan update_plan{{
+        remote_entry("provider-root", InstalledPackageReason::Explicit),
+        requires_check_entry(
+            "same-name-devel-git", "same-name-devel-base"),
+    }};
+    const RootTargetIdentity root{0, "provider-root"};
+
+    reset_preflight_stub();
+    BuildPlan aur_provider_plan = build_plan_for({
+        {"provider-root", "provider-root", "provider-root"},
+    });
+    add_required_package_target(
+        aur_provider_plan, "same-name-devel-git",
+        "same-name-devel-base", {root});
+    const ProvidedDependency aur_provider = typed_aur_provider(
+        "same-name-devel-git", "same-name-devel-base",
+        "virtual-devel-api");
+    aur_provider_plan.dependency_edges.push_back(typed_provider_edge(
+        "provider-root", "provider-root", "virtual-devel-api",
+        aur_provider));
+    aur_provider_plan.provided.push_back(BuildPlanProvidedDependency{
+        "virtual-devel-api", aur_provider,
+        ProviderResolutionKind::Unique});
+    return_build_plan(std::move(aur_provider_plan));
+
+    const AurUpdateExecutionPreflight aur_provider_preflight =
+        ::resolve_aur_update_execution_preflight(
+            update_plan,
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect_status(
+        aur_provider_preflight.targets[0],
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "AUR provider required-devel root");
+    expect_status(
+        aur_provider_preflight.targets[1],
+        AurUpdateExecutionTargetStatus::Skipped,
+        "AUR provider RequiresCheck target");
+    expect_required_devel_blocker(
+        aur_provider_preflight.targets[0],
+        AurUpdateRequiredDevelTargetRelation::AurProvider,
+        1, 0, std::nullopt, "same-name-devel-git", "same-name-devel-base",
+        {PackageRole::RuntimeDependency}, {root}, "AUR provider");
+    const BuildPlanDependencyEdge& retained_aur_edge =
+        aur_provider_preflight.build_plan->dependency_edges.front();
+    expect(
+        retained_aur_edge.requirement.has_value() &&
+            retained_aur_edge.resolved_candidate.has_value() &&
+            std::holds_alternative<ProviderResolvedDependencyCandidate>(
+                *retained_aur_edge.resolved_candidate) &&
+            std::holds_alternative<AurProviderOrigin>(
+                retained_aur_edge.resolved_provider->origin),
+        "AUR provider test lost typed requirement or source identity");
+
+    reset_preflight_stub();
+    BuildPlan repository_exact_plan = build_plan_for({
+        {"provider-root", "provider-root", "provider-root"},
+    });
+    repository_exact_plan.configured_repository_order =
+        std::vector<std::string>{"extra"};
+    repository_exact_plan.dependency_edges.push_back(
+        typed_repository_exact_edge(
+            "provider-root", "provider-root", "same-name-devel-git",
+            "same-name-devel-base"));
+    return_build_plan(std::move(repository_exact_plan));
+
+    const AurUpdateExecutionPreflight repository_exact_preflight =
+        ::resolve_aur_update_execution_preflight(
+            update_plan,
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect_status(
+        repository_exact_preflight.targets[0],
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Repository exact required-devel root");
+    expect_required_devel_blocker(
+        repository_exact_preflight.targets[0],
+        AurUpdateRequiredDevelTargetRelation::RepositoryExactDependency,
+        1, 0, std::nullopt, "same-name-devel-git",
+        "same-name-devel-base", {PackageRole::RuntimeDependency}, {root},
+        "Repository exact dependency");
+    const auto* repository_candidate = std::get_if<RepositoryExactPackage>(
+        &*repository_exact_preflight.build_plan
+              ->dependency_edges.front()
+              .resolved_candidate);
+    expect(
+        repository_candidate != nullptr &&
+            repository_candidate->repository ==
+                ConfiguredRepositoryIdentity{"extra", 0} &&
+            repository_candidate->package_name ==
+                "same-name-devel-git" &&
+            repository_candidate->package_base ==
+                "same-name-devel-base" &&
+            repository_candidate->package_version.version() != nullptr &&
+            *repository_candidate->package_version.version() == "1.0-1",
+        "Repository exact same-name re-entry lost source/version identity");
+
+    reset_preflight_stub();
+    BuildPlan repository_provider_plan = build_plan_for({
+        {"provider-root", "provider-root", "provider-root"},
+    });
+    repository_provider_plan.configured_repository_order =
+        std::vector<std::string>{"extra"};
+    const ProvidedDependency repository_provider =
+        typed_repository_provider(
+            "same-name-devel-git", "same-name-devel-base",
+            "virtual-devel-api");
+    repository_provider_plan.dependency_edges.push_back(
+        typed_provider_edge(
+            "provider-root", "provider-root", "virtual-devel-api",
+            repository_provider,
+            ProviderResolutionKind::UserSelected));
+    repository_provider_plan.provided.push_back(
+        BuildPlanProvidedDependency{
+            "virtual-devel-api", repository_provider,
+            ProviderResolutionKind::UserSelected});
+    return_build_plan(std::move(repository_provider_plan));
+
+    const AurUpdateExecutionPreflight repository_provider_preflight =
+        ::resolve_aur_update_execution_preflight(
+            update_plan,
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect_status(
+        repository_provider_preflight.targets[0],
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Repository provider required-devel root");
+    expect_required_devel_blocker(
+        repository_provider_preflight.targets[0],
+        AurUpdateRequiredDevelTargetRelation::RepositoryProvider,
+        1, 0, std::nullopt, "same-name-devel-git",
+        "same-name-devel-base", {PackageRole::RuntimeDependency}, {root},
+        "Repository provider");
+    const ProvidedDependency& retained_repository_provider =
+        *repository_provider_preflight.build_plan
+             ->dependency_edges.front()
+             .resolved_provider;
+    const auto* repository_origin = std::get_if<RepositoryProviderOrigin>(
+        &retained_repository_provider.origin);
+    expect(
+        repository_origin != nullptr &&
+            repository_origin->repository_name == "extra" &&
+            repository_origin->configured_order ==
+                std::optional<std::size_t>{0} &&
+            retained_repository_provider.package_name ==
+                "same-name-devel-git" &&
+            retained_repository_provider.package_base ==
+                "same-name-devel-base",
+        "Repository provider same-name re-entry was compared by name only");
+
+    reset_preflight_stub();
+    BuildPlan ambiguous_plan = build_plan_for({
+        {"provider-root", "provider-root", "provider-root"},
+    });
+    ambiguous_plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+        "provider-root",
+        "provider-root",
+        "ambiguous-devel-api",
+        PackageRole::RuntimeDependency,
+        DependencyKind::AmbiguousProvider,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        ProviderResolutionKind::Unique,
+        exact_requirement("ambiguous-devel-api"),
+        std::nullopt,
+        std::nullopt});
+    ambiguous_plan.ambiguous_providers.push_back(
+        AmbiguousProvidedDependency{
+            "ambiguous-devel-api",
+            {
+                typed_aur_provider(
+                    "same-name-devel-git", "same-name-devel-base",
+                    "ambiguous-devel-api"),
+                typed_repository_provider(
+                    "same-name-devel-git", "same-name-devel-base",
+                    "ambiguous-devel-api"),
+            }});
+    return_build_plan(std::move(ambiguous_plan));
+
+    const AurUpdateExecutionPreflight ambiguous_preflight =
+        ::resolve_aur_update_execution_preflight(
+            update_plan,
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect_status(
+        ambiguous_preflight.targets[0],
+        AurUpdateExecutionTargetStatus::Unsupported,
+        "Ambiguous RequiresCheck provider root");
+    expect(
+        has_issue(
+            ambiguous_preflight.targets[0],
+            AurUpdateExecutionReason::AmbiguousProvider) &&
+            !has_issue(
+                ambiguous_preflight.targets[0],
+                AurUpdateExecutionReason::
+                    RequiredDevelTargetRequiresCheck) &&
+            ambiguous_preflight.targets[1].status ==
+                AurUpdateExecutionTargetStatus::Skipped,
+        "Ambiguous RequiresCheck provider was auto-selected or lost its blocker");
+
+    reset_preflight_stub();
+    BuildPlan installed_plan = build_plan_for({
+        {"provider-root", "provider-root", "provider-root"},
+    });
+    installed_plan.dependency_edges.push_back(
+        typed_installed_exact_edge(
+            "provider-root", "provider-root",
+            "same-name-devel-git"));
+    return_build_plan(std::move(installed_plan));
+    const AurUpdateExecutionPreflight installed_preflight =
+        ::resolve_aur_update_execution_preflight(
+            update_plan,
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect(
+        installed_preflight.targets[0].status ==
+                AurUpdateExecutionTargetStatus::Executable &&
+            installed_preflight.targets[1].status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            installed_preflight.targets[1].skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    IndependentDevelRequiresCheck &&
+            !has_issue(
+                installed_preflight.targets[0],
+                AurUpdateExecutionReason::
+                    RequiredDevelTargetRequiresCheck),
+        "Exact installed satisfaction was treated as a mutation re-entry");
+
+    reset_preflight_stub();
+    BuildPlan forged_constraint_plan = build_plan_for({
+        {"provider-root", "provider-root", "provider-root"},
+    });
+    BuildPlanDependencyEdge forged_constraint_edge =
+        typed_installed_exact_edge(
+            "provider-root", "provider-root",
+            "same-name-devel-git");
+    forged_constraint_edge.dependency_spec =
+        "same-name-devel-git>=2";
+    forged_constraint_edge.requirement = DependencyRequirement{
+        ConsumerDependencyRequirement(
+            "same-name-devel-git>=2", "same-name-devel-git",
+            DependencyVersionConstraint(
+                DependencyVersionRelation::GreaterThanOrEqual,
+                "2"))};
+    forged_constraint_edge.constraint_evaluation =
+        ConstraintEvaluation::unconstrained();
+    forged_constraint_plan.dependency_edges.push_back(
+        std::move(forged_constraint_edge));
+    return_build_plan(std::move(forged_constraint_plan));
+
+    const AurUpdateExecutionPreflight forged_constraint_preflight =
+        ::resolve_aur_update_execution_preflight(
+            update_plan,
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect(
+        forged_constraint_preflight.targets[0].status ==
+                AurUpdateExecutionTargetStatus::Incomplete &&
+            forged_constraint_preflight.targets[1].status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            forged_constraint_preflight.targets[1].skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    RequiredDevelRequiresCheck,
+        "Forged InstalledExact constraint remained independent");
+    expect_required_devel_blocker(
+        forged_constraint_preflight.targets[0],
+        AurUpdateRequiredDevelTargetRelation::IdentityDrift,
+        1, 0, std::nullopt, "same-name-devel-git",
+        "same-name-devel-base", {PackageRole::RuntimeDependency}, {root},
+        "Forged InstalledExact constraint");
+
+    reset_preflight_stub();
+    BuildPlan combined_identity_drift_plan = build_plan_for({
+        {"provider-root", "provider-root", "provider-root"},
+    });
+    BuildPlanDependencyEdge combined_identity_drift_edge =
+        typed_installed_exact_edge(
+            "provider-root", "provider-root",
+            "same-name-devel-git");
+    combined_identity_drift_edge.resolved_package_name =
+        "different-installed-child";
+    std::get<InstalledExactPackage>(
+        *combined_identity_drift_edge.resolved_candidate)
+        .package_name = "different-installed-child";
+    combined_identity_drift_plan.dependency_edges.push_back(
+        std::move(combined_identity_drift_edge));
+    return_build_plan(std::move(combined_identity_drift_plan));
+
+    const AurUpdateExecutionPreflight combined_identity_drift =
+        ::resolve_aur_update_execution_preflight(
+            update_plan,
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect(
+        combined_identity_drift.targets[0].status ==
+                AurUpdateExecutionTargetStatus::Incomplete &&
+            combined_identity_drift.targets[1].status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            combined_identity_drift.targets[1].skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    RequiredDevelRequiresCheck,
+        "Combined InstalledExact identity drift was not required");
+    expect_required_devel_blocker(
+        combined_identity_drift.targets[0],
+        AurUpdateRequiredDevelTargetRelation::IdentityDrift,
+        1, 0, std::nullopt, "same-name-devel-git",
+        "same-name-devel-base", {PackageRole::RuntimeDependency}, {root},
+        "Combined InstalledExact identity drift");
+}
+
+void test_required_devel_package_base_uses_exact_required_children() {
+    const AurUpdatePlan update_plan{{
+        remote_entry(
+            "shared-root", InstalledPackageReason::Explicit,
+            AurUpdateClassification::UpdateAvailable, "shared-root",
+            "shared-suite"),
+        requires_check_entry(
+            "shared-devel-git", "shared-suite"),
+    }};
+    const RootTargetIdentity root{0, "shared-root"};
+
+    reset_preflight_stub();
+    return_build_plan(build_plan_for({
+        {"shared-root", "shared-root", "shared-suite"},
+    }));
+    const AurUpdateExecutionPreflight unselected_sibling =
+        ::resolve_aur_update_execution_preflight(
+            update_plan,
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect_status(
+        unselected_sibling.targets[0],
+        AurUpdateExecutionTargetStatus::Executable,
+        "Unselected same-PackageBase sibling root");
+    expect_status(
+        unselected_sibling.targets[1],
+        AurUpdateExecutionTargetStatus::Skipped,
+        "Unselected same-PackageBase RequiresCheck sibling");
+    expect(
+        !has_issue(
+            unselected_sibling.targets[0],
+            AurUpdateExecutionReason::
+                RequiredDevelTargetRequiresCheck) &&
+            unselected_sibling.build_plan->order.size() == 1 &&
+            unselected_sibling.build_plan
+                    ->order.front()
+                    .package_names ==
+                std::vector<std::string>{"shared-root"},
+        "PackageBase equality alone blocked an unselected sibling");
+
+    reset_preflight_stub();
+    BuildPlan required_child_plan = build_plan_for({
+        {"shared-root", "shared-root", "shared-suite"},
+    });
+    add_required_package_target(
+        required_child_plan, "shared-devel-git", "shared-suite",
+        {root});
+    required_child_plan.dependency_edges.push_back(
+        typed_aur_exact_edge(
+            "shared-root", "shared-suite", "shared-devel-git",
+            "shared-suite"));
+    return_build_plan(std::move(required_child_plan));
+
+    const AurUpdateExecutionPreflight required_sibling =
+        ::resolve_aur_update_execution_preflight(
+            update_plan,
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect_status(
+        required_sibling.targets[0],
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Required same-PackageBase sibling root");
+    expect_status(
+        required_sibling.targets[1],
+        AurUpdateExecutionTargetStatus::Skipped,
+        "Required same-PackageBase RequiresCheck sibling");
+    expect(
+        required_sibling.build_plan->order.size() == 1 &&
+            required_sibling.build_plan
+                    ->order.front()
+                    .package_names ==
+                std::vector<std::string>{
+                    "shared-root", "shared-devel-git"},
+        "Same-PackageBase required child set differs");
+    expect_required_devel_blocker(
+        required_sibling.targets[0],
+        AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+        1, 0, std::nullopt, "shared-devel-git", "shared-suite",
+        {PackageRole::RuntimeDependency}, {root},
+        "Same-PackageBase exact dependency");
+    expect_required_devel_blocker(
+        required_sibling.targets[0],
+        AurUpdateRequiredDevelTargetRelation::RequiredArtifactChild,
+        1, std::nullopt, 0, "shared-devel-git", "shared-suite",
+        {PackageRole::RuntimeDependency}, {root},
+        "Same-PackageBase required artifact child");
+}
+
+void test_required_devel_shared_dependency_preserves_edge_roots() {
+    reset_preflight_stub();
+    const RootTargetIdentity first_root{0, "shared-first-root"};
+    const RootTargetIdentity second_root{1, "shared-second-root"};
+    BuildPlan plan = build_plan_for({
+        {"shared-first-root", "shared-first-root", "shared-first-root"},
+        {"shared-second-root", "shared-second-root", "shared-second-root"},
+    });
+    add_required_package_target(
+        plan, "shared-required-git", "shared-required-base",
+        {first_root, second_root});
+    plan.dependency_edges.push_back(typed_aur_exact_edge(
+        "shared-first-root", "shared-first-root",
+        "shared-required-git", "shared-required-base"));
+    plan.dependency_edges.push_back(typed_aur_exact_edge(
+        "shared-second-root", "shared-second-root",
+        "shared-required-git", "shared-required-base"));
+    return_build_plan(std::move(plan));
+
+    const AurUpdateExecutionPreflight preflight =
+        ::resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{
+                remote_entry(
+                    "shared-first-root",
+                    InstalledPackageReason::Explicit),
+                requires_check_entry(
+                    "shared-required-git", "shared-required-base"),
+                remote_entry(
+                    "shared-second-root",
+                    InstalledPackageReason::Explicit),
+            }},
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+
+    expect(
+        preflight.targets[0].status ==
+                AurUpdateExecutionTargetStatus::Incomplete &&
+            preflight.targets[1].status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            preflight.targets[1].skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    RequiredDevelRequiresCheck &&
+            preflight.targets[2].status ==
+                AurUpdateExecutionTargetStatus::Incomplete,
+        "Shared required dependency did not retain localized target states");
+    expect_required_devel_blocker(
+        preflight.targets[0],
+        AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+        1, 0, std::nullopt, "shared-required-git",
+        "shared-required-base", {PackageRole::RuntimeDependency},
+        {first_root}, "Shared dependency first edge");
+    expect_required_devel_blocker(
+        preflight.targets[2],
+        AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+        1, 1, std::nullopt, "shared-required-git",
+        "shared-required-base", {PackageRole::RuntimeDependency},
+        {second_root}, "Shared dependency second edge");
+    expect_required_devel_blocker(
+        preflight.targets[0],
+        AurUpdateRequiredDevelTargetRelation::RequiredArtifactChild,
+        1, std::nullopt, 0, "shared-required-git",
+        "shared-required-base", {PackageRole::RuntimeDependency},
+        {first_root, second_root}, "Shared dependency artifact first root");
+    expect_required_devel_blocker(
+        preflight.targets[2],
+        AurUpdateRequiredDevelTargetRelation::RequiredArtifactChild,
+        1, std::nullopt, 0, "shared-required-git",
+        "shared-required-base", {PackageRole::RuntimeDependency},
+        {first_root, second_root}, "Shared dependency artifact second root");
+}
+
+void test_required_devel_identity_drift_and_unattributed_state_fail_closed() {
+    const AurUpdatePlan drift_plan{{
+        remote_entry("drift-root", InstalledPackageReason::Explicit),
+        requires_check_entry(
+            "drift-devel-git", "expected-devel-base"),
+    }};
+    const RootTargetIdentity drift_root{0, "drift-root"};
+
+    auto expect_drift = [&](BuildPlan plan,
+                            bool artifact_identity_is_drifted,
+                            const std::string& context) {
+        reset_preflight_stub();
+        return_build_plan(std::move(plan));
+        const AurUpdateExecutionPreflight preflight =
+            ::resolve_aur_update_execution_preflight(
+                drift_plan,
+                DevelRequiresCheckPolicy::SkipIndependentTarget);
+        expect_status(
+            preflight.targets[0],
+            AurUpdateExecutionTargetStatus::Incomplete,
+            context + " root");
+        expect_status(
+            preflight.targets[1],
+            AurUpdateExecutionTargetStatus::Skipped,
+            context + " RequiresCheck target");
+        expect_required_devel_blocker(
+            preflight.targets[0],
+            AurUpdateRequiredDevelTargetRelation::IdentityDrift,
+            1, 0, std::nullopt, "drift-devel-git", "expected-devel-base",
+            {PackageRole::RuntimeDependency}, {drift_root}, context);
+        expect_required_devel_blocker(
+            preflight.targets[0],
+            artifact_identity_is_drifted
+                ? AurUpdateRequiredDevelTargetRelation::IdentityDrift
+                : AurUpdateRequiredDevelTargetRelation::
+                      RequiredArtifactChild,
+            1, std::nullopt, 0, "drift-devel-git",
+            "expected-devel-base", {PackageRole::RuntimeDependency},
+            {drift_root}, context + " artifact");
+        expect(
+            !has_issue(
+                preflight.targets[0],
+                AurUpdateExecutionReason::DevelRequiresCheck) &&
+                preflight.targets[1].skip_kind ==
+                    AurUpdateExecutionSkipKind::
+                        RequiredDevelRequiresCheck,
+            context + ": drift promoted the RequiresCheck target");
+    };
+
+    BuildPlan base_drift = build_plan_for({
+        {"drift-root", "drift-root", "drift-root"},
+    });
+    add_required_package_target(
+        base_drift, "drift-devel-git", "observed-devel-base",
+        {drift_root});
+    base_drift.dependency_edges.push_back(typed_aur_exact_edge(
+        "drift-root", "drift-root", "drift-devel-git",
+        "observed-devel-base"));
+    expect_drift(
+        std::move(base_drift), true, "PackageBase drift");
+
+    BuildPlan version_drift = build_plan_for({
+        {"drift-root", "drift-root", "drift-root"},
+    });
+    add_required_package_target(
+        version_drift, "drift-devel-git", "expected-devel-base",
+        {drift_root});
+    version_drift.dependency_edges.push_back(typed_aur_exact_edge(
+        "drift-root", "drift-root", "drift-devel-git",
+        "expected-devel-base", PackageRole::RuntimeDependency,
+        "9.0-1"));
+    expect_drift(
+        std::move(version_drift), false, "Remote version drift");
+
+    BuildPlan child_drift = build_plan_for({
+        {"drift-root", "drift-root", "drift-root"},
+    });
+    add_required_package_target(
+        child_drift, "drift-devel-git", "expected-devel-base",
+        {drift_root});
+    BuildPlanDependencyEdge child_drift_edge = typed_aur_exact_edge(
+        "drift-root", "drift-root", "drift-devel-git",
+        "expected-devel-base");
+    std::get<AurResolvedDependencyCandidate>(
+        *child_drift_edge.resolved_candidate)
+        .package_name = "different-devel-child";
+    child_drift.dependency_edges.push_back(
+        std::move(child_drift_edge));
+    expect_drift(
+        std::move(child_drift), false, "Resolved child drift");
+
+    BuildPlan source_drift = build_plan_for({
+        {"drift-root", "drift-root", "drift-root"},
+    });
+    source_drift.configured_repository_order =
+        std::vector<std::string>{"extra"};
+    add_required_package_target(
+        source_drift, "drift-devel-git", "expected-devel-base",
+        {drift_root});
+    BuildPlanDependencyEdge source_drift_edge = typed_aur_exact_edge(
+        "drift-root", "drift-root", "drift-devel-git",
+        "expected-devel-base");
+    source_drift_edge.resolved_candidate = RepositoryExactPackage{
+        ConfiguredRepositoryIdentity{"extra", 0},
+        "drift-devel-git",
+        "expected-devel-base",
+        ObservedVersion::available(
+            ObservedVersionSource::RepositoryExactPackage, "1.0-1"),
+        {},
+        std::optional<std::string>{"x86_64"}};
+    source_drift.dependency_edges.push_back(
+        std::move(source_drift_edge));
+    expect_drift(
+        std::move(source_drift), false, "Resolved source drift");
+
+    BuildPlan provider_source_drift = build_plan_for({
+        {"drift-root", "drift-root", "drift-root"},
+    });
+    add_required_package_target(
+        provider_source_drift, "drift-devel-git",
+        "expected-devel-base", {drift_root});
+    ProvidedDependency drifted_provider = typed_aur_provider(
+        "drift-devel-git", "expected-devel-base",
+        "drift-virtual-api");
+    drifted_provider.constraint_metadata->provided_version =
+        ObservedVersion::available(
+            ObservedVersionSource::LocalProviderCapability,
+            "1.0-1");
+    BuildPlanDependencyEdge drifted_provider_edge =
+        typed_provider_edge(
+            "drift-root", "drift-root", "drift-virtual-api",
+            drifted_provider);
+    std::get<ProviderResolvedDependencyCandidate>(
+        *drifted_provider_edge.resolved_candidate)
+        .provided_version =
+        drifted_provider.constraint_metadata->provided_version;
+    provider_source_drift.dependency_edges.push_back(
+        std::move(drifted_provider_edge));
+    expect_drift(
+        std::move(provider_source_drift), false,
+        "Provider capability source drift");
+
+    reset_preflight_stub();
+    BuildPlan installed_source_drift = build_plan_for({
+        {"drift-root", "drift-root", "drift-root"},
+    });
+    BuildPlanDependencyEdge installed_drift_edge =
+        typed_installed_exact_edge(
+            "drift-root", "drift-root", "drift-devel-git");
+    installed_drift_edge.resolved_candidate =
+        AurResolvedDependencyCandidate{
+            "drift-devel-git", "expected-devel-base",
+            ObservedVersion::available(
+                ObservedVersionSource::AurExactPackage,
+                "1.0-1")};
+    installed_source_drift.dependency_edges.push_back(
+        std::move(installed_drift_edge));
+    return_build_plan(std::move(installed_source_drift));
+    const AurUpdateExecutionPreflight installed_drift_preflight =
+        ::resolve_aur_update_execution_preflight(
+            drift_plan,
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect(
+        installed_drift_preflight.targets[0].status ==
+                AurUpdateExecutionTargetStatus::Incomplete &&
+            installed_drift_preflight.targets[1].status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            installed_drift_preflight.targets[1].skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    RequiredDevelRequiresCheck,
+        "Installed source drift was treated as exact installed satisfaction");
+    expect_required_devel_blocker(
+        installed_drift_preflight.targets[0],
+        AurUpdateRequiredDevelTargetRelation::IdentityDrift,
+        1, 0, std::nullopt, "drift-devel-git",
+        "expected-devel-base", {PackageRole::RuntimeDependency},
+        {drift_root}, "Installed source drift");
+
+    reset_preflight_stub();
+    BuildPlan unattributed = build_plan_for({
+        {"unattributed-root-a", "unattributed-root-a",
+         "unattributed-root-a"},
+        {"unattributed-root-c", "unattributed-root-c",
+         "unattributed-root-c"},
+    });
+    add_required_package_target(
+        unattributed, "unattributed-devel-git",
+        "unattributed-devel-base", {});
+    unattributed.dependency_edges.push_back(typed_aur_exact_edge(
+        "orphan-parent", "orphan-base", "unattributed-devel-git",
+        "unattributed-devel-base"));
+    return_build_plan(std::move(unattributed));
+
+    const AurUpdateExecutionPreflight unattributed_preflight =
+        ::resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{
+                remote_entry(
+                    "unattributed-root-a",
+                    InstalledPackageReason::Explicit),
+                requires_check_entry(
+                    "unattributed-devel-git",
+                    "unattributed-devel-base"),
+                remote_entry(
+                    "unattributed-root-c",
+                    InstalledPackageReason::Explicit),
+            }},
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    expect_status(
+        unattributed_preflight.targets[0],
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Unattributed first root");
+    expect_status(
+        unattributed_preflight.targets[1],
+        AurUpdateExecutionTargetStatus::Skipped,
+        "Unattributed RequiresCheck target");
+    expect_status(
+        unattributed_preflight.targets[2],
+        AurUpdateExecutionTargetStatus::Incomplete,
+        "Unattributed second root");
+    for(const std::size_t target_index : {std::size_t{0}, std::size_t{2}}) {
+        expect_required_devel_blocker(
+            unattributed_preflight.targets[target_index],
+            AurUpdateRequiredDevelTargetRelation::IdentityDrift,
+            1, 0, std::nullopt, "unattributed-devel-git",
+            "unattributed-devel-base",
+            {PackageRole::RuntimeDependency}, {},
+            "Unattributed edge fallback");
+        expect_required_devel_blocker(
+            unattributed_preflight.targets[target_index],
+            AurUpdateRequiredDevelTargetRelation::IdentityDrift,
+            1, std::nullopt, 0, "unattributed-devel-git",
+            "unattributed-devel-base",
+            {PackageRole::RuntimeDependency}, {},
+            "Unattributed artifact fallback");
+        expect(
+            has_issue(
+                unattributed_preflight.targets[target_index],
+                AurUpdateExecutionReason::BuildPlanInconsistent),
+            "Unattributed required-devel state did not fail closed globally");
+    }
+    expect(
+        unattributed_preflight.targets[1].skip_kind ==
+            AurUpdateExecutionSkipKind::
+                RequiredDevelRequiresCheck,
+        "Unattributed fallback changed the skipped target identity");
+}
+
+void test_duplicate_requires_check_identity_is_not_independent() {
+    reset_preflight_stub();
+    return_build_plan(build_plan_for({
+        {"duplicate-check-root", "duplicate-check-root",
+         "duplicate-check-root"},
+    }));
+    const AurUpdatePlanEntry duplicate = requires_check_entry(
+        "duplicate-check-git", "duplicate-check-base");
+    const AurUpdateExecutionPreflight preflight =
+        ::resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{
+                remote_entry(
+                    "duplicate-check-root",
+                    InstalledPackageReason::Explicit),
+                duplicate,
+                duplicate,
+            }},
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+
+    expect_single_resolver_call(
+        {"duplicate-check-root"},
+        "Duplicate RequiresCheck identity");
+    expect_status(
+        preflight.targets[0], AurUpdateExecutionTargetStatus::Executable,
+        "Duplicate RequiresCheck executable root");
+    for(const std::size_t index : {std::size_t{1}, std::size_t{2}}) {
+        expect_status(
+            preflight.targets[index],
+            AurUpdateExecutionTargetStatus::Incomplete,
+            "Duplicate RequiresCheck target");
+        expect(
+            has_issue(
+                preflight.targets[index],
+                AurUpdateExecutionReason::UpdatePlanInconsistent) &&
+                !preflight.targets[index].skip_kind.has_value(),
+            "Duplicate RequiresCheck identity was guessed independent");
+    }
+    expect(
+        has_blocking_targets(preflight) && !can_execute(preflight),
+        "Duplicate RequiresCheck identity failed open");
+}
+
+void test_required_devel_localization_keeps_other_hard_blockers() {
+    reset_preflight_stub();
+    const RootTargetIdentity root{0, "hard-blocker-root"};
+    BuildPlan plan = build_plan_for({
+        {"hard-blocker-root", "hard-blocker-root", "hard-blocker-root"},
+    });
+    add_required_package_target(
+        plan, "hard-devel-git", "hard-devel-base", {root});
+    plan.dependency_edges.push_back(typed_aur_exact_edge(
+        "hard-blocker-root", "hard-blocker-root", "hard-devel-git",
+        "hard-devel-base", PackageRole::RuntimeDependency, "1.0-1",
+        ConstraintEvaluation::unsatisfied()));
+
+    plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+        "hard-blocker-root",
+        "hard-blocker-root",
+        "hard-ambiguous-api",
+        PackageRole::BuildDependency,
+        DependencyKind::AmbiguousProvider,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        ProviderResolutionKind::Unique,
+        exact_requirement("hard-ambiguous-api"),
+        std::nullopt,
+        std::nullopt});
+    plan.ambiguous_providers.push_back(AmbiguousProvidedDependency{
+        "hard-ambiguous-api",
+        {
+            typed_aur_provider(
+                "hard-provider-a", "hard-provider-a",
+                "hard-ambiguous-api"),
+            typed_repository_provider(
+                "hard-provider-b", "hard-provider-b",
+                "hard-ambiguous-api"),
+        }});
+
+    add_dependency_target(
+        plan, "uncovered-artifact", "uncovered-artifact",
+        {root}, PackageRole::CheckDependency);
+    plan.dependency_edges.push_back(typed_aur_exact_edge(
+        "hard-blocker-root", "hard-blocker-root",
+        "uncovered-artifact", "uncovered-artifact",
+        PackageRole::CheckDependency));
+    plan.relation_assessments.push_back(relation_assessment_fixture(
+        PackageRelationAssessmentKind::ConfirmedInstalledConflict,
+        "hard-blocker-root", "hard-blocker-root",
+        {{0, "hard-blocker-root"}}));
+    return_build_plan(std::move(plan));
+
+    const AurUpdateExecutionPreflight preflight =
+        ::resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{
+                remote_entry(
+                    "hard-blocker-root",
+                    InstalledPackageReason::Explicit),
+                requires_check_entry(
+                    "hard-devel-git", "hard-devel-base"),
+            }},
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    const AurUpdateExecutionTarget& affected = preflight.targets[0];
+    expect_status(
+        affected, AurUpdateExecutionTargetStatus::Incomplete,
+        "RequiresCheck with hard blockers");
+    expect_status(
+        preflight.targets[1], AurUpdateExecutionTargetStatus::Skipped,
+        "RequiresCheck target with hard blockers");
+    expect_required_devel_blocker(
+        affected,
+        AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+        1, 0, std::nullopt, "hard-devel-git", "hard-devel-base",
+        {PackageRole::RuntimeDependency}, {root},
+        "Hard blocker exact dependency");
+    expect(
+        has_issue(
+            affected,
+            AurUpdateExecutionReason::VersionConstraintUnverified) &&
+            has_issue(
+                affected,
+                AurUpdateExecutionReason::AmbiguousProvider) &&
+            has_issue(
+                affected,
+                AurUpdateExecutionReason::
+                    ConflictsOrReplacesUnresolved) &&
+            has_issue(
+                affected,
+                AurUpdateExecutionReason::BuildPlanInconsistent) &&
+            std::any_of(
+                affected.issues.begin(), affected.issues.end(),
+                [](const AurUpdateExecutionIssue& issue) {
+                    return issue.build_plan_projection_issue.has_value() &&
+                           issue.build_plan_projection_issue->kind ==
+                               BuildPlanArtifactTargetProjectionIssueKind::
+                                   UncoveredPlannedPackageTarget;
+                }) &&
+            preflight.targets[1].issues.size() == 1 &&
+            preflight.targets[1].issues.front().reason ==
+                AurUpdateExecutionReason::DevelRequiresCheck,
+        "RequiresCheck localization filtered or reassigned a hard blocker");
 }
 
 void test_unknown_requires_check_policy_fails_closed() {
@@ -2552,6 +4044,33 @@ int main() {
         run_case(
             "devel RequiresCheck blocks without candidate promotion",
             test_devel_requires_check_blocks_without_candidate_promotion);
+        run_case(
+            "SkipIndependentTarget keeps identity and update precedence",
+            test_skip_independent_target_keeps_full_identity_and_update_precedence);
+        run_case(
+            "required devel exact dependency is root-local",
+            test_required_devel_exact_dependency_is_root_local);
+        run_case(
+            "required devel relation snapshot complete equality",
+            test_required_devel_relation_snapshot_complete_equality);
+        run_case(
+            "required devel provider and repository re-entry is source-aware",
+            test_required_devel_provider_and_repository_reentry_are_source_aware);
+        run_case(
+            "required devel PackageBase uses exact required children",
+            test_required_devel_package_base_uses_exact_required_children);
+        run_case(
+            "required devel shared dependency preserves edge roots",
+            test_required_devel_shared_dependency_preserves_edge_roots);
+        run_case(
+            "required devel drift and unattributed state fail closed",
+            test_required_devel_identity_drift_and_unattributed_state_fail_closed);
+        run_case(
+            "duplicate RequiresCheck identity is not independent",
+            test_duplicate_requires_check_identity_is_not_independent);
+        run_case(
+            "required devel localization keeps hard blockers",
+            test_required_devel_localization_keeps_other_hard_blockers);
         run_case(
             "unknown RequiresCheck policy fails closed",
             test_unknown_requires_check_policy_fails_closed);

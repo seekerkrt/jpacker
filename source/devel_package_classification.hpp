@@ -2,6 +2,7 @@
 
 #include "vcs_source_identity.hpp"
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <vector>
@@ -20,8 +21,13 @@ public:
     [[nodiscard]] static DevelChildSuffixEvidence classify(
         std::string package_name);
 
-    [[nodiscard]] const std::string& package_name() const noexcept;
-    [[nodiscard]] const VcsKind* candidate_kind() const noexcept;
+    [[nodiscard]] const std::string& package_name() const noexcept {
+        return package_name_;
+    }
+    [[nodiscard]] const VcsKind* candidate_kind() const noexcept {
+        return candidate_kind_.has_value() ? &candidate_kind_.value()
+                                           : nullptr;
+    }
 
     bool operator==(const DevelChildSuffixEvidence&) const = default;
 
@@ -52,12 +58,27 @@ public:
         std::string package_base,
         std::vector<std::string> installed_children);
 
-    [[nodiscard]] const std::string& package_base() const noexcept;
+    [[nodiscard]] const std::string& package_base() const noexcept {
+        return package_base_;
+    }
     [[nodiscard]] const VcsKind* package_base_candidate_kind()
-        const noexcept;
+        const noexcept {
+        return package_base_candidate_kind_.has_value()
+                   ? &package_base_candidate_kind_.value()
+                   : nullptr;
+    }
     [[nodiscard]] const std::vector<DevelChildSuffixEvidence>&
-    installed_children() const noexcept;
-    [[nodiscard]] bool has_candidate() const noexcept;
+    installed_children() const noexcept {
+        return installed_children_;
+    }
+    [[nodiscard]] bool has_candidate() const noexcept {
+        if(package_base_candidate_kind_.has_value()) return true;
+        return std::any_of(
+            installed_children_.begin(), installed_children_.end(),
+            [](const DevelChildSuffixEvidence& child) {
+                return child.candidate_kind() != nullptr;
+            });
+    }
 
     bool operator==(const DevelPackageSuffixEvidence&) const = default;
 
@@ -168,15 +189,25 @@ public:
         std::vector<SuccessfulBuildSourceConfirmation>
             successful_build_confirmations = {});
 
-    [[nodiscard]] DevelEvidenceLevel evidence_level() const noexcept;
+    [[nodiscard]] DevelEvidenceLevel evidence_level() const noexcept {
+        return evidence_level_;
+    }
     [[nodiscard]] DevelSourceFormDisposition source_form_disposition()
-        const noexcept;
+        const noexcept {
+        return source_form_disposition_;
+    }
     [[nodiscard]] const DevelPackageSuffixEvidence& suffix_evidence()
-        const noexcept;
+        const noexcept {
+        return suffix_evidence_;
+    }
     [[nodiscard]] const std::vector<TrustedDevelSourceMetadata>&
-    trusted_metadata() const noexcept;
+    trusted_metadata() const noexcept {
+        return trusted_metadata_;
+    }
     [[nodiscard]] const std::vector<SuccessfulBuildSourceConfirmation>&
-    successful_build_confirmations() const noexcept;
+    successful_build_confirmations() const noexcept {
+        return successful_build_confirmations_;
+    }
 
     bool operator==(const DevelPackageClassification&) const = default;
 

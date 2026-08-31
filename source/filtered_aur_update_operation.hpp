@@ -68,6 +68,7 @@ struct FilteredAurUpdateOperationIssue {
 
 enum class FilteredAurUpdateTargetAdapterDisposition {
     NormalSkip,
+    RequiresCheckPolicySkip,
     PlannerTarget,
 };
 
@@ -77,6 +78,10 @@ struct FilteredAurUpdateTargetAdapterEntry {
     AurUpdatePlanEntry update;
     FilteredAurUpdateTargetAdapterDisposition disposition =
         FilteredAurUpdateTargetAdapterDisposition::NormalSkip;
+    std::optional<DevelRequiresCheckPolicy>
+        devel_requires_check_policy;
+    std::optional<DevelRequiresCheckReason>
+        devel_requires_check_reason;
     std::optional<std::size_t> planner_target_index;
     std::optional<std::size_t> filtered_update_plan_index;
 };

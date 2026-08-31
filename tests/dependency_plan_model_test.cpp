@@ -783,6 +783,189 @@ void test_invalid_conflicting_and_source_identity_fail_closed() {
         "typed-candidate>=2.");
 }
 
+BuildPlanDependencyEdge installed_exact_edge(
+    ConsumerDependencyRequirement requirement,
+    std::string installed_version,
+    ConstraintEvaluation evaluation) {
+    const std::string package_name = requirement.package_name();
+    const std::string dependency_specification =
+        requirement.raw_specification();
+    return BuildPlanDependencyEdge{
+        "installed-consumer",
+        "installed-consumer",
+        dependency_specification,
+        PackageRole::RuntimeDependency,
+        DependencyKind::Installed,
+        package_name,
+        std::nullopt,
+        std::nullopt,
+        ProviderResolutionKind::Unique,
+        DependencyRequirement{std::move(requirement)},
+        ResolvedDependencyCandidate{InstalledExactPackage{
+            package_name,
+            ObservedVersion::available(
+                ObservedVersionSource::InstalledExactPackage,
+                std::move(installed_version))}},
+        std::move(evaluation)};
+}
+
+void test_verified_installed_exact_dependency_satisfaction_matrix() {
+    const std::string package_name = "installed-exact";
+    BuildPlanDependencyEdge unconstrained = installed_exact_edge(
+        ConsumerDependencyRequirement(
+            package_name, package_name, std::nullopt),
+        "1.0-1", ConstraintEvaluation::unconstrained());
+    expect(
+        is_verified_installed_exact_dependency_satisfaction(
+            unconstrained, package_name, "1.0-1"),
+        "Unconstrained InstalledExact satisfaction was rejected");
+
+    const auto satisfied_requirement = []() {
+        return ConsumerDependencyRequirement(
+            "installed-exact>=1.0-1", "installed-exact",
+            DependencyVersionConstraint(
+                DependencyVersionRelation::GreaterThanOrEqual,
+                "1.0-1"));
+    };
+    BuildPlanDependencyEdge satisfied = installed_exact_edge(
+        satisfied_requirement(), "1.0-1",
+        ConstraintEvaluation::satisfied());
+    expect(
+        is_verified_installed_exact_dependency_satisfaction(
+            satisfied, package_name, "1.0-1"),
+        "Satisfied InstalledExact dependency was rejected");
+
+    const std::optional<ConstraintEvaluation> conflicting =
+        project_conflicting_constraint_invocation({
+            ConsumerDependencyRequirement(
+                "installed-exact<1", package_name,
+                DependencyVersionConstraint(
+                    DependencyVersionRelation::LessThan, "1")),
+            ConsumerDependencyRequirement(
+                "installed-exact>=2", package_name,
+                DependencyVersionConstraint(
+                    DependencyVersionRelation::GreaterThanOrEqual,
+                    "2")),
+        });
+    expect(conflicting.has_value(), "InstalledExact conflict fixture is invalid");
+
+    struct NegativeCase {
+        std::string name;
+        std::function<void(BuildPlanDependencyEdge&)> mutate;
+        std::string expected_installed_version = "1.0-1";
+    };
+    const std::vector<NegativeCase> cases = {
+        {"raw specification mismatch",
+         [](BuildPlanDependencyEdge& edge) {
+             edge.dependency_spec = "different-installed-exact";
+         }},
+        {"raw and typed constraint mismatch",
+         [](BuildPlanDependencyEdge& edge) {
+             edge.requirement = DependencyRequirement{
+                 ConsumerDependencyRequirement(
+                     "installed-exact>=2", "installed-exact",
+                     std::nullopt)};
+             edge.dependency_spec = "installed-exact>=2";
+             edge.constraint_evaluation =
+                 ConstraintEvaluation::unconstrained();
+         }},
+        {"forged Unconstrained",
+         [](BuildPlanDependencyEdge& edge) {
+             edge.requirement = DependencyRequirement{
+                 ConsumerDependencyRequirement(
+                     "installed-exact>=2", "installed-exact",
+                     DependencyVersionConstraint(
+                         DependencyVersionRelation::GreaterThanOrEqual,
+                         "2"))};
+             edge.dependency_spec = "installed-exact>=2";
+             edge.constraint_evaluation =
+                 ConstraintEvaluation::unconstrained();
+         }},
+        {"Unsatisfied",
+         [](BuildPlanDependencyEdge& edge) {
+             edge.requirement = DependencyRequirement{
+                 ConsumerDependencyRequirement(
+                     "installed-exact>=2", "installed-exact",
+                     DependencyVersionConstraint(
+                         DependencyVersionRelation::GreaterThanOrEqual,
+                         "2"))};
+             edge.dependency_spec = "installed-exact>=2";
+             edge.constraint_evaluation =
+                 ConstraintEvaluation::unsatisfied();
+         }},
+        {"Unknown",
+         [](BuildPlanDependencyEdge& edge) {
+             edge.constraint_evaluation = ConstraintEvaluation::unknown(
+                 ObservedVersionUnknownReason::
+                     CandidateVersionUnavailable);
+         }},
+        {"Invalid",
+         [](BuildPlanDependencyEdge& edge) {
+             edge.constraint_evaluation = ConstraintEvaluation::invalid(
+                 ConstraintInvalidReason::MalformedRequirement);
+         }},
+        {"Conflicting",
+         [&conflicting](BuildPlanDependencyEdge& edge) {
+             edge.constraint_evaluation = *conflicting;
+         }},
+        {"stored evaluation drift",
+         [](BuildPlanDependencyEdge& edge) {
+             edge.constraint_evaluation =
+                 ConstraintEvaluation::unconstrained();
+         }},
+        {"installed version drift", [](BuildPlanDependencyEdge&) {},
+         "9.0-1"},
+        {"wrong observed source",
+         [](BuildPlanDependencyEdge& edge) {
+             std::get<InstalledExactPackage>(
+                 *edge.resolved_candidate)
+                 .observed_version = ObservedVersion::available(
+                 ObservedVersionSource::RepositoryExactPackage,
+                 "1.0-1");
+         }},
+        {"wrong candidate variant",
+         [](BuildPlanDependencyEdge& edge) {
+             edge.resolved_candidate = AurResolvedDependencyCandidate{
+                 "installed-exact", "installed-exact",
+                 ObservedVersion::available(
+                     ObservedVersionSource::AurExactPackage,
+                     "1.0-1")};
+         }},
+        {"resolved name drift",
+         [](BuildPlanDependencyEdge& edge) {
+             edge.resolved_package_name = "different-installed-exact";
+         }},
+        {"resolved PackageBase present",
+         [](BuildPlanDependencyEdge& edge) {
+             edge.resolved_package_base = "installed-exact";
+         }},
+        {"resolved provider present",
+         [](BuildPlanDependencyEdge& edge) {
+             edge.resolved_provider =
+                 ProvidedDependency::from_aur("installed-exact");
+         }},
+        {"root role",
+         [](BuildPlanDependencyEdge& edge) {
+             edge.role = PackageRole::Root;
+         }},
+        {"selected Installed edge",
+         [](BuildPlanDependencyEdge& edge) {
+             edge.provider_resolution =
+                 ProviderResolutionKind::UserSelected;
+         }},
+    };
+
+    for(const NegativeCase& test_case : cases) {
+        BuildPlanDependencyEdge edge = satisfied;
+        test_case.mutate(edge);
+        expect(
+            !is_verified_installed_exact_dependency_satisfaction(
+                edge, package_name,
+                test_case.expected_installed_version),
+            "InstalledExact negative case passed: " + test_case.name);
+    }
+}
+
 void test_execution_guard_category_order() {
     BuildPlan plan;
     plan.unresolved.push_back("missing-dependency");
@@ -3128,6 +3311,9 @@ int main() {
         run_case(
             "invalid/conflicting/source identity fail closed",
             test_invalid_conflicting_and_source_identity_fail_closed);
+        run_case(
+            "verified InstalledExact dependency satisfaction matrix",
+            test_verified_installed_exact_dependency_satisfaction_matrix);
         run_case(
             "execution guard category order",
             test_execution_guard_category_order);

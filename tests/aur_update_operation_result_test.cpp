@@ -190,6 +190,140 @@ AurUpdateExecutionTarget devel_requires_check_target(
     return target;
 }
 
+AurUpdateExecutionTarget independent_devel_requires_check_target(
+    std::size_t update_plan_index,
+    const std::string& package_name,
+    const std::string& package_base = {}) {
+    const std::string resolved_package_base =
+        package_base.empty() ? package_name : package_base;
+    DevelPackageClassification devel_classification =
+        DevelPackageClassification::classify(
+            DevelPackageSuffixEvidence::classify(
+                resolved_package_base, {package_name}));
+    AurUpdateExecutionTarget target;
+    target.update_plan_index = update_plan_index;
+    target.update = AurUpdatePlanEntry{
+        package_name,
+        "1.0-1",
+        InstalledPackageReason::Explicit,
+        AurUpdateRemotePackage{
+            package_name,
+            resolved_package_base,
+            "1.0-1",
+            AurVersionRelation::SameAsInstalled},
+        AurUpdateClassification::UpToDate,
+        std::move(devel_classification),
+        DevelUpdateAssessment::requires_check(
+            DevelRequiresCheckReason::SuffixCandidateOnly)};
+    target.status = AurUpdateExecutionTargetStatus::Skipped;
+    target.skip_kind =
+        AurUpdateExecutionSkipKind::IndependentDevelRequiresCheck;
+    AurUpdateExecutionIssue issue{
+        AurUpdateExecutionReason::DevelRequiresCheck,
+        package_name,
+        resolved_package_base,
+        std::nullopt,
+        "Devel package suffix is candidate evidence only."};
+    issue.devel_requires_check_reason =
+        DevelRequiresCheckReason::SuffixCandidateOnly;
+    target.issues.push_back(std::move(issue));
+    return target;
+}
+
+AurUpdateExecutionPreflight required_devel_result_preflight() {
+    const RootTargetIdentity root{0, "required-result-root"};
+    AurUpdateExecutionTarget affected =
+        executable_target(0, root.requested_name);
+    affected.status = AurUpdateExecutionTargetStatus::Incomplete;
+
+    AurUpdateExecutionTarget required =
+        independent_devel_requires_check_target(
+            1, "required-result-git", "required-result-base");
+    required.skip_kind =
+        AurUpdateExecutionSkipKind::RequiredDevelRequiresCheck;
+
+    AurUpdateRequiredDevelTargetBlocker blocker{
+        AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+        1,
+        "required-result-git",
+        DevelRequiresCheckReason::SuffixCandidateOnly};
+    blocker.dependency_edge_index = 0;
+    blocker.package_base = "required-result-base";
+    blocker.roles = {PackageRole::RuntimeDependency};
+    blocker.affected_roots = {root};
+    AurUpdateExecutionIssue required_issue{
+        AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck,
+        "required-result-git",
+        "required-result-base",
+        "required-result-git",
+        "Required devel result fixture."};
+    required_issue.devel_requires_check_reason =
+        DevelRequiresCheckReason::SuffixCandidateOnly;
+    required_issue.required_devel_target_blocker = blocker;
+    affected.issues.push_back(std::move(required_issue));
+
+    AurUpdateRequiredDevelTargetBlocker artifact_blocker{
+        AurUpdateRequiredDevelTargetRelation::RequiredArtifactChild,
+        1,
+        "required-result-git",
+        DevelRequiresCheckReason::SuffixCandidateOnly};
+    artifact_blocker.build_plan_order_index = 0;
+    artifact_blocker.package_base = "required-result-base";
+    artifact_blocker.roles = {PackageRole::RuntimeDependency};
+    artifact_blocker.affected_roots = {root};
+    AurUpdateExecutionIssue artifact_issue{
+        AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck,
+        "required-result-git",
+        "required-result-base",
+        std::nullopt,
+        "Required devel artifact result fixture."};
+    artifact_issue.devel_requires_check_reason =
+        DevelRequiresCheckReason::SuffixCandidateOnly;
+    artifact_issue.required_devel_target_blocker =
+        std::move(artifact_blocker);
+    affected.issues.push_back(std::move(artifact_issue));
+
+    BuildPlan plan;
+    plan.root_targets = {root};
+    plan.package_targets = {
+        PlannedPackageTarget{
+            root.requested_name, root.requested_name, {PackageRole::Root}, {root}},
+        PlannedPackageTarget{
+            "required-result-git", "required-result-base", {PackageRole::RuntimeDependency}, {root}},
+    };
+    plan.order = {
+        BuildPlanEntry{
+            "required-result-base", {"required-result-git"}},
+        BuildPlanEntry{
+            root.requested_name, {root.requested_name}},
+    };
+    plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+        root.requested_name,
+        root.requested_name,
+        "required-result-git",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Aur,
+        std::optional<std::string>{"required-result-git"},
+        std::optional<std::string>{"required-result-base"},
+        std::nullopt,
+        ProviderResolutionKind::Unique,
+        DependencyRequirement{ConsumerDependencyRequirement(
+            "required-result-git", "required-result-git",
+            std::nullopt)},
+        ResolvedDependencyCandidate{AurResolvedDependencyCandidate{
+            "required-result-git",
+            "required-result-base",
+            ObservedVersion::available(
+                ObservedVersionSource::AurExactPackage,
+                "1.0-1")}},
+        ConstraintEvaluation::unconstrained()});
+
+    return AurUpdateExecutionPreflight{
+        {std::move(affected), std::move(required)},
+        std::move(plan),
+        DevelRequiresCheckPolicy::SkipIndependentTarget};
+}
+
 AurUpdateExecutionTarget blocking_target(
     std::size_t update_plan_index,
     const std::string& package_name,
@@ -535,6 +669,31 @@ bool has_reduction_issue(
         });
 }
 
+void expect_independent_shape_inconsistent(
+    AurUpdateExecutionTarget target,
+    DevelRequiresCheckPolicy policy,
+    const std::string& context) {
+    AurUpdateExecutionPreflight preflight;
+    preflight.targets.push_back(std::move(target));
+    preflight.devel_requires_check_policy = policy;
+    AurUpdateSourceBuildPreparation preparation;
+    preparation.devel_requires_check_policy = policy;
+    const AurUpdateOperationResult result =
+        ::reduce_aur_update_operation_result(
+            preflight, preparation, policy, std::nullopt);
+    expect(
+        result.status == AurUpdateOperationStatus::InconsistentResult &&
+            !result.is_success() &&
+            has_reduction_issue(
+                result,
+                AurUpdateOperationReductionReason::
+                    OtherCorrelationInconsistent) &&
+            result.targets.size() == 1 &&
+            result.targets.front().status ==
+                AurUpdateOperationTargetStatus::Incomplete,
+        context + ": malformed independent skip became success");
+}
+
 void expect_target_statuses(
     const AurUpdateOperationResult& result,
     const std::vector<AurUpdateOperationTargetStatus>& expected,
@@ -627,6 +786,302 @@ void test_all_skipped_is_no_updates() {
     expect(
         !result.is_success(),
         "Post-reduction RequiresCheck assessment became UpToDate success");
+}
+
+void test_independent_devel_requires_check_result_semantics() {
+    AurUpdateExecutionPreflight requires_check_only;
+    requires_check_only.targets.push_back(
+        independent_devel_requires_check_target(
+            0, "independent-result-git", "independent-result-base-git"));
+    requires_check_only.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    AurUpdateSourceBuildPreparation noop_preparation;
+    noop_preparation.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+
+    const AurUpdateOperationResult no_updates =
+        ::reduce_aur_update_operation_result(
+            requires_check_only, noop_preparation,
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
+            std::nullopt);
+
+    expect(
+        no_updates.status == AurUpdateOperationStatus::NoUpdates &&
+            no_updates.is_success() &&
+            no_updates.reduction_issues.empty() &&
+            no_updates.targets.size() == 1 &&
+            no_updates.targets.front().status ==
+                AurUpdateOperationTargetStatus::Skipped &&
+            no_updates.targets.front().skip_kind ==
+                std::optional<AurUpdateExecutionSkipKind>{
+                    AurUpdateExecutionSkipKind::
+                        IndependentDevelRequiresCheck} &&
+            no_updates.package_state_change() ==
+                PackageStateChange::Unknown &&
+            !no_updates.changed_package_state(),
+        "Independent RequiresCheck-only result was not a successful unverified skip");
+    const AurUpdateOperationTargetResult& skipped =
+        no_updates.targets.front();
+    expect(
+        skipped.update_plan_index == 0 &&
+            skipped.update.installed_name == "independent-result-git" &&
+            skipped.update.installed_version == "1.0-1" &&
+            skipped.update.install_reason ==
+                InstalledPackageReason::Explicit &&
+            skipped.package_base ==
+                std::optional<std::string>{
+                    "independent-result-base-git"} &&
+            skipped.update.aur_package.has_value() &&
+            skipped.update.aur_package->aur_name ==
+                "independent-result-git" &&
+            skipped.update.aur_package->package_base ==
+                "independent-result-base-git" &&
+            skipped.update.aur_package->version == "1.0-1" &&
+            skipped.update.aur_package->version_relation ==
+                AurVersionRelation::SameAsInstalled &&
+            skipped.update.classification ==
+                AurUpdateClassification::UpToDate &&
+            skipped.update.devel_assessment.requires_check_reason() !=
+                nullptr &&
+            *skipped.update.devel_assessment.requires_check_reason() ==
+                DevelRequiresCheckReason::SuffixCandidateOnly &&
+            skipped.preflight_issues.size() == 1 &&
+            skipped.preflight_issues.front().reason ==
+                AurUpdateExecutionReason::DevelRequiresCheck &&
+            skipped.preflight_issues.front()
+                    .devel_requires_check_reason ==
+                std::optional<DevelRequiresCheckReason>{
+                    DevelRequiresCheckReason::SuffixCandidateOnly},
+        "Independent RequiresCheck result lost full target identity or exact reason");
+
+    AurUpdateExecutionPreflight mixed = preflight_with({
+        executable_target(0, "updated-root"),
+        independent_devel_requires_check_target(
+            1, "independent-mixed-result-git"),
+    });
+    mixed.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    mixed.build_plan = BuildPlan{};
+    mixed.build_plan->root_targets = {{0, "updated-root"}};
+    mixed.build_plan->package_targets.push_back(PlannedPackageTarget{
+        "updated-root",
+        "updated-root",
+        {PackageRole::Root},
+        {{0, "updated-root"}}});
+    mixed.build_plan->order.push_back(
+        BuildPlanEntry{"updated-root", {"updated-root"}});
+    AurUpdateSourceBuildPreparation mixed_preparation =
+        preparation_for_execution(mixed);
+    mixed_preparation.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    const AurUpdateSourceBuildExecutionResult execution = execution_result(
+        AurUpdateInvocationExecutionStatus::Completed,
+        {work_item_result(
+            0, AurUpdateWorkItemExecutionStatus::Updated, {0},
+            "updated-root")});
+
+    const AurUpdateOperationResult changed =
+        ::reduce_aur_update_operation_result(
+            mixed, mixed_preparation,
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
+            execution);
+    expect(
+        changed.status == AurUpdateOperationStatus::Completed &&
+            changed.is_success() && changed.reduction_issues.empty() &&
+            changed.targets.size() == 2 &&
+            changed.targets[0].status ==
+                AurUpdateOperationTargetStatus::Updated &&
+            changed.targets[1].status ==
+                AurUpdateOperationTargetStatus::Skipped &&
+            changed.targets[1].skip_kind ==
+                std::optional<AurUpdateExecutionSkipKind>{
+                    AurUpdateExecutionSkipKind::
+                        IndependentDevelRequiresCheck} &&
+            changed.package_state_change() ==
+                PackageStateChange::Changed &&
+            changed.changed_package_state(),
+        "Changed package evidence did not take precedence over independent RequiresCheck attention");
+}
+
+void test_required_devel_blocker_result_correlation() {
+    preparation_stub::reset();
+    const AppConfig config;
+    AurUpdateExecutionPreflight preflight =
+        required_devel_result_preflight();
+    const AurUpdateSourceBuildPreparation preparation =
+        prepare_aur_update_source_build_invocation(
+            preflight,
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
+            SavedSourcePreferencePolicy::Ignore, false, config);
+    const AurUpdateOperationResult blocked =
+        ::reduce_aur_update_operation_result(
+            preflight, preparation,
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
+            std::nullopt);
+    expect(
+        preparation.is_blocked() &&
+            blocked.status ==
+                AurUpdateOperationStatus::BlockedBeforeExecution &&
+            blocked.reduction_issues.empty() &&
+            blocked.targets.size() == 2 &&
+            blocked.targets[0].status ==
+                AurUpdateOperationTargetStatus::Incomplete &&
+            blocked.targets[1].status ==
+                AurUpdateOperationTargetStatus::Skipped &&
+            blocked.targets[1].skip_kind ==
+                AurUpdateExecutionSkipKind::RequiredDevelRequiresCheck &&
+            !blocked.is_success(),
+        "Required devel blocker did not reduce to a coherent blocked result");
+
+    std::get<AurResolvedDependencyCandidate>(
+        *preflight.build_plan->dependency_edges.front()
+             .resolved_candidate)
+        .package_version = ObservedVersion::available(
+        ObservedVersionSource::AurExactPackage, "9.0-1");
+    const AurUpdateOperationResult drifted =
+        ::reduce_aur_update_operation_result(
+            preflight, preparation,
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
+            std::nullopt);
+    expect(
+        drifted.status ==
+                AurUpdateOperationStatus::InconsistentResult &&
+            has_reduction_issue(
+                drifted,
+                AurUpdateOperationReductionReason::
+                    OtherCorrelationInconsistent),
+        "Required devel BuildPlan version drift passed the result firewall");
+}
+
+void test_missing_required_devel_relation_result_is_inconsistent() {
+    AurUpdateExecutionPreflight malformed =
+        required_devel_result_preflight();
+    std::erase_if(
+        malformed.targets[0].issues,
+        [](const AurUpdateExecutionIssue& issue) {
+            return issue.reason == AurUpdateExecutionReason::
+                                       RequiredDevelTargetRequiresCheck;
+        });
+    malformed.targets[0].status =
+        AurUpdateExecutionTargetStatus::Executable;
+    malformed.targets[1].skip_kind =
+        AurUpdateExecutionSkipKind::IndependentDevelRequiresCheck;
+
+    const RootTargetIdentity root{0, "required-result-root"};
+    ExactReducerInput input = exact_reducer_input(
+        malformed.targets,
+        {
+            ExactWorkItemExecutionSpec{
+                "required-result-base",
+                {exact_child(
+                    "required-result-git", {0}, {root},
+                    {PackageRole::RuntimeDependency},
+                    AurUpdateChildExecutionStatus::Installed,
+                    DesiredInstallReason::Dependency)},
+                AurUpdateWorkItemExecutionStatus::Updated,
+                {}},
+            ExactWorkItemExecutionSpec{
+                "required-result-root",
+                {exact_child(
+                    "required-result-root", {0}, {root},
+                    {PackageRole::Root},
+                    AurUpdateChildExecutionStatus::Installed)},
+                AurUpdateWorkItemExecutionStatus::Updated,
+                {}},
+        },
+        AurUpdateInvocationExecutionStatus::Completed);
+    input.preflight.build_plan = malformed.build_plan;
+    input.preflight.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    input.preparation.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+
+    const AurUpdateOperationResult missing =
+        ::reduce_aur_update_operation_result(
+            input.preflight, input.preparation,
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
+            input.execution);
+    expect(
+        missing.status == AurUpdateOperationStatus::InconsistentResult &&
+            !missing.is_success() &&
+            std::any_of(
+                missing.reduction_issues.begin(),
+                missing.reduction_issues.end(),
+                [](const AurUpdateOperationReductionIssue& issue) {
+                    return issue.reason ==
+                               AurUpdateOperationReductionReason::
+                                   OtherCorrelationInconsistent &&
+                           issue.stage ==
+                               AurUpdateOperationReductionStage::Preflight;
+                }),
+        "Missing required-devel blocker became a successful result");
+
+    AurUpdateExecutionTarget installed_root =
+        executable_target(0, "installed-forged-root");
+    AurUpdateExecutionTarget installed_requires_check =
+        independent_devel_requires_check_target(
+            1, "installed-forged-git", "installed-forged-base");
+    ExactReducerInput installed_input = exact_reducer_input(
+        {installed_root, installed_requires_check},
+        {ExactWorkItemExecutionSpec{
+            "installed-forged-root",
+            {exact_child(
+                "installed-forged-root", {0},
+                {{0, "installed-forged-root"}},
+                {PackageRole::Root},
+                AurUpdateChildExecutionStatus::Installed)},
+            AurUpdateWorkItemExecutionStatus::Updated,
+            {}}},
+        AurUpdateInvocationExecutionStatus::Completed);
+    BuildPlan installed_plan;
+    installed_plan.root_targets = {{0, "installed-forged-root"}};
+    installed_plan.package_targets.push_back(PlannedPackageTarget{
+        "installed-forged-root",
+        "installed-forged-root",
+        {PackageRole::Root},
+        {{0, "installed-forged-root"}}});
+    installed_plan.order.push_back(BuildPlanEntry{
+        "installed-forged-root", {"installed-forged-root"}});
+    installed_plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+        "installed-forged-root",
+        "installed-forged-root",
+        "installed-forged-git>=2",
+        PackageRole::RuntimeDependency,
+        DependencyKind::Installed,
+        "installed-forged-git",
+        std::nullopt,
+        std::nullopt,
+        ProviderResolutionKind::Unique,
+        DependencyRequirement{ConsumerDependencyRequirement(
+            "installed-forged-git>=2", "installed-forged-git",
+            DependencyVersionConstraint(
+                DependencyVersionRelation::GreaterThanOrEqual,
+                "2"))},
+        ResolvedDependencyCandidate{InstalledExactPackage{
+            "installed-forged-git",
+            ObservedVersion::available(
+                ObservedVersionSource::InstalledExactPackage,
+                "1.0-1")}},
+        ConstraintEvaluation::unconstrained()});
+    installed_input.preflight.build_plan = std::move(installed_plan);
+    installed_input.preflight.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    installed_input.preparation.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+
+    const AurUpdateOperationResult installed_forged =
+        ::reduce_aur_update_operation_result(
+            installed_input.preflight, installed_input.preparation,
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
+            installed_input.execution);
+    expect(
+        installed_forged.status ==
+                AurUpdateOperationStatus::InconsistentResult &&
+            has_reduction_issue(
+                installed_forged,
+                AurUpdateOperationReductionReason::
+                    OtherCorrelationInconsistent),
+        "Forged InstalledExact constraint became a successful result");
 }
 
 void test_skip_order_and_typed_reasons_are_preserved() {
@@ -755,27 +1210,128 @@ void test_requires_check_policy_snapshots_fail_closed() {
         std::move(unknown), std::move(unknown_preparation),
         unknown_policy, "unknown RequiresCheck policy");
 
-    AurUpdateExecutionTarget future =
-        up_to_date_target(0, "future-independent-skip");
-    future.skip_kind =
-        AurUpdateExecutionSkipKind::IndependentDevelRequiresCheck;
-    AurUpdateExecutionPreflight future_preflight =
-        preflight_with({std::move(future)});
-    future_preflight.devel_requires_check_policy =
-        DevelRequiresCheckPolicy::SkipIndependentTarget;
-    AurUpdateSourceBuildPreparation future_preparation;
-    future_preparation.devel_requires_check_policy =
-        DevelRequiresCheckPolicy::SkipIndependentTarget;
-    const AurUpdateOperationResult future_result =
-        ::reduce_aur_update_operation_result(
-            future_preflight, future_preparation,
-            DevelRequiresCheckPolicy::SkipIndependentTarget,
-            std::nullopt);
-    expect(
-        future_result.status ==
-                AurUpdateOperationStatus::InconsistentResult &&
-            !future_result.is_success(),
-        "Slice 1 accepted an independent RequiresCheck skip snapshot");
+    expect_independent_shape_inconsistent(
+        independent_devel_requires_check_target(
+            0, "block-policy-result-git"),
+        DevelRequiresCheckPolicy::BlockOperation,
+        "BlockOperation independent RequiresCheck result");
+
+    AurUpdateExecutionTarget missing_reason =
+        independent_devel_requires_check_target(
+            0, "missing-result-reason-git");
+    missing_reason.issues.front().devel_requires_check_reason.reset();
+    expect_independent_shape_inconsistent(
+        std::move(missing_reason),
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        "independent result without exact reason");
+
+    AurUpdateExecutionTarget missing_classification =
+        independent_devel_requires_check_target(
+            0, "missing-result-classification-git");
+    missing_classification.update.devel_classification.reset();
+    expect_independent_shape_inconsistent(
+        std::move(missing_classification),
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        "independent result without producer classification");
+
+    AurUpdateExecutionTarget base_evidence_drift =
+        independent_devel_requires_check_target(
+            0, "base-result-evidence-drift-git");
+    base_evidence_drift.update.devel_classification =
+        DevelPackageClassification::classify(
+            DevelPackageSuffixEvidence::classify(
+                "different-result-base-git",
+                {"base-result-evidence-drift-git"}));
+    expect_independent_shape_inconsistent(
+        std::move(base_evidence_drift),
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        "independent result with PackageBase evidence drift");
+
+    AurUpdateExecutionTarget child_evidence_drift =
+        independent_devel_requires_check_target(
+            0, "child-result-evidence-drift-git");
+    child_evidence_drift.update.devel_classification =
+        DevelPackageClassification::classify(
+            DevelPackageSuffixEvidence::classify(
+                "child-result-evidence-drift-git",
+                {"different-result-child-git"}));
+    expect_independent_shape_inconsistent(
+        std::move(child_evidence_drift),
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        "independent result with child evidence drift");
+
+    AurUpdateExecutionTarget reason_evidence_drift =
+        independent_devel_requires_check_target(
+            0, "reason-result-evidence-drift-git");
+    reason_evidence_drift.update.devel_assessment =
+        DevelUpdateAssessment::requires_check(
+            DevelRequiresCheckReason::NoAuthoritativeBuildProvenance);
+    reason_evidence_drift.issues.front().devel_requires_check_reason =
+        DevelRequiresCheckReason::NoAuthoritativeBuildProvenance;
+    expect_independent_shape_inconsistent(
+        std::move(reason_evidence_drift),
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        "independent result with reason evidence drift");
+
+    AurUpdateExecutionTarget forged_assessment =
+        independent_devel_requires_check_target(
+            0, "forged-result-assessment-git");
+    forged_assessment.update.devel_assessment =
+        DevelUpdateAssessment::not_applicable();
+    expect_independent_shape_inconsistent(
+        std::move(forged_assessment),
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        "independent result with forged assessment");
+
+    AurUpdateExecutionTarget forged_classification =
+        independent_devel_requires_check_target(
+            0, "forged-result-classification-git");
+    forged_classification.update.classification =
+        AurUpdateClassification::UpdateAvailable;
+    forged_classification.update.aur_package->version_relation =
+        AurVersionRelation::NewerThanInstalled;
+    expect_independent_shape_inconsistent(
+        std::move(forged_classification),
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        "independent result with forged classification");
+
+    AurUpdateExecutionTarget rooted_skip =
+        independent_devel_requires_check_target(
+            0, "rooted-independent-result-git");
+    rooted_skip.build_plan_root_index = 0;
+    expect_independent_shape_inconsistent(
+        std::move(rooted_skip),
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        "independent result with BuildPlan root");
+
+    AurUpdateExecutionTarget install_candidate_skip =
+        independent_devel_requires_check_target(
+            0, "install-candidate-result-git");
+    install_candidate_skip.desired_install_reason =
+        DesiredInstallReason::Explicit;
+    expect_independent_shape_inconsistent(
+        std::move(install_candidate_skip),
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        "independent result with install reason");
+
+    AurUpdateExecutionTarget contradictory_skip =
+        independent_devel_requires_check_target(
+            0, "contradictory-independent-result-git");
+    AurUpdateRequiredDevelTargetBlocker required_blocker{
+        AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+        0,
+        "contradictory-independent-result-git",
+        DevelRequiresCheckReason::SuffixCandidateOnly};
+    required_blocker.dependency_edge_index = 0;
+    required_blocker.package_base =
+        "contradictory-independent-result-git";
+    required_blocker.roles = {PackageRole::RuntimeDependency};
+    contradictory_skip.issues.front().required_devel_target_blocker =
+        std::move(required_blocker);
+    expect_independent_shape_inconsistent(
+        std::move(contradictory_skip),
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        "independent result with required blocker");
 }
 
 void test_unknown_preflight_reason_is_typed() {
@@ -3403,6 +3959,15 @@ void run_case(const std::string& name, Callable callable) {
 int main() {
     try {
         run_case("all skipped is NoUpdates", test_all_skipped_is_no_updates);
+        run_case(
+            "independent RequiresCheck result semantics",
+            test_independent_devel_requires_check_result_semantics);
+        run_case(
+            "required devel blocker result correlation",
+            test_required_devel_blocker_result_correlation);
+        run_case(
+            "missing required devel relation result is inconsistent",
+            test_missing_required_devel_relation_result_is_inconsistent);
         run_case(
             "skip order and typed reasons are preserved",
             test_skip_order_and_typed_reasons_are_preserved);

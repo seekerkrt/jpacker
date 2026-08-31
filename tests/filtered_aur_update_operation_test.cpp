@@ -3064,6 +3064,292 @@ void test_original_filtered_and_preflight_index_mapping() {
     execution_stub::require_script_consumed();
 }
 
+void test_requires_check_policy_skip_adapter_and_full_retention() {
+    reset_stubs();
+    const AurUpdatePlan original_plan{{
+        classified_update_entry("normal-update-git"),
+        requires_check_entry(
+            "independent-devel-git", "independent-devel-base"),
+        current_entry("current-package"),
+    }};
+
+    std::vector<FilteredAurUpdateOperationIssue> adapter_issues;
+    const FilteredAurUpdateTargetAdapter adapter =
+        adapt_aur_update_plan_for_upgrade_all(
+            original_plan,
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
+            adapter_issues);
+    expect(
+        adapter_issues.empty() && adapter.entries.size() == 3 &&
+            adapter.entries[0].original_query_plan_index == 0 &&
+            adapter.entries[0].update == original_plan.entries[0] &&
+            adapter.entries[0].disposition ==
+                FilteredAurUpdateTargetAdapterDisposition::PlannerTarget &&
+            adapter.entries[0].planner_target_index ==
+                std::optional<std::size_t>{0} &&
+            adapter.entries[1].original_query_plan_index == 1 &&
+            adapter.entries[1].update == original_plan.entries[1] &&
+            adapter.entries[1].disposition ==
+                FilteredAurUpdateTargetAdapterDisposition::
+                    RequiresCheckPolicySkip &&
+            adapter.entries[1].devel_requires_check_policy ==
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::SkipIndependentTarget} &&
+            adapter.entries[1].devel_requires_check_reason ==
+                std::optional<DevelRequiresCheckReason>{
+                    DevelRequiresCheckReason::SuffixCandidateOnly} &&
+            !adapter.entries[1].planner_target_index.has_value() &&
+            adapter.entries[2].original_query_plan_index == 2 &&
+            adapter.entries[2].update == original_plan.entries[2] &&
+            adapter.entries[2].disposition ==
+                FilteredAurUpdateTargetAdapterDisposition::NormalSkip &&
+            !adapter.entries[2].planner_target_index.has_value(),
+        "RequiresCheck adapter disposition lost full target identity");
+    expect(
+        adapter.planner_targets.size() == 1 &&
+            adapter.planner_targets.front().package_name ==
+                "normal-update-git" &&
+            adapter.planner_target_to_original_query_plan_index ==
+                std::vector<std::size_t>{0} &&
+            adapter.original_query_plan_to_planner_target_index ==
+                std::vector<std::optional<std::size_t>>{
+                    std::size_t{0}, std::nullopt, std::nullopt},
+        "RequiresCheck adapter leaked a policy skip into planner roots");
+
+    std::vector<FilteredAurUpdateOperationIssue> block_issues;
+    const FilteredAurUpdateTargetAdapter block_adapter =
+        adapt_aur_update_plan_for_upgrade_all(
+            AurUpdatePlan{{original_plan.entries[1]}},
+            DevelRequiresCheckPolicy::BlockOperation,
+            block_issues);
+    expect(
+        block_issues.empty() && block_adapter.entries.size() == 1 &&
+            block_adapter.entries.front().disposition ==
+                FilteredAurUpdateTargetAdapterDisposition::PlannerTarget &&
+            !block_adapter.entries.front()
+                 .devel_requires_check_policy.has_value() &&
+            !block_adapter.entries.front()
+                 .devel_requires_check_reason.has_value() &&
+            block_adapter.entries.front().planner_target_index ==
+                std::optional<std::size_t>{0} &&
+            block_adapter.planner_targets.size() == 1 &&
+            block_adapter.planner_targets.front().status ==
+                UpgradeAllAurTargetStatus::Incomplete,
+        "BlockOperation adapter behavior changed for RequiresCheck");
+
+    return_build_plan(
+        root_plan({{"normal-update-git", "normal-update-git"}}),
+        {"normal-update-git"});
+    const AppConfig config;
+    PreparedFilteredAurUpdateOperation prepared =
+        ::prepare_filtered_aur_update_operation(
+            query_result(original_plan.entries),
+            NoExplicitSourceSatisfaction{},
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
+            SavedSourcePreferencePolicy::Ignore, config);
+
+    expect(
+        prepared.is_prepared() &&
+            prepared.original_query_result().plan == original_plan &&
+            prepared.filtered_plan() == original_plan &&
+            prepared.filtered_to_original_indexes() ==
+                std::vector<std::size_t>{0, 1, 2} &&
+            prepared.original_to_filtered_indexes() ==
+                std::vector<std::optional<std::size_t>>{
+                    std::size_t{0}, std::size_t{1}, std::size_t{2}},
+        "RequiresCheck policy skip disappeared from the full filtered plan");
+    expect(
+        prepared.target_adapter_result().entries[1].disposition ==
+                FilteredAurUpdateTargetAdapterDisposition::
+                    RequiresCheckPolicySkip &&
+            prepared.target_adapter_result()
+                    .entries[1]
+                    .devel_requires_check_policy ==
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::SkipIndependentTarget} &&
+            prepared.target_adapter_result()
+                    .entries[1]
+                    .devel_requires_check_reason ==
+                std::optional<DevelRequiresCheckReason>{
+                    DevelRequiresCheckReason::SuffixCandidateOnly} &&
+            prepared.target_adapter_result()
+                    .entries[1]
+                    .filtered_update_plan_index ==
+                std::optional<std::size_t>{1} &&
+            prepared.selected_target_correlations().size() == 1 &&
+            prepared.selected_target_correlations()
+                    .front()
+                    .original_query_plan_index == 0 &&
+            prepared.selected_target_correlations()
+                    .front()
+                    .filtered_update_plan_index == 0 &&
+            preflight_stub::resolver_calls() ==
+                std::vector<std::vector<std::string>>{
+                    {"normal-update-git"}},
+        "RequiresCheck planner subset or correlation mapping differs");
+    const AurUpdateExecutionPreflight& preflight =
+        prepared.execution_preflight();
+    expect(
+        preflight.targets.size() == 3 &&
+            preflight.targets[0].status ==
+                AurUpdateExecutionTargetStatus::Executable &&
+            preflight.targets[0].update.devel_assessment.state() ==
+                DevelUpdateAssessmentState::RequiresCheck &&
+            project_aur_update_effective_state(
+                preflight.targets[0].update) ==
+                AurUpdateEffectiveState::UpdateAvailable &&
+            preflight.targets[1].status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            preflight.targets[1].skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    IndependentDevelRequiresCheck &&
+            preflight.targets[1].issues.size() == 1 &&
+            preflight.targets[1]
+                    .issues.front()
+                    .devel_requires_check_reason ==
+                std::optional<DevelRequiresCheckReason>{
+                    DevelRequiresCheckReason::SuffixCandidateOnly} &&
+            preflight.targets[2].status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            preflight.targets[2].skip_kind ==
+                AurUpdateExecutionSkipKind::UpToDate,
+        "Filtered preflight changed update precedence or skip kinds");
+
+    reset_stubs();
+    PreparedFilteredAurUpdateOperation skip_only =
+        ::prepare_filtered_aur_update_operation(
+            query_result({original_plan.entries[1]}),
+            NoExplicitSourceSatisfaction{},
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
+            SavedSourcePreferencePolicy::Ignore, config);
+    expect(
+        skip_only.is_noop() && preflight_stub::resolver_call_count() == 0 &&
+            skip_only.original_query_result().plan.entries.size() == 1 &&
+            skip_only.filtered_plan().entries ==
+                std::vector<AurUpdatePlanEntry>{
+                    original_plan.entries[1]} &&
+            skip_only.target_adapter_result()
+                    .entries.front()
+                    .disposition ==
+                FilteredAurUpdateTargetAdapterDisposition::
+                    RequiresCheckPolicySkip &&
+            skip_only.target_adapter_result()
+                    .entries.front()
+                    .devel_requires_check_policy ==
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::SkipIndependentTarget} &&
+            skip_only.target_adapter_result()
+                    .entries.front()
+                    .devel_requires_check_reason ==
+                std::optional<DevelRequiresCheckReason>{
+                    DevelRequiresCheckReason::SuffixCandidateOnly} &&
+            skip_only.execution_preflight().targets.front().status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            skip_only.execution_preflight().targets.front().skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    IndependentDevelRequiresCheck &&
+            project_aur_update_effective_state(
+                skip_only.execution_preflight().targets.front().update) ==
+                AurUpdateEffectiveState::RequiresCheck,
+        "RequiresCheck-only filtered capability was dropped, resolved, or blocked");
+}
+
+void test_requires_check_skip_observation_foundation() {
+    const AppConfig config;
+    const AurUpdatePlanEntry requires_check = requires_check_entry(
+        "observed-independent-git", "observed-independent-base");
+
+    reset_stubs();
+    const FilteredAurUpdateObservation independent =
+        ::observe_filtered_aur_update_operation(
+            query_result({requires_check}),
+            NoExplicitSourceSatisfaction{},
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
+            SavedSourcePreferencePolicy::Ignore, config);
+    expect(
+        independent.is_noop() && !independent.is_blocked() &&
+            preflight_stub::resolver_call_count() == 0 &&
+            independent.preflight.targets.size() == 1 &&
+            independent.preflight.targets.front().status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            independent.preflight.targets.front().skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    IndependentDevelRequiresCheck &&
+            independent.source_build_observation.has_value() &&
+            independent.source_build_observation->is_noop(),
+        "Independent RequiresCheck observation was blocked or flattened");
+
+    reset_stubs();
+    BuildPlan required_plan =
+        root_plan({{"observed-root", "observed-root"}});
+    add_aur_dependency(
+        required_plan, "observed-root", "observed-required-git",
+        "observed-required-base");
+    return_build_plan(std::move(required_plan), {"observed-root"});
+    const FilteredAurUpdateObservation required =
+        ::observe_filtered_aur_update_operation(
+            query_result({
+                update_entry("observed-root"),
+                requires_check_entry(
+                    "observed-required-git",
+                    "observed-required-base"),
+            }),
+            NoExplicitSourceSatisfaction{},
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
+            SavedSourcePreferencePolicy::Ignore, config);
+    expect(
+        required.is_blocked() && !required.is_noop() &&
+            required.preflight.targets.size() == 2 &&
+            required.preflight.targets[0].status ==
+                AurUpdateExecutionTargetStatus::Incomplete &&
+            required.preflight.targets[1].status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            required.preflight.targets[1].skip_kind ==
+                AurUpdateExecutionSkipKind::RequiredDevelRequiresCheck &&
+            has_preflight_issue(
+                required.preflight.targets[0],
+                AurUpdateExecutionReason::
+                    RequiredDevelTargetRequiresCheck) &&
+            required.source_build_observation.has_value() &&
+            required.source_build_observation->is_blocked(),
+        "Required RequiresCheck observation lost its typed blocker");
+
+    reset_stubs();
+    BuildPlan execution_plan =
+        root_plan({{"execution-root", "execution-root"}});
+    add_aur_dependency(
+        execution_plan, "execution-root", "execution-required-git",
+        "execution-required-base");
+    return_build_plan(std::move(execution_plan), {"execution-root"});
+    PreparedFilteredAurUpdateOperation blocked_preparation =
+        ::prepare_filtered_aur_update_operation(
+            query_result({
+                update_entry("execution-root"),
+                requires_check_entry(
+                    "execution-required-git",
+                    "execution-required-base"),
+            }),
+            NoExplicitSourceSatisfaction{},
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
+            SavedSourcePreferencePolicy::Ignore, config);
+    expect(
+        blocked_preparation.is_blocked() &&
+            blocked_preparation.source_build_preparation().has_value() &&
+            blocked_preparation.source_build_preparation()->is_blocked() &&
+            !blocked_preparation.source_build_preparation()
+                 ->invocation.has_value(),
+        "Required RequiresCheck relation created an execution capability");
+    const FilteredAurUpdateExecutionResult blocked_execution =
+        ::execute_prepared_filtered_aur_update_operation(
+            std::move(blocked_preparation), config);
+    expect(
+        !blocked_execution.execution.has_value() &&
+            blocked_execution.reduced_operation_result.status ==
+                AurUpdateOperationStatus::BlockedBeforeExecution,
+        "Required RequiresCheck relation reached the runner");
+    expect_no_mutation("required RequiresCheck completeness firewall");
+}
+
 void test_transitive_external_satisfaction_keeps_selected_root_executable() {
     reset_stubs();
     const AppConfig config;
@@ -4219,6 +4505,12 @@ int main() {
         run_case(
             "original, filtered, and preflight index mapping",
             test_original_filtered_and_preflight_index_mapping);
+        run_case(
+            "RequiresCheck policy-skip adapter and full retention",
+            test_requires_check_policy_skip_adapter_and_full_retention);
+        run_case(
+            "RequiresCheck skip observation foundation",
+            test_requires_check_skip_observation_foundation);
         run_case(
             "transitive external satisfaction",
             test_transitive_external_satisfaction_keeps_selected_root_executable);

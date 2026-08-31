@@ -96,6 +96,10 @@ constexpr std::string_view ROOT_ROLE_NAME = "Root";
 constexpr std::string_view UPGRADE_ALL_COMMAND_NAME = "upgrade-all";
 constexpr std::string_view DEVEL_REQUIRES_CHECK_POLICY_DIAGNOSTIC =
     "Devel RequiresCheck policy is unknown.";
+constexpr char PREFLIGHT_TARGET_COUNT_DIAGNOSTIC[] =
+    "Preflight target count differs from the filtered update plan.";
+constexpr char PREFLIGHT_TARGET_PAYLOAD_DIAGNOSTIC[] =
+    "Preflight target position/index/payload differs from the filtered update plan.";
 
 std::vector<UpgradeAllExplicitSourceIdentity>
 materialize_explicit_source_satisfaction(
@@ -690,15 +694,82 @@ void build_filtered_update_plan(Operation& operation) {
     const AurUpdatePlan& original_plan = state.query_result.plan;
     state.original_query_plan_to_filtered_index.assign(
         original_plan.entries.size(), std::nullopt);
+    if(state.target_adapter.entries.size() !=
+       original_plan.entries.size()) {
+        add_localized_operation_issue(
+            state.issues,
+            FilteredAurUpdateOperationIssueKind::
+                TargetPlannerMappingInconsistent,
+            localization::translate_message(
+                PREFLIGHT_TARGET_COUNT_DIAGNOSTIC));
+    }
 
     for(std::size_t original_index = 0;
         original_index < state.target_adapter.entries.size();
         ++original_index) {
         FilteredAurUpdateTargetAdapterEntry& adapter_entry =
             state.target_adapter.entries[original_index];
+        if(original_index >= original_plan.entries.size() ||
+           adapter_entry.original_query_plan_index != original_index ||
+           !same_update_entry(
+               adapter_entry.update,
+               original_plan.entries[original_index])) {
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
+                state.issues,
+                FilteredAurUpdateOperationIssueKind::
+                    TargetPlannerMappingInconsistent,
+                localization::translate_message(
+                    PREFLIGHT_TARGET_PAYLOAD_DIAGNOSTIC));
+            issue.original_query_plan_index = original_index;
+            issue.package_name = adapter_entry.update.installed_name;
+            continue;
+        }
+
+        const bool is_requires_check_policy_skip =
+            adapter_entry.disposition ==
+            FilteredAurUpdateTargetAdapterDisposition::
+                RequiresCheckPolicySkip;
+        const DevelRequiresCheckReason* adapter_requires_check_reason =
+            adapter_entry.update.devel_assessment
+                .requires_check_reason();
+        if(is_requires_check_policy_skip &&
+           (state.devel_requires_check_policy !=
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::SkipIndependentTarget} ||
+            adapter_entry.devel_requires_check_policy !=
+                state.devel_requires_check_policy ||
+            project_aur_update_effective_state(adapter_entry.update) !=
+                AurUpdateEffectiveState::RequiresCheck ||
+            adapter_requires_check_reason == nullptr ||
+            adapter_entry.devel_requires_check_reason !=
+                std::optional<DevelRequiresCheckReason>{
+                    *adapter_requires_check_reason} ||
+            adapter_entry.planner_target_index.has_value())) {
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
+                state.issues,
+                FilteredAurUpdateOperationIssueKind::
+                    DevelRequiresCheckPolicyInconsistent,
+                std::string{DEVEL_REQUIRES_CHECK_POLICY_DIAGNOSTIC});
+            issue.original_query_plan_index = original_index;
+            issue.package_name = adapter_entry.update.installed_name;
+        }
+        if(!is_requires_check_policy_skip &&
+           (adapter_entry.devel_requires_check_policy.has_value() ||
+            adapter_entry.devel_requires_check_reason.has_value())) {
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
+                state.issues,
+                FilteredAurUpdateOperationIssueKind::
+                    DevelRequiresCheckPolicyInconsistent,
+                std::string{DEVEL_REQUIRES_CHECK_POLICY_DIAGNOSTIC});
+            issue.original_query_plan_index = original_index;
+            issue.package_name = adapter_entry.update.installed_name;
+        }
         bool should_retain =
             adapter_entry.disposition ==
-            FilteredAurUpdateTargetAdapterDisposition::NormalSkip;
+                FilteredAurUpdateTargetAdapterDisposition::NormalSkip ||
+            adapter_entry.disposition ==
+                FilteredAurUpdateTargetAdapterDisposition::
+                    RequiresCheckPolicySkip;
         if(adapter_entry.planner_target_index.has_value()) {
             const std::size_t planner_index =
                 *adapter_entry.planner_target_index;
@@ -1535,6 +1606,23 @@ FilteredAurUpdateTargetAdapter adapt_aur_update_plan_for_upgrade_all(
                                           AUR_SERVICE_NAME);
                 break;
             case AurUpdateEffectiveState::RequiresCheck:
+                if(devel_requires_check_policy ==
+                   DevelRequiresCheckPolicy::SkipIndependentTarget) {
+                    // POLICY(#508): Keep the complete query/update identity,
+                    // but do not let a check-required target become a planner
+                    // root. BuildPlan re-entry is checked by preflight after
+                    // the remaining candidate roots have been resolved.
+                    adapter_entry.disposition =
+                        FilteredAurUpdateTargetAdapterDisposition::
+                            RequiresCheckPolicySkip;
+                    adapter_entry.devel_requires_check_policy =
+                        devel_requires_check_policy;
+                    adapter_entry.devel_requires_check_reason =
+                        *update.devel_assessment
+                             .requires_check_reason();
+                    adapter.entries.push_back(std::move(adapter_entry));
+                    continue;
+                }
                 status = UpgradeAllAurTargetStatus::Incomplete;
                 status_detail = localization::translate_message(
                     "devel package update status requires check: suffix candidate only");

@@ -240,6 +240,60 @@ bool has_incomplete_constraint_evaluations(const BuildPlan& plan) noexcept {
         });
 }
 
+bool is_verified_installed_exact_dependency_satisfaction(
+    const BuildPlanDependencyEdge& edge,
+    const std::string& expected_package_name,
+    const std::string& expected_installed_version) {
+    const bool is_dependency_role =
+        edge.role == PackageRole::RuntimeDependency ||
+        edge.role == PackageRole::BuildDependency ||
+        edge.role == PackageRole::CheckDependency;
+    const auto* requirement =
+        edge.requirement.has_value()
+            ? std::get_if<ConsumerDependencyRequirement>(
+                  &edge.requirement.value())
+            : nullptr;
+    const auto* candidate =
+        edge.resolved_candidate.has_value()
+            ? std::get_if<InstalledExactPackage>(
+                  &edge.resolved_candidate.value())
+            : nullptr;
+    if(!is_dependency_role || edge.kind != DependencyKind::Installed ||
+       edge.provider_resolution != ProviderResolutionKind::Unique ||
+       requirement == nullptr || candidate == nullptr ||
+       edge.dependency_spec != requirement->raw_specification() ||
+       requirement->package_name() != expected_package_name ||
+       edge.resolved_package_name !=
+           std::optional<std::string>{expected_package_name} ||
+       edge.resolved_package_base.has_value() ||
+       edge.resolved_provider.has_value() ||
+       candidate->package_name != expected_package_name ||
+       candidate->observed_version.source() !=
+           ObservedVersionSource::InstalledExactPackage ||
+       candidate->observed_version.version() == nullptr ||
+       *candidate->observed_version.version() !=
+           expected_installed_version ||
+       !edge.constraint_evaluation.has_value()) {
+        return false;
+    }
+
+    const DependencyRequirementParseResult parsed =
+        parse_dependency_requirement(edge.dependency_spec);
+    if(parsed.requirement() == nullptr ||
+       *parsed.requirement() != edge.requirement.value()) {
+        return false;
+    }
+
+    const ConstraintEvaluation fresh_evaluation =
+        evaluate_consumer_dependency_requirement(
+            *requirement, candidate->observed_version);
+    if(fresh_evaluation != edge.constraint_evaluation.value()) return false;
+    return fresh_evaluation.satisfaction() ==
+               ConstraintSatisfaction::Unconstrained ||
+           fresh_evaluation.satisfaction() ==
+               ConstraintSatisfaction::Satisfied;
+}
+
 namespace {
 
 void append_required_action(
