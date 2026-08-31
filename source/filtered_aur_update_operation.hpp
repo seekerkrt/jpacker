@@ -31,6 +31,7 @@ using FilteredAurUpdateExplicitSourceSatisfaction = std::variant<
 
 enum class FilteredAurUpdateOperationIssueKind {
     UnknownUpdateClassification,
+    DevelRequiresCheckPolicyInconsistent,
     TargetPlannerMappingInconsistent,
     FilteredTargetMappingInconsistent,
     PreflightTargetMappingInconsistent,
@@ -135,6 +136,7 @@ class PreparedFilteredAurUpdateOperation final {
         AurUpdateQueryResult query_result,
         FilteredAurUpdateExplicitSourceSatisfaction
             explicit_source_satisfaction,
+        DevelRequiresCheckPolicy devel_requires_check_policy,
         SavedSourcePreferencePolicy saved_source_preference_policy,
         const AppConfig& config,
         std::optional<ValidatedCacheRoot> cache_root);
@@ -148,6 +150,8 @@ class PreparedFilteredAurUpdateOperation final {
     friend struct FilteredAurUpdateOperationMutableAccess;
 
     bool valid_ = true;
+    std::optional<DevelRequiresCheckPolicy>
+        devel_requires_check_policy;
 
     AurUpdateQueryResult query_result;
     FilteredAurUpdateTargetAdapter target_adapter;
@@ -200,6 +204,10 @@ public:
     }
     const std::vector<FilteredAurUpdateOperationIssue>& operation_issues()
         const noexcept;
+    const std::optional<DevelRequiresCheckPolicy>&
+    devel_requires_check_policy_snapshot() const noexcept {
+        return devel_requires_check_policy;
+    }
 
     bool is_valid() const noexcept;
     bool is_prepared() const noexcept;
@@ -224,6 +232,8 @@ struct FilteredAurUpdateObservation {
         build_unit_correlations;
     std::optional<AurUpdateSourceBuildObservation> source_build_observation;
     std::vector<FilteredAurUpdateOperationIssue> issues;
+    std::optional<DevelRequiresCheckPolicy>
+        devel_requires_check_policy;
 
     const AurUpdateQueryResult& original_query_result() const noexcept {
         return query_result;
@@ -246,6 +256,8 @@ struct FilteredAurUpdateObservation {
     bool is_ready() const noexcept;
     bool is_noop() const noexcept;
     bool is_blocked() const noexcept;
+    bool has_consistent_devel_requires_check_policy_snapshot()
+        const noexcept;
 };
 
 struct FilteredAurUpdateExecutionResult {
@@ -265,6 +277,8 @@ struct FilteredAurUpdateExecutionResult {
     AurUpdateOperationResult reduced_operation_result;
     std::vector<FilteredAurUpdateSelectedTargetResult> selected_target_results;
     std::vector<FilteredAurUpdateOperationIssue> issues;
+    std::optional<DevelRequiresCheckPolicy>
+        devel_requires_check_policy;
 
     bool is_success() const noexcept;
     PackageStateChange package_state_change() const noexcept;
@@ -275,16 +289,20 @@ struct FilteredAurUpdateExecutionResult {
     bool has_query_failure() const noexcept;
     bool has_planning_issue() const noexcept;
     bool has_duplicate_exclusions() const noexcept;
+    bool has_consistent_devel_requires_check_policy_snapshot()
+        const noexcept;
 };
 
 FilteredAurUpdateTargetAdapter adapt_aur_update_plan_for_upgrade_all(
     const AurUpdatePlan& update_plan,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     std::vector<FilteredAurUpdateOperationIssue>& issues);
 
 PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
     AurUpdateQueryResult query_result,
     FilteredAurUpdateExplicitSourceSatisfaction
         explicit_source_satisfaction,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     SavedSourcePreferencePolicy saved_source_preference_policy,
     const AppConfig& config,
     std::optional<ValidatedCacheRoot> cache_root = std::nullopt);
@@ -293,6 +311,7 @@ FilteredAurUpdateObservation observe_filtered_aur_update_operation(
     AurUpdateQueryResult query_result,
     FilteredAurUpdateExplicitSourceSatisfaction
         explicit_source_satisfaction,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     SavedSourcePreferencePolicy saved_source_preference_policy,
     const AppConfig& config);
 

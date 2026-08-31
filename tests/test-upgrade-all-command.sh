@@ -1196,7 +1196,7 @@ EOF
 run_matrix_table target-status 10 <<'EOF'
 0|  - package: matrix-target|-
 0|  - package: matrix-target|-
-0|  - package: matrix-target|-
+0|upgrade-all summary:|-
 1|  - package: matrix-target|The upgrade-all result contains failure details despite a successful aggregate status.
 1|  - package: matrix-target|The upgrade-all result contains failure details despite a successful aggregate status.
 1|  - package: matrix-target|execution failure: build or install failure
@@ -1217,11 +1217,12 @@ run_matrix_table operation-status 8 <<'EOF'
 1|-|Unexpected upgrade-all command failure: Unknown AUR update operation status.
 EOF
 
-run_matrix_table preflight-reason 23 <<'EOF'
+run_matrix_table preflight-reason 24 <<'EOF'
 1|  - package: matrix-target|AUR preflight issue: none: matrix preflight diagnostic
-0|  - package: matrix-target|-
+0|upgrade-all summary:|-
 1|  - package: matrix-target|AUR preflight issue: devel update requires check: matrix preflight diagnostic
-0|  - package: matrix-target|-
+1|  - package: matrix-target|AUR preflight issue: devel update requires check: matrix preflight diagnostic
+0|upgrade-all summary:|-
 1|  - package: matrix-target|AUR preflight issue: AUR metadata unavailable: matrix preflight diagnostic
 1|  - package: matrix-target|AUR preflight issue: version comparison unavailable: matrix preflight diagnostic
 1|  - package: matrix-target|AUR preflight issue: installed reason unknown: matrix preflight diagnostic
@@ -1243,9 +1244,10 @@ run_matrix_table preflight-reason 23 <<'EOF'
 1|  - package: matrix-target|Unexpected upgrade-all command failure: Unknown AUR update preflight reason.
 EOF
 
-run_matrix_table preparation-reason 16 <<'EOF'
+run_matrix_table preparation-reason 17 <<'EOF'
 1|  - package: matrix-target|AUR preparation issue: none: matrix preparation diagnostic
 1|  - package: matrix-target|AUR preparation issue: blocking preflight: matrix preparation diagnostic
+1|  - package: matrix-target|AUR preparation issue: preflight inconsistent: matrix preparation diagnostic
 1|  - package: matrix-target|AUR preparation issue: preflight inconsistent: matrix preparation diagnostic
 1|  - package: matrix-target|AUR preparation issue: build plan missing: matrix preparation diagnostic
 1|  - package: matrix-target|AUR preparation issue: build plan order empty: matrix preparation diagnostic
@@ -1278,7 +1280,7 @@ run_matrix_table reduction-stage 4 <<'EOF'
 1|upgrade-all summary:|Unexpected upgrade-all command failure: Unknown AUR reduction stage.
 EOF
 
-run_matrix_table reduction-reason 26 <<'EOF'
+run_matrix_table reduction-reason 27 <<'EOF'
 1|upgrade-all summary:|AUR reduction issue: preflight: duplicate preflight update plan index: matrix reduction diagnostic
 1|upgrade-all summary:|AUR reduction issue: preflight: out-of-range preflight update plan index: matrix reduction diagnostic
 1|upgrade-all summary:|AUR reduction issue: preflight: preflight target order inconsistent: matrix reduction diagnostic
@@ -1300,6 +1302,7 @@ run_matrix_table reduction-reason 26 <<'EOF'
 1|upgrade-all summary:|AUR reduction issue: preflight: unexpected unselected artifact identity: matrix reduction diagnostic
 1|upgrade-all summary:|AUR reduction issue: preflight: execution result with preparation issues: matrix reduction diagnostic
 1|upgrade-all summary:|AUR reduction issue: preflight: missing execution result: matrix reduction diagnostic
+1|upgrade-all summary:|AUR reduction issue: preflight: other correlation inconsistency: matrix reduction diagnostic
 1|upgrade-all summary:|AUR reduction issue: preflight: unknown enum value: matrix reduction diagnostic
 1|upgrade-all summary:|AUR reduction issue: preflight: work item result inconsistent: matrix reduction diagnostic
 1|upgrade-all summary:|AUR reduction issue: preflight: invocation result inconsistent: matrix reduction diagnostic
@@ -1307,8 +1310,9 @@ run_matrix_table reduction-reason 26 <<'EOF'
 1|upgrade-all summary:|Unexpected upgrade-all command failure: Unknown AUR reduction reason.
 EOF
 
-run_matrix_table filtered-issue-kind 16 <<'EOF'
+run_matrix_table filtered-issue-kind 17 <<'EOF'
 1|upgrade-all summary:|AUR mapping issue: unknown update classification: package matrix-target: PackageBase matrix-base: matrix mapping diagnostic
+1|upgrade-all summary:|AUR mapping issue: target/planner mapping inconsistent: package matrix-target: PackageBase matrix-base: matrix mapping diagnostic
 1|upgrade-all summary:|AUR mapping issue: target/planner mapping inconsistent: package matrix-target: PackageBase matrix-base: matrix mapping diagnostic
 1|upgrade-all summary:|AUR mapping issue: filtered target mapping inconsistent: package matrix-target: PackageBase matrix-base: matrix mapping diagnostic
 1|upgrade-all summary:|AUR mapping issue: preflight target mapping inconsistent: package matrix-target: PackageBase matrix-base: matrix mapping diagnostic
@@ -1588,7 +1592,7 @@ assert_exact_line "  操作結果: 不整合" "$stdout_file"
 assert_exact_line "  パッケージ状態の観測: 未検証" "$stdout_file"
 assert_exact_line "    診断: 内部不整合" "$stdout_file"
 
-if [ "$case_count" -ne 247 ]; then
+if [ "$case_count" -ne 251 ]; then
     echo "upgrade-all command test scenario count drifted: $case_count" >&2
     exit 1
 fi

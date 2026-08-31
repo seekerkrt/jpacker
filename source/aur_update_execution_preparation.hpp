@@ -61,6 +61,7 @@ enum class AurUpdatePreparationReason {
     None,
     BlockingPreflight,
     PreflightInconsistent,
+    DevelRequiresCheckPolicyInconsistent,
     BuildPlanMissing,
     BuildPlanOrderEmpty,
     RootAttributionInconsistent,
@@ -167,12 +168,14 @@ class PreparedAurUpdateSourceBuildInvocation final {
     prepare_aur_update_source_build_invocation(
         const AurUpdateExecutionPreflight& preflight,
         const AurUpdateBuildUnitSelection& build_unit_selection,
+        DevelRequiresCheckPolicy devel_requires_check_policy,
         SavedSourcePreferencePolicy saved_source_preference_policy,
         bool needed,
         const AppConfig& config);
     friend AurUpdateSourceBuildPreparation
     prepare_aur_update_source_build_invocation(
         const AurUpdateExecutionPreflight& preflight,
+        DevelRequiresCheckPolicy devel_requires_check_policy,
         SavedSourcePreferencePolicy saved_source_preference_policy,
         bool needed,
         const AppConfig& config);
@@ -225,6 +228,8 @@ struct AurUpdateSourceBuildPreparation {
     std::vector<AurUpdateExternallySatisfiedBuildUnit>
         externally_satisfied_build_units;
     std::optional<PreparedAurUpdateSourceBuildInvocation> invocation;
+    std::optional<DevelRequiresCheckPolicy>
+        devel_requires_check_policy;
 
     bool is_prepared() const noexcept;
     bool is_noop() const noexcept;
@@ -247,6 +252,8 @@ struct AurUpdateSourceBuildObservation {
         work_item_attributions;
     std::optional<ProductionSourceBuildPreparationObservation>
         production_preflight;
+    std::optional<DevelRequiresCheckPolicy>
+        devel_requires_check_policy;
 
     bool is_ready() const noexcept;
     bool is_noop() const noexcept;
@@ -264,6 +271,7 @@ void seed_aur_update_source_build_cache(
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     const AurUpdateExecutionPreflight& preflight,
     const AurUpdateBuildUnitSelection& build_unit_selection,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     SavedSourcePreferencePolicy saved_source_preference_policy,
     bool needed,
     const AppConfig& config);
@@ -273,6 +281,7 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
 AurUpdateSourceBuildObservation observe_aur_update_source_build_preparation(
     const AurUpdateExecutionPreflight& preflight,
     const AurUpdateBuildUnitSelection& build_unit_selection,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     SavedSourcePreferencePolicy saved_source_preference_policy,
     bool needed,
     const AppConfig& config);
@@ -280,12 +289,14 @@ AurUpdateSourceBuildObservation observe_aur_update_source_build_preparation(
 // BuildPlan::order全件をexecution対象にするroute-neutral convenience overload。
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     const AurUpdateExecutionPreflight& preflight,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     SavedSourcePreferencePolicy saved_source_preference_policy,
     bool needed,
     const AppConfig& config);
 
 AurUpdateSourceBuildObservation observe_aur_update_source_build_preparation(
     const AurUpdateExecutionPreflight& preflight,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     SavedSourcePreferencePolicy saved_source_preference_policy,
     bool needed,
     const AppConfig& config);

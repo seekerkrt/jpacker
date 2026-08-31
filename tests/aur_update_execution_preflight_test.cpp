@@ -23,6 +23,20 @@ void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
 }
 
+AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
+    const AurUpdatePlan& update_plan) {
+    return ::resolve_aur_update_execution_preflight(
+        update_plan, DevelRequiresCheckPolicy::BlockOperation);
+}
+
+AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
+    const AurUpdatePlan& update_plan,
+    const ProviderSelectionCallback& select_provider) {
+    return ::resolve_aur_update_execution_preflight(
+        update_plan, DevelRequiresCheckPolicy::BlockOperation,
+        select_provider);
+}
+
 AurUpdatePlanEntry remote_entry(
     const std::string& installed_name,
     InstalledPackageReason installed_reason,
@@ -330,6 +344,11 @@ void test_classification_order_and_combined_resolution() {
     AurUpdateExecutionPreflight preflight =
         resolve_aur_update_execution_preflight(update_plan);
 
+    expect(
+        preflight.devel_requires_check_policy ==
+            std::optional<DevelRequiresCheckPolicy>{
+                DevelRequiresCheckPolicy::BlockOperation},
+        "Combined classification lost the explicit RequiresCheck policy");
     expect(preflight.targets.size() == update_plan.entries.size(), "Target count differs");
     for(std::size_t i = 0; i < preflight.targets.size(); ++i) {
         expect(
@@ -364,6 +383,11 @@ void test_classification_order_and_combined_resolution() {
     expect(
         has_issue(preflight.targets[1], AurUpdateExecutionReason::UpToDate),
         "Up-to-date reason is missing");
+    expect(
+        preflight.targets[1].skip_kind ==
+            std::optional<AurUpdateExecutionSkipKind>{
+                AurUpdateExecutionSkipKind::UpToDate},
+        "Up-to-date typed skip kind is missing");
     expect(!preflight.targets[1].build_plan_root_index.has_value(), "Skipped target has a root index");
 
     expect_status(
@@ -374,6 +398,11 @@ void test_classification_order_and_combined_resolution() {
             preflight.targets[2],
             AurUpdateExecutionReason::NonAurForeign),
         "Non-AUR reason is missing");
+    expect(
+        preflight.targets[2].skip_kind ==
+            std::optional<AurUpdateExecutionSkipKind>{
+                AurUpdateExecutionSkipKind::NonAurForeign},
+        "Non-AUR typed skip kind is missing");
 
     expect_status(
         preflight.targets[3], AurUpdateExecutionTargetStatus::Executable,
@@ -434,6 +463,12 @@ void test_devel_requires_check_blocks_without_candidate_promotion() {
     const AurUpdateExecutionPreflight preflight =
         resolve_aur_update_execution_preflight(update_plan);
 
+    expect(
+        preflight.devel_requires_check_policy ==
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::BlockOperation} &&
+            !preflight.targets[1].skip_kind.has_value(),
+        "RequiresCheck BlockOperation policy or non-skip shape was lost");
     expect_single_resolver_call(
         {"normal-update-git"},
         "RequiresCheck candidate firewall");
@@ -466,6 +501,100 @@ void test_devel_requires_check_blocks_without_candidate_promotion() {
             has_blocking_targets(preflight) &&
             !can_execute(preflight),
         "Mixed RequiresCheck invocation bypassed all-target preflight");
+}
+
+void test_unknown_requires_check_policy_fails_closed() {
+    reset_preflight_stub();
+    const AurUpdateExecutionPreflight preflight =
+        ::resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{remote_entry(
+                "unknown-policy", InstalledPackageReason::Explicit)}},
+            static_cast<DevelRequiresCheckPolicy>(-1));
+
+    expect(
+        resolver_call_count() == 0,
+        "Unknown RequiresCheck policy reached dependency resolution");
+    expect(
+        preflight.devel_requires_check_policy.has_value() &&
+            !is_known_devel_requires_check_policy(
+                *preflight.devel_requires_check_policy) &&
+            has_blocking_targets(preflight) &&
+            !can_execute(preflight),
+        "Unknown RequiresCheck policy was rounded to executable success");
+}
+
+void test_executable_hidden_required_devel_payload_fails_closed() {
+    AurUpdateExecutionTarget target;
+    target.update_plan_index = 0;
+    target.update = remote_entry(
+        "hidden-required-devel", InstalledPackageReason::Explicit);
+    target.status = AurUpdateExecutionTargetStatus::Executable;
+    target.desired_install_reason = DesiredInstallReason::Explicit;
+
+    AurUpdateExecutionIssue hidden_issue;
+    hidden_issue.required_devel_target_blocker =
+        AurUpdateRequiredDevelTargetBlocker{
+            AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+            1,
+            "required-devel-git",
+            DevelRequiresCheckReason::SuffixCandidateOnly};
+    target.issues.push_back(std::move(hidden_issue));
+
+    const AurUpdateExecutionPreflight preflight{
+        {std::move(target)}, std::nullopt, DevelRequiresCheckPolicy::BlockOperation};
+    expect(
+        !is_valid_aur_update_execution_target_skip_snapshot(
+            preflight.targets.front()) &&
+            !has_valid_aur_update_execution_policy_snapshot(preflight) &&
+            has_blocking_targets(preflight) && !can_execute(preflight),
+        "Executable hidden required-devel payload did not fail closed");
+}
+
+void test_required_devel_target_blocker_foundation_is_lossless() {
+    const std::vector<RootTargetIdentity> affected_roots{
+        {0, "dependent-root"}};
+    AurUpdateRequiredDevelTargetBlocker blocker{
+        AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+        1,
+        "required-devel-git",
+        DevelRequiresCheckReason::SuffixCandidateOnly};
+    blocker.dependency_edge_index = 3;
+    blocker.build_plan_order_index = 2;
+    blocker.package_base = "required-devel-base";
+    blocker.roles = {PackageRole::RuntimeDependency};
+    blocker.affected_roots = affected_roots;
+
+    AurUpdateExecutionIssue issue;
+    issue.reason =
+        AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck;
+    issue.devel_requires_check_reason =
+        DevelRequiresCheckReason::SuffixCandidateOnly;
+    issue.required_devel_target_blocker = blocker;
+    expect(
+        issue.required_devel_target_blocker == blocker &&
+            issue.required_devel_target_blocker
+                    ->requires_check_update_plan_index ==
+                1 &&
+            issue.required_devel_target_blocker
+                    ->dependency_edge_index ==
+                std::optional<std::size_t>{3} &&
+            issue.required_devel_target_blocker
+                    ->build_plan_order_index ==
+                std::optional<std::size_t>{2} &&
+            issue.required_devel_target_blocker->package_name ==
+                "required-devel-git" &&
+            issue.required_devel_target_blocker->package_base ==
+                std::optional<std::string>{"required-devel-base"} &&
+            issue.required_devel_target_blocker->roles ==
+                std::vector<PackageRole>{
+                    PackageRole::RuntimeDependency} &&
+            issue.required_devel_target_blocker->affected_roots ==
+                affected_roots &&
+            is_known_aur_update_required_devel_target_relation(
+                issue.required_devel_target_blocker->relation) &&
+            !is_known_aur_update_required_devel_target_relation(
+                static_cast<AurUpdateRequiredDevelTargetRelation>(-1)),
+        "Required devel target blocker foundation lost typed identity");
 }
 
 void test_five_field_suffix_up_to_date_is_inconsistent() {
@@ -2325,29 +2454,41 @@ void test_invocation_helpers() {
     AurUpdateExecutionTarget executable;
     executable.status = AurUpdateExecutionTargetStatus::Executable;
     AurUpdateExecutionTarget skipped;
+    skipped.update = remote_entry(
+        "skipped", InstalledPackageReason::Unknown,
+        AurUpdateClassification::UpToDate);
     skipped.status = AurUpdateExecutionTargetStatus::Skipped;
+    skipped.skip_kind = AurUpdateExecutionSkipKind::UpToDate;
+    skipped.issues.push_back(AurUpdateExecutionIssue{
+        AurUpdateExecutionReason::UpToDate,
+        "skipped",
+        std::nullopt,
+        std::nullopt,
+        "Already up to date."});
     AurUpdateExecutionTarget unsupported;
     unsupported.status = AurUpdateExecutionTargetStatus::Unsupported;
     AurUpdateExecutionTarget incomplete;
     incomplete.status = AurUpdateExecutionTargetStatus::Incomplete;
 
-    AurUpdateExecutionPreflight executable_only{{executable, skipped}, std::nullopt};
+    AurUpdateExecutionPreflight executable_only{
+        {executable, skipped}, std::nullopt, DevelRequiresCheckPolicy::BlockOperation};
     expect(has_executable_targets(executable_only), "Executable helper returned false");
     expect(!has_blocking_targets(executable_only), "Executable plan has a blocker");
     expect(can_execute(executable_only), "Executable plan could not execute");
 
-    AurUpdateExecutionPreflight skip_only{{skipped}, std::nullopt};
+    AurUpdateExecutionPreflight skip_only{
+        {skipped}, std::nullopt, DevelRequiresCheckPolicy::BlockOperation};
     expect(!has_executable_targets(skip_only), "Skip-only helper found executable work");
     expect(!has_blocking_targets(skip_only), "Skip-only helper found a blocker");
     expect(!can_execute(skip_only), "Skip-only helper allowed execution");
 
     AurUpdateExecutionPreflight with_unsupported{
-        {executable, unsupported}, std::nullopt};
+        {executable, unsupported}, std::nullopt, DevelRequiresCheckPolicy::BlockOperation};
     expect(has_blocking_targets(with_unsupported), "Unsupported blocker was not found");
     expect(!can_execute(with_unsupported), "Unsupported plan allowed execution");
 
     AurUpdateExecutionPreflight with_incomplete{
-        {executable, incomplete}, std::nullopt};
+        {executable, incomplete}, std::nullopt, DevelRequiresCheckPolicy::BlockOperation};
     expect(has_blocking_targets(with_incomplete), "Incomplete blocker was not found");
     expect(!can_execute(with_incomplete), "Incomplete plan allowed execution");
 }
@@ -2392,7 +2533,7 @@ void test_preflight_uses_combined_resolver_seam() {
     expect(
         resolver_selection_callback_presence() ==
             std::vector<bool>{false},
-        "Legacy preflight API did not delegate with an empty provider selector");
+        "BlockOperation test helper did not delegate with an empty provider selector");
 }
 
 template <typename Callable>
@@ -2411,6 +2552,15 @@ int main() {
         run_case(
             "devel RequiresCheck blocks without candidate promotion",
             test_devel_requires_check_blocks_without_candidate_promotion);
+        run_case(
+            "unknown RequiresCheck policy fails closed",
+            test_unknown_requires_check_policy_fails_closed);
+        run_case(
+            "executable hidden required-devel payload fails closed",
+            test_executable_hidden_required_devel_payload_fails_closed);
+        run_case(
+            "required devel target blocker foundation is lossless",
+            test_required_devel_target_blocker_foundation_is_lossless);
         run_case(
             "five-field suffix UpToDate is inconsistent",
             test_five_field_suffix_up_to_date_is_inconsistent);

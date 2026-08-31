@@ -62,6 +62,7 @@ enum class AurUpdateOperationReductionReason {
     ExecutionResultWithPreparationIssues,
     MissingExecutionResult,
 
+    DevelRequiresCheckPolicyInconsistent,
     UnknownEnumValue,
     WorkItemResultInconsistent,
     InvocationResultInconsistent,
@@ -117,6 +118,7 @@ struct AurUpdateOperationTargetResult {
 
     std::vector<AurUpdateOperationExecutionContribution>
         execution_contributions;
+    std::optional<AurUpdateExecutionSkipKind> skip_kind;
 };
 
 struct AurUpdateOperationResult {
@@ -136,6 +138,8 @@ struct AurUpdateOperationResult {
     std::vector<AurUpdatePreparationIssue> preparation_issues;
     std::vector<AurUpdatePreparationWarning> preparation_warnings;
     std::vector<AurUpdateOperationReductionIssue> reduction_issues;
+    std::optional<DevelRequiresCheckPolicy>
+        devel_requires_check_policy;
 
     bool is_success() const noexcept;
     PackageStateChange package_state_change() const noexcept;
@@ -151,4 +155,5 @@ struct AurUpdateOperationResult {
 AurUpdateOperationResult reduce_aur_update_operation_result(
     const AurUpdateExecutionPreflight& preflight,
     const AurUpdateSourceBuildPreparation& preparation,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     const std::optional<AurUpdateSourceBuildExecutionResult>& execution);

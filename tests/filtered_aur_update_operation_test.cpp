@@ -148,6 +148,7 @@ PreparedFilteredAurUpdateOperation prepare_strict_filtered_aur_update_operation(
     std::optional<ValidatedCacheRoot> cache_root = std::nullopt) {
     return ::prepare_filtered_aur_update_operation(
         std::move(query_result), std::move(explicit_source_satisfaction),
+        DevelRequiresCheckPolicy::BlockOperation,
         SavedSourcePreferencePolicy::Strict, config,
         std::move(cache_root));
 }
@@ -994,6 +995,25 @@ void test_system_aur_dry_run_auto_observes_current_update_without_capability() {
                 std::vector<std::string>{
                     root.package_name, root.package_base},
         "Ignore consumed or normalized an injected preference failure");
+
+    FilteredAurUpdateObservation& drifted_child =
+        *observation.aur_observation;
+    AurUpdateExecutionIssue hidden_required_issue;
+    hidden_required_issue.required_devel_target_blocker =
+        AurUpdateRequiredDevelTargetBlocker{
+            AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+            1,
+            "required-devel-git",
+            DevelRequiresCheckReason::SuffixCandidateOnly};
+    drifted_child.source_build_observation
+        ->affected_update_targets.front()
+        .issues.push_back(std::move(hidden_required_issue));
+    expect(
+        drifted_child.is_blocked() && !drifted_child.is_ready() &&
+            observation.is_blocked() && !observation.is_ready(),
+        "Hidden required-devel observation drift remained Ready");
+    expect_no_system_aur_dry_run_mutation(
+        "hidden required-devel observation drift");
     query_stub::require_script_consumed();
     execution_stub::require_script_consumed();
 }
@@ -1137,7 +1157,14 @@ void test_system_aur_dry_run_requires_check_stays_blocked() {
     expect(
         observation.is_blocked() && !observation.is_ready() &&
             !observation.has_current_aur_update_intent() &&
+            observation.devel_requires_check_policy ==
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::BlockOperation} &&
+            observation.saved_source_preference_policy ==
+                std::optional<SavedSourcePreferencePolicy>{
+                    SavedSourcePreferencePolicy::Ignore} &&
             observation.issues.empty() && child.is_blocked() &&
+            child.has_consistent_devel_requires_check_policy_snapshot() &&
             child.execution_preflight().targets.size() == 1 &&
             has_preflight_issue(
                 child.execution_preflight().targets.front(),
@@ -1146,7 +1173,10 @@ void test_system_aur_dry_run_requires_check_stays_blocked() {
                     .targets.front()
                     .issues.front()
                     .devel_requires_check_reason ==
-                DevelRequiresCheckReason::SuffixCandidateOnly,
+                DevelRequiresCheckReason::SuffixCandidateOnly &&
+            !child.execution_preflight()
+                 .targets.front()
+                 .skip_kind.has_value(),
         "Dry-run RequiresCheck was flattened or bypassed by --noconfirm");
     expect(
         preflight_stub::resolver_call_count() == 0 &&
@@ -1897,6 +1927,10 @@ void test_system_aur_requires_check_stays_blocked() {
                 SystemAurUpdateRepositoryPhaseStatus::Completed &&
             result.aur.status ==
                 SystemAurUpdateAurPhaseStatus::BlockedBeforeExecution &&
+            child.has_consistent_devel_requires_check_policy_snapshot() &&
+            child.devel_requires_check_policy ==
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::BlockOperation} &&
             child.reduced_operation_result.status ==
                 AurUpdateOperationStatus::BlockedBeforeExecution &&
             child.preflight.targets.size() == 1 &&
@@ -2420,6 +2454,40 @@ void test_system_aur_reducer_fails_closed_on_malformed_child() {
         "Malformed child result failed open or was flattened");
 }
 
+void test_system_aur_reducer_rejects_policy_mismatch() {
+    reset_stubs();
+    repository_stub::set_after_success([] {
+        require_no_pre_repository_authority();
+        query_stub::set_foreign_inventory({});
+    });
+    const AppConfig config;
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_fixture();
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    expect(
+        result.is_success(),
+        "Policy-mismatch fixture did not start from success");
+
+    result.aur.operation_result->devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    SystemAurUpdateOperationResult malformed =
+        reduce_system_aur_update_result(std::move(result));
+    expect(
+        malformed.status ==
+                SystemAurUpdateOperationStatus::InconsistentResult &&
+            malformed.aur.status ==
+                SystemAurUpdateAurPhaseStatus::InconsistentResult &&
+            malformed.has_inconsistency() &&
+            malformed.has_partial_completion() &&
+            !malformed.is_success() &&
+            malformed.aur.operation_result
+                    ->devel_requires_check_policy ==
+                DevelRequiresCheckPolicy::SkipIndependentTarget,
+        "System/AUR RequiresCheck policy mismatch failed open");
+}
+
 void test_system_aur_reducer_correlates_exact_query_snapshot() {
     reset_stubs();
     const RootSpec root{"query-correlated", "query-correlated-base"};
@@ -2758,6 +2826,7 @@ void test_ignore_policy_reaches_filtered_preparation_without_preference_io() {
             query_result({update_entry(
                 "ignore-filtered-child", "ignore-filtered-base")}),
             NoExplicitSourceSatisfaction{},
+            DevelRequiresCheckPolicy::BlockOperation,
             SavedSourcePreferencePolicy::Ignore, config);
     expect(
         prepared.is_prepared() &&
@@ -3232,83 +3301,111 @@ void test_query_recoverable_failure_is_retained_and_blocks_mutation() {
 }
 
 void test_requires_check_blocks_mixed_operation_before_mutation() {
-    reset_stubs();
-    return_build_plan(
-        root_plan({{"normal-update-git", "normal-update-git"}}),
-        {"normal-update-git"});
     const AppConfig config;
+    for(const SavedSourcePreferencePolicy saved_policy : {
+            SavedSourcePreferencePolicy::Ignore,
+            SavedSourcePreferencePolicy::Strict}) {
+        reset_stubs();
+        return_build_plan(
+            root_plan({{"normal-update-git", "normal-update-git"}}),
+            {"normal-update-git"});
+        const std::string context =
+            saved_policy == SavedSourcePreferencePolicy::Ignore
+                ? "Ignore + BlockOperation"
+                : "Strict + BlockOperation";
 
-    PreparedFilteredAurUpdateOperation prepared =
-        ::prepare_filtered_aur_update_operation(
-            query_result({
-                classified_update_entry("normal-update-git"),
-                requires_check_entry("manual-check-git"),
-            }),
-            NoExplicitSourceSatisfaction{},
-            SavedSourcePreferencePolicy::Ignore, config);
+        PreparedFilteredAurUpdateOperation prepared =
+            ::prepare_filtered_aur_update_operation(
+                query_result({
+                    classified_update_entry("normal-update-git"),
+                    requires_check_entry("manual-check-git"),
+                }),
+                NoExplicitSourceSatisfaction{},
+                DevelRequiresCheckPolicy::BlockOperation,
+                saved_policy, config);
 
-    expect(
-        prepared.is_blocked(),
-        "RequiresCheck did not block the mixed operation");
-    expect(
-        prepared.filtered_plan().entries.size() == 2 &&
-            prepared.execution_preflight().targets.size() == 2 &&
-            prepared.execution_preflight().targets[0].status ==
-                AurUpdateExecutionTargetStatus::Executable &&
+        expect(
+            prepared.is_blocked(),
+            context + ": RequiresCheck did not block the mixed operation");
+        expect(
+            prepared.devel_requires_check_policy_snapshot() ==
+                    std::optional<DevelRequiresCheckPolicy>{
+                        DevelRequiresCheckPolicy::BlockOperation} &&
+                prepared.execution_preflight()
+                        .devel_requires_check_policy ==
+                    prepared.devel_requires_check_policy_snapshot() &&
+                prepared.source_build_preparation().has_value() &&
+                prepared.source_build_preparation()
+                        ->devel_requires_check_policy ==
+                    prepared.devel_requires_check_policy_snapshot(),
+            context + ": policy snapshots diverged before execution");
+        expect(
+            prepared.filtered_plan().entries.size() == 2 &&
+                prepared.execution_preflight().targets.size() == 2 &&
+                prepared.execution_preflight().targets[0].status ==
+                    AurUpdateExecutionTargetStatus::Executable &&
+                prepared.execution_preflight()
+                        .targets[0]
+                        .update.devel_assessment.state() ==
+                    DevelUpdateAssessmentState::RequiresCheck &&
+                prepared.execution_preflight().targets[1].status ==
+                    AurUpdateExecutionTargetStatus::Incomplete &&
+                !prepared.execution_preflight()
+                     .targets[1]
+                     .skip_kind.has_value(),
+            context + ": mixed operation lost order or block shape");
+        expect(
             prepared.execution_preflight()
-                    .targets[0]
-                    .update.devel_assessment.state() ==
-                DevelUpdateAssessmentState::RequiresCheck &&
-            prepared.execution_preflight().targets[1].status ==
-                AurUpdateExecutionTargetStatus::Incomplete,
-        "Mixed operation lost original order or effective states");
-    expect(
-        prepared.execution_preflight()
-                    .targets[1]
-                    .issues.front()
-                    .reason ==
-                AurUpdateExecutionReason::DevelRequiresCheck &&
-            prepared.execution_preflight()
-                    .targets[1]
-                    .issues.front()
-                    .devel_requires_check_reason ==
-                DevelRequiresCheckReason::SuffixCandidateOnly,
-        "RequiresCheck preflight reason was flattened");
-    expect(
-        has_planner_issue(
-            prepared.target_and_build_unit_plan(),
-            UpgradeAllPlanningIssueKind::IncompleteAurTarget),
-        "RequiresCheck did not remain a typed planning blocker");
-    expect(
-        preparation_stub::strict_preference_read_history().empty() &&
-            preparation_stub::
-                    source_preference_directory_snapshot_call_count() ==
-                0 &&
-            preparation_stub::database_call_count() == 0,
-        "Ignore policy let RequiresCheck cross a preparation authority boundary");
+                        .targets[1]
+                        .issues.front()
+                        .reason ==
+                    AurUpdateExecutionReason::DevelRequiresCheck &&
+                prepared.execution_preflight()
+                        .targets[1]
+                        .issues.front()
+                        .devel_requires_check_reason ==
+                    DevelRequiresCheckReason::SuffixCandidateOnly,
+            context + ": RequiresCheck preflight reason was flattened");
+        expect(
+            has_planner_issue(
+                prepared.target_and_build_unit_plan(),
+                UpgradeAllPlanningIssueKind::IncompleteAurTarget),
+            context + ": RequiresCheck lost its planning blocker");
+        expect(
+            preparation_stub::strict_preference_read_history().empty() &&
+                preparation_stub::
+                        source_preference_directory_snapshot_call_count() ==
+                    0 &&
+                preparation_stub::database_call_count() == 0,
+            context + ": RequiresCheck crossed preparation authority");
 
-    FilteredAurUpdateExecutionResult result =
-        execute_prepared_filtered_aur_update_operation(
-            std::move(prepared), config);
-    expect(
-        !result.is_success() && !result.execution.has_value() &&
-            result.reduced_operation_result.status ==
-                AurUpdateOperationStatus::BlockedBeforeExecution,
-        "RequiresCheck mixed operation reached execution");
-    expect(
-        result.selected_target_results.size() == 1 &&
-            result.selected_target_results.front()
-                    .operation_result.status ==
-                AurUpdateOperationTargetStatus::NotAttempted,
-        "RequiresCheck was promoted into the selected target subset");
-    expect(
-        result.reduced_operation_result.targets.size() == 2 &&
-            result.reduced_operation_result.targets[0].status ==
-                AurUpdateOperationTargetStatus::NotAttempted &&
-            result.reduced_operation_result.targets[1].status ==
-                AurUpdateOperationTargetStatus::Incomplete,
-        "RequiresCheck mixed result lost original filtered order");
-    expect_no_mutation("RequiresCheck mixed operation");
+        FilteredAurUpdateExecutionResult result =
+            execute_prepared_filtered_aur_update_operation(
+                std::move(prepared), config);
+        expect(
+            !result.is_success() && !result.execution.has_value() &&
+                result.has_consistent_devel_requires_check_policy_snapshot() &&
+                result.devel_requires_check_policy ==
+                    std::optional<DevelRequiresCheckPolicy>{
+                        DevelRequiresCheckPolicy::BlockOperation} &&
+                result.reduced_operation_result.status ==
+                    AurUpdateOperationStatus::BlockedBeforeExecution,
+            context + ": mixed operation reached execution or lost policy");
+        expect(
+            result.selected_target_results.size() == 1 &&
+                result.selected_target_results.front()
+                        .operation_result.status ==
+                    AurUpdateOperationTargetStatus::NotAttempted,
+            context + ": RequiresCheck entered the selected subset");
+        expect(
+            result.reduced_operation_result.targets.size() == 2 &&
+                result.reduced_operation_result.targets[0].status ==
+                    AurUpdateOperationTargetStatus::NotAttempted &&
+                result.reduced_operation_result.targets[1].status ==
+                    AurUpdateOperationTargetStatus::Incomplete,
+            context + ": mixed result lost original filtered order");
+        expect_no_mutation(context);
+    }
 }
 
 void test_planner_issue_blocks_mutation_but_keeps_disposition() {
@@ -3350,6 +3447,7 @@ void test_initial_preflight_identity_blocker_stops_before_mutation() {
         ::prepare_filtered_aur_update_operation(
             query_result({update_entry("identity-root")}),
             NoExplicitSourceSatisfaction{},
+            DevelRequiresCheckPolicy::BlockOperation,
             SavedSourcePreferencePolicy::Ignore, config);
     expect(prepared.is_blocked(),
            "Initial preflight identity mismatch was not blocked");
@@ -3855,6 +3953,83 @@ void test_projection_payload_private_snapshot_drift_blocks_mutation() {
     expect_no_mutation("projection payload private snapshot drift");
 }
 
+void test_skip_kind_snapshot_drift_blocks_before_execution() {
+    reset_stubs();
+    return_build_plan(
+        root_plan({{"skip-drift-update", "skip-drift-update"}}),
+        {"skip-drift-update"});
+    const AppConfig config;
+    PreparedFilteredAurUpdateOperation prepared =
+        prepare_strict_filtered_aur_update_operation(
+            query_result({
+                update_entry("skip-drift-update"),
+                current_entry("skip-drift-current"),
+            }),
+            NoExplicitSourceSatisfaction{}, config);
+    expect(
+        prepared.is_prepared(),
+        "Skip-kind drift fixture did not prepare");
+
+    AurUpdateExecutionPreflight& owned_preflight =
+        const_cast<AurUpdateExecutionPreflight&>(
+            prepared.execution_preflight());
+    owned_preflight.targets[1].skip_kind =
+        AurUpdateExecutionSkipKind::IndependentDevelRequiresCheck;
+
+    FilteredAurUpdateExecutionResult result =
+        execute_prepared_filtered_aur_update_operation(
+            std::move(prepared), config);
+    expect(
+        !result.execution.has_value() && !result.is_success() &&
+            result.reduced_operation_result.status ==
+                AurUpdateOperationStatus::InconsistentResult &&
+            !result.reduced_operation_result.reduction_issues.empty(),
+        "Drifted skip kind reached execution or became success");
+    expect_no_mutation("skip-kind snapshot drift");
+}
+
+void test_hidden_required_devel_payload_drift_blocks_before_execution() {
+    reset_stubs();
+    return_build_plan(
+        root_plan({{"hidden-required-update", "hidden-required-update"}}),
+        {"hidden-required-update"});
+    const AppConfig config;
+    PreparedFilteredAurUpdateOperation prepared =
+        prepare_strict_filtered_aur_update_operation(
+            query_result({update_entry("hidden-required-update")}),
+            NoExplicitSourceSatisfaction{}, config);
+    expect(
+        prepared.is_prepared(),
+        "Hidden required-devel payload drift fixture did not prepare");
+
+    AurUpdateExecutionPreflight& owned_preflight =
+        const_cast<AurUpdateExecutionPreflight&>(
+            prepared.execution_preflight());
+    AurUpdateExecutionIssue hidden_issue;
+    hidden_issue.required_devel_target_blocker =
+        AurUpdateRequiredDevelTargetBlocker{
+            AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+            1,
+            "required-devel-git",
+            DevelRequiresCheckReason::SuffixCandidateOnly};
+    owned_preflight.targets.front().issues.push_back(
+        std::move(hidden_issue));
+    expect(
+        !prepared.is_prepared() && prepared.is_blocked(),
+        "Hidden required-devel payload drift remained executable");
+
+    FilteredAurUpdateExecutionResult result =
+        execute_prepared_filtered_aur_update_operation(
+            std::move(prepared), config);
+    expect(
+        !result.execution.has_value() && !result.is_success() &&
+            result.reduced_operation_result.status ==
+                AurUpdateOperationStatus::InconsistentResult &&
+            !result.reduced_operation_result.reduction_issues.empty(),
+        "Hidden required-devel payload drift reached execution or became success");
+    expect_no_mutation("hidden required-devel payload drift");
+}
+
 void test_prepared_operation_replay_is_rejected() {
     reset_stubs();
     return_build_plan(
@@ -3905,7 +4080,9 @@ void test_reducer_inconsistency_is_retained() {
     result.preflight.targets[0].update_plan_index = 8;
     AurUpdateOperationResult inconsistent =
         reduce_aur_update_operation_result(
-            result.preflight, result.preparation, result.execution);
+            result.preflight, result.preparation,
+            DevelRequiresCheckPolicy::BlockOperation,
+            result.execution);
     expect(result.execution.has_value() &&
                !inconsistent.reduction_issues.empty() &&
                inconsistent.status ==
@@ -4000,6 +4177,9 @@ int main() {
             "system+AUR malformed child fails closed",
             test_system_aur_reducer_fails_closed_on_malformed_child);
         run_case(
+            "system+AUR RequiresCheck policy mismatch fails closed",
+            test_system_aur_reducer_rejects_policy_mismatch);
+        run_case(
             "system+AUR exact query snapshot correlation",
             test_system_aur_reducer_correlates_exact_query_snapshot);
         run_case(
@@ -4089,6 +4269,12 @@ int main() {
         run_case(
             "projection payload private snapshot drift",
             test_projection_payload_private_snapshot_drift_blocks_mutation);
+        run_case(
+            "skip-kind snapshot drift blocks before execution",
+            test_skip_kind_snapshot_drift_blocks_before_execution);
+        run_case(
+            "hidden required-devel payload drift blocks before execution",
+            test_hidden_required_devel_payload_drift_blocks_before_execution);
         run_case(
             "prepared operation replay",
             test_prepared_operation_replay_is_rejected);

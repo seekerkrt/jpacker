@@ -219,6 +219,19 @@ assert_no_external_mutation
 assert_cache_absent
 assert_state_absent
 
+# The dry-run command uses the same filtered-operation owner but has its own
+# production call site. The operation stub rejects any policy other than the
+# explicit current BlockOperation contract.
+setup_case devel-requires-check-dry-run devel-requires-check
+run_status 1 --dry-run upgrade-aur
+assert_contains "Unified plan:" "$stdout_file"
+assert_contains "  Status: Blocked" "$stdout_file"
+assert_exact_line "preflight" "$command_log"
+assert_contains "prepare needed=false" "$command_log"
+assert_no_external_mutation
+assert_cache_absent
+assert_state_absent
+
 # Incomplete/unsupported preflight targets block every executable work item.
 setup_case metadata-unavailable metadata-unavailable
 run_status 1 upgrade-aur
@@ -842,7 +855,7 @@ run_status 0 upgrade
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_pipeline_absent
 
-if [ "$case_count" -ne 54 ]; then
+if [ "$case_count" -ne 55 ]; then
     fail_case "internal test case count changed: $case_count"
 fi
 echo "AUR update command integration tests passed ($case_count cases)."

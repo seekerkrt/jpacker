@@ -36,6 +36,7 @@ static_assert(
 using FilteredPreparationFunction = AurUpdateSourceBuildPreparation (*)(
     const AurUpdateExecutionPreflight&,
     const AurUpdateBuildUnitSelection&,
+    DevelRequiresCheckPolicy,
     SavedSourcePreferencePolicy,
     bool,
     const AppConfig&);
@@ -53,14 +54,25 @@ void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
 }
 
+AurUpdateExecutionPreflight with_block_operation_policy(
+    const AurUpdateExecutionPreflight& preflight) {
+    AurUpdateExecutionPreflight snapshot = preflight;
+    snapshot.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    return snapshot;
+}
+
 // Existing cases are the Strict regression ledger. Ignore cases call the
 // policy-bearing production overload explicitly.
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     const AurUpdateExecutionPreflight& preflight,
     bool needed,
     const AppConfig& config) {
+    AurUpdateExecutionPreflight snapshot =
+        with_block_operation_policy(preflight);
     return ::prepare_aur_update_source_build_invocation(
-        preflight, SavedSourcePreferencePolicy::Strict, needed, config);
+        snapshot, DevelRequiresCheckPolicy::BlockOperation,
+        SavedSourcePreferencePolicy::Strict, needed, config);
 }
 
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
@@ -68,8 +80,11 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     const AurUpdateBuildUnitSelection& build_unit_selection,
     bool needed,
     const AppConfig& config) {
+    AurUpdateExecutionPreflight snapshot =
+        with_block_operation_policy(preflight);
     return ::prepare_aur_update_source_build_invocation(
-        preflight, build_unit_selection,
+        snapshot, build_unit_selection,
+        DevelRequiresCheckPolicy::BlockOperation,
         SavedSourcePreferencePolicy::Strict, needed, config);
 }
 
@@ -176,6 +191,7 @@ AurUpdateExecutionTarget skipped_target(
             AurVersionRelation::SameAsInstalled},
         AurUpdateClassification::UpToDate};
     target.status = AurUpdateExecutionTargetStatus::Skipped;
+    target.skip_kind = AurUpdateExecutionSkipKind::UpToDate;
     target.issues.push_back(AurUpdateExecutionIssue{
         AurUpdateExecutionReason::UpToDate,
         package_name,
@@ -620,6 +636,8 @@ void test_noop_and_blocking_preflight_short_circuit() {
     non_aur_skip.update.classification =
         AurUpdateClassification::NonAurForeign;
     non_aur_skip.update.aur_package.reset();
+    non_aur_skip.skip_kind =
+        AurUpdateExecutionSkipKind::NonAurForeign;
     non_aur_skip.issues = {
         AurUpdateExecutionIssue{
             AurUpdateExecutionReason::NonAurForeign,
@@ -753,6 +771,28 @@ void test_skipped_preflight_inconsistencies_fail_closed() {
         "executable and invalid skipped target");
 
     stub::reset();
+    AurUpdateExecutionPreflight conflicting_normal_skip;
+    AurUpdateExecutionTarget conflicting_target =
+        skipped_target(0, "conflicting-normal-skip");
+    conflicting_target.issues.push_back(AurUpdateExecutionIssue{
+        AurUpdateExecutionReason::NonAurForeign,
+        "conflicting-normal-skip",
+        std::nullopt,
+        std::nullopt,
+        "Conflicting normal skip reason."});
+    conflicting_normal_skip.targets.push_back(
+        std::move(conflicting_target));
+    AurUpdateSourceBuildPreparation conflicting_result =
+        prepare_aur_update_source_build_invocation(
+            conflicting_normal_skip, false, config);
+    expect_blocked_reason(
+        conflicting_result,
+        AurUpdatePreparationReason::PreflightInconsistent,
+        "Skipped target with conflicting normal skip reasons");
+    expect_no_external_preparation_boundary(
+        "Skipped target with conflicting normal skip reasons");
+
+    stub::reset();
     AurUpdateExecutionPreflight reasonless_skip;
     AurUpdateExecutionTarget reasonless_target =
         skipped_target(0, "reasonless-skip");
@@ -875,6 +915,41 @@ void test_executable_structure_failures() {
         "Executable target preflight issue attribution differs");
     expect_no_external_preparation_boundary(
         "executable target with preflight issue");
+
+    stub::reset();
+    AurUpdateExecutionPreflight hidden_required_devel =
+        single_root_preflight("executable-hidden-required-devel");
+    AurUpdateExecutionIssue hidden_required_devel_issue;
+    hidden_required_devel_issue.required_devel_target_blocker =
+        AurUpdateRequiredDevelTargetBlocker{
+            AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+            1,
+            "required-devel-git",
+            DevelRequiresCheckReason::SuffixCandidateOnly};
+    hidden_required_devel.targets.front().issues.push_back(
+        hidden_required_devel_issue);
+    const AurUpdateSourceBuildPreparation hidden_required_devel_result =
+        prepare_aur_update_source_build_invocation(
+            hidden_required_devel, false, config);
+    expect_blocked_reason(
+        hidden_required_devel_result,
+        AurUpdatePreparationReason::PreflightInconsistent,
+        "executable target with hidden required-devel payload");
+    const AurUpdatePreparationIssue& retained_hidden_required_devel =
+        require_issue(
+            hidden_required_devel_result,
+            AurUpdatePreparationReason::PreflightInconsistent,
+            "hidden required-devel payload");
+    expect(
+        !hidden_required_devel_result.invocation.has_value() &&
+            retained_hidden_required_devel.preflight_issue.has_value() &&
+            retained_hidden_required_devel.preflight_issue
+                    ->required_devel_target_blocker ==
+                hidden_required_devel_issue
+                    .required_devel_target_blocker,
+        "Executable hidden required-devel payload was not retained as a blocker");
+    expect_no_external_preparation_boundary(
+        "executable target with hidden required-devel payload");
 
     stub::reset();
     AurUpdateExecutionPreflight wrong_root = single_root_preflight();
@@ -1745,6 +1820,66 @@ void expect_ignore_preference_boundary(
         context + ": Ignore changed PKGDEST guard coverage or input");
 }
 
+void test_requires_check_policy_snapshot_mismatch_fails_before_io() {
+    const AppConfig config;
+
+    const auto expect_policy_block = [&config](
+                                         AurUpdateExecutionPreflight preflight,
+                                         DevelRequiresCheckPolicy policy,
+                                         const std::string& context) {
+        stub::reset();
+        const AurUpdateSourceBuildPreparation preparation =
+            ::prepare_aur_update_source_build_invocation(
+                preflight, policy,
+                SavedSourcePreferencePolicy::Ignore, false, config);
+        expect(
+            preparation.is_blocked() &&
+                !preparation.is_noop() &&
+                preparation.issues.size() == 1 &&
+                preparation.issues.front().reason ==
+                    AurUpdatePreparationReason::
+                        DevelRequiresCheckPolicyInconsistent,
+            context + ": malformed policy snapshot was not blocked");
+        expect_no_external_preparation_boundary(context);
+    };
+
+    expect_policy_block(
+        single_root_preflight("missing-policy"),
+        DevelRequiresCheckPolicy::BlockOperation,
+        "missing RequiresCheck policy");
+
+    AurUpdateExecutionPreflight mismatched =
+        single_root_preflight("mismatched-policy");
+    mismatched.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    expect_policy_block(
+        std::move(mismatched),
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        "mismatched RequiresCheck policy");
+
+    AurUpdateExecutionPreflight unknown =
+        single_root_preflight("unknown-policy");
+    unknown.devel_requires_check_policy =
+        static_cast<DevelRequiresCheckPolicy>(-1);
+    expect_policy_block(
+        std::move(unknown),
+        static_cast<DevelRequiresCheckPolicy>(-1),
+        "unknown RequiresCheck policy");
+
+    AurUpdateExecutionPreflight future_skip;
+    AurUpdateExecutionTarget skipped =
+        skipped_target(0, "future-independent-skip");
+    skipped.skip_kind =
+        AurUpdateExecutionSkipKind::IndependentDevelRequiresCheck;
+    future_skip.targets.push_back(std::move(skipped));
+    future_skip.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    expect_policy_block(
+        std::move(future_skip),
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        "Slice 1 independent RequiresCheck skip");
+}
+
 void test_ignore_saved_source_preferences_without_io_or_environment() {
     const AppConfig config;
 
@@ -1757,7 +1892,9 @@ void test_ignore_saved_source_preferences_without_io_or_environment() {
             {"loaded warning must remain unread"}));
     const AurUpdateSourceBuildPreparation loaded =
         ::prepare_aur_update_source_build_invocation(
-            single_root_preflight("ignore-loaded"),
+            with_block_operation_policy(
+                single_root_preflight("ignore-loaded")),
+            DevelRequiresCheckPolicy::BlockOperation,
             SavedSourcePreferencePolicy::Ignore, false, config);
     expect_ignore_preference_boundary(
         loaded, 1, "Ignore singular loaded preference");
@@ -1788,7 +1925,9 @@ void test_ignore_saved_source_preferences_without_io_or_environment() {
                 failure.observed_file_type));
         const AurUpdateSourceBuildPreparation preparation =
             ::prepare_aur_update_source_build_invocation(
-                single_root_preflight(failure.name),
+                with_block_operation_policy(
+                    single_root_preflight(failure.name)),
+                DevelRequiresCheckPolicy::BlockOperation,
                 SavedSourcePreferencePolicy::Ignore, false, config);
         expect_ignore_preference_boundary(
             preparation, 1, failure.name);
@@ -1804,10 +1943,10 @@ void test_ignore_saved_source_preferences_without_io_or_environment() {
             environment({{"MAKEFLAGS", "-j12"}})));
     const AurUpdateSourceBuildPreparation split =
         ::prepare_aur_update_source_build_invocation(
-            single_root_preflight(
-                "ignore-split-child",
-                DesiredInstallReason::Explicit,
-                "ignore-split-base"),
+            with_block_operation_policy(single_root_preflight(
+                "ignore-split-child", DesiredInstallReason::Explicit,
+                "ignore-split-base")),
+            DevelRequiresCheckPolicy::BlockOperation,
             SavedSourcePreferencePolicy::Ignore, false, config);
     expect_ignore_preference_boundary(
         split, 1, "Ignore split-child fallback candidate");
@@ -1835,7 +1974,9 @@ void test_ignore_saved_source_preferences_without_io_or_environment() {
             environment({{"CXXFLAGS", "-march=native"}})));
     const AurUpdateSourceBuildPreparation multiple =
         ::prepare_aur_update_source_build_invocation(
-            same_package_base_multiple_preflight(),
+            with_block_operation_policy(
+                same_package_base_multiple_preflight()),
+            DevelRequiresCheckPolicy::BlockOperation,
             SavedSourcePreferencePolicy::Ignore, false, config);
     expect_ignore_preference_boundary(
         multiple, 1, "Ignore same-PackageBase multiple child");
@@ -1880,8 +2021,9 @@ void test_ignore_preserves_preflight_and_generic_safety_authorities() {
             blocking_case.reason));
         const AurUpdateSourceBuildPreparation preparation =
             ::prepare_aur_update_source_build_invocation(
-                preflight, SavedSourcePreferencePolicy::Ignore, false,
-                config);
+                with_block_operation_policy(preflight),
+                DevelRequiresCheckPolicy::BlockOperation,
+                SavedSourcePreferencePolicy::Ignore, false, config);
         const AurUpdatePreparationIssue& issue = require_issue(
             preparation, AurUpdatePreparationReason::BlockingPreflight,
             blocking_case.name);
@@ -1910,7 +2052,9 @@ void test_ignore_preserves_preflight_and_generic_safety_authorities() {
         1, "scripted reviewed-source safety failure");
     const AurUpdateSourceBuildPreparation reviewed =
         ::prepare_aur_update_source_build_invocation(
-            single_root_preflight("ignore-reviewed-safety"),
+            with_block_operation_policy(
+                single_root_preflight("ignore-reviewed-safety")),
+            DevelRequiresCheckPolicy::BlockOperation,
             SavedSourcePreferencePolicy::Ignore, false, config);
     expect_blocked_reason(
         reviewed,
@@ -2212,11 +2356,20 @@ void test_unexpected_generic_failure_is_global_and_stops_before_database() {
 }
 
 void test_result_state_helpers_reject_forbidden_combination() {
+    AurUpdateSourceBuildPreparation missing_policy;
+    expect(
+        missing_policy.is_blocked() && !missing_policy.is_noop(),
+        "Missing RequiresCheck policy was defaulted to no-op");
+
     AurUpdateSourceBuildPreparation noop;
+    noop.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     expect_result_invariant(noop, "direct no-op model");
-    expect(noop.is_noop(), "Default result is not no-op");
+    expect(noop.is_noop(), "Explicit BlockOperation result is not no-op");
 
     AurUpdateSourceBuildPreparation blocked;
+    blocked.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     AurUpdatePreparationIssue blocked_issue;
     blocked_issue.reason =
         AurUpdatePreparationReason::PreflightInconsistent;
@@ -2268,8 +2421,8 @@ void test_result_state_helpers_reject_forbidden_combination() {
     prepared.issues.push_back(std::move(forbidden_issue));
     expect(
         !prepared.is_prepared() && !prepared.is_noop() &&
-            !prepared.is_blocked(),
-        "Forbidden invocation-plus-issues state was classified as valid");
+            prepared.is_blocked(),
+        "Forbidden invocation-plus-issues state did not fail closed");
 }
 
 void test_move_preserves_correlation_and_invalidates_source() {
@@ -2347,6 +2500,9 @@ int main() {
         run_case(
             "unknown package root attribution is global",
             test_unknown_package_root_attribution_is_global);
+        run_case(
+            "RequiresCheck policy snapshot mismatch fails before IO",
+            test_requires_check_policy_snapshot_mismatch_fails_before_io);
         run_case(
             "Ignore saved preferences has zero IO and empty environments",
             test_ignore_saved_source_preferences_without_io_or_environment);

@@ -28,6 +28,12 @@ void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
 }
 
+AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
+    const AurUpdatePlan& update_plan) {
+    return ::resolve_aur_update_execution_preflight(
+        update_plan, DevelRequiresCheckPolicy::BlockOperation);
+}
+
 AurUpdatePlanEntry update_entry(
     const std::string& package_name, InstalledPackageReason reason) {
     return AurUpdatePlanEntry{

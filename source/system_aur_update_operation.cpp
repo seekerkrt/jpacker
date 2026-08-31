@@ -22,7 +22,11 @@ bool has_reason(
 
 bool filtered_result_has_inconsistency(
     const FilteredAurUpdateExecutionResult& filtered) noexcept {
-    return !filtered.issues.empty() ||
+    return !filtered.has_consistent_devel_requires_check_policy_snapshot() ||
+           filtered.devel_requires_check_policy !=
+               std::optional<DevelRequiresCheckPolicy>{
+                   DevelRequiresCheckPolicy::BlockOperation} ||
+           !filtered.issues.empty() ||
            !filtered.reduced_operation_result.reduction_issues.empty() ||
            filtered.reduced_operation_result.status ==
                AurUpdateOperationStatus::InconsistentResult;
@@ -185,8 +189,16 @@ bool auto_dry_run_authority_is_complete(
            observation.saved_source_preference_policy ==
                std::optional<SavedSourcePreferencePolicy>{
                    SavedSourcePreferencePolicy::Ignore} &&
+           observation.devel_requires_check_policy ==
+               std::optional<DevelRequiresCheckPolicy>{
+                   DevelRequiresCheckPolicy::BlockOperation} &&
            observation.repository_configuration.has_value() &&
            observation.aur_observation.has_value() &&
+           observation.aur_observation
+               ->has_consistent_devel_requires_check_policy_snapshot() &&
+           observation.aur_observation
+                   ->devel_requires_check_policy ==
+               observation.devel_requires_check_policy &&
            inventory_matches_query(
                observation.foreign_inventory,
                observation.aur_observation->original_query_result());
@@ -198,6 +210,7 @@ bool repo_only_dry_run_has_no_aur_authority(
            !observation.actual_authority_refresh.has_value() &&
            !observation.explicit_source_satisfaction.has_value() &&
            !observation.saved_source_preference_policy.has_value() &&
+           !observation.devel_requires_check_policy.has_value() &&
            !observation.repository_configuration.has_value() &&
            observation.foreign_inventory.empty() &&
            !observation.aur_observation.has_value();
@@ -246,6 +259,8 @@ SystemAurUpdateDryRunObservation observe_system_aur_update_dry_run(
     observation.explicit_source_satisfaction.emplace();
     observation.saved_source_preference_policy =
         SavedSourcePreferencePolicy::Ignore;
+    observation.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
 
     try {
         observation.repository_configuration =
@@ -328,6 +343,7 @@ SystemAurUpdateDryRunObservation observe_system_aur_update_dry_run(
             observe_filtered_aur_update_operation(
                 std::move(query_result.value()),
                 NoExplicitSourceSatisfaction{},
+                DevelRequiresCheckPolicy::BlockOperation,
                 SavedSourcePreferencePolicy::Ignore, config);
     } catch(const std::exception& error) {
         observation.issues.push_back(SystemAurUpdateDryRunIssue{
@@ -751,6 +767,7 @@ execute_prepared_system_aur_update_operation(
     try {
         filtered.emplace(prepare_filtered_aur_update_operation(
             std::move(query_result), NoExplicitSourceSatisfaction{},
+            DevelRequiresCheckPolicy::BlockOperation,
             SavedSourcePreferencePolicy::Ignore, config));
     } catch(const std::logic_error& error) {
         result.aur.status =

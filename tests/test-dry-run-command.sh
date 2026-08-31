@@ -954,6 +954,34 @@ fi
 assert_protected_storage_unchanged
 assert_read_only_commands
 
+setup_case dry-run-upgrade-all-devel-requires-check
+set_foreign_inventory 'foo-git 1.0-1 explicit'
+MOGUET_TEST_VERCMP_OUTPUT=0
+export MOGUET_TEST_VERCMP_OUTPUT
+: > "$command_log"
+start_mutation_sentinel
+if (cd "$case_work_dir" &&
+        "$repository_test_binary" --noconfirm upgrade-all --dry-run) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+assert_expected_observation \
+    Blocked 1 "AurUpdateExecutionReason::DevelRequiresCheck" \
+    "$status" "dry-run upgrade-all devel RequiresCheck"
+if ! grep -F -- \
+    "authoritative build provenance is unavailable" \
+    "$output_file" >/dev/null
+then
+    echo "upgrade-all dry-run RequiresCheck lost its blocker reason" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+assert_protected_storage_unchanged
+assert_read_only_commands
+
 run_supported \
     upgrade-aur NoOp 0 "External owner: AUR RPC" \
     upgrade-aur --dry-run

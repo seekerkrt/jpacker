@@ -20,6 +20,54 @@ void expect(bool condition, const std::string& diagnostic) {
     if(!condition) throw std::runtime_error(diagnostic);
 }
 
+AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
+    const AurUpdateExecutionPreflight& preflight,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
+    bool needed,
+    const AppConfig& config) {
+    AurUpdateExecutionPreflight snapshot = preflight;
+    snapshot.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    return ::prepare_aur_update_source_build_invocation(
+        snapshot, DevelRequiresCheckPolicy::BlockOperation,
+        saved_source_preference_policy, needed, config);
+}
+
+AurUpdateOperationResult reduce_aur_update_operation_result(
+    const AurUpdateExecutionPreflight& preflight,
+    const AurUpdateSourceBuildPreparation& preparation,
+    const std::optional<AurUpdateSourceBuildExecutionResult>& execution) {
+    AurUpdateExecutionPreflight preflight_snapshot = preflight;
+    preflight_snapshot.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    if(preparation.devel_requires_check_policy.has_value()) {
+        return ::reduce_aur_update_operation_result(
+            preflight_snapshot, preparation,
+            DevelRequiresCheckPolicy::BlockOperation, execution);
+    }
+    if(preparation.invocation.has_value()) {
+        throw std::logic_error(
+            "Policyless reducer fixture unexpectedly owns an invocation.");
+    }
+    AurUpdateSourceBuildPreparation preparation_snapshot;
+    preparation_snapshot.issues = preparation.issues;
+    preparation_snapshot.warnings = preparation.warnings;
+    preparation_snapshot.affected_update_targets =
+        preparation.affected_update_targets;
+    preparation_snapshot.affected_roots = preparation.affected_roots;
+    preparation_snapshot.build_unit_selection =
+        preparation.build_unit_selection;
+    preparation_snapshot.projected_build_units =
+        preparation.projected_build_units;
+    preparation_snapshot.externally_satisfied_build_units =
+        preparation.externally_satisfied_build_units;
+    preparation_snapshot.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    return ::reduce_aur_update_operation_result(
+        preflight_snapshot, preparation_snapshot,
+        DevelRequiresCheckPolicy::BlockOperation, execution);
+}
+
 AurUpdatePlanEntry update_entry(
     const std::string& package_name,
     const std::string& package_base = {}) {
@@ -75,6 +123,7 @@ AurUpdateExecutionTarget up_to_date_target(
             AurVersionRelation::SameAsInstalled},
         AurUpdateClassification::UpToDate};
     target.status = AurUpdateExecutionTargetStatus::Skipped;
+    target.skip_kind = AurUpdateExecutionSkipKind::UpToDate;
     target.issues.push_back(AurUpdateExecutionIssue{
         AurUpdateExecutionReason::UpToDate,
         package_name,
@@ -96,6 +145,7 @@ AurUpdateExecutionTarget non_aur_target(
         std::nullopt,
         AurUpdateClassification::NonAurForeign};
     target.status = AurUpdateExecutionTargetStatus::Skipped;
+    target.skip_kind = AurUpdateExecutionSkipKind::NonAurForeign;
     target.issues.push_back(AurUpdateExecutionIssue{
         AurUpdateExecutionReason::NonAurForeign,
         package_name,
@@ -161,12 +211,16 @@ AurUpdateExecutionPreflight preflight_with(
     std::vector<AurUpdateExecutionTarget> targets) {
     AurUpdateExecutionPreflight preflight;
     preflight.targets = std::move(targets);
+    preflight.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     return preflight;
 }
 
 AurUpdateSourceBuildPreparation preparation_for_execution(
     const AurUpdateExecutionPreflight& preflight) {
     AurUpdateSourceBuildPreparation preparation;
+    preparation.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     for(const auto& target : preflight.targets) {
         if(target.status == AurUpdateExecutionTargetStatus::Executable) {
             preparation.affected_update_targets.push_back(target);
@@ -541,7 +595,7 @@ void test_all_skipped_is_no_updates() {
     });
     const AurUpdateSourceBuildPreparation preparation;
 
-    const AurUpdateOperationResult result =
+    AurUpdateOperationResult result =
         reduce_aur_update_operation_result(
             preflight, preparation, std::nullopt);
 
@@ -559,6 +613,20 @@ void test_all_skipped_is_no_updates() {
     expect(
         !result.changed_package_state(),
         "Skip-only operation reported package mutation");
+
+    result.targets.front().skip_kind =
+        AurUpdateExecutionSkipKind::IndependentDevelRequiresCheck;
+    expect(
+        !result.is_success(),
+        "Post-reduction independent RequiresCheck skip became success");
+    result.targets.front().skip_kind =
+        AurUpdateExecutionSkipKind::UpToDate;
+    result.targets.front().update.devel_assessment =
+        DevelUpdateAssessment::requires_check(
+            DevelRequiresCheckReason::SuffixCandidateOnly);
+    expect(
+        !result.is_success(),
+        "Post-reduction RequiresCheck assessment became UpToDate success");
 }
 
 void test_skip_order_and_typed_reasons_are_preserved() {
@@ -634,6 +702,80 @@ void test_skipped_without_normal_reason_is_inconsistent() {
         result,
         {AurUpdateOperationTargetStatus::Incomplete},
         "malformed skipped target");
+}
+
+void test_requires_check_policy_snapshots_fail_closed() {
+    const auto expect_policy_inconsistent = [](
+                                                AurUpdateExecutionPreflight preflight,
+                                                AurUpdateSourceBuildPreparation preparation,
+                                                DevelRequiresCheckPolicy policy,
+                                                const std::string& context) {
+        const AurUpdateOperationResult result =
+            ::reduce_aur_update_operation_result(
+                preflight, preparation, policy, std::nullopt);
+        expect(
+            result.status == AurUpdateOperationStatus::InconsistentResult &&
+                !result.is_success() &&
+                has_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::
+                        DevelRequiresCheckPolicyInconsistent),
+            context + ": malformed policy snapshot became success");
+    };
+
+    AurUpdateExecutionPreflight missing =
+        preflight_with({up_to_date_target(0, "missing-policy")});
+    missing.devel_requires_check_policy.reset();
+    AurUpdateSourceBuildPreparation block_preparation;
+    block_preparation.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    expect_policy_inconsistent(
+        std::move(missing), std::move(block_preparation),
+        DevelRequiresCheckPolicy::BlockOperation,
+        "missing preflight RequiresCheck policy");
+
+    AurUpdateExecutionPreflight mismatch =
+        preflight_with({up_to_date_target(0, "mismatched-policy")});
+    AurUpdateSourceBuildPreparation skip_preparation;
+    skip_preparation.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    expect_policy_inconsistent(
+        std::move(mismatch), std::move(skip_preparation),
+        DevelRequiresCheckPolicy::BlockOperation,
+        "cross-layer RequiresCheck policy mismatch");
+
+    const DevelRequiresCheckPolicy unknown_policy =
+        static_cast<DevelRequiresCheckPolicy>(-1);
+    AurUpdateExecutionPreflight unknown =
+        preflight_with({up_to_date_target(0, "unknown-policy")});
+    unknown.devel_requires_check_policy = unknown_policy;
+    AurUpdateSourceBuildPreparation unknown_preparation;
+    unknown_preparation.devel_requires_check_policy = unknown_policy;
+    expect_policy_inconsistent(
+        std::move(unknown), std::move(unknown_preparation),
+        unknown_policy, "unknown RequiresCheck policy");
+
+    AurUpdateExecutionTarget future =
+        up_to_date_target(0, "future-independent-skip");
+    future.skip_kind =
+        AurUpdateExecutionSkipKind::IndependentDevelRequiresCheck;
+    AurUpdateExecutionPreflight future_preflight =
+        preflight_with({std::move(future)});
+    future_preflight.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    AurUpdateSourceBuildPreparation future_preparation;
+    future_preparation.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    const AurUpdateOperationResult future_result =
+        ::reduce_aur_update_operation_result(
+            future_preflight, future_preparation,
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
+            std::nullopt);
+    expect(
+        future_result.status ==
+                AurUpdateOperationStatus::InconsistentResult &&
+            !future_result.is_success(),
+        "Slice 1 accepted an independent RequiresCheck skip snapshot");
 }
 
 void test_unknown_preflight_reason_is_typed() {
@@ -719,6 +861,72 @@ void test_executable_preflight_issue_keeps_known_update() {
             result.changed_package_state() &&
             result.has_partial_completion(),
         "Known update was lost after executable preflight inconsistency");
+}
+
+void test_executable_hidden_required_devel_payload_is_inconsistent() {
+    AurUpdateExecutionTarget malformed =
+        executable_target(0, "hidden-required-devel");
+    AurUpdateExecutionIssue hidden_issue;
+    hidden_issue.required_devel_target_blocker =
+        AurUpdateRequiredDevelTargetBlocker{
+            AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+            1,
+            "required-devel-git",
+            DevelRequiresCheckReason::SuffixCandidateOnly};
+    malformed.issues.push_back(std::move(hidden_issue));
+    const AurUpdateExecutionPreflight preflight =
+        preflight_with({std::move(malformed)});
+    const AurUpdateSourceBuildPreparation preparation =
+        preparation_for_execution(preflight);
+    const AurUpdateSourceBuildExecutionResult execution = execution_result(
+        AurUpdateInvocationExecutionStatus::Completed,
+        {work_item_result(
+            0,
+            AurUpdateWorkItemExecutionStatus::Updated,
+            {0})});
+
+    const AurUpdateOperationResult result =
+        reduce_aur_update_operation_result(
+            preflight, preparation, execution);
+    expect(
+        result.status == AurUpdateOperationStatus::InconsistentResult &&
+            !result.is_success() &&
+            has_reduction_issue(
+                result,
+                AurUpdateOperationReductionReason::
+                    OtherCorrelationInconsistent) &&
+            result.targets.front().preflight_issues.size() == 1 &&
+            result.targets.front()
+                .preflight_issues.front()
+                .required_devel_target_blocker.has_value(),
+        "Executable hidden required-devel payload became a successful result");
+}
+
+void test_executable_reason_none_issue_is_inconsistent() {
+    AurUpdateExecutionTarget malformed =
+        executable_target(0, "reason-none-issue");
+    malformed.issues.emplace_back();
+    const AurUpdateExecutionPreflight preflight =
+        preflight_with({std::move(malformed)});
+    const AurUpdateSourceBuildPreparation preparation =
+        preparation_for_execution(preflight);
+    const AurUpdateSourceBuildExecutionResult execution = execution_result(
+        AurUpdateInvocationExecutionStatus::Completed,
+        {work_item_result(
+            0,
+            AurUpdateWorkItemExecutionStatus::Updated,
+            {0})});
+
+    const AurUpdateOperationResult result =
+        reduce_aur_update_operation_result(
+            preflight, preparation, execution);
+    expect(
+        result.status == AurUpdateOperationStatus::InconsistentResult &&
+            has_reduction_issue(
+                result,
+                AurUpdateOperationReductionReason::
+                    OtherCorrelationInconsistent),
+        "Executable reason-None issue bypassed canonical result validation");
 }
 
 void test_preflight_blockers_keep_status_and_stop_executable_targets() {
@@ -3111,8 +3319,16 @@ void test_same_target_partial_update_and_failure_keeps_contributions() {
 }
 
 void test_all_query_helpers() {
+    AurUpdateOperationResult missing_policy;
+    missing_policy.status = AurUpdateOperationStatus::NoUpdates;
+    expect(
+        !missing_policy.is_success(),
+        "NoUpdates with a missing RequiresCheck policy succeeded");
+
     AurUpdateOperationResult no_updates;
     no_updates.status = AurUpdateOperationStatus::NoUpdates;
+    no_updates.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     expect(no_updates.is_success(), "NoUpdates helper returned failure");
     expect(
         !no_updates.changed_package_state() &&
@@ -3124,6 +3340,8 @@ void test_all_query_helpers() {
 
     AurUpdateOperationResult completed;
     completed.status = AurUpdateOperationStatus::Completed;
+    completed.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     AurUpdateOperationTargetResult updated;
     updated.status = AurUpdateOperationTargetStatus::Updated;
     completed.targets.push_back(std::move(updated));
@@ -3132,6 +3350,23 @@ void test_all_query_helpers() {
             completed.changed_package_state() &&
             !completed.has_partial_completion(),
         "Completed helper semantics differ");
+    AurUpdateRequiredDevelTargetBlocker required_blocker{
+        AurUpdateRequiredDevelTargetRelation::RequiredArtifactChild,
+        1,
+        "required-devel-git",
+        DevelRequiresCheckReason::SuffixCandidateOnly};
+    AurUpdateExecutionIssue required_issue;
+    required_issue.reason =
+        AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck;
+    required_issue.devel_requires_check_reason =
+        DevelRequiresCheckReason::SuffixCandidateOnly;
+    required_issue.required_devel_target_blocker =
+        std::move(required_blocker);
+    completed.targets.front().preflight_issues.push_back(
+        std::move(required_issue));
+    expect(
+        !completed.is_success(),
+        "Required devel blocker survived in a successful target snapshot");
 
     AurUpdateOperationResult partial;
     partial.status =
@@ -3175,6 +3410,9 @@ int main() {
             "skipped target without normal reason is inconsistent",
             test_skipped_without_normal_reason_is_inconsistent);
         run_case(
+            "RequiresCheck policy snapshots fail closed",
+            test_requires_check_policy_snapshots_fail_closed);
+        run_case(
             "unknown preflight reason is typed",
             test_unknown_preflight_reason_is_typed);
         run_case(
@@ -3183,6 +3421,12 @@ int main() {
         run_case(
             "executable preflight issue keeps known update",
             test_executable_preflight_issue_keeps_known_update);
+        run_case(
+            "executable hidden required-devel payload is inconsistent",
+            test_executable_hidden_required_devel_payload_is_inconsistent);
+        run_case(
+            "executable reason-None issue is inconsistent",
+            test_executable_reason_none_issue_is_inconsistent);
         run_case(
             "preflight blockers preserve status and stop executables",
             test_preflight_blockers_keep_status_and_stop_executable_targets);

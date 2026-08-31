@@ -362,7 +362,8 @@ bool source_observation_matches_ready_preflight(
         const AurUpdateExecutionTarget& expected = *executable_targets[index];
         const AurUpdateExecutionTarget& actual =
             source.affected_update_targets[index];
-        if(actual.status != AurUpdateExecutionTargetStatus::Executable ||
+        if(!is_valid_aur_update_execution_target_skip_snapshot(actual) ||
+           actual.status != AurUpdateExecutionTargetStatus::Executable ||
            actual.update_plan_index != expected.update_plan_index ||
            actual.build_plan_root_index != expected.build_plan_root_index ||
            actual.desired_install_reason != expected.desired_install_reason ||
@@ -991,6 +992,10 @@ void validate_local_source_input(
 const std::vector<std::string>* validate_aur_update_input(
     const AurUpdateQueryResult& query,
     const AurUpdateExecutionPreflight& preflight) {
+    if(!has_valid_aur_update_execution_policy_snapshot(preflight)) {
+        reject_inconsistent_input(
+            "AUR execution policy or typed skip snapshot is inconsistent.");
+    }
     if(query.plan.entries.size() != preflight.targets.size()) {
         reject_inconsistent_input(
             "AUR query and execution preflight target counts do not match.");
@@ -1471,6 +1476,7 @@ bool is_known_wrapped_preflight_issue_reason(
             return false;
         case AurUpdateExecutionReason::UpToDate:
         case AurUpdateExecutionReason::DevelRequiresCheck:
+        case AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck:
         case AurUpdateExecutionReason::NonAurForeign:
         case AurUpdateExecutionReason::AurMetadataUnavailable:
         case AurUpdateExecutionReason::VersionComparisonUnavailable:
@@ -1547,6 +1553,8 @@ bool same_preflight_issue_identity(
        lhs.devel_requires_check_reason !=
            rhs.devel_requires_check_reason ||
        lhs.relation_reason != rhs.relation_reason ||
+       lhs.required_devel_target_blocker !=
+           rhs.required_devel_target_blocker ||
        lhs.build_plan_projection_issue.has_value() !=
            rhs.build_plan_projection_issue.has_value()) {
         return false;
@@ -3303,6 +3311,13 @@ std::unique_ptr<UnifiedPlanProjection> project_aur_update_unified_plan(
     const AurUpdateExecutionPreflight& preflight = input.preflight.get();
     const std::vector<std::string>* repository_order =
         validate_aur_update_input(query, preflight);
+    if(input.source_build_preparation.has_value() &&
+       input.source_build_preparation->get()
+               .devel_requires_check_policy !=
+           preflight.devel_requires_check_policy) {
+        reject_inconsistent_input(
+            "AUR execution preflight and source preparation policies differ.");
+    }
     const BuildPlan* plan = preflight.build_plan.has_value()
                                 ? &preflight.build_plan.value()
                                 : nullptr;
@@ -3329,6 +3344,8 @@ std::unique_ptr<UnifiedPlanProjection> project_aur_update_unified_plan(
             input.filtered_operation->get();
         if(&operation.original_query_result() != &query ||
            &operation.execution_preflight() != &preflight ||
+           operation.devel_requires_check_policy_snapshot() !=
+               preflight.devel_requires_check_policy ||
            !input.source_build_preparation.has_value() ||
            !operation.source_build_preparation().has_value() ||
            &operation.source_build_preparation().value() !=
@@ -3586,10 +3603,15 @@ std::unique_ptr<UnifiedPlanProjection> project_upgrade_all_unified_plan(
            &aggregate_aur_preflight->issues() != &input.issues->get() ||
            &filtered->original_query_result() != &aur_query ||
            &filtered->execution_preflight() != &aur_preflight ||
+           filtered->devel_requires_check_policy_snapshot() !=
+               aur_preflight.devel_requires_check_policy ||
            !input.aur_source_build_preparation.has_value() ||
            !filtered->source_build_preparation().has_value() ||
            &filtered->source_build_preparation().value() !=
-               &input.aur_source_build_preparation->get()) {
+               &input.aur_source_build_preparation->get() ||
+           input.aur_source_build_preparation->get()
+                   .devel_requires_check_policy !=
+               aur_preflight.devel_requires_check_policy) {
             reject_inconsistent_input(
                 "Prepared upgrade-all AUR authorities are inconsistent.");
         }
@@ -3776,6 +3798,7 @@ project_system_aur_update_unified_plan(
            combined.actual_authority_refresh.has_value() ||
            combined.explicit_source_satisfaction.has_value() ||
            combined.saved_source_preference_policy.has_value() ||
+           combined.devel_requires_check_policy.has_value() ||
            combined.repository_configuration.has_value() ||
            !combined.foreign_inventory.empty() ||
            combined.aur_observation.has_value()) {
@@ -3804,8 +3827,30 @@ project_system_aur_update_unified_plan(
        combined.saved_source_preference_policy !=
            std::optional<SavedSourcePreferencePolicy>{
                SavedSourcePreferencePolicy::Ignore} ||
+       combined.devel_requires_check_policy !=
+           std::optional<DevelRequiresCheckPolicy>{
+               DevelRequiresCheckPolicy::BlockOperation} ||
        (combined.aur_observation.has_value() &&
-        !combined.repository_configuration.has_value())) {
+        (!combined.repository_configuration.has_value() ||
+         !combined.aur_observation
+              ->devel_requires_check_policy.has_value() ||
+         !is_known_devel_requires_check_policy(
+             *combined.aur_observation
+                  ->devel_requires_check_policy) ||
+         combined.aur_observation
+                 ->devel_requires_check_policy !=
+             combined.devel_requires_check_policy ||
+         combined.aur_observation->preflight
+                 .devel_requires_check_policy !=
+             combined.devel_requires_check_policy ||
+         !has_valid_aur_update_execution_policy_snapshot(
+             combined.aur_observation->preflight) ||
+         !combined.aur_observation
+              ->source_build_observation.has_value() ||
+         combined.aur_observation
+                 ->source_build_observation
+                 ->devel_requires_check_policy !=
+             combined.devel_requires_check_policy))) {
         reject_inconsistent_input(
             "System/AUR dry-run observation has invalid freshness or source policy.");
     }

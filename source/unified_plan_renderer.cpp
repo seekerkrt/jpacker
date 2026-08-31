@@ -3000,6 +3000,8 @@ std::string aur_update_execution_reason_display(
             return "AurUpdateExecutionReason::UpToDate";
         case AurUpdateExecutionReason::DevelRequiresCheck:
             return "AurUpdateExecutionReason::DevelRequiresCheck";
+        case AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck:
+            return "AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck";
         case AurUpdateExecutionReason::NonAurForeign:
             return "AurUpdateExecutionReason::NonAurForeign";
         case AurUpdateExecutionReason::AurMetadataUnavailable:
@@ -3720,6 +3722,9 @@ std::string aur_update_preparation_reason_display(
             return "AurUpdatePreparationReason::BlockingPreflight";
         case AurUpdatePreparationReason::PreflightInconsistent:
             return "AurUpdatePreparationReason::PreflightInconsistent";
+        case AurUpdatePreparationReason::
+            DevelRequiresCheckPolicyInconsistent:
+            return "AurUpdatePreparationReason::DevelRequiresCheckPolicyInconsistent";
         case AurUpdatePreparationReason::BuildPlanMissing:
             return "AurUpdatePreparationReason::BuildPlanMissing";
         case AurUpdatePreparationReason::BuildPlanOrderEmpty:
@@ -3825,6 +3830,9 @@ std::string filtered_aur_observation_issue_kind_display(
     switch(kind) {
         case FilteredAurUpdateOperationIssueKind::UnknownUpdateClassification:
             return "FilteredAurUpdateOperationIssueKind::UnknownUpdateClassification";
+        case FilteredAurUpdateOperationIssueKind::
+            DevelRequiresCheckPolicyInconsistent:
+            return "FilteredAurUpdateOperationIssueKind::DevelRequiresCheckPolicyInconsistent";
         case FilteredAurUpdateOperationIssueKind::TargetPlannerMappingInconsistent:
             return "FilteredAurUpdateOperationIssueKind::TargetPlannerMappingInconsistent";
         case FilteredAurUpdateOperationIssueKind::FilteredTargetMappingInconsistent:

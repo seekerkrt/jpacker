@@ -265,6 +265,7 @@ int run_upgrade_aur_dry_run(const AppConfig& config) {
     PreparedFilteredAurUpdateOperation preparation =
         prepare_filtered_aur_update_operation(
             std::move(query_result), NoExplicitSourceSatisfaction{},
+            DevelRequiresCheckPolicy::BlockOperation,
             SavedSourcePreferencePolicy::Strict, config, std::nullopt);
     return render_dry_run_projection(
         project_filtered_aur_update_unified_plan(preparation));

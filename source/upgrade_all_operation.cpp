@@ -1402,6 +1402,7 @@ void PreparedUpgradeAllAurPreflight::prepare_filtered_operation_stage(
                 std::move(query_result),
                 UpgradeAllExplicitSourceSatisfaction{
                     std::move(explicit_sources)},
+                DevelRequiresCheckPolicy::BlockOperation,
                 SavedSourcePreferencePolicy::Strict,
                 config,
                 std::move(cache_root)));
