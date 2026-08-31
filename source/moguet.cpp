@@ -742,8 +742,9 @@ int main(int argc, char* argv[]) {
     const char* system_aur_presentation_case =
         std::getenv("MOGUET_TEST_SYSTEM_AUR_PRESENTATION_CASE");
     if(system_aur_presentation_case &&
-       std::string(system_aur_presentation_case) == "inconsistent") {
-        return run_inconsistent_system_aur_update_presentation_test();
+       system_aur_presentation_case[0] != '\0') {
+        return run_system_aur_update_presentation_test(
+            system_aur_presentation_case);
     }
 #endif
 #ifdef MOGUET_ENABLE_APP_CONFIG_TEST_HOOKS

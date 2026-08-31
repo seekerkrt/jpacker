@@ -193,6 +193,14 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(
         line += " " + package_name;
     append_command_log(line);
 
+    for(const std::string& package_name : package_names) {
+        if(package_name == "system-query-fatal") {
+            throw AurRpcResponseError(
+                std::string{"fixture fatal AUR schema failure\n"} +
+                std::string{"\x1b", 1} + "unsafe\\detail");
+        }
+    }
+
     std::map<std::string, AurPackageInfo> package_by_name;
     for(const auto& package_name : package_names) {
         std::optional<AurPackageInfo> info = fixture_info(package_name);

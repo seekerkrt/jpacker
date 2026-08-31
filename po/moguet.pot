@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.5.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-31 15:08+0900\n"
+"POT-Creation-Date: 2026-08-31 16:18+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -3490,6 +3490,11 @@ msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
 #, c++-format
+msgid "The {} update was not attempted."
+msgstr ""
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
 msgid "The repository system upgrade completed, but the fresh installed-package inventory for {} could not be obtained."
 msgstr ""
 
@@ -3521,20 +3526,15 @@ msgstr ""
 msgid "The completed repository system upgrade was not rolled back."
 msgstr ""
 
+msgid "The repository system upgrade completed."
+msgstr ""
+
 #. TRANSLATORS: AUR is a runtime project identity.
 #, c++-format
 msgid "The repository and {} update result is inconsistent; no success was reported."
 msgstr ""
 
 msgid "The repository system upgrade failed."
-msgstr ""
-
-#. TRANSLATORS: AUR is a runtime project identity.
-#, c++-format
-msgid "The {} update was not attempted."
-msgstr ""
-
-msgid "The repository system upgrade completed."
 msgstr ""
 
 msgid "The repository system upgrade was not attempted."

@@ -2026,6 +2026,9 @@ void test_system_aur_unexpected_preparation_exception_keeps_phase() {
                 SystemAurUpdateOperationPhase::AurPreparation &&
             result.aur.status ==
                 SystemAurUpdateAurPhaseStatus::InconsistentResult &&
+            result.aur.diagnostic ==
+                std::optional<std::string>{
+                    "fixture unexpected filtered preparation exception"} &&
             !result.aur.operation_result.has_value() &&
             result.has_inconsistency() &&
             result.has_partial_completion() &&
@@ -2060,6 +2063,8 @@ void test_system_aur_unexpected_execution_exception_keeps_phase() {
                 SystemAurUpdateOperationPhase::AurExecution &&
             result.aur.status ==
                 SystemAurUpdateAurPhaseStatus::InconsistentResult &&
+            result.aur.diagnostic.has_value() &&
+            !result.aur.diagnostic->empty() &&
             !result.aur.operation_result.has_value() &&
             result.has_inconsistency() &&
             result.has_partial_completion() &&

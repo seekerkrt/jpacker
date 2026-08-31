@@ -246,10 +246,10 @@ void present_system_aur_update_operation_result(
     SystemAurUpdateOperationResult result);
 
 #ifdef MOGUET_ENABLE_SYSTEM_AUR_UPDATE_PRESENTATION_TEST_HOOKS
-// Test-only seam: consume a moved-from coordinator capability so the public
-// command/presenter boundary receives a typed inconsistent aggregate without
-// crossing any repository or AUR authority.
-int run_inconsistent_system_aur_update_presentation_test();
+// Test-only seam: feed coherent childless failures, a child-owned failure, or
+// a moved-from capability into the public presenter without system mutation.
+int run_system_aur_update_presentation_test(
+    const std::string& test_case);
 #endif
 
 // productionはTTY gateをcandidate queryより先に確定する。

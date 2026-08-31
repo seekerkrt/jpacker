@@ -552,6 +552,19 @@ void test_typed_runtime_diagnostic_connection() {
     expect(
         cancelled.message.starts_with("Cancelled: "),
         "Runtime presentation classified a localized/raw string");
+
+    const std::string unsafe_detail =
+        std::string{"日本語\\path\n"} +
+        std::string{"\x1b", 1} +
+        "escape" +
+        std::string{"\xe2\x80\xae", 3} +
+        std::string{"\xef\xbb\xbf", 3} +
+        std::string{"\xff", 1};
+    expect(
+        terminal_safe_runtime_diagnostic_detail(unsafe_detail) ==
+            "日本語\\x5Cpath\\x0A\\x1Bescape"
+            "\\xE2\\x80\\xAE\\xEF\\xBB\\xBF\\xFF",
+        "Runtime diagnostic detail did not escape terminal controls, bidi/BOM, or invalid UTF-8");
 }
 
 } // namespace

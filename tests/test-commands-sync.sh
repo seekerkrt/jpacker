@@ -867,6 +867,57 @@ assert_event_prefix_absent '^(git|makepkg) '
 assert_contains "The repository system upgrade failed." "$output_file"
 assert_contains "The AUR update was not attempted." "$output_file"
 
+setup_case system-aur-update-fresh-configuration-failure-reports-cause
+export MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE=37
+export MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT=1
+export MOGUET_TEST_SUDO_MAIN_STATUS=0
+run_status 1 --noedit --nodiff --noconfirm -Syu
+repository_update='sudo pacman -Syu --noconfirm'
+assert_event_at 1 "$repository_update"
+assert_event_count 1 "$repository_update"
+assert_event_at 2 "pacman-conf --verbose RootDir DBPath"
+assert_event_prefix_absent '^aur '
+assert_event_prefix_absent '^(git|makepkg) '
+assert_event_pattern_count 0 '^sudo pacman -(R|U) '
+assert_contains "The repository system upgrade completed." "$output_file"
+assert_contains \
+    "The repository system upgrade completed, but the fresh installed-package inventory for AUR could not be obtained." \
+    "$output_file"
+assert_contains \
+    "Query failure: pacman-conf failed with exit code 37. [source=pacman]" \
+    "$output_file"
+assert_output_count 1 "pacman-conf failed with exit code 37."
+assert_contains "The AUR update was not attempted." "$output_file"
+assert_contains \
+    "The completed repository system upgrade was not rolled back." \
+    "$output_file"
+
+setup_case system-aur-update-fatal-query-reports-safe-cause
+foreign_inventory=$case_dir/foreign-inventory.state
+printf 'system-query-fatal 0.9-1 explicit\n' > "$foreign_inventory"
+export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$foreign_inventory
+export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+export MOGUET_TEST_SUDO_MAIN_STATUS=0
+run_status 1 --noedit --nodiff --noconfirm -Syu
+repository_update='sudo pacman -Syu --noconfirm'
+assert_event_at 1 "$repository_update"
+assert_event_before "$repository_update" "aur info-many system-query-fatal"
+assert_event_prefix_absent '^(git|makepkg) '
+assert_event_pattern_count 0 '^sudo pacman -(R|U) '
+assert_contains "The repository system upgrade completed." "$output_file"
+assert_contains \
+    "The repository system upgrade completed, but the fresh AUR update query failed." \
+    "$output_file"
+assert_contains \
+    "Query failure: fixture fatal AUR schema failure\\x0A\\x1Bunsafe\\x5Cdetail [source=aur]" \
+    "$output_file"
+assert_output_count 1 "fixture fatal AUR schema failure"
+assert_contains "The AUR update was not attempted." "$output_file"
+assert_not_contains "AUR update:" "$output_file"
+assert_contains \
+    "The completed repository system upgrade was not rolled back." \
+    "$output_file"
+
 setup_case system-aur-update-no-updates-is-not-whole-noop
 foreign_inventory=$case_dir/foreign-inventory.state
 : > "$foreign_inventory"
@@ -881,6 +932,12 @@ assert_event_prefix_absent '^(git|makepkg) '
 assert_contains "The repository system upgrade completed." "$output_file"
 assert_contains "AUR update: no updates" "$output_file"
 assert_not_contains "No changes are required." "$output_file"
+assert_not_contains "[source=aur]" "$output_file"
+assert_not_contains "[source=pacman]" "$output_file"
+assert_not_contains "Query failure:" "$output_file"
+assert_not_contains "Execution failure:" "$output_file"
+assert_not_contains "Blocked:" "$output_file"
+assert_not_contains "Internal inconsistency:" "$output_file"
 
 setup_case system-aur-update-success-is-fresh-and-ignores-preference
 foreign_inventory=$case_dir/foreign-inventory.state
@@ -902,6 +959,12 @@ assert_not_contains "Applying custom build flags" "$output_file"
 assert_contains "The repository system upgrade completed." "$output_file"
 assert_contains "AUR update: completed" "$output_file"
 assert_contains "The repository system upgrade and normal AUR update completed." "$output_file"
+assert_not_contains "[source=aur]" "$output_file"
+assert_not_contains "[source=pacman]" "$output_file"
+assert_not_contains "Query failure:" "$output_file"
+assert_not_contains "Execution failure:" "$output_file"
+assert_not_contains "Blocked:" "$output_file"
+assert_not_contains "Internal inconsistency:" "$output_file"
 
 setup_case system-aur-update-requires-check-is-partial
 foreign_inventory=$case_dir/foreign-inventory.state
