@@ -338,6 +338,18 @@ fallback preferenceも参照せず、preference-derived build environmentはempt
 invalid、unreadable、failureとなるpreference dataのいずれもこのrouteへ影響しません。
 .
 .PP
+statusが
+.B RequiresCheck
+のindependent devel targetはnon-blocking warning付きでskipし、unrelatedなnormal AUR
+updateを停止しません。このstateは未検証のままで、UpToDateでもautomatic update decisionでも
+ありません。別のupdate candidateがdependency、provider、required-child relationとして
+そのtargetを必要とする場合はaffected rootをblockし、commandをnon-zeroにします。明示的な
+.B upgrade-aur
+と
+.B upgrade-all
+はstrictなwhole-operation RequiresCheck blocker behaviorを維持します。
+.
+.PP
 phaseはsequentialでatomicではありません。repository failure時はAUR phaseをnot attemptedの
 ままnon-zeroで終了します。repository phase完了後にAUR phaseがblock / failした場合は、
 repository completionとnon-zeroのpartial failureを表示し、rollbackしません。cleanup failureは

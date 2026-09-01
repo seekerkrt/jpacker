@@ -23,7 +23,7 @@ MoguetはArch Linux向けの **pacman-first wrapper** として扱う。日常�
 | plain `-S` Auto | official packageはbinary repository、source preferenceがあるofficial packageはofficial source-build、officialにないtargetはAURへ分類する | pacman単独のbinary repository searchにAUR/source-build分類を補う |
 | `-S --aur` | AUR RPC / PackageBase / AUR build planだけを使い、official packageやsource preferenceへfallbackしない | `--aur`はMoguet selectorでありpacmanへ渡さない |
 | `-S --repo` | official binary repositoryへ限定し、AUR / source-buildへfallbackしない | selectorを除いたargvをpacmanへ渡す |
-| exact target-less `-Syu` Auto | official repository system update成功後にfreshなinstalled foreign inventoryを取得し、normal installed AUR updateを行う。saved source-build preferenceはzero-readで適用しない | ordinary AUR-helper updateとしてrepository transactionと後続AUR transactionをsequentialにorchestrateする |
+| exact target-less `-Syu` Auto | official repository system update成功後にfreshなinstalled foreign inventoryを取得し、normal installed AUR updateを行う。independent devel `RequiresCheck`はattention付きskip、required relationはblocker。saved source-build preferenceはzero-readで適用しない | ordinary AUR-helper updateとしてrepository transactionと後続AUR transactionをsequentialにorchestrateする |
 | exact target-less `-Syu --repo` | official repository system updateだけを行い、AUR inventory / RPC、source preference、cache / Git / makepkgへ到達しない | semantic `--repo`を除き、compatibleなpacman argumentをrepository phaseへpass-throughする |
 | `-Ss` | official searchとAUR searchを組み合わせる。非対話でprovider / root selectionを開始しない | pacman searchを表示し、MoguetがAUR searchを補完する |
 | `-Si` | officialを優先し、見つからない場合だけAUR metadataを表示する。`--aur` / `--repo`はsourceを限定する | AUR infoはpacman infoではなくtyped AUR metadataを表示する |
@@ -122,7 +122,8 @@ AURを黙ってskipしない。full compatible pacman pass-throughが必要な�
 repository upgradeだけを行い、AUR inventory / RPC、source preference、cache、Git、makepkg、
 source runnerを呼ばない。`moguet -Syu --aur`はunsupportedであり、AUR-only source-aware
 operationのcanonical surfaceは`moguet upgrade-aur`である。`--noconfirm`はprovider ambiguity、
-conflict / replacement、VCS/devel `RequiresCheck`その他のguardを突破しない。
+conflict / replacement、required VCS/devel `RequiresCheck`その他のguardを突破せず、independent
+`RequiresCheck`をautomatic updateへ昇格させない。
 
 composite化するのは上記exact formだけである。`-Sy`、`-Su`、`-Suy`、`-S -y -u`、
 `-S --refresh --sysupgrade`、target-bearing `-Syu <pkg>`、unknown modifier formはcurrent routingを
@@ -146,6 +147,12 @@ upgrade成功後にAUR stateをfreshに再評価することを明示する。cu
 repository intentを持つouter operationを`NoOp`へ落とさない。RepoOnlyの
 `moguet --dry-run -Syu --repo`はrepository intentだけを表示し、AUR / preference authorityへ
 到達しない。どちらもactual capabilityを作成・再利用しない。
+
+Auto dry-runもactualと同じ`SkipIndependentTarget` policyを使う。independent devel
+`RequiresCheck`だけならcurrent-state AUR childを`NoOp`、outer operationを`Ready`として
+attentionを表示し、unrelated `UpdateAvailable`があればAUR child / outerとも`Ready`を維持する。
+required dependency / provider / child relationへ再登場した`RequiresCheck`はAUR child / outerを
+`Blocked`にする。RepoOnlyはtyped attentionを含むAUR authorityを一切保持しない。
 
 diagnostic presentationはtyped stateからlocalizeする一方向のprojectionであり、localized / raw
 stringからclassificationを逆算しない。English / Japaneseともnormal summary、
@@ -177,9 +184,15 @@ v2.5.0のconservative connectionはupstream VCS revisionをquery / 比較せず�
 official repository package、AURに存在しないforeign package、source preferenceだけで選ばれるpackageはautomatic AUR update対象にしない。
 
 exact target-less `-Syu`のnormal AUR phaseも同じexact inventory / AUR query / plan / provider /
-conflict / replaces / artifact / `RequiresCheck` safety authorityを使うが、saved source preference
-policyだけはIgnoreでzero-I/Oとする。`upgrade-aur`と`upgrade-all`はStrictのままであり、
-normal `-Syu`からsource preference登録packageをsource-build routeへ自動routingしない。
+conflict / replaces / artifact / `RequiresCheck` safety authorityを使う。ordinary `-Syu`では
+independent `RequiresCheck`を`Skipped(IndependentDevelRequiresCheck)`としてwarning / attentionへ
+投影し、unrelatedなnormal updateをblockせず、他のhard failureがなければexit 0を許す。ただし
+`RequiresCheck`を`UpToDate` / `NoChange`へ変換せず、package-state observationは`Unknown`のまま
+保持する。dependency、provider、required artifact childとして必要なtargetは
+`Skipped(RequiredDevelRequiresCheck)`とaffected rootのtyped blockerを保持し、current global
+preparation barrierに従ってnon-zeroとなる。saved source preference policyは別authorityのIgnoreで
+zero-I/Oとする。`upgrade-aur`と`upgrade-all`は`BlockOperation` + Strictのままであり、normal
+`-Syu`からsource preference登録packageをsource-build routeへ自動routingしない。
 
 <a id="compat-git-remote-revision-observer"></a>
 ## Trusted Git remote revision observer foundation compatibility
@@ -520,7 +533,7 @@ RepoOnly `-Syu --repo`ではcompatible pacman pass-throughの一部としてrepo
 ## Exit code、partial completion、failure
 
 - pacmanへ直接委譲したcommandはpacmanの終了codeを返す。
-- exact target-less Auto `-Syu`はrepository + normal AUR aggregateのtyped resultを使い、complete successは0、repository failure、repository完了後のAUR blocker / failure、inconsistent resultはnon-zeroとする。
+- exact target-less Auto `-Syu`はrepository + normal AUR aggregateのtyped resultを使い、complete successは0とする。independent devel `RequiresCheck`だけはwarning / attention付きsuccessを許すが、repository failure、required `RequiresCheck`を含むrepository完了後のAUR blocker / failure、inconsistent resultはnon-zeroとする。
 - repository failureではAURをnot attemptedとして示す。repository完了後のAUR failureではrepository completionを隠さずpartial completionとして示し、rollbackを行わない。
 - AUR install resultとcleanup failureをflattenせず、AUR `NoUpdates`だけをwhole-operation `NoOp`へ昇格しない。
 - integrated searchはofficialまたはAURのmatchを表示できた場合に成功とするが、query failureをempty resultへflattenしない。

@@ -503,7 +503,8 @@ before invoking pacman, preserves the compatible pacman pass-through surface,
 and performs no AUR inventory, AUR RPC, preference, cache, Git, or makepkg
 work. `moguet -Syu --aur` is unsupported; use the source-aware
 `moguet upgrade-aur` for an AUR-only update. `--noconfirm` never bypasses
-provider, conflict/replacement, `RequiresCheck`, or other safety guards.
+provider, conflict/replacement, required `RequiresCheck`, or other safety
+guards, and it never approves an unverified devel update.
 
 Moguet v2.5.0 treats installed exact-AUR packages with conventional `-git`,
 `-svn`, `-hg`, `-bzr`, `-cvs`, or `-darcs` suffix evidence as devel
@@ -513,12 +514,19 @@ PackageBase/child evidence, and reason instead of silently treating the
 package as up to date. A normal newer AUR version remains an update candidate
 and keeps the existing precedence.
 
-`RequiresCheck` is not an automatic rebuild candidate. `upgrade-aur`, its
-dry-run, and the fresh AUR phase of `upgrade-all` block before AUR mutation;
-non-TTY use and `--noconfirm` do not add a prompt or approve a rebuild. v2.5.0
-does not query or compare the upstream VCS revision and does not publish devel
-build provenance. The current development tree includes the trusted HTTPS Git
-remote revision observer foundation from
+`RequiresCheck` is neither `UpToDate` nor an automatic rebuild decision. In
+ordinary exact target-less `-Syu`, an independent target in this state is
+skipped with a non-blocking warning; unrelated normal AUR updates can continue,
+and the aggregate can succeed. Its update status remains unverified. If another
+update candidate requires that target through a dependency, provider, or
+required-child relation, the affected root remains blocked and the operation
+is non-zero. `upgrade-aur`, its dry-run, and the fresh AUR phase of
+`upgrade-all` retain their strict whole-operation blocker behavior. Non-TTY use
+and `--noconfirm` do not add a prompt or approve a rebuild.
+
+v2.5.0 does not query or compare the upstream VCS revision and does not publish
+devel build provenance. The current development tree includes the trusted
+HTTPS Git remote revision observer foundation from
 [issue #475](https://github.com/seekerkrt/moguet/issues/475), limited to
 default HEAD and exact branches with strict complete SHA-1 / SHA-256 results.
 It has no production source-authority producer or caller and is not connected

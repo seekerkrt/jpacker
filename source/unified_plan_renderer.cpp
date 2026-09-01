@@ -4772,6 +4772,11 @@ std::string invalid_snapshot_raw_value_display(std::string_view value) {
     return display;
 }
 
+std::string independent_requires_check_attention_message() {
+    return localization::translate_message(
+        "skipped: devel update requires check: suffix candidate only; not automatically updated because authoritative build provenance is unavailable");
+}
+
 } // namespace
 
 UnifiedPlanRenderingResult render_unified_plan_observation(
@@ -4980,6 +4985,52 @@ UnifiedPlanRenderingResult render_system_aur_update_unified_plan(
             state.issues.end(),
             std::make_move_iterator(aur_rendering.issues.begin()),
             std::make_move_iterator(aur_rendering.issues.end()));
+    }
+
+    if(!projection.requires_check_attentions().empty()) {
+        state.output << localization::translate_message(
+                            "Attention-required details:")
+                     << '\n';
+        for(std::size_t index = 0;
+            index < projection.requires_check_attentions().size();
+            ++index) {
+            const SystemAurUpdateRequiresCheckAttention& attention =
+                projection.requires_check_attentions()[index];
+            const bool is_supported =
+                projection.mode() == SystemAurUpdateUnifiedPlanMode::Auto &&
+                attention.reason ==
+                    DevelRequiresCheckReason::SuffixCandidateOnly &&
+                attention.skip_kind ==
+                    AurUpdateExecutionSkipKind::
+                        IndependentDevelRequiresCheck &&
+                attention.observation_state ==
+                    AurUpdateEffectiveState::RequiresCheck &&
+                has_valid_requires_check_package_identity_shape(
+                    attention.package_name) &&
+                has_valid_requires_check_package_identity_shape(
+                    attention.package_base);
+            if(!is_supported) {
+                state.add_issue(
+                    UnifiedPlanRenderingIssueKind::UnsupportedValue,
+                    UnifiedPlanRenderingSection::RouteSemantics,
+                    index, attention.update_plan_index,
+                    localization::translate_message(
+                        "A system/AUR RequiresCheck attention is not supported by the renderer."));
+                state.output << localization::translate_message(
+                                    "  unsupported")
+                             << '\n';
+                continue;
+            }
+            state.output << "  "
+                         << invalid_snapshot_raw_value_display(
+                                attention.package_name)
+                         << " (PackageBase: "
+                         << invalid_snapshot_raw_value_display(
+                                attention.package_base)
+                         << "): "
+                         << independent_requires_check_attention_message()
+                         << '\n';
+        }
     }
     return UnifiedPlanRenderingResult{
         state.output.str(), std::move(state.issues)};

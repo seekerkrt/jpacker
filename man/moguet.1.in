@@ -370,6 +370,19 @@ Valid, invalid, unreadable, or failing preference data therefore does not
 affect this route.
 .
 .PP
+An independent devel target whose status is
+.B RequiresCheck
+is skipped with a non-blocking warning and does not stop unrelated normal AUR
+updates. This state remains unverified: it is neither UpToDate nor an automatic
+update decision. If another update candidate requires the target through a
+dependency, provider, or required-child relation, the affected root is blocked
+and the command remains non-zero. The explicit
+.B upgrade-aur
+and
+.B upgrade-all
+routes retain their strict whole-operation RequiresCheck blocker behavior.
+.
+.PP
 The phases are sequential, not atomic. A repository failure leaves the AUR
 phase not attempted and exits non-zero. If the repository phase completes but
 the AUR phase is blocked or fails, Moguet reports repository completion and a

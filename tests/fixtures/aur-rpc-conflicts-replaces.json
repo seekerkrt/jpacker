@@ -62,6 +62,36 @@
       "Provides": ["foo"],
       "Conflicts": ["foo"]
     },
+    "moguet-fixture-rc-one-git": {
+      "Name": "moguet-fixture-rc-one-git",
+      "PackageBase": "moguet-fixture-rc-one-git",
+      "Version": "1.0-1",
+      "Depends": []
+    },
+    "moguet-fixture-rc-two-git": {
+      "Name": "moguet-fixture-rc-two-git",
+      "PackageBase": "moguet-fixture-rc-two-git",
+      "Version": "1.0-1",
+      "Depends": []
+    },
+    "moguet-fixture-rc-three-git": {
+      "Name": "moguet-fixture-rc-three-git",
+      "PackageBase": "moguet-fixture-rc-three-git",
+      "Version": "1.0-1",
+      "Depends": []
+    },
+    "required-devel-root": {
+      "Name": "required-devel-root",
+      "PackageBase": "required-devel-root",
+      "Version": "1.0-1",
+      "Depends": ["required-devel-git"]
+    },
+    "required-devel-git": {
+      "Name": "required-devel-git",
+      "PackageBase": "required-devel-git",
+      "Version": "1.0-1",
+      "Depends": []
+    },
     "foo-git-with-target": {
       "Name": "foo-git-with-target",
       "PackageBase": "foo-git-with-target",

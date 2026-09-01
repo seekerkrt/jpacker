@@ -1,5 +1,6 @@
 #pragma once
 
+#include "aur_update_execution_preflight.hpp"
 #include "build_plan_artifact_target_projection.hpp"
 #include "commands_inspect.hpp"
 #include "commands_sync.hpp"
@@ -9,13 +10,14 @@
 #include "unified_plan_observation.hpp"
 #include "upgrade_all_operation.hpp"
 
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
-struct AurUpdateExecutionPreflight;
 struct AurUpdateQueryResult;
 struct AurUpdateSourceBuildPreparation;
 class PreparedFilteredAurUpdateOperation;
@@ -225,6 +227,24 @@ enum class SystemAurUpdateUnifiedPlanTransactionRelationship {
     SeparateSequentialTransactions,
 };
 
+// Ordinary system+AUR dry-run keeps non-blocking RequiresCheck observations
+// as typed route data. Rendering is a one-way projection and never decides
+// whether a target is independent from these copied fields.
+struct SystemAurUpdateRequiresCheckAttention {
+    std::size_t update_plan_index = 0;
+    std::string package_name;
+    std::string package_base;
+    DevelRequiresCheckReason reason =
+        DevelRequiresCheckReason::SuffixCandidateOnly;
+    AurUpdateExecutionSkipKind skip_kind =
+        AurUpdateExecutionSkipKind::IndependentDevelRequiresCheck;
+    AurUpdateEffectiveState observation_state =
+        AurUpdateEffectiveState::RequiresCheck;
+
+    bool operator==(
+        const SystemAurUpdateRequiresCheckAttention&) const = default;
+};
+
 // Route-specific aggregate keeps the repository system intent observable even
 // when the current-state AUR child is Blocked. The child observations remain
 // separate, so no atomic transaction is projected.
@@ -256,6 +276,10 @@ public:
     const UnifiedPlanProjection* aur_projection() const noexcept {
         return aur_projection_.get();
     }
+    const std::vector<SystemAurUpdateRequiresCheckAttention>&
+    requires_check_attentions() const noexcept {
+        return requires_check_attentions_;
+    }
     std::optional<SystemAurUpdateUnifiedPlanFreshness> freshness()
         const noexcept {
         return freshness_;
@@ -276,6 +300,8 @@ private:
         std::vector<SystemAurUpdateUnifiedPlanPhase> phases,
         std::unique_ptr<UnifiedPlanProjection> repository_projection,
         std::unique_ptr<UnifiedPlanProjection> aur_projection,
+        std::vector<SystemAurUpdateRequiresCheckAttention>
+            requires_check_attentions,
         std::optional<SystemAurUpdateUnifiedPlanFreshness> freshness,
         std::optional<SystemAurUpdateUnifiedPlanActualRefresh>
             actual_refresh,
@@ -284,6 +310,8 @@ private:
         : status_(status), mode_(mode), phases_(std::move(phases)),
           repository_projection_(std::move(repository_projection)),
           aur_projection_(std::move(aur_projection)),
+          requires_check_attentions_(
+              std::move(requires_check_attentions)),
           freshness_(freshness), actual_refresh_(actual_refresh),
           transaction_relationship_(transaction_relationship) {
     }
@@ -293,6 +321,8 @@ private:
     std::vector<SystemAurUpdateUnifiedPlanPhase> phases_;
     std::unique_ptr<UnifiedPlanProjection> repository_projection_;
     std::unique_ptr<UnifiedPlanProjection> aur_projection_;
+    std::vector<SystemAurUpdateRequiresCheckAttention>
+        requires_check_attentions_;
     std::optional<SystemAurUpdateUnifiedPlanFreshness> freshness_;
     std::optional<SystemAurUpdateUnifiedPlanActualRefresh> actual_refresh_;
     std::optional<SystemAurUpdateUnifiedPlanTransactionRelationship>

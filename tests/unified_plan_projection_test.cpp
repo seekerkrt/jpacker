@@ -518,7 +518,9 @@ AurUpdateQueryResult update_query(
 AurUpdateExecutionPreflight executable_update_preflight(
     BuildPlan plan,
     InstalledPackageReason install_reason =
-        InstalledPackageReason::Explicit) {
+        InstalledPackageReason::Explicit,
+    DevelRequiresCheckPolicy devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation) {
     AurUpdateExecutionTarget target;
     target.update_plan_index = 0;
     target.build_plan_root_index = 0;
@@ -530,7 +532,7 @@ AurUpdateExecutionPreflight executable_update_preflight(
             ? DesiredInstallReason::Dependency
             : DesiredInstallReason::Explicit;
     return AurUpdateExecutionPreflight{
-        {std::move(target)}, std::move(plan), DevelRequiresCheckPolicy::BlockOperation};
+        {std::move(target)}, std::move(plan), devel_requires_check_policy};
 }
 
 AurUpdateExecutionPreflight no_op_update_preflight() {
@@ -546,7 +548,7 @@ AurUpdateExecutionPreflight no_op_update_preflight() {
         std::nullopt,
         "fixture target is already up to date"});
     return AurUpdateExecutionPreflight{
-        {std::move(target)}, std::nullopt, DevelRequiresCheckPolicy::BlockOperation};
+        {std::move(target)}, std::nullopt, DevelRequiresCheckPolicy::SkipIndependentTarget};
 }
 
 RegisteredSourcePreferenceSnapshot registered_source(
@@ -629,6 +631,7 @@ AurUpdateSourceBuildObservation ready_source_build_observation(
     expect(
         preflight.build_plan.has_value() &&
             preflight.targets.size() == 1 &&
+            preflight.devel_requires_check_policy.has_value() &&
             preflight.build_plan->root_targets.size() == 1 &&
             preflight.build_plan->order.size() == 1,
         "system/AUR source observation fixture is malformed");
@@ -707,7 +710,7 @@ AurUpdateSourceBuildObservation ready_source_build_observation(
     observation.production_preflight.emplace(
         std::move(production_preflight));
     observation.devel_requires_check_policy =
-        DevelRequiresCheckPolicy::BlockOperation;
+        *preflight.devel_requires_check_policy;
     expect(
         observation.issues.empty() &&
             observation.affected_update_targets.size() == 1 &&
@@ -724,9 +727,11 @@ AurUpdateSourceBuildObservation ready_source_build_observation(
 FilteredAurUpdateObservation ready_filtered_aur_observation() {
     FilteredAurUpdateObservation filtered;
     filtered.devel_requires_check_policy =
-        DevelRequiresCheckPolicy::BlockOperation;
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
     filtered.query_result = update_query();
-    filtered.preflight = executable_update_preflight(build_plan_fixture());
+    filtered.preflight = executable_update_preflight(
+        build_plan_fixture(), InstalledPackageReason::Explicit,
+        DevelRequiresCheckPolicy::SkipIndependentTarget);
     filtered.source_build_observation.emplace(
         ready_source_build_observation(filtered.preflight));
     expect(
@@ -775,7 +780,7 @@ multi_unit_partial_provider_filtered_aur_observation() {
 
     FilteredAurUpdateObservation filtered;
     filtered.devel_requires_check_policy =
-        DevelRequiresCheckPolicy::BlockOperation;
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
     filtered.query_result.plan.entries = {
         update(provider_child, provider_base),
         update(plain_child, plain_base)};
@@ -791,14 +796,14 @@ multi_unit_partial_provider_filtered_aur_observation() {
     }
     filtered.preflight.build_plan.emplace(std::move(plan));
     filtered.preflight.devel_requires_check_policy =
-        DevelRequiresCheckPolicy::BlockOperation;
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
     const BuildPlan& retained_plan = *filtered.preflight.build_plan;
     const ProvidedDependency& repository_provider =
         retained_plan.provided.front().provider;
 
     AurUpdateSourceBuildObservation source;
     source.devel_requires_check_policy =
-        DevelRequiresCheckPolicy::BlockOperation;
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
     source.affected_update_targets = filtered.preflight.targets;
     source.affected_roots = retained_plan.root_targets;
     source.production_preflight.emplace();
@@ -893,12 +898,12 @@ multi_unit_partial_provider_filtered_aur_observation() {
 FilteredAurUpdateObservation no_op_filtered_aur_observation() {
     FilteredAurUpdateObservation filtered;
     filtered.devel_requires_check_policy =
-        DevelRequiresCheckPolicy::BlockOperation;
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
     filtered.query_result = update_query(AurUpdateClassification::UpToDate);
     filtered.preflight = no_op_update_preflight();
     filtered.source_build_observation.emplace();
     filtered.source_build_observation->devel_requires_check_policy =
-        DevelRequiresCheckPolicy::BlockOperation;
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
     expect(
         filtered.issues.empty() &&
             filtered.preflight.targets.size() == 1 &&
@@ -916,7 +921,7 @@ FilteredAurUpdateObservation no_op_filtered_aur_observation() {
 FilteredAurUpdateObservation blocked_filtered_aur_observation() {
     FilteredAurUpdateObservation filtered;
     filtered.devel_requires_check_policy =
-        DevelRequiresCheckPolicy::BlockOperation;
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
     filtered.query_result = update_query();
     AurUpdateExecutionTarget target;
     target.update_plan_index = 0;
@@ -928,10 +933,10 @@ FilteredAurUpdateObservation blocked_filtered_aur_observation() {
         "fixture current-state provider ambiguity"});
     filtered.preflight.targets.push_back(std::move(target));
     filtered.preflight.devel_requires_check_policy =
-        DevelRequiresCheckPolicy::BlockOperation;
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
     filtered.source_build_observation.emplace();
     filtered.source_build_observation->devel_requires_check_policy =
-        DevelRequiresCheckPolicy::BlockOperation;
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
     AurUpdatePreparationIssue issue;
     issue.reason = AurUpdatePreparationReason::BlockingPreflight;
     issue.diagnostic = "fixture current-state preparation blocker";
@@ -975,7 +980,7 @@ SystemAurUpdateDryRunObservation system_aur_auto_observation(
         SystemAurUpdateDryRunActualAuthorityRefresh::AfterRepositorySuccess,
         NoExplicitSourceSatisfaction{},
         SavedSourcePreferencePolicy::Ignore,
-        DevelRequiresCheckPolicy::BlockOperation,
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
         std::move(repository_configuration),
         std::move(inventory),
         std::move(filtered),
@@ -996,6 +1001,10 @@ SystemAurUpdateDryRunObservation system_aur_auto_observation(
             observation.saved_source_preference_policy ==
                 std::optional<SavedSourcePreferencePolicy>{
                     SavedSourcePreferencePolicy::Ignore} &&
+            observation.devel_requires_check_policy ==
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::
+                        SkipIndependentTarget} &&
             observation.repository_configuration.has_value() &&
             observation.aur_observation.has_value() &&
             observation.issues.empty(),
@@ -3201,7 +3210,8 @@ void test_system_aur_auto_projection_separates_current_observation() {
         projection->status() ==
                 SystemAurUpdateUnifiedPlanStatus::Ready &&
             projection->mode() ==
-                SystemAurUpdateUnifiedPlanMode::Auto,
+                SystemAurUpdateUnifiedPlanMode::Auto &&
+            projection->requires_check_attentions().empty(),
         "system/AUR Auto projection did not remain Ready");
     expect(
         projection->phases() ==
@@ -3354,6 +3364,7 @@ void test_system_aur_noop_and_repo_only_do_not_false_noop() {
     expect(
         no_updates_projection->status() ==
                 SystemAurUpdateUnifiedPlanStatus::Ready &&
+            no_updates_projection->requires_check_attentions().empty() &&
             has_repository_system_upgrade_intent(require_observation(
                 no_updates_projection->repository_projection(),
                 "system/AUR no-update repository child")),
@@ -3406,6 +3417,7 @@ void test_system_aur_noop_and_repo_only_do_not_false_noop() {
                     SystemAurUpdateUnifiedPlanPhase::
                         RepositorySystemTransactionIntent} &&
             repo_only_projection->aur_projection() == nullptr &&
+            repo_only_projection->requires_check_attentions().empty() &&
             !repo_only_projection->freshness().has_value() &&
             !repo_only_projection->actual_refresh().has_value() &&
             !repo_only_projection->transaction_relationship().has_value(),
@@ -3449,7 +3461,7 @@ void test_system_aur_blockers_preserve_repository_child() {
         SystemAurUpdateDryRunActualAuthorityRefresh::AfterRepositorySuccess,
         NoExplicitSourceSatisfaction{},
         SavedSourcePreferencePolicy::Ignore,
-        DevelRequiresCheckPolicy::BlockOperation,
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
         PacmanRepositoryConfiguration{},
         ForeignPackageInventory{InstalledPackageMetadata{
             "suite-child", "1.0", InstalledPackageReason::Explicit}},
@@ -3517,7 +3529,7 @@ void test_system_aur_projection_rejects_malformed_authority() {
         system_aur_auto_observation(ready_filtered_aur_observation());
     mismatched_devel_policy.aur_observation
         ->devel_requires_check_policy =
-        DevelRequiresCheckPolicy::SkipIndependentTarget;
+        DevelRequiresCheckPolicy::BlockOperation;
     expect_invalid_argument(
         [&mismatched_devel_policy] {
             (void)project_system_aur_update_unified_plan(
@@ -3599,7 +3611,7 @@ void test_system_aur_projection_rejects_malformed_authority() {
         SystemAurUpdateDryRunActualAuthorityRefresh::AfterRepositorySuccess,
         NoExplicitSourceSatisfaction{},
         SavedSourcePreferencePolicy::Ignore,
-        DevelRequiresCheckPolicy::BlockOperation,
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
         PacmanRepositoryConfiguration{},
         {},
         std::nullopt,

@@ -1859,9 +1859,9 @@ bool FilteredAurUpdateObservation::
 
 bool FilteredAurUpdateExecutionResult::
     has_consistent_devel_requires_check_policy_snapshot() const noexcept {
-    return devel_requires_check_policy ==
-               std::optional<DevelRequiresCheckPolicy>{
-                   DevelRequiresCheckPolicy::BlockOperation} &&
+    return devel_requires_check_policy.has_value() &&
+           is_known_devel_requires_check_policy(
+               *devel_requires_check_policy) &&
            preflight.devel_requires_check_policy ==
                devel_requires_check_policy &&
            preparation.devel_requires_check_policy ==

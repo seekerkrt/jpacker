@@ -443,7 +443,8 @@ initially対応するpacman semantic optionは`--needed`だけで、repository t
 pacmanへ渡さず、compatibleなpacman pass-through surfaceを維持し、AUR inventory、AUR RPC、
 preference、cache、Git、makepkgへ到達しません。`moguet -Syu --aur`はunsupportedです。
 AUR-only source-aware updateには`moguet upgrade-aur`を使います。`--noconfirm`はprovider、
-conflict / replacement、`RequiresCheck`等のsafety guardを突破しません。
+conflict / replacement、required `RequiresCheck`等のsafety guardを突破せず、未検証の
+devel updateを承認しません。
 
 Moguet v2.5.0では、exact AUR packageとして解決できるinstalled packageについて、
 `-git`、`-svn`、`-hg`、`-bzr`、`-cvs`、`-darcs`というconventionalなsuffix
@@ -452,10 +453,16 @@ Moguet v2.5.0では、exact AUR packageとして解決できるinstalled package
 reason付きの`RequiresCheck`を表示します。normal AUR versionが新しい場合は既存の
 update candidate authorityを優先します。
 
-`RequiresCheck`はautomatic rebuild candidateではありません。`upgrade-aur`、そのdry-run、
-`upgrade-all`のfresh AUR phaseはAUR mutationより前にblockし、non-TTYや`--noconfirm`でも
-promptを追加せずrebuildを承認しません。v2.5.0ではupstream VCS revisionのquery / 比較や
-devel build provenanceのpublicationを行いません。current development treeには
+`RequiresCheck`は`UpToDate`でもautomatic rebuild decisionでもありません。通常のexact
+target-less `-Syu`では、independentなtargetだけをnon-blocking warning付きでskipし、
+unrelatedなnormal AUR updateを継続してaggregate successを許します。update statusは
+未検証のままです。別のupdate candidateがdependency、provider、required-child relationとして
+そのtargetを必要とする場合は、affected rootをblockしてoperationをnon-zeroにします。
+`upgrade-aur`、そのdry-run、`upgrade-all`のfresh AUR phaseは、strictなwhole-operation
+blocker semanticsを維持します。non-TTYや`--noconfirm`でもpromptを追加せずrebuildを承認しません。
+
+v2.5.0ではupstream VCS revisionのquery / 比較やdevel build provenanceのpublicationを
+行いません。current development treeには
 [Issue #475](https://github.com/seekerkrt/moguet/issues/475)のtrusted HTTPS Git remote revision
 observer foundationが入り、default HEAD / exact branchとcompleteなSHA-1 / SHA-256 resultだけへ
 限定されています。ただしproduction source-authority producer / callerはなく、AUR update assessmentへ

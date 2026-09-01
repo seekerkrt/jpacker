@@ -25,7 +25,7 @@ bool filtered_result_has_inconsistency(
     return !filtered.has_consistent_devel_requires_check_policy_snapshot() ||
            filtered.devel_requires_check_policy !=
                std::optional<DevelRequiresCheckPolicy>{
-                   DevelRequiresCheckPolicy::BlockOperation} ||
+                   DevelRequiresCheckPolicy::SkipIndependentTarget} ||
            !filtered.issues.empty() ||
            !filtered.reduced_operation_result.reduction_issues.empty() ||
            filtered.reduced_operation_result.status ==
@@ -191,7 +191,7 @@ bool auto_dry_run_authority_is_complete(
                    SavedSourcePreferencePolicy::Ignore} &&
            observation.devel_requires_check_policy ==
                std::optional<DevelRequiresCheckPolicy>{
-                   DevelRequiresCheckPolicy::BlockOperation} &&
+                   DevelRequiresCheckPolicy::SkipIndependentTarget} &&
            observation.repository_configuration.has_value() &&
            observation.aur_observation.has_value() &&
            observation.aur_observation
@@ -260,7 +260,7 @@ SystemAurUpdateDryRunObservation observe_system_aur_update_dry_run(
     observation.saved_source_preference_policy =
         SavedSourcePreferencePolicy::Ignore;
     observation.devel_requires_check_policy =
-        DevelRequiresCheckPolicy::BlockOperation;
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
 
     try {
         observation.repository_configuration =
@@ -343,7 +343,7 @@ SystemAurUpdateDryRunObservation observe_system_aur_update_dry_run(
             observe_filtered_aur_update_operation(
                 std::move(query_result.value()),
                 NoExplicitSourceSatisfaction{},
-                DevelRequiresCheckPolicy::BlockOperation,
+                DevelRequiresCheckPolicy::SkipIndependentTarget,
                 SavedSourcePreferencePolicy::Ignore, config);
     } catch(const std::exception& error) {
         observation.issues.push_back(SystemAurUpdateDryRunIssue{
@@ -767,7 +767,7 @@ execute_prepared_system_aur_update_operation(
     try {
         filtered.emplace(prepare_filtered_aur_update_operation(
             std::move(query_result), NoExplicitSourceSatisfaction{},
-            DevelRequiresCheckPolicy::BlockOperation,
+            DevelRequiresCheckPolicy::SkipIndependentTarget,
             SavedSourcePreferencePolicy::Ignore, config));
     } catch(const std::logic_error& error) {
         result.aur.status =

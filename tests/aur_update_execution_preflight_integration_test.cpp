@@ -10,6 +10,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <unistd.h>
 #include <vector>
@@ -48,6 +49,19 @@ AurUpdatePlanEntry update_entry(
         AurUpdateClassification::UpdateAvailable};
 }
 
+AurUpdatePlanEntry requires_check_entry(
+    const std::string& package_name) {
+    return classify_aur_update(AurUpdatePlanInput{
+        package_name,
+        "1.0-1",
+        InstalledPackageReason::Dependency,
+        AurUpdateRemotePackage{
+            package_name,
+            package_name,
+            "1.0-1",
+            AurVersionRelation::SameAsInstalled}});
+}
+
 bool has_reason(
     const AurUpdateExecutionTarget& target,
     AurUpdateExecutionReason reason) {
@@ -66,6 +80,22 @@ const AurUpdateExecutionIssue& relation_issue(
         });
     if(found == target.issues.end()) {
         throw std::runtime_error("Typed relation preflight issue is missing");
+    }
+    return *found;
+}
+
+const AurUpdateExecutionTarget& target_by_name(
+    const AurUpdateExecutionPreflight& preflight,
+    std::string_view package_name) {
+    const auto found = std::find_if(
+        preflight.targets.begin(), preflight.targets.end(),
+        [&package_name](const AurUpdateExecutionTarget& target) {
+            return target.update.installed_name == package_name;
+        });
+    if(found == preflight.targets.end()) {
+        throw std::runtime_error(
+            "Integration preflight target is missing: " +
+            std::string{package_name});
     }
     return *found;
 }
@@ -189,6 +219,134 @@ void test_simple_roots_and_combined_resolution() {
     expect(
         fixture.relative_paths() == paths_before,
         "Executable or skip-only preflight created a filesystem path");
+    expect_no_forbidden_operations();
+}
+
+void test_skip_independent_target_uses_real_resolver_reentry() {
+    FixtureRoot fixture("requires-check-localization");
+    const fs::path database_path = fixture.root() / "database";
+    const fs::path sync_directory = database_path / "sync";
+    fs::create_directories(sync_directory);
+    std::ofstream(sync_directory / "core.db").close();
+    const std::vector<fs::path> paths_before = fixture.relative_paths();
+    fixture.enter();
+
+    const auto arrange_repository_observation = [&] {
+        package_metadata_test_stub::set_empty_package_cache();
+        stub::enqueue_captured_command_result(
+            DATABASE_PATH_COMMAND,
+            CapturedCommandResult{
+                "RootDir = " + fixture.root().string() +
+                    "\nDBPath = " + database_path.string() + "\n",
+                0});
+        stub::enqueue_captured_command_result(
+            REPOSITORY_LIST_COMMAND,
+            CapturedCommandResult{"core\n", 0});
+    };
+
+    stub::reset();
+    arrange_repository_observation();
+    const AurUpdateExecutionPreflight required =
+        ::resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{
+                update_entry(
+                    "localization-required-root",
+                    InstalledPackageReason::Explicit),
+                requires_check_entry(
+                    "localization-required-git"),
+            }},
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    const AurUpdateExecutionTarget& required_root = target_by_name(
+        required, "localization-required-root");
+    const AurUpdateExecutionTarget& required_devel = target_by_name(
+        required, "localization-required-git");
+    const auto blocker = std::find_if(
+        required_root.issues.begin(), required_root.issues.end(),
+        [](const AurUpdateExecutionIssue& issue) {
+            return issue.reason == AurUpdateExecutionReason::
+                                       RequiredDevelTargetRequiresCheck;
+        });
+    expect(
+        required.build_plan.has_value() &&
+            required.build_plan->root_targets ==
+                std::vector<RootTargetIdentity>{
+                    {0, "localization-required-root"}} &&
+            std::any_of(
+                required.build_plan->dependency_edges.begin(),
+                required.build_plan->dependency_edges.end(),
+                [](const BuildPlanDependencyEdge& edge) {
+                    return edge.parent_package_name ==
+                               "localization-required-root" &&
+                           edge.resolved_package_name ==
+                               std::optional<std::string>{
+                                   "localization-required-git"};
+                }) &&
+            required_root.status ==
+                AurUpdateExecutionTargetStatus::Incomplete &&
+            blocker != required_root.issues.end() &&
+            blocker->required_devel_target_blocker.has_value() &&
+            blocker->required_devel_target_blocker
+                    ->requires_check_update_plan_index == 1 &&
+            blocker->required_devel_target_blocker->relation ==
+                AurUpdateRequiredDevelTargetRelation::
+                    AurExactDependency &&
+            required_devel.status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            required_devel.skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    RequiredDevelRequiresCheck &&
+            !required_devel.build_plan_root_index.has_value() &&
+            !required_devel.desired_install_reason.has_value() &&
+            !can_execute(required),
+        "Real resolver did not re-enter or block a required RequiresCheck dependency");
+    expect(
+        stub::strict_info_calls() ==
+            std::vector<std::string>{
+                "localization-required-root",
+                "localization-required-git"},
+        "Real required RequiresCheck fixture used an unexpected AUR resolver sequence");
+    expect_no_forbidden_operations();
+
+    stub::reset();
+    arrange_repository_observation();
+    const AurUpdateExecutionPreflight independent =
+        ::resolve_aur_update_execution_preflight(
+            AurUpdatePlan{{
+                update_entry(
+                    "localization-independent-root",
+                    InstalledPackageReason::Explicit),
+                requires_check_entry(
+                    "localization-independent-git"),
+            }},
+            DevelRequiresCheckPolicy::SkipIndependentTarget);
+    const AurUpdateExecutionTarget& independent_root = target_by_name(
+        independent, "localization-independent-root");
+    const AurUpdateExecutionTarget& independent_devel = target_by_name(
+        independent, "localization-independent-git");
+    expect(
+        independent.build_plan.has_value() &&
+            independent.build_plan->root_targets ==
+                std::vector<RootTargetIdentity>{
+                    {0, "localization-independent-root"}} &&
+            independent_root.status ==
+                AurUpdateExecutionTargetStatus::Executable &&
+            independent_devel.status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            independent_devel.skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    IndependentDevelRequiresCheck &&
+            !independent_devel.build_plan_root_index.has_value() &&
+            !independent_devel.desired_install_reason.has_value() &&
+            can_execute(independent),
+        "Real resolver did not preserve an independent RequiresCheck skip");
+    expect(
+        stub::strict_info_calls() ==
+            std::vector<std::string>{
+                "localization-independent-root"},
+        "Independent RequiresCheck leaked into real resolver root authority");
+    expect(
+        fixture.relative_paths() == paths_before,
+        "RequiresCheck real-resolver preflight mutated the filesystem fixture");
     expect_no_forbidden_operations();
 }
 
@@ -395,6 +553,8 @@ int main(int argc, char** argv) {
         if(argc != 2) throw std::runtime_error("Expected one integration case name.");
         const std::string case_name = argv[1];
         if(case_name == "simple") {
+            test_skip_independent_target_uses_real_resolver_reentry();
+            unsetenv("TMPDIR");
             test_simple_roots_and_combined_resolution();
         } else if(case_name == "repository-failure") {
             test_repository_metadata_failure_is_fail_closed();

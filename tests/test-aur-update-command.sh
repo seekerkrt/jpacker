@@ -203,6 +203,8 @@ assert_contains \
     "  preflight issue: devel update requires check: fixture suffix candidate only; authoritative build provenance is unavailable" \
     "$stderr_file"
 assert_not_contains "manual-check-git 1.0-1 ->" "$stdout_file"
+assert_not_contains "Warning: Requires check" "$stdout_file"
+assert_not_contains "Warning: Requires check" "$stderr_file"
 assert_exact_line "reduce execution=no" "$command_log"
 assert_no_external_mutation
 assert_cache_absent
@@ -215,6 +217,8 @@ assert_exact_line \
     "manual-check-git: devel update requires check: suffix candidate only" \
     "$stdout_file"
 assert_not_contains "prompt" "$command_log"
+assert_not_contains "Warning: Requires check" "$stdout_file"
+assert_not_contains "Warning: Requires check" "$stderr_file"
 assert_no_external_mutation
 assert_cache_absent
 assert_state_absent

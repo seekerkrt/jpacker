@@ -49,7 +49,9 @@ struct SystemAurUpdateUnifiedPlanProjectionTestAccess {
     static std::unique_ptr<SystemAurUpdateUnifiedPlanProjection> make_auto(
         SystemAurUpdateUnifiedPlanStatus status,
         std::unique_ptr<UnifiedPlanProjection> repository_projection,
-        std::unique_ptr<UnifiedPlanProjection> aur_projection) {
+        std::unique_ptr<UnifiedPlanProjection> aur_projection,
+        std::vector<SystemAurUpdateRequiresCheckAttention>
+            requires_check_attentions = {}) {
         return std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>(
             new SystemAurUpdateUnifiedPlanProjection(
                 status, SystemAurUpdateUnifiedPlanMode::Auto,
@@ -63,6 +65,7 @@ struct SystemAurUpdateUnifiedPlanProjectionTestAccess {
                      PotentialLaterAurTransactions},
                 std::move(repository_projection),
                 std::move(aur_projection),
+                std::move(requires_check_attentions),
                 SystemAurUpdateUnifiedPlanFreshness::
                     CurrentInstalledState,
                 SystemAurUpdateUnifiedPlanActualRefresh::
@@ -80,7 +83,7 @@ struct SystemAurUpdateUnifiedPlanProjectionTestAccess {
                 SystemAurUpdateUnifiedPlanMode::RepoOnly,
                 {SystemAurUpdateUnifiedPlanPhase::
                      RepositorySystemTransactionIntent},
-                std::move(repository_projection), nullptr, std::nullopt,
+                std::move(repository_projection), nullptr, {}, std::nullopt,
                 std::nullopt, std::nullopt));
     }
 };
@@ -2826,7 +2829,15 @@ void test_system_aur_update_route_rendering() {
         SystemAurUpdateUnifiedPlanProjectionTestAccess::make_auto(
             SystemAurUpdateUnifiedPlanStatus::Ready,
             make_repository_system_transaction_child(),
-            make_empty_aur_child(UnifiedPlanObservationStatus::NoOp));
+            make_empty_aur_child(UnifiedPlanObservationStatus::NoOp),
+            {SystemAurUpdateRequiresCheckAttention{
+                0,
+                "foo-git",
+                "foo-git",
+                DevelRequiresCheckReason::SuffixCandidateOnly,
+                AurUpdateExecutionSkipKind::
+                    IndependentDevelRequiresCheck,
+                AurUpdateEffectiveState::RequiresCheck}});
     const UnifiedPlanRenderingResult no_op_rendered =
         render_system_aur_update_unified_plan(*no_op_child);
     expect(
@@ -2834,7 +2845,17 @@ void test_system_aur_update_route_rendering() {
         "system/AUR NoOp-child rendering is incomplete");
     expect(
         no_op_child->status() ==
-            SystemAurUpdateUnifiedPlanStatus::Ready,
+                SystemAurUpdateUnifiedPlanStatus::Ready &&
+            no_op_child->requires_check_attentions().size() == 1 &&
+            no_op_child->requires_check_attentions().front() ==
+                SystemAurUpdateRequiresCheckAttention{
+                    0,
+                    "foo-git",
+                    "foo-git",
+                    DevelRequiresCheckReason::SuffixCandidateOnly,
+                    AurUpdateExecutionSkipKind::
+                        IndependentDevelRequiresCheck,
+                    AurUpdateEffectiveState::RequiresCheck},
         "current AUR NoOp flattened the combined route to NoOp");
     expect_contains(
         no_op_rendered.text,
@@ -2847,6 +2868,10 @@ void test_system_aur_update_route_rendering() {
     expect_contains(
         no_op_rendered.text, "Repository system transaction intent",
         "system/AUR NoOp-child repository intent");
+    expect_contains(
+        no_op_rendered.text,
+        "Attention-required details:\n  foo-git (PackageBase: foo-git): skipped: devel update requires check: suffix candidate only; not automatically updated because authoritative build provenance is unavailable",
+        "system/AUR RequiresCheck attention");
 
     const std::string unsafe_diagnostic =
         std::string("query-before\nquery-after\rcr-after\ttab-after") +
@@ -2907,7 +2932,8 @@ void test_system_aur_update_route_rendering() {
         repo_only_rendered.is_complete(),
         "system/AUR RepoOnly rendering is incomplete");
     expect(
-        repo_only->aur_projection() == nullptr,
+        repo_only->aur_projection() == nullptr &&
+            repo_only->requires_check_attentions().empty(),
         "system/AUR RepoOnly fixture retained an AUR child");
     expect_contains(
         repo_only_rendered.text,
@@ -2947,6 +2973,9 @@ void test_system_aur_update_route_rendering() {
     expect_not_contains(
         repo_only_rendered.text, "Phase 2:",
         "system/AUR RepoOnly later phase");
+    expect_not_contains(
+        repo_only_rendered.text, "Attention-required details:",
+        "system/AUR RepoOnly RequiresCheck attention");
 }
 
 void test_rendering_issue_is_isolated_from_execution_status() {

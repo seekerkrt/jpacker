@@ -891,7 +891,11 @@ void test_system_aur_dry_run_auto_observes_current_update_without_capability() {
             observation.explicit_source_satisfaction.has_value() &&
             observation.saved_source_preference_policy ==
                 std::optional<SavedSourcePreferencePolicy>{
-                    SavedSourcePreferencePolicy::Ignore},
+                    SavedSourcePreferencePolicy::Ignore} &&
+            observation.devel_requires_check_policy ==
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::
+                        SkipIndependentTarget},
         "Auto dry-run lost route, freshness, or Ignore authority");
     expect(
         observation.is_ready() && !observation.is_blocked() &&
@@ -1133,7 +1137,7 @@ void test_system_aur_dry_run_repo_only_observes_repository_intent_only() {
         "RepoOnly dry-run consumed the saved preference failure trap");
 }
 
-void test_system_aur_dry_run_requires_check_stays_blocked() {
+void test_system_aur_dry_run_independent_requires_check_is_attention() {
     reset_stubs();
     const RootSpec root{"dry-manual-check-git", "dry-manual-check-base"};
     query_stub::set_foreign_inventory(
@@ -1155,17 +1159,24 @@ void test_system_aur_dry_run_requires_check_stays_blocked() {
         require_system_aur_dry_run_child(
             observation, "system+AUR dry-run RequiresCheck");
     expect(
-        observation.is_blocked() && !observation.is_ready() &&
+        observation.is_ready() && !observation.is_blocked() &&
             !observation.has_current_aur_update_intent() &&
             observation.devel_requires_check_policy ==
                 std::optional<DevelRequiresCheckPolicy>{
-                    DevelRequiresCheckPolicy::BlockOperation} &&
+                    DevelRequiresCheckPolicy::
+                        SkipIndependentTarget} &&
             observation.saved_source_preference_policy ==
                 std::optional<SavedSourcePreferencePolicy>{
                     SavedSourcePreferencePolicy::Ignore} &&
-            observation.issues.empty() && child.is_blocked() &&
+            observation.issues.empty() && child.is_noop() &&
+            !child.is_blocked() &&
             child.has_consistent_devel_requires_check_policy_snapshot() &&
             child.execution_preflight().targets.size() == 1 &&
+            child.execution_preflight().targets.front().status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            child.execution_preflight().targets.front().skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    IndependentDevelRequiresCheck &&
             has_preflight_issue(
                 child.execution_preflight().targets.front(),
                 AurUpdateExecutionReason::DevelRequiresCheck) &&
@@ -1174,10 +1185,9 @@ void test_system_aur_dry_run_requires_check_stays_blocked() {
                     .issues.front()
                     .devel_requires_check_reason ==
                 DevelRequiresCheckReason::SuffixCandidateOnly &&
-            !child.execution_preflight()
-                 .targets.front()
-                 .skip_kind.has_value(),
-        "Dry-run RequiresCheck was flattened or bypassed by --noconfirm");
+            child.source_build_preflight().has_value() &&
+            child.source_build_preflight()->is_noop(),
+        "Dry-run independent RequiresCheck was blocked, flattened, or approved");
     expect(
         preflight_stub::resolver_call_count() == 0 &&
             preparation_stub::strict_preference_read_history().empty() &&
@@ -1188,7 +1198,7 @@ void test_system_aur_dry_run_requires_check_stays_blocked() {
             preparation_stub::pkgdest_guard_history().empty() &&
             preparation_stub::reviewed_state_preflight_call_count() == 0 &&
             preparation_stub::database_call_count() == 0,
-        "Dry-run RequiresCheck crossed later preference/preparation authority");
+        "Dry-run independent RequiresCheck crossed later preference/preparation authority");
     expect_no_system_aur_dry_run_mutation(
         "system+AUR dry-run RequiresCheck");
     query_stub::require_script_consumed();
@@ -1198,9 +1208,19 @@ void test_system_aur_dry_run_requires_check_stays_blocked() {
 void test_system_aur_dry_run_ambiguous_provider_is_not_auto_selected() {
     reset_stubs();
     const RootSpec root{"dry-ambiguous-root", "dry-ambiguous-root"};
+    const RootSpec requires_check{
+        "dry-ambiguous-independent-git",
+        "dry-ambiguous-independent-base"};
     query_stub::set_foreign_inventory(
-        inventory_for_roots({root}));
-    enqueue_exact_update_query({root});
+        inventory_for_roots({root, requires_check}));
+    query_stub::enqueue_info_many_result({{root.package_name,
+                                           package_info(root.package_name, root.package_base)},
+                                          {requires_check.package_name,
+                                           package_info(
+                                               requires_check.package_name,
+                                               requires_check.package_base, "1.0-1")}});
+    query_stub::enqueue_vercmp_result("1");
+    query_stub::enqueue_vercmp_result("0");
     BuildPlan plan = root_plan({root});
     plan.dependency_edges.push_back(BuildPlanDependencyEdge{
         root.package_name,
@@ -1231,11 +1251,16 @@ void test_system_aur_dry_run_ambiguous_provider_is_not_auto_selected() {
     expect(
         observation.is_blocked() && !observation.is_ready() &&
             child.is_blocked() &&
-            child.execution_preflight().targets.size() == 1 &&
+            child.execution_preflight().targets.size() == 2 &&
             has_preflight_issue(
                 child.execution_preflight().targets.front(),
-                AurUpdateExecutionReason::AmbiguousProvider),
-        "Dry-run ambiguous provider did not remain a typed blocker");
+                AurUpdateExecutionReason::AmbiguousProvider) &&
+            child.execution_preflight().targets[1].status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            child.execution_preflight().targets[1].skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    IndependentDevelRequiresCheck,
+        "Dry-run ambiguous provider was downgraded by independent RequiresCheck attention");
     expect(
         preflight_stub::resolver_selection_callback_presence() ==
                 std::vector<bool>{true} &&
@@ -1900,7 +1925,7 @@ void test_system_aur_fatal_query_failure_stops_before_preflight() {
     query_stub::require_script_consumed();
 }
 
-void test_system_aur_requires_check_stays_blocked() {
+void test_system_aur_independent_requires_check_completes_with_attention() {
     reset_stubs();
     query_stub::set_foreign_inventory({{"manual-check-git",
                                         "1.0-1",
@@ -1926,32 +1951,243 @@ void test_system_aur_requires_check_stays_blocked() {
         result.repository.status ==
                 SystemAurUpdateRepositoryPhaseStatus::Completed &&
             result.aur.status ==
-                SystemAurUpdateAurPhaseStatus::BlockedBeforeExecution &&
+                SystemAurUpdateAurPhaseStatus::NoUpdates &&
             child.has_consistent_devel_requires_check_policy_snapshot() &&
             child.devel_requires_check_policy ==
                 std::optional<DevelRequiresCheckPolicy>{
-                    DevelRequiresCheckPolicy::BlockOperation} &&
+                    DevelRequiresCheckPolicy::
+                        SkipIndependentTarget} &&
             child.reduced_operation_result.status ==
-                AurUpdateOperationStatus::BlockedBeforeExecution &&
+                AurUpdateOperationStatus::NoUpdates &&
             child.preflight.targets.size() == 1 &&
+            child.preflight.targets.front().status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            child.preflight.targets.front().skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    IndependentDevelRequiresCheck &&
             has_preflight_issue(
                 child.preflight.targets.front(),
                 AurUpdateExecutionReason::DevelRequiresCheck),
-        "RequiresCheck was flattened or bypassed after repository success");
+        "Independent RequiresCheck was blocked, flattened, or approved after repository success");
     expect(
-        !result.is_success() && result.has_partial_completion() &&
+        result.is_success() && !result.has_partial_completion() &&
+            result.status == SystemAurUpdateOperationStatus::Completed &&
+            result.package_state_change() ==
+                PackageStateChange::Unknown &&
+            child.package_state_change() == PackageStateChange::Unknown &&
+            !child.changed_package_state() &&
             execution_stub::call_history().empty() &&
-            preparation_stub::strict_preference_read_history().empty(),
-        "RequiresCheck reached mutation or saved preference IO");
+            preparation_stub::strict_preference_read_history().empty() &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0,
+        "Independent RequiresCheck became partial failure, mutation, or saved preference IO");
     query_stub::require_script_consumed();
+}
+
+void test_system_aur_update_and_independent_requires_check_succeed() {
+    reset_stubs();
+    const RootSpec update_root{
+        "ordinary-update", "ordinary-update-base"};
+    const RootSpec requires_check{
+        "ordinary-independent-git", "ordinary-independent-base"};
+    const RootSpec current{"ordinary-current", "ordinary-current"};
+    query_stub::set_foreign_inventory(ForeignPackageInventory{
+        {update_root.package_name, "1.0-1",
+         InstalledPackageReason::Explicit},
+        {requires_check.package_name, "1.0-1",
+         InstalledPackageReason::Explicit},
+        {current.package_name, "1.0-1",
+         InstalledPackageReason::Explicit}});
+    query_stub::enqueue_info_many_result({{update_root.package_name,
+                                           package_info(
+                                               update_root.package_name, update_root.package_base,
+                                               "2.0-1")},
+                                          {requires_check.package_name,
+                                           package_info(
+                                               requires_check.package_name,
+                                               requires_check.package_base, "1.0-1")},
+                                          {current.package_name,
+                                           package_info(
+                                               current.package_name, current.package_base,
+                                               "1.0-1")}});
+    query_stub::enqueue_vercmp_result("1");
+    query_stub::enqueue_vercmp_result("0");
+    query_stub::enqueue_vercmp_result("0");
+    return_build_plan(
+        root_plan({update_root}), {update_root.package_name});
+
+    AppConfig config;
+    config.no_confirm = true;
+    config.provider_selection =
+        make_provider_selection_session(config.no_confirm);
+    execution_stub::enqueue_success(
+        expected_system_aur_execution(
+            0, update_root.package_name, update_root.package_base,
+            InstalledPackageReason::Explicit, config),
+        update_root.package_base,
+        selected_system_aur_child(
+            update_root.package_name,
+            InstalledPackageReason::Explicit));
+
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            prepare_system_aur_update_fixture(), config);
+    const FilteredAurUpdateExecutionResult& child =
+        require_system_aur_child(
+            result,
+            "system+AUR update plus independent RequiresCheck");
+
+    expect(
+        result.is_success() &&
+            result.status == SystemAurUpdateOperationStatus::Completed &&
+            result.aur.status ==
+                SystemAurUpdateAurPhaseStatus::Completed &&
+            result.package_state_change() == PackageStateChange::Changed &&
+            child.reduced_operation_result.status ==
+                AurUpdateOperationStatus::Completed &&
+            child.reduced_operation_result.targets.size() == 3 &&
+            child.reduced_operation_result.targets[0].status ==
+                AurUpdateOperationTargetStatus::Updated &&
+            child.reduced_operation_result.targets[1].status ==
+                AurUpdateOperationTargetStatus::Skipped &&
+            child.reduced_operation_result.targets[1].skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    IndependentDevelRequiresCheck &&
+            child.reduced_operation_result.targets[2].status ==
+                AurUpdateOperationTargetStatus::Skipped &&
+            child.reduced_operation_result.targets[2].skip_kind ==
+                AurUpdateExecutionSkipKind::UpToDate,
+        "Normal update and independent RequiresCheck did not complete with Changed authority");
+    expect(
+        preflight_stub::resolver_calls() ==
+                std::vector<std::vector<std::string>>{
+                    {update_root.package_name}} &&
+            execution_stub::call_history().size() == 1 &&
+            execution_stub::call_history().front().package_name ==
+                update_root.package_name &&
+            preparation_stub::strict_preference_read_history().empty() &&
+            preparation_stub::
+                    source_preference_directory_snapshot_call_count() ==
+                0,
+        "Independent RequiresCheck entered mutation or saved preference authority");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+}
+
+void test_system_aur_required_requires_check_blocks_actual_and_dry_run() {
+    const RootSpec update_root{
+        "required-owner", "required-owner-base"};
+    const RootSpec requires_check{
+        "required-child-git", "required-child-base"};
+    const auto arrange = [&] {
+        query_stub::set_foreign_inventory(ForeignPackageInventory{
+            {update_root.package_name, "1.0-1",
+             InstalledPackageReason::Explicit},
+            {requires_check.package_name, "1.0-1",
+             InstalledPackageReason::Dependency}});
+        query_stub::enqueue_info_many_result({{update_root.package_name,
+                                               package_info(
+                                                   update_root.package_name, update_root.package_base,
+                                                   "2.0-1")},
+                                              {requires_check.package_name,
+                                               package_info(
+                                                   requires_check.package_name,
+                                                   requires_check.package_base, "1.0-1")}});
+        query_stub::enqueue_vercmp_result("1");
+        query_stub::enqueue_vercmp_result("0");
+        BuildPlan plan = root_plan({update_root});
+        add_aur_dependency(
+            plan, update_root.package_name,
+            requires_check.package_name,
+            requires_check.package_base);
+        return_build_plan(
+            std::move(plan), {update_root.package_name});
+    };
+
+    AppConfig config;
+    config.no_confirm = true;
+    config.provider_selection =
+        make_provider_selection_session(config.no_confirm);
+
+    reset_stubs();
+    arrange();
+    SystemAurUpdateDryRunObservation dry =
+        observe_system_aur_update_dry_run(
+            make_auto_system_aur_dry_run_request(), config);
+    const FilteredAurUpdateObservation& dry_child =
+        require_system_aur_dry_run_child(
+            dry, "system+AUR dry required RequiresCheck");
+    expect(
+        dry.is_blocked() && !dry.is_ready() &&
+            dry.devel_requires_check_policy ==
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::
+                        SkipIndependentTarget} &&
+            dry_child.execution_preflight().targets.size() == 2 &&
+            dry_child.execution_preflight().targets[0].status ==
+                AurUpdateExecutionTargetStatus::Incomplete &&
+            has_preflight_issue(
+                dry_child.execution_preflight().targets[0],
+                AurUpdateExecutionReason::
+                    RequiredDevelTargetRequiresCheck) &&
+            dry_child.execution_preflight().targets[1].status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            dry_child.execution_preflight().targets[1].skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    RequiredDevelRequiresCheck,
+        "Dry-run required RequiresCheck was downgraded to attention or Ready");
+    expect_no_system_aur_dry_run_mutation(
+        "system+AUR dry required RequiresCheck");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
+
+    reset_stubs();
+    arrange();
+    SystemAurUpdateOperationResult actual =
+        execute_prepared_system_aur_update_operation(
+            prepare_system_aur_update_fixture(), config);
+    const FilteredAurUpdateExecutionResult& actual_child =
+        require_system_aur_child(
+            actual, "system+AUR actual required RequiresCheck");
+    expect(
+        !actual.is_success() && actual.has_partial_completion() &&
+            actual.status ==
+                SystemAurUpdateOperationStatus::
+                    StoppedBeforeAurExecution &&
+            actual.aur.status ==
+                SystemAurUpdateAurPhaseStatus::BlockedBeforeExecution &&
+            actual_child.reduced_operation_result.status ==
+                AurUpdateOperationStatus::BlockedBeforeExecution &&
+            actual_child.reduced_operation_result.targets[0].status ==
+                AurUpdateOperationTargetStatus::Incomplete &&
+            actual_child.reduced_operation_result.targets[1].status ==
+                AurUpdateOperationTargetStatus::Skipped &&
+            actual_child.reduced_operation_result.targets[1].skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    RequiredDevelRequiresCheck &&
+            execution_stub::call_history().empty(),
+        "Actual required RequiresCheck was downgraded or reached mutation");
+    query_stub::require_script_consumed();
+    execution_stub::require_script_consumed();
 }
 
 void test_system_aur_ambiguous_provider_is_not_auto_selected() {
     reset_stubs();
     const RootSpec root{"ambiguous-root", "ambiguous-root"};
+    const RootSpec requires_check{
+        "ambiguous-independent-git",
+        "ambiguous-independent-base"};
     query_stub::set_foreign_inventory(
-        inventory_for_roots({root}));
-    enqueue_exact_update_query({root});
+        inventory_for_roots({root, requires_check}));
+    query_stub::enqueue_info_many_result({{root.package_name,
+                                           package_info(root.package_name, root.package_base)},
+                                          {requires_check.package_name,
+                                           package_info(
+                                               requires_check.package_name,
+                                               requires_check.package_base, "1.0-1")}});
+    query_stub::enqueue_vercmp_result("1");
+    query_stub::enqueue_vercmp_result("0");
     BuildPlan plan = root_plan({root});
     plan.dependency_edges.push_back(BuildPlanDependencyEdge{
         root.package_name,
@@ -1984,11 +2220,16 @@ void test_system_aur_ambiguous_provider_is_not_auto_selected() {
     expect(
         result.aur.status ==
                 SystemAurUpdateAurPhaseStatus::BlockedBeforeExecution &&
-            child.preflight.targets.size() == 1 &&
+            child.preflight.targets.size() == 2 &&
             has_preflight_issue(
                 child.preflight.targets.front(),
-                AurUpdateExecutionReason::AmbiguousProvider),
-        "Ambiguous provider did not remain a typed blocker");
+                AurUpdateExecutionReason::AmbiguousProvider) &&
+            child.preflight.targets[1].status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            child.preflight.targets[1].skip_kind ==
+                AurUpdateExecutionSkipKind::
+                    IndependentDevelRequiresCheck,
+        "Ambiguous provider was downgraded by independent RequiresCheck attention");
     expect(
         preflight_stub::resolver_selection_callback_presence() ==
                 std::vector<bool>{true} &&
@@ -2243,6 +2484,10 @@ void test_system_aur_success_uses_only_post_repository_inventory_and_ignore() {
         "Coordinator did not preserve Ignore zero-I/O and downstream safety");
     expect(
         child.upgrade_all_plan.explicit_sources.empty() &&
+            child.devel_requires_check_policy ==
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::
+                        SkipIndependentTarget} &&
             execution_stub::call_history().size() == 1 &&
             !execution_stub::call_history().front().needed &&
             execution_stub::call_history()
@@ -2471,7 +2716,7 @@ void test_system_aur_reducer_rejects_policy_mismatch() {
         "Policy-mismatch fixture did not start from success");
 
     result.aur.operation_result->devel_requires_check_policy =
-        DevelRequiresCheckPolicy::SkipIndependentTarget;
+        DevelRequiresCheckPolicy::BlockOperation;
     SystemAurUpdateOperationResult malformed =
         reduce_system_aur_update_result(std::move(result));
     expect(
@@ -2484,7 +2729,7 @@ void test_system_aur_reducer_rejects_policy_mismatch() {
             !malformed.is_success() &&
             malformed.aur.operation_result
                     ->devel_requires_check_policy ==
-                DevelRequiresCheckPolicy::SkipIndependentTarget,
+                DevelRequiresCheckPolicy::BlockOperation,
         "System/AUR RequiresCheck policy mismatch failed open");
 }
 
@@ -4403,8 +4648,8 @@ int main() {
             "system+AUR dry-run RepoOnly zero AUR authority",
             test_system_aur_dry_run_repo_only_observes_repository_intent_only);
         run_case(
-            "system+AUR dry-run RequiresCheck",
-            test_system_aur_dry_run_requires_check_stays_blocked);
+            "system+AUR dry-run independent RequiresCheck attention",
+            test_system_aur_dry_run_independent_requires_check_is_attention);
         run_case(
             "system+AUR dry-run ambiguous provider",
             test_system_aur_dry_run_ambiguous_provider_is_not_auto_selected);
@@ -4436,8 +4681,14 @@ int main() {
             "system+AUR fatal query failure",
             test_system_aur_fatal_query_failure_stops_before_preflight);
         run_case(
-            "system+AUR RequiresCheck stays blocked",
-            test_system_aur_requires_check_stays_blocked);
+            "system+AUR independent RequiresCheck completes with attention",
+            test_system_aur_independent_requires_check_completes_with_attention);
+        run_case(
+            "system+AUR update plus independent RequiresCheck",
+            test_system_aur_update_and_independent_requires_check_succeed);
+        run_case(
+            "system+AUR required RequiresCheck blocks actual and dry-run",
+            test_system_aur_required_requires_check_blocks_actual_and_dry_run);
         run_case(
             "system+AUR ambiguous provider is not auto-selected",
             test_system_aur_ambiguous_provider_is_not_auto_selected);
