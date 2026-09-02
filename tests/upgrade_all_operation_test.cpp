@@ -2597,7 +2597,8 @@ void test_system_only_observation_failure_remains_unverified() {
     const UpgradeAllPhasePackageStateObservations phase_observations =
         project_upgrade_all_phase_package_state_observations(result);
     const PresentationProjection presentation =
-        project_upgrade_all_presentation(result);
+        project_upgrade_all_presentation_with_operation_state(
+            result, operation_state);
     expect(
         operation_state.outcome == OperationOutcome::Succeeded &&
             operation_state.package_state.state ==
