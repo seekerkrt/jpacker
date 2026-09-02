@@ -119,6 +119,8 @@ struct SystemAurUpdateDryRunObservation {
             explicit_source_satisfaction_value,
         std::optional<SavedSourcePreferencePolicy>
             saved_source_preference_policy_value,
+        std::optional<DevelRequiresCheckPolicy>
+            devel_requires_check_policy_value,
         std::optional<PacmanRepositoryConfiguration>
             repository_configuration_value,
         ForeignPackageInventory foreign_inventory_value,
@@ -132,6 +134,8 @@ struct SystemAurUpdateDryRunObservation {
               std::move(explicit_source_satisfaction_value)),
           saved_source_preference_policy(
               saved_source_preference_policy_value),
+          devel_requires_check_policy(
+              devel_requires_check_policy_value),
           repository_configuration(
               std::move(repository_configuration_value)),
           foreign_inventory(std::move(foreign_inventory_value)),
@@ -148,6 +152,8 @@ struct SystemAurUpdateDryRunObservation {
         explicit_source_satisfaction;
     std::optional<SavedSourcePreferencePolicy>
         saved_source_preference_policy;
+    std::optional<DevelRequiresCheckPolicy>
+        devel_requires_check_policy;
     std::optional<PacmanRepositoryConfiguration>
         repository_configuration;
     ForeignPackageInventory foreign_inventory;

@@ -1802,6 +1802,8 @@ moguet_add_cpp_test(
     REAL_ALPM
     SOURCES
         tests/aur_update_execution_preparation_test.cpp
+        source/devel_package_classification.cpp
+        source/vcs_source_identity.cpp
         source/aur_update_execution_preparation.cpp
         source/build_plan_artifact_target_projection.cpp
         source/dependency_constraint.cpp

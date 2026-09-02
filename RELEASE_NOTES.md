@@ -39,6 +39,21 @@ explicit source-aware `upgrade*` workflows.
 - `upgrade-aur` remains AUR-only in the sense that it does not run the
   repository system update; it does not ignore saved preferences.
 
+### Independent devel `RequiresCheck` localization
+
+- In ordinary exact target-less `moguet -Syu`, an independent devel target
+  whose update status is `RequiresCheck` is skipped with a non-blocking
+  warning. It does not prevent unrelated normal AUR updates from continuing,
+  and the aggregate can exit successfully when no other hard failure exists.
+- `RequiresCheck` remains an unverified package-state observation. It is not
+  rewritten as `UpToDate` or `NoChange`, and it never authorizes an automatic
+  update, including with `--noconfirm`.
+- If another update candidate requires that target through a dependency,
+  provider, or required-child relation, the affected root retains a typed
+  blocker and the operation remains non-zero.
+- `upgrade-aur` and `upgrade-all`, including dry-run, retain their strict
+  whole-operation `RequiresCheck` blocker behavior.
+
 ### Sequential outcome and dry-run freshness
 
 - Repository and AUR work are separate sequential transactions, not one atomic
@@ -95,6 +110,18 @@ Moguetのsaved source-build preferenceは明示的なsource-aware `upgrade*` wor
   workflowのままで、saved source-build preferenceを引き続きStrictに確認・適用します。
 - `upgrade-aur`のAUR-onlyはrepository system updateを行わないことを意味し、saved
   preferenceを無視する意味ではありません。
+
+### independent devel `RequiresCheck`の局所化
+
+- 通常のexact target-less `moguet -Syu`では、update statusが`RequiresCheck`の
+  independent devel targetをnon-blocking warning付きでskipします。unrelatedなnormal AUR
+  updateは継続し、他にhard failureがなければaggregateはsuccess / exit 0になれます。
+- `RequiresCheck`は未検証のpackage-state observationのままです。`UpToDate` / `NoChange`へ
+  書き換えず、`--noconfirm`を含めautomatic updateのauthorityにはしません。
+- 別のupdate candidateがdependency、provider、required-child relationとしてそのtargetを
+  必要とする場合は、affected rootのtyped blockerを維持してoperationをnon-zeroにします。
+- `upgrade-aur` / `upgrade-all`とそのdry-runは、strictなwhole-operation
+  `RequiresCheck` blocker behaviorを維持します。
 
 ### sequential outcomeとdry-run freshness
 

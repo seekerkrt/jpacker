@@ -39,6 +39,67 @@ bool has_executable_update_targets(
         });
 }
 
+bool all_build_plan_roots_are_executable(
+    const AurUpdateExecutionPreflight& preflight) noexcept {
+    if(!preflight.build_plan.has_value()) return false;
+    std::size_t correlated_root_count = 0;
+    for(const AurUpdateExecutionTarget& target : preflight.targets) {
+        if(!target.build_plan_root_index.has_value()) continue;
+        ++correlated_root_count;
+        if(target.status != AurUpdateExecutionTargetStatus::Executable ||
+           !target.desired_install_reason.has_value()) {
+            return false;
+        }
+    }
+    return correlated_root_count != 0 &&
+           correlated_root_count ==
+               preflight.build_plan->root_targets.size();
+}
+
+std::vector<SystemAurUpdateRequiresCheckAttention>
+project_system_aur_requires_check_attentions(
+    const AurUpdateExecutionPreflight& preflight) {
+    if(preflight.devel_requires_check_policy !=
+       std::optional<DevelRequiresCheckPolicy>{
+           DevelRequiresCheckPolicy::SkipIndependentTarget}) {
+        reject_inconsistent_input(
+            "System/AUR RequiresCheck attention projection has an invalid policy.");
+    }
+
+    std::vector<SystemAurUpdateRequiresCheckAttention> attentions;
+    for(const AurUpdateExecutionTarget& target : preflight.targets) {
+        if(target.skip_kind !=
+           std::optional<AurUpdateExecutionSkipKind>{
+               AurUpdateExecutionSkipKind::
+                   IndependentDevelRequiresCheck}) {
+            continue;
+        }
+        if(target.status != AurUpdateExecutionTargetStatus::Skipped ||
+           !is_valid_aur_update_independent_devel_skip_snapshot(
+               target.update, target.issues, target.skip_kind,
+               DevelRequiresCheckPolicy::SkipIndependentTarget) ||
+           !target.update.aur_package.has_value() ||
+           target.issues.front().devel_requires_check_reason !=
+               std::optional<DevelRequiresCheckReason>{
+                   DevelRequiresCheckReason::SuffixCandidateOnly}) {
+            reject_inconsistent_input(
+                "System/AUR independent RequiresCheck attention is inconsistent.");
+        }
+
+        // The snapshot validator above owns effective-state correlation; the
+        // public projection records that proven state without re-running the
+        // producer classifier or interpreting its diagnostic text.
+        attentions.push_back(SystemAurUpdateRequiresCheckAttention{
+            target.update_plan_index,
+            target.update.installed_name,
+            target.update.aur_package->package_base,
+            *target.issues.front().devel_requires_check_reason,
+            *target.skip_kind,
+            AurUpdateEffectiveState::RequiresCheck});
+    }
+    return attentions;
+}
+
 void append_build_plan_blockers(
     const BuildPlan& plan, UnifiedPlanObservationInput& observation) {
     for(const BuildPlanResolutionFailure& failure : plan.resolution_failures) {
@@ -362,7 +423,8 @@ bool source_observation_matches_ready_preflight(
         const AurUpdateExecutionTarget& expected = *executable_targets[index];
         const AurUpdateExecutionTarget& actual =
             source.affected_update_targets[index];
-        if(actual.status != AurUpdateExecutionTargetStatus::Executable ||
+        if(!is_valid_aur_update_execution_target_skip_snapshot(actual) ||
+           actual.status != AurUpdateExecutionTargetStatus::Executable ||
            actual.update_plan_index != expected.update_plan_index ||
            actual.build_plan_root_index != expected.build_plan_root_index ||
            actual.desired_install_reason != expected.desired_install_reason ||
@@ -991,6 +1053,10 @@ void validate_local_source_input(
 const std::vector<std::string>* validate_aur_update_input(
     const AurUpdateQueryResult& query,
     const AurUpdateExecutionPreflight& preflight) {
+    if(!has_valid_aur_update_execution_policy_snapshot(preflight)) {
+        reject_inconsistent_input(
+            "AUR execution policy or typed skip snapshot is inconsistent.");
+    }
     if(query.plan.entries.size() != preflight.targets.size()) {
         reject_inconsistent_input(
             "AUR query and execution preflight target counts do not match.");
@@ -1471,6 +1537,7 @@ bool is_known_wrapped_preflight_issue_reason(
             return false;
         case AurUpdateExecutionReason::UpToDate:
         case AurUpdateExecutionReason::DevelRequiresCheck:
+        case AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck:
         case AurUpdateExecutionReason::NonAurForeign:
         case AurUpdateExecutionReason::AurMetadataUnavailable:
         case AurUpdateExecutionReason::VersionComparisonUnavailable:
@@ -1547,6 +1614,8 @@ bool same_preflight_issue_identity(
        lhs.devel_requires_check_reason !=
            rhs.devel_requires_check_reason ||
        lhs.relation_reason != rhs.relation_reason ||
+       lhs.required_devel_target_blocker !=
+           rhs.required_devel_target_blocker ||
        lhs.build_plan_projection_issue.has_value() !=
            rhs.build_plan_projection_issue.has_value()) {
         return false;
@@ -3303,6 +3372,13 @@ std::unique_ptr<UnifiedPlanProjection> project_aur_update_unified_plan(
     const AurUpdateExecutionPreflight& preflight = input.preflight.get();
     const std::vector<std::string>* repository_order =
         validate_aur_update_input(query, preflight);
+    if(input.source_build_preparation.has_value() &&
+       input.source_build_preparation->get()
+               .devel_requires_check_policy !=
+           preflight.devel_requires_check_policy) {
+        reject_inconsistent_input(
+            "AUR execution preflight and source preparation policies differ.");
+    }
     const BuildPlan* plan = preflight.build_plan.has_value()
                                 ? &preflight.build_plan.value()
                                 : nullptr;
@@ -3329,6 +3405,8 @@ std::unique_ptr<UnifiedPlanProjection> project_aur_update_unified_plan(
             input.filtered_operation->get();
         if(&operation.original_query_result() != &query ||
            &operation.execution_preflight() != &preflight ||
+           operation.devel_requires_check_policy_snapshot() !=
+               preflight.devel_requires_check_policy ||
            !input.source_build_preparation.has_value() ||
            !operation.source_build_preparation().has_value() ||
            &operation.source_build_preparation().value() !=
@@ -3586,10 +3664,15 @@ std::unique_ptr<UnifiedPlanProjection> project_upgrade_all_unified_plan(
            &aggregate_aur_preflight->issues() != &input.issues->get() ||
            &filtered->original_query_result() != &aur_query ||
            &filtered->execution_preflight() != &aur_preflight ||
+           filtered->devel_requires_check_policy_snapshot() !=
+               aur_preflight.devel_requires_check_policy ||
            !input.aur_source_build_preparation.has_value() ||
            !filtered->source_build_preparation().has_value() ||
            &filtered->source_build_preparation().value() !=
-               &input.aur_source_build_preparation->get()) {
+               &input.aur_source_build_preparation->get() ||
+           input.aur_source_build_preparation->get()
+                   .devel_requires_check_policy !=
+               aur_preflight.devel_requires_check_policy) {
             reject_inconsistent_input(
                 "Prepared upgrade-all AUR authorities are inconsistent.");
         }
@@ -3776,6 +3859,7 @@ project_system_aur_update_unified_plan(
            combined.actual_authority_refresh.has_value() ||
            combined.explicit_source_satisfaction.has_value() ||
            combined.saved_source_preference_policy.has_value() ||
+           combined.devel_requires_check_policy.has_value() ||
            combined.repository_configuration.has_value() ||
            !combined.foreign_inventory.empty() ||
            combined.aur_observation.has_value()) {
@@ -3789,6 +3873,7 @@ project_system_aur_update_unified_plan(
                 {SystemAurUpdateUnifiedPlanPhase::
                      RepositorySystemTransactionIntent},
                 std::move(repository_projection), nullptr,
+                {},
                 std::nullopt, std::nullopt, std::nullopt));
     }
 
@@ -3804,8 +3889,30 @@ project_system_aur_update_unified_plan(
        combined.saved_source_preference_policy !=
            std::optional<SavedSourcePreferencePolicy>{
                SavedSourcePreferencePolicy::Ignore} ||
+       combined.devel_requires_check_policy !=
+           std::optional<DevelRequiresCheckPolicy>{
+               DevelRequiresCheckPolicy::SkipIndependentTarget} ||
        (combined.aur_observation.has_value() &&
-        !combined.repository_configuration.has_value())) {
+        (!combined.repository_configuration.has_value() ||
+         !combined.aur_observation
+              ->devel_requires_check_policy.has_value() ||
+         !is_known_devel_requires_check_policy(
+             *combined.aur_observation
+                  ->devel_requires_check_policy) ||
+         combined.aur_observation
+                 ->devel_requires_check_policy !=
+             combined.devel_requires_check_policy ||
+         combined.aur_observation->preflight
+                 .devel_requires_check_policy !=
+             combined.devel_requires_check_policy ||
+         !has_valid_aur_update_execution_policy_snapshot(
+             combined.aur_observation->preflight) ||
+         !combined.aur_observation
+              ->source_build_observation.has_value() ||
+         combined.aur_observation
+                 ->source_build_observation
+                 ->devel_requires_check_policy !=
+             combined.devel_requires_check_policy))) {
         reject_inconsistent_input(
             "System/AUR dry-run observation has invalid freshness or source policy.");
     }
@@ -3823,6 +3930,8 @@ project_system_aur_update_unified_plan(
 
     std::vector<BuildPlanArtifactTargetProjectionResult> projections;
     std::vector<ProjectedBuildPlanArtifactTargets> route_artifact_targets;
+    std::vector<SystemAurUpdateRequiresCheckAttention>
+        requires_check_attentions;
     if(combined.aur_observation.has_value()) {
         const FilteredAurUpdateObservation& filtered =
             *combined.aur_observation;
@@ -3851,6 +3960,8 @@ project_system_aur_update_unified_plan(
         }
         const AurUpdateExecutionPreflight& preflight =
             filtered.execution_preflight();
+        requires_check_attentions =
+            project_system_aur_requires_check_attentions(preflight);
         const std::vector<std::string>* repository_order =
             validate_aur_update_input(query, preflight);
         if(repository_order != nullptr &&
@@ -3885,8 +3996,6 @@ project_system_aur_update_unified_plan(
         if(plan != nullptr) {
             projections.push_back(
                 project_build_plan_required_artifact_targets(*plan));
-            route_artifact_targets = project_aur_update_artifact_targets(
-                preflight, projections.front());
             aur_observation.dependency_authorities.push_back(
                 UnifiedPlanDependencyAuthorityReference::from_build_plan(
                     *plan));
@@ -3894,7 +4003,10 @@ project_system_aur_update_unified_plan(
             if(projections.front().failure() != nullptr) {
                 append_artifact_projection(
                     *plan, projections.front(), aur_observation);
-            } else {
+            } else if(all_build_plan_roots_are_executable(preflight)) {
+                route_artifact_targets =
+                    project_aur_update_artifact_targets(
+                        preflight, projections.front());
                 append_artifact_units(
                     *plan, route_artifact_targets, aur_observation);
             }
@@ -3985,6 +4097,7 @@ project_system_aur_update_unified_plan(
                  PotentialLaterAurTransactions},
             std::move(repository_projection),
             std::move(aur_projection),
+            std::move(requires_check_attentions),
             SystemAurUpdateUnifiedPlanFreshness::CurrentInstalledState,
             SystemAurUpdateUnifiedPlanActualRefresh::
                 AfterRepositorySuccess,

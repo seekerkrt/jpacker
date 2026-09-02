@@ -1,5 +1,6 @@
 #include "aur_update_execution_preparation.hpp"
 
+#include "aur_update_required_devel_relation_projection.hpp"
 #include "app_config.hpp"
 #include "localization.hpp"
 #include "package_identifier.hpp"
@@ -25,6 +26,8 @@ constexpr std::string_view AUR_SERVICE_NAME = "AUR";
 constexpr std::string_view BUILD_PLAN_TYPE_NAME = "BuildPlan";
 constexpr std::string_view PKGDEST_ENVIRONMENT_KEY = "PKGDEST";
 constexpr std::string_view ROOT_ROLE_NAME = "Root";
+constexpr std::string_view DEVEL_REQUIRES_CHECK_POLICY_DIAGNOSTIC =
+    "Devel RequiresCheck policy or typed skip snapshot is inconsistent.";
 
 struct ExecutableRootBinding {
     const AurUpdateExecutionTarget* target = nullptr;
@@ -98,6 +101,24 @@ bool is_known_status(AurUpdateExecutionTargetStatus status) noexcept {
     return status == AurUpdateExecutionTargetStatus::Executable ||
            status == AurUpdateExecutionTargetStatus::Skipped ||
            is_blocking_status(status);
+}
+
+bool has_known_devel_requires_check_policy(
+    const std::optional<DevelRequiresCheckPolicy>& policy) noexcept {
+    return policy.has_value() &&
+           is_known_devel_requires_check_policy(*policy);
+}
+
+bool has_valid_update_target_snapshots(
+    const std::vector<AurUpdateExecutionTarget>& targets,
+    const std::optional<DevelRequiresCheckPolicy>& policy) noexcept {
+    if(!has_known_devel_requires_check_policy(policy)) return false;
+    return std::all_of(
+        targets.begin(), targets.end(),
+        [&policy](const AurUpdateExecutionTarget& target) {
+            return is_valid_aur_update_execution_target_skip_snapshot(
+                target, *policy);
+        });
 }
 
 bool is_normal_skipped_preflight_reason(
@@ -298,10 +319,14 @@ void retain_executable_preflight_inconsistencies(
     AurUpdateSourceBuildPreparation& preparation) {
     for(const auto& target : preflight.targets) {
         if(target.status != AurUpdateExecutionTargetStatus::Executable) continue;
+        if(preflight.devel_requires_check_policy.has_value() &&
+           is_valid_aur_update_execution_target_skip_snapshot(
+               target, *preflight.devel_requires_check_policy)) {
+            continue;
+        }
 
         bool retained_target = false;
         for(const auto& preflight_issue : target.issues) {
-            if(preflight_issue.reason == AurUpdateExecutionReason::None) continue;
             if(!retained_target) {
                 preparation.affected_update_targets.push_back(target);
                 retained_target = true;
@@ -330,12 +355,53 @@ void retain_skipped_preflight_inconsistencies(
     for(const auto& target : preflight.targets) {
         if(target.status != AurUpdateExecutionTargetStatus::Skipped) continue;
 
-        bool has_normal_skip_issue = false;
+        if(preflight.devel_requires_check_policy.has_value() &&
+           is_known_devel_requires_check_policy(
+               *preflight.devel_requires_check_policy) &&
+           is_valid_aur_update_execution_target_skip_snapshot(
+               target, *preflight.devel_requires_check_policy)) {
+            continue;
+        }
+
+        if(target.skip_kind.has_value() &&
+           (!is_known_aur_update_execution_skip_kind(
+                *target.skip_kind) ||
+            *target.skip_kind == AurUpdateExecutionSkipKind::
+                                     IndependentDevelRequiresCheck ||
+            *target.skip_kind == AurUpdateExecutionSkipKind::
+                                     RequiredDevelRequiresCheck)) {
+            preparation.affected_update_targets.push_back(target);
+            AurUpdatePreparationIssue issue =
+                make_localized_preparation_issue(
+                    AurUpdatePreparationReason::
+                        DevelRequiresCheckPolicyInconsistent,
+                    std::string{
+                        DEVEL_REQUIRES_CHECK_POLICY_DIAGNOSTIC});
+            attribute_issue_to_target(issue, target);
+            issue.package_name = target.update.installed_name;
+            preparation.issues.push_back(std::move(issue));
+            continue;
+        }
+
+        std::size_t normal_skip_issue_count = 0;
+        bool has_matching_normal_skip_issue = false;
         bool retained_target = false;
         for(const auto& preflight_issue : target.issues) {
             if(preflight_issue.reason == AurUpdateExecutionReason::None) continue;
             if(is_normal_skipped_preflight_reason(preflight_issue.reason)) {
-                has_normal_skip_issue = true;
+                ++normal_skip_issue_count;
+                has_matching_normal_skip_issue =
+                    has_matching_normal_skip_issue ||
+                    (preflight_issue.reason ==
+                         AurUpdateExecutionReason::UpToDate &&
+                     target.skip_kind ==
+                         std::optional<AurUpdateExecutionSkipKind>{
+                             AurUpdateExecutionSkipKind::UpToDate}) ||
+                    (preflight_issue.reason ==
+                         AurUpdateExecutionReason::NonAurForeign &&
+                     target.skip_kind ==
+                         std::optional<AurUpdateExecutionSkipKind>{
+                             AurUpdateExecutionSkipKind::NonAurForeign});
                 continue;
             }
 
@@ -358,7 +424,12 @@ void retain_skipped_preflight_inconsistencies(
             preparation.issues.push_back(std::move(issue));
         }
 
-        if(has_normal_skip_issue || retained_target) continue;
+        if(normal_skip_issue_count == 1 &&
+           has_matching_normal_skip_issue &&
+           is_valid_aur_update_execution_target_skip_snapshot(target)) {
+            continue;
+        }
+        if(retained_target) continue;
 
         // POLICY(#267): reasonのないSkipped snapshotをnormal no-opとして受理しない。
         preparation.affected_update_targets.push_back(target);
@@ -368,6 +439,27 @@ void retain_skipped_preflight_inconsistencies(
                 // TRANSLATORS: {} is the literal service name "AUR".
                 "Skipped {} update target has no normal skip preflight issue.",
                 AUR_SERVICE_NAME));
+        attribute_issue_to_target(issue, target);
+        issue.package_name = target.update.installed_name;
+        preparation.issues.push_back(std::move(issue));
+    }
+}
+
+void retain_non_skipped_skip_kind_inconsistencies(
+    const AurUpdateExecutionPreflight& preflight,
+    AurUpdateSourceBuildPreparation& preparation) {
+    for(const auto& target : preflight.targets) {
+        if(target.status == AurUpdateExecutionTargetStatus::Skipped ||
+           !target.skip_kind.has_value()) {
+            continue;
+        }
+        preparation.affected_update_targets.push_back(target);
+        AurUpdatePreparationIssue issue =
+            make_localized_preparation_issue(
+                AurUpdatePreparationReason::
+                    DevelRequiresCheckPolicyInconsistent,
+                std::string{
+                    DEVEL_REQUIRES_CHECK_POLICY_DIAGNOSTIC});
         attribute_issue_to_target(issue, target);
         issue.package_name = target.update.installed_name;
         preparation.issues.push_back(std::move(issue));
@@ -1640,33 +1732,53 @@ PreparedAurUpdateSourceBuildInvocation::
 }
 
 bool AurUpdateSourceBuildPreparation::is_prepared() const noexcept {
-    return invocation.has_value() && invocation->is_valid() && issues.empty() &&
+    return has_known_devel_requires_check_policy(
+               devel_requires_check_policy) &&
+           has_valid_update_target_snapshots(
+               affected_update_targets,
+               devel_requires_check_policy) &&
+           invocation.has_value() && invocation->is_valid() && issues.empty() &&
            has_exact_prepared_correlation(
                invocation->production_invocation_.work_items,
                invocation->work_item_attributions(), *this);
 }
 
 bool AurUpdateSourceBuildPreparation::is_noop() const noexcept {
-    return !invocation.has_value() && issues.empty();
+    return has_known_devel_requires_check_policy(
+               devel_requires_check_policy) &&
+           has_valid_update_target_snapshots(
+               affected_update_targets,
+               devel_requires_check_policy) &&
+           !invocation.has_value() && issues.empty();
 }
 
 bool AurUpdateSourceBuildPreparation::is_blocked() const noexcept {
-    return !invocation.has_value() && !issues.empty();
+    return !is_prepared() && !is_noop();
 }
 
 bool AurUpdateSourceBuildObservation::is_ready() const noexcept {
-    return production_preflight.has_value() && issues.empty() &&
+    return has_known_devel_requires_check_policy(
+               devel_requires_check_policy) &&
+           has_valid_update_target_snapshots(
+               affected_update_targets,
+               devel_requires_check_policy) &&
+           production_preflight.has_value() && issues.empty() &&
            has_exact_prepared_correlation(
                production_preflight->work_items,
                work_item_attributions, *this);
 }
 
 bool AurUpdateSourceBuildObservation::is_noop() const noexcept {
-    return !production_preflight.has_value() && issues.empty();
+    return has_known_devel_requires_check_policy(
+               devel_requires_check_policy) &&
+           has_valid_update_target_snapshots(
+               affected_update_targets,
+               devel_requires_check_policy) &&
+           !production_preflight.has_value() && issues.empty();
 }
 
 bool AurUpdateSourceBuildObservation::is_blocked() const noexcept {
-    return !production_preflight.has_value() && !issues.empty();
+    return !is_ready() && !is_noop();
 }
 
 void seed_aur_update_source_build_cache(
@@ -1688,14 +1800,62 @@ AurUpdateSourceBuildDraftPreparation
 prepare_aur_update_source_build_drafts(
     const AurUpdateExecutionPreflight& preflight,
     const AurUpdateBuildUnitSelection& build_unit_selection,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     SavedSourcePreferencePolicy saved_source_preference_policy,
     bool needed) {
     AurUpdateSourceBuildPreparation preparation;
     preparation.build_unit_selection = build_unit_selection;
+    preparation.devel_requires_check_policy =
+        devel_requires_check_policy;
+
+    const bool policy_matches =
+        is_known_devel_requires_check_policy(
+            devel_requires_check_policy) &&
+        preflight.devel_requires_check_policy ==
+            std::optional<DevelRequiresCheckPolicy>{
+                devel_requires_check_policy};
+    if(!policy_matches) {
+        AurUpdatePreparationIssue issue =
+            make_localized_preparation_issue(
+                AurUpdatePreparationReason::
+                    DevelRequiresCheckPolicyInconsistent,
+                std::string{
+                    DEVEL_REQUIRES_CHECK_POLICY_DIAGNOSTIC});
+        preparation.issues.push_back(std::move(issue));
+        return {std::move(preparation), {}};
+    }
+
+    if(devel_requires_check_policy ==
+           DevelRequiresCheckPolicy::SkipIndependentTarget &&
+       !has_valid_aur_update_execution_policy_snapshot(preflight)) {
+        AurUpdatePreparationIssue issue =
+            make_localized_preparation_issue(
+                AurUpdatePreparationReason::
+                    DevelRequiresCheckPolicyInconsistent,
+                std::string{
+                    DEVEL_REQUIRES_CHECK_POLICY_DIAGNOSTIC});
+        preparation.issues.push_back(std::move(issue));
+        return {std::move(preparation), {}};
+    }
+    if(devel_requires_check_policy ==
+           DevelRequiresCheckPolicy::SkipIndependentTarget &&
+       !has_complete_aur_update_required_devel_relation_snapshot(
+           preflight)) {
+        AurUpdatePreparationIssue issue =
+            make_localized_preparation_issue(
+                AurUpdatePreparationReason::
+                    DevelRequiresCheckPolicyInconsistent,
+                std::string{
+                    DEVEL_REQUIRES_CHECK_POLICY_DIAGNOSTIC});
+        preparation.issues.push_back(std::move(issue));
+        return {std::move(preparation), {}};
+    }
 
     // Blocking preflight and normal no-op never reach preference or DB
     // authority. The same snapshot feeds both executable preparation and the
     // capability-free dry-run observation.
+    retain_non_skipped_skip_kind_inconsistencies(
+        preflight, preparation);
     retain_skipped_preflight_inconsistencies(preflight, preparation);
     if(has_blocking_preflight_targets(preflight) ||
        std::any_of(
@@ -1837,7 +1997,8 @@ AurUpdateSourceBuildObservation make_source_build_observation(
         std::move(preparation.projected_build_units),
         std::move(preparation.externally_satisfied_build_units),
         std::move(attributions),
-        std::move(production_preflight)};
+        std::move(production_preflight),
+        preparation.devel_requires_check_policy};
 }
 
 } // namespace
@@ -1845,12 +2006,14 @@ AurUpdateSourceBuildObservation make_source_build_observation(
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     const AurUpdateExecutionPreflight& preflight,
     const AurUpdateBuildUnitSelection& build_unit_selection,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     SavedSourcePreferencePolicy saved_source_preference_policy,
     bool needed,
     const AppConfig& config) {
     AurUpdateSourceBuildDraftPreparation draft_preparation =
         prepare_aur_update_source_build_drafts(
             preflight, build_unit_selection,
+            devel_requires_check_policy,
             saved_source_preference_policy, needed);
     AurUpdateSourceBuildPreparation preparation =
         std::move(draft_preparation.observation);
@@ -1890,7 +2053,8 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
             std::move(preparation.projected_build_units),
             std::move(preparation.externally_satisfied_build_units),
             std::optional<PreparedAurUpdateSourceBuildInvocation>{
-                std::move(prepared_invocation)}};
+                std::move(prepared_invocation)},
+            preparation.devel_requires_check_policy};
     } catch(const ReviewedSourceProductionError& error) {
         AurUpdatePreparationIssue issue = make_localized_preparation_issue(
             AurUpdatePreparationReason::GenericPreparationInconsistent,
@@ -1926,12 +2090,14 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
 AurUpdateSourceBuildObservation observe_aur_update_source_build_preparation(
     const AurUpdateExecutionPreflight& preflight,
     const AurUpdateBuildUnitSelection& build_unit_selection,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     SavedSourcePreferencePolicy saved_source_preference_policy,
     bool needed,
     const AppConfig& config) {
     AurUpdateSourceBuildDraftPreparation draft_preparation =
         prepare_aur_update_source_build_drafts(
             preflight, build_unit_selection,
+            devel_requires_check_policy,
             saved_source_preference_policy, needed);
     AurUpdateSourceBuildPreparation preparation =
         std::move(draft_preparation.observation);
@@ -1997,24 +2163,26 @@ AurUpdateSourceBuildObservation observe_aur_update_source_build_preparation(
 
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     const AurUpdateExecutionPreflight& preflight,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     SavedSourcePreferencePolicy saved_source_preference_policy,
     bool needed,
     const AppConfig& config) {
     const AurUpdateBuildUnitSelection build_unit_selection =
         make_all_selected_build_unit_selection(preflight);
     return prepare_aur_update_source_build_invocation(
-        preflight, build_unit_selection, saved_source_preference_policy,
-        needed, config);
+        preflight, build_unit_selection, devel_requires_check_policy,
+        saved_source_preference_policy, needed, config);
 }
 
 AurUpdateSourceBuildObservation observe_aur_update_source_build_preparation(
     const AurUpdateExecutionPreflight& preflight,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     SavedSourcePreferencePolicy saved_source_preference_policy,
     bool needed,
     const AppConfig& config) {
     const AurUpdateBuildUnitSelection build_unit_selection =
         make_all_selected_build_unit_selection(preflight);
     return observe_aur_update_source_build_preparation(
-        preflight, build_unit_selection, saved_source_preference_policy,
-        needed, config);
+        preflight, build_unit_selection, devel_requires_check_policy,
+        saved_source_preference_policy, needed, config);
 }

@@ -309,8 +309,14 @@ assert_read_only_commands() {
             'alpm sync-valid core'|\
             'alpm sync-cache core'|\
             'alpm sync-query core/clean-root'|\
+            'alpm sync-query core/foo'|\
             'alpm sync-query core/foo-git'|\
+            'alpm sync-query core/required-devel-git'|\
+            'alpm sync-query core/required-devel-root'|\
             'alpm sync-query core/repository-root'|\
+            'alpm sync-query core/moguet-fixture-rc-one-git'|\
+            'alpm sync-query core/moguet-fixture-rc-two-git'|\
+            'alpm sync-query core/moguet-fixture-rc-three-git'|\
             'alpm release') ;;
             *)
                 echo "dry-run crossed a forbidden or unapproved process boundary" >&2
@@ -541,10 +547,80 @@ assert_protected_storage_unchanged
 assert_read_only_commands
 
 setup_case sync-system-aur-requires-check
-set_foreign_inventory 'foo-git 1.0-1 explicit'
-MOGUET_TEST_VERCMP_OUTPUT=0
+set_foreign_inventory 'moguet-fixture-rc-one-git 1.0-1 explicit
+moguet-fixture-rc-two-git 1.0-1 explicit
+moguet-fixture-rc-three-git 1.0-1 explicit'
 MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
-export MOGUET_TEST_VERCMP_OUTPUT MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG
+export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG
+: > "$command_log"
+start_mutation_sentinel
+if (cd "$case_work_dir" &&
+        "$repository_test_binary" --dry-run --noconfirm -Syu) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+if [ "$status" -ne 0 ]; then
+    echo "combined RequiresCheck dry-run returned $status" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+grep -Fx -- "System + normal AUR update plan:" "$output_file" >/dev/null
+grep -Fx -- "  Status: Ready" "$output_file" >/dev/null
+assert_text_occurrence_count 1 "  Status: NoOp" "$output_file"
+assert_text_occurrence_count 1 "Attention-required details:" "$output_file"
+assert_text_occurrence_count 3 \
+    "skipped: devel update requires check: suffix candidate only; not automatically updated because authoritative build provenance is unavailable" \
+    "$output_file"
+grep -F -- "moguet-fixture-rc-one-git (PackageBase: moguet-fixture-rc-one-git)" "$output_file" >/dev/null
+grep -F -- "moguet-fixture-rc-two-git (PackageBase: moguet-fixture-rc-two-git)" "$output_file" >/dev/null
+grep -F -- "moguet-fixture-rc-three-git (PackageBase: moguet-fixture-rc-three-git)" "$output_file" >/dev/null
+if grep -F -- "  Status: Blocked" "$output_file" >/dev/null; then
+    echo "independent RequiresCheck blocked the combined dry-run" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+grep -Fx -- "  AUR assessment is based on the current installed state." "$output_file" >/dev/null
+assert_protected_storage_unchanged
+assert_read_only_commands
+
+setup_case sync-system-aur-update-plus-requires-check
+set_foreign_inventory 'clean-root 0.9-1 explicit
+foo-git 1.0-1 explicit
+foo 1.0-1 explicit'
+MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG
+: > "$command_log"
+start_mutation_sentinel
+if (cd "$case_work_dir" &&
+        "$repository_test_binary" --dry-run --noconfirm -Syu) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+if [ "$status" -ne 0 ]; then
+    echo "combined mixed RequiresCheck dry-run returned $status" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+grep -Fx -- "System + normal AUR update plan:" "$output_file" >/dev/null
+assert_text_occurrence_count 3 "  Status: Ready" "$output_file"
+assert_text_occurrence_count 1 "Attention-required details:" "$output_file"
+assert_text_occurrence_count 1 \
+    "foo-git (PackageBase: foo-git): skipped: devel update requires check: suffix candidate only; not automatically updated because authoritative build provenance is unavailable" \
+    "$output_file"
+assert_protected_storage_unchanged
+assert_read_only_commands
+
+setup_case sync-system-aur-required-requires-check
+set_foreign_inventory 'required-devel-root 0.9-1 explicit
+required-devel-git 1.0-1 dependency'
+MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG
 : > "$command_log"
 start_mutation_sentinel
 if (cd "$case_work_dir" &&
@@ -556,14 +632,22 @@ else
     status=$?
 fi
 if [ "$status" -ne 1 ]; then
-    echo "combined RequiresCheck dry-run returned $status" >&2
+    echo "combined required RequiresCheck dry-run returned $status" >&2
     sed -n '1,240p' "$output_file" >&2
     exit 1
 fi
-grep -Fx -- "System + normal AUR update plan:" "$output_file" >/dev/null
+if ! grep -Fx -- "System + normal AUR update plan:" "$output_file" >/dev/null; then
+    echo "required RequiresCheck dry-run lost the combined plan" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
 assert_text_occurrence_count 2 "  Status: Blocked" "$output_file"
-grep -F -- "RequiresCheck" "$output_file" >/dev/null
-grep -Fx -- "  AUR assessment is based on the current installed state." "$output_file" >/dev/null
+grep -F -- "AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck" "$output_file" >/dev/null
+if grep -F -- "Attention-required details:" "$output_file" >/dev/null; then
+    echo "required RequiresCheck was downgraded to attention" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
 assert_protected_storage_unchanged
 assert_read_only_commands
 
@@ -597,6 +681,7 @@ if grep -F -- "System + normal AUR update plan:" "$output_file" >/dev/null ||
    grep -F -- "Combined update phases:" "$output_file" >/dev/null ||
    grep -F -- "Current-state normal AUR phase:" "$output_file" >/dev/null ||
    grep -F -- "AUR assessment is based on" "$output_file" >/dev/null ||
+   grep -F -- "Attention-required details:" "$output_file" >/dev/null ||
    grep -F -- "later normal AUR" "$output_file" >/dev/null
 then
     echo "repository-only dry-run exposed AUR observation semantics" >&2
@@ -919,6 +1004,11 @@ then
     sed -n '1,240p' "$output_file" >&2
     exit 1
 fi
+if grep -F -- "Warning: Requires check" "$output_file" >/dev/null; then
+    echo "strict upgrade-aur RequiresCheck was downgraded to a warning" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
 assert_text_occurrence_count 1 \
     'Checking AUR updates for 1 foreign packages...' "$output_file"
 assert_text_occurrence_count 1 \
@@ -948,6 +1038,44 @@ if ! grep -F -- \
     "$output_file" >/dev/null
 then
     echo "dry-run RequiresCheck lost its blocker reason" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+if grep -F -- "Attention-required details:" "$output_file" >/dev/null; then
+    echo "strict upgrade-aur dry-run RequiresCheck became attention" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+assert_protected_storage_unchanged
+assert_read_only_commands
+
+setup_case dry-run-upgrade-all-devel-requires-check
+set_foreign_inventory 'foo-git 1.0-1 explicit'
+MOGUET_TEST_VERCMP_OUTPUT=0
+export MOGUET_TEST_VERCMP_OUTPUT
+: > "$command_log"
+start_mutation_sentinel
+if (cd "$case_work_dir" &&
+        "$repository_test_binary" --noconfirm upgrade-all --dry-run) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+assert_expected_observation \
+    Blocked 1 "AurUpdateExecutionReason::DevelRequiresCheck" \
+    "$status" "dry-run upgrade-all devel RequiresCheck"
+if ! grep -F -- \
+    "authoritative build provenance is unavailable" \
+    "$output_file" >/dev/null
+then
+    echo "upgrade-all dry-run RequiresCheck lost its blocker reason" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+if grep -F -- "Attention-required details:" "$output_file" >/dev/null; then
+    echo "strict upgrade-all dry-run RequiresCheck became attention" >&2
     sed -n '1,240p' "$output_file" >&2
     exit 1
 fi

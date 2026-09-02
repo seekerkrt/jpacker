@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.5.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-31 16:18+0900\n"
+"POT-Creation-Date: 2026-09-02 09:05+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2325,6 +2325,12 @@ msgstr ""
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
 #, c++-format
 msgid "Unknown {} update target status."
+msgstr ""
+
+msgid "skipped: devel update requires check: suffix candidate only; not automatically updated because authoritative build provenance is unavailable"
+msgstr ""
+
+msgid "Unknown devel RequiresCheck attention reason."
 msgstr ""
 
 msgid "preflight issue"
@@ -9172,6 +9178,11 @@ msgstr ""
 
 #, c++-format
 msgid "System/{} projection has no current-state {} child observation."
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "A system/{} RequiresCheck attention is not supported by the renderer."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal XDG standard identity.

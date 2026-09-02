@@ -216,6 +216,8 @@ AurUpdateExecutionPreflight executable_preflight(
     AurUpdateExecutionPreflight preflight;
     preflight.targets.push_back(std::move(target));
     preflight.build_plan = std::move(plan);
+    preflight.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     return preflight;
 }
 
@@ -226,7 +228,8 @@ AurUpdateSourceBuildPreparation prepare(
         SavedSourcePreferencePolicy::Strict) {
     AppConfig config;
     return prepare_aur_update_source_build_invocation(
-        preflight, saved_source_preference_policy, needed, config);
+        preflight, DevelRequiresCheckPolicy::BlockOperation,
+        saved_source_preference_policy, needed, config);
 }
 
 void reset_case() {

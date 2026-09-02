@@ -435,6 +435,9 @@ std::string preflight_reason_label(AurUpdateExecutionReason reason) {
         case AurUpdateExecutionReason::DevelRequiresCheck:
             return localization::translate_message(
                 "devel update requires check");
+        case AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck:
+            return localization::translate_message(
+                "devel update requires check");
         case AurUpdateExecutionReason::NonAurForeign:
             // TRANSLATORS: The placeholder is the literal service name "AUR".
             return localization::format_translated_message("non-{} foreign",
@@ -493,6 +496,9 @@ std::string preparation_reason_label(AurUpdatePreparationReason reason) {
         case AurUpdatePreparationReason::BlockingPreflight:
             return localization::translate_message("blocking preflight");
         case AurUpdatePreparationReason::PreflightInconsistent:
+            return localization::translate_message("preflight inconsistent");
+        case AurUpdatePreparationReason::
+            DevelRequiresCheckPolicyInconsistent:
             return localization::translate_message("preflight inconsistent");
         case AurUpdatePreparationReason::BuildPlanMissing:
             return localization::translate_message("build plan missing");
@@ -607,6 +613,8 @@ std::string reduction_reason_label(
             return localization::translate_message("work item result inconsistent");
         case AurUpdateOperationReductionReason::InvocationResultInconsistent:
             return localization::translate_message("invocation result inconsistent");
+        case AurUpdateOperationReductionReason::
+            DevelRequiresCheckPolicyInconsistent:
         case AurUpdateOperationReductionReason::OtherCorrelationInconsistent:
             return localization::translate_message("other correlation inconsistency");
     }
@@ -620,6 +628,10 @@ std::string filtered_issue_kind_label(
     switch(kind) {
         case FilteredAurUpdateOperationIssueKind::UnknownUpdateClassification:
             return localization::translate_message("unknown update classification");
+        case FilteredAurUpdateOperationIssueKind::
+            DevelRequiresCheckPolicyInconsistent:
+            return localization::translate_message(
+                "target/planner mapping inconsistent");
         case FilteredAurUpdateOperationIssueKind::TargetPlannerMappingInconsistent:
             return localization::translate_message("target/planner mapping inconsistent");
         case FilteredAurUpdateOperationIssueKind::FilteredTargetMappingInconsistent:
@@ -810,6 +822,7 @@ bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
             return true;
         case AurUpdateExecutionReason::None:
         case AurUpdateExecutionReason::DevelRequiresCheck:
+        case AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck:
         case AurUpdateExecutionReason::AurMetadataUnavailable:
         case AurUpdateExecutionReason::VersionComparisonUnavailable:
         case AurUpdateExecutionReason::InstalledReasonUnknown:

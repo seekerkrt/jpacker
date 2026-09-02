@@ -1,5 +1,6 @@
 #include "aur_update_operation_result.hpp"
 
+#include "aur_update_required_devel_relation_projection.hpp"
 #include "localization.hpp"
 
 #include <algorithm>
@@ -8,6 +9,9 @@
 #include <utility>
 
 namespace {
+
+constexpr char DEVEL_REQUIRES_CHECK_POLICY_SNAPSHOT_DIAGNOSTIC[] =
+    "Devel RequiresCheck policy snapshots are missing, unknown, or inconsistent.";
 
 void add_reduction_issue(
     AurUpdateOperationResult& result,
@@ -85,7 +89,9 @@ bool same_preflight_issue(
                rhs.devel_requires_check_reason &&
            lhs.build_plan_projection_issue ==
                rhs.build_plan_projection_issue &&
-           lhs.relation_reason == rhs.relation_reason;
+           lhs.relation_reason == rhs.relation_reason &&
+           lhs.required_devel_target_blocker ==
+               rhs.required_devel_target_blocker;
 }
 
 bool same_preflight_target_snapshot(
@@ -96,6 +102,7 @@ bool same_preflight_target_snapshot(
            same_update_entry(lhs.update, rhs.update) &&
            lhs.status == rhs.status &&
            lhs.desired_install_reason == rhs.desired_install_reason &&
+           lhs.skip_kind == rhs.skip_kind &&
            lhs.issues.size() == rhs.issues.size() &&
            std::equal(
                lhs.issues.begin(), lhs.issues.end(),
@@ -159,6 +166,7 @@ bool is_known_preflight_reason(AurUpdateExecutionReason reason) noexcept {
         case AurUpdateExecutionReason::None:
         case AurUpdateExecutionReason::UpToDate:
         case AurUpdateExecutionReason::DevelRequiresCheck:
+        case AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck:
         case AurUpdateExecutionReason::NonAurForeign:
         case AurUpdateExecutionReason::AurMetadataUnavailable:
         case AurUpdateExecutionReason::VersionComparisonUnavailable:
@@ -181,12 +189,6 @@ bool is_known_preflight_reason(AurUpdateExecutionReason reason) noexcept {
             return true;
     }
     return false;
-}
-
-bool is_normal_skipped_preflight_reason(
-    AurUpdateExecutionReason reason) noexcept {
-    return reason == AurUpdateExecutionReason::UpToDate ||
-           reason == AurUpdateExecutionReason::NonAurForeign;
 }
 
 bool is_known_installed_package_reason(
@@ -233,33 +235,11 @@ bool is_known_desired_install_reason(DesiredInstallReason reason) noexcept {
     return false;
 }
 
-bool has_normal_skipped_preflight_issues(
-    const AurUpdateExecutionTarget& target) noexcept {
-    bool has_up_to_date_reason = false;
-    bool has_non_aur_reason = false;
-    for(const auto& issue : target.issues) {
-        if(issue.reason == AurUpdateExecutionReason::None) continue;
-        if(!is_normal_skipped_preflight_reason(issue.reason)) return false;
-        has_up_to_date_reason = has_up_to_date_reason ||
-                                issue.reason == AurUpdateExecutionReason::UpToDate;
-        has_non_aur_reason = has_non_aur_reason ||
-                             issue.reason == AurUpdateExecutionReason::NonAurForeign;
-    }
-    if(has_up_to_date_reason && !has_non_aur_reason) {
-        return target.update.classification ==
-                   AurUpdateClassification::UpToDate &&
-               target.update.aur_package.has_value() &&
-               (target.update.aur_package->version_relation ==
-                    AurVersionRelation::OlderThanInstalled ||
-                target.update.aur_package->version_relation ==
-                    AurVersionRelation::SameAsInstalled);
-    }
-    if(has_non_aur_reason && !has_up_to_date_reason) {
-        return target.update.classification ==
-                   AurUpdateClassification::NonAurForeign &&
-               !target.update.aur_package.has_value();
-    }
-    return false;
+bool has_valid_skipped_preflight_issues(
+    const AurUpdateExecutionTarget& target,
+    DevelRequiresCheckPolicy policy) noexcept {
+    return is_valid_aur_update_execution_target_skip_snapshot(
+        target, policy);
 }
 
 bool is_known_preparation_reason(AurUpdatePreparationReason reason) noexcept {
@@ -267,6 +247,8 @@ bool is_known_preparation_reason(AurUpdatePreparationReason reason) noexcept {
         case AurUpdatePreparationReason::None:
         case AurUpdatePreparationReason::BlockingPreflight:
         case AurUpdatePreparationReason::PreflightInconsistent:
+        case AurUpdatePreparationReason::
+            DevelRequiresCheckPolicyInconsistent:
         case AurUpdatePreparationReason::BuildPlanMissing:
         case AurUpdatePreparationReason::BuildPlanOrderEmpty:
         case AurUpdatePreparationReason::RootAttributionInconsistent:
@@ -1089,12 +1071,51 @@ AurUpdateOperationStatus map_invocation_status(
     return AurUpdateOperationStatus::InconsistentResult;
 }
 
+bool is_valid_success_target_snapshot(
+    const AurUpdateOperationTargetResult& target,
+    DevelRequiresCheckPolicy policy) noexcept {
+    switch(target.status) {
+        case AurUpdateOperationTargetStatus::Updated:
+        case AurUpdateOperationTargetStatus::NoChange:
+            return !target.skip_kind.has_value() &&
+                   target.preflight_issues.empty() &&
+                   target.preparation_issues.empty();
+        case AurUpdateOperationTargetStatus::Skipped:
+            return target.preparation_issues.empty() &&
+                   (is_valid_aur_update_normal_skip_snapshot(
+                        target.update, target.preflight_issues,
+                        target.skip_kind) ||
+                    is_valid_aur_update_independent_devel_skip_snapshot(
+                        target.update, target.preflight_issues,
+                        target.skip_kind, policy));
+        case AurUpdateOperationTargetStatus::Unsupported:
+        case AurUpdateOperationTargetStatus::Incomplete:
+        case AurUpdateOperationTargetStatus::Failed:
+        case AurUpdateOperationTargetStatus::UpdatedCleanupFailed:
+        case AurUpdateOperationTargetStatus::NoChangeCleanupFailed:
+        case AurUpdateOperationTargetStatus::NotAttempted:
+            return false;
+    }
+    return false;
+}
+
 } // namespace
 
 bool AurUpdateOperationResult::is_success() const noexcept {
-    return (status == AurUpdateOperationStatus::NoUpdates ||
-            status == AurUpdateOperationStatus::Completed) &&
-           selected_repository_provider_transaction.is_success();
+    if(!devel_requires_check_policy.has_value() ||
+       !is_known_devel_requires_check_policy(
+           *devel_requires_check_policy) ||
+       (status != AurUpdateOperationStatus::NoUpdates &&
+        status != AurUpdateOperationStatus::Completed) ||
+       !selected_repository_provider_transaction.is_success()) {
+        return false;
+    }
+    return std::all_of(
+        targets.begin(), targets.end(),
+        [this](const AurUpdateOperationTargetResult& target) {
+            return is_valid_success_target_snapshot(
+                target, *devel_requires_check_policy);
+        });
 }
 
 PackageStateChange AurUpdateOperationResult::package_state_change()
@@ -1134,6 +1155,21 @@ PackageStateChange AurUpdateOperationResult::package_state_change()
                 return PackageStateChange::Changed;
             }
         }
+    }
+    if(devel_requires_check_policy ==
+           std::optional<DevelRequiresCheckPolicy>{
+               DevelRequiresCheckPolicy::SkipIndependentTarget} &&
+       std::any_of(
+           targets.begin(), targets.end(),
+           [this](const AurUpdateOperationTargetResult& target) {
+               return target.status ==
+                          AurUpdateOperationTargetStatus::Skipped &&
+                      is_valid_aur_update_independent_devel_skip_snapshot(
+                          target.update, target.preflight_issues,
+                          target.skip_kind,
+                          *devel_requires_check_policy);
+           })) {
+        return PackageStateChange::Unknown;
     }
     return selected_repository_provider_transaction.package_state_change ==
                    PackageStateChange::Unknown
@@ -1204,8 +1240,11 @@ bool AurUpdateOperationResult::has_blocking_targets() const noexcept {
 AurUpdateOperationResult reduce_aur_update_operation_result(
     const AurUpdateExecutionPreflight& preflight,
     const AurUpdateSourceBuildPreparation& preparation,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     const std::optional<AurUpdateSourceBuildExecutionResult>& execution) {
     AurUpdateOperationResult result;
+    result.devel_requires_check_policy =
+        devel_requires_check_policy;
     result.preparation_issues = preparation.issues;
     result.preparation_warnings = preparation.warnings;
     if(execution.has_value()) {
@@ -1215,6 +1254,36 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
             execution->selected_repository_provider_transaction;
     }
     result.targets.reserve(preflight.targets.size());
+
+    const std::optional<DevelRequiresCheckPolicy> expected_policy{
+        devel_requires_check_policy};
+    if(!is_known_devel_requires_check_policy(
+           devel_requires_check_policy) ||
+       preflight.devel_requires_check_policy != expected_policy ||
+       preparation.devel_requires_check_policy != expected_policy ||
+       !has_valid_aur_update_execution_policy_snapshot(preflight)) {
+        add_reduction_issue(
+            result,
+            AurUpdateOperationReductionReason::
+                DevelRequiresCheckPolicyInconsistent,
+            AurUpdateOperationReductionStage::Preflight,
+            std::string{
+                DEVEL_REQUIRES_CHECK_POLICY_SNAPSHOT_DIAGNOSTIC});
+    }
+    if(devel_requires_check_policy ==
+           DevelRequiresCheckPolicy::SkipIndependentTarget &&
+       preflight.devel_requires_check_policy == expected_policy &&
+       has_valid_aur_update_execution_policy_snapshot(preflight) &&
+       !has_complete_aur_update_required_devel_relation_snapshot(
+           preflight)) {
+        add_reduction_issue(
+            result,
+            AurUpdateOperationReductionReason::
+                OtherCorrelationInconsistent,
+            AurUpdateOperationReductionStage::Preflight,
+            std::string{
+                DEVEL_REQUIRES_CHECK_POLICY_SNAPSHOT_DIAGNOSTIC});
+    }
 
     std::map<std::size_t, std::vector<std::size_t>>
         positions_by_update_plan_index;
@@ -1237,6 +1306,7 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
         target.package_base = package_base_for_target(input);
         target.status = initial_target_status(input.status);
         target.preflight_issues = input.issues;
+        target.skip_kind = input.skip_kind;
         result.targets.push_back(std::move(target));
 
         if(!is_known_preflight_status(input.status)) {
@@ -1277,19 +1347,32 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         "AUR"),
                     {input.update_plan_index}, {position});
             }
-            if(input.status == AurUpdateExecutionTargetStatus::Executable &&
-               issue.reason != AurUpdateExecutionReason::None) {
+            if(!is_valid_aur_update_execution_issue_devel_payload(
+                   issue)) {
                 add_reduction_issue(
                     result,
                     AurUpdateOperationReductionReason::
                         OtherCorrelationInconsistent,
                     AurUpdateOperationReductionStage::Preflight,
                     localization::format_translated_message(
-                        // TRANSLATORS: AUR is a runtime project identity.
-                        "Executable {} update target retains a blocking preflight issue.",
+                        "{} update preflight issue has an unknown reason.",
                         "AUR"),
                     {input.update_plan_index}, {position});
             }
+        }
+        if(input.status == AurUpdateExecutionTargetStatus::Executable &&
+           !is_valid_aur_update_execution_target_skip_snapshot(
+               input, devel_requires_check_policy)) {
+            add_reduction_issue(
+                result,
+                AurUpdateOperationReductionReason::
+                    OtherCorrelationInconsistent,
+                AurUpdateOperationReductionStage::Preflight,
+                localization::format_translated_message(
+                    // TRANSLATORS: AUR is a runtime project identity.
+                    "Executable {} update target retains a blocking preflight issue.",
+                    "AUR"),
+                {input.update_plan_index}, {position});
         }
         if(!is_known_installed_package_reason(
                input.update.install_reason)) {
@@ -1346,7 +1429,8 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
         }
         if(input.status == AurUpdateExecutionTargetStatus::Skipped &&
            (has_unknown_target_enum ||
-            !has_normal_skipped_preflight_issues(input))) {
+            !has_valid_skipped_preflight_issues(
+                input, devel_requires_check_policy))) {
             add_reduction_issue(
                 result,
                 AurUpdateOperationReductionReason::
@@ -1355,6 +1439,21 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                 localization::format_translated_message(
                     // TRANSLATORS: AUR is a runtime project identity.
                     "Skipped {} update target cannot be confirmed as a normal skip.",
+                    "AUR"),
+                {input.update_plan_index}, {position});
+            result.targets[position].status =
+                AurUpdateOperationTargetStatus::Incomplete;
+            all_targets_are_skipped = false;
+        }
+        if(input.status != AurUpdateExecutionTargetStatus::Skipped &&
+           input.skip_kind.has_value()) {
+            add_reduction_issue(
+                result,
+                AurUpdateOperationReductionReason::
+                    OtherCorrelationInconsistent,
+                AurUpdateOperationReductionStage::Preflight,
+                localization::format_translated_message(
+                    "{} update preflight target has an unknown status.",
                     "AUR"),
                 {input.update_plan_index}, {position});
             result.targets[position].status =

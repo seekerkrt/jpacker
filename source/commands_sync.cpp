@@ -2042,6 +2042,17 @@ int run_system_aur_update_presentation_test(
         FilteredAurUpdateExecutionResult child =
             execute_prepared_filtered_aur_update_operation(
                 prepare_upgrade_aur_operation(config), config);
+        // The command stub produces the strict upgrade-aur snapshot. This
+        // test-only wrapper changes every policy snapshot together so the
+        // retained child models the ordinary system+AUR route instead.
+        child.devel_requires_check_policy =
+            DevelRequiresCheckPolicy::SkipIndependentTarget;
+        child.preflight.devel_requires_check_policy =
+            DevelRequiresCheckPolicy::SkipIndependentTarget;
+        child.preparation.devel_requires_check_policy =
+            DevelRequiresCheckPolicy::SkipIndependentTarget;
+        child.reduced_operation_result.devel_requires_check_policy =
+            DevelRequiresCheckPolicy::SkipIndependentTarget;
         SystemAurUpdateOperationResult result =
             completed_system_aur_prefix_for_test(child.query_result);
         result.aur.operation_result.emplace(std::move(child));

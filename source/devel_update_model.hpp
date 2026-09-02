@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdexcept>
 #include <utility>
 #include <variant>
 
@@ -68,7 +69,32 @@ public:
     [[nodiscard]] static DevelUpdateAssessment unknown(
         DevelUnknownReason reason);
     [[nodiscard]] static DevelUpdateAssessment requires_check(
-        DevelRequiresCheckReason reason);
+        DevelRequiresCheckReason reason) {
+        switch(reason) {
+            case DevelRequiresCheckReason::SuffixCandidateOnly:
+            case DevelRequiresCheckReason::NoAuthoritativeBuildProvenance:
+            case DevelRequiresCheckReason::InstalledArtifactDrift:
+            case DevelRequiresCheckReason::AurRecipeAdvanced:
+            case DevelRequiresCheckReason::SourceMetadataMissing:
+            case DevelRequiresCheckReason::SourceMetadataMalformed:
+            case DevelRequiresCheckReason::SourceIdentityChanged:
+            case DevelRequiresCheckReason::TransportRequiresCheck:
+            case DevelRequiresCheckReason::SelectorRequiresCheck:
+            case DevelRequiresCheckReason::MultipleFloatingSources:
+            case DevelRequiresCheckReason::
+                ArchitectureSpecificSourceUnresolved:
+            case DevelRequiresCheckReason::ProvenanceMissing:
+            case DevelRequiresCheckReason::ProvenanceInvalid:
+            case DevelRequiresCheckReason::ProvenanceCorrupted:
+            case DevelRequiresCheckReason::ProvenanceFutureSchema:
+            case DevelRequiresCheckReason::BuildSourceProofUnavailable:
+                return DevelUpdateAssessment(
+                    DevelUpdateAssessmentState::RequiresCheck,
+                    reason);
+        }
+        throw std::invalid_argument(
+            "Devel check-required reason is invalid.");
+    }
     [[nodiscard]] static DevelUpdateAssessment unsupported(
         DevelUnsupportedReason reason);
 

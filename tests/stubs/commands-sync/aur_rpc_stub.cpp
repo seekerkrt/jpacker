@@ -74,8 +74,18 @@ std::optional<AurPackageInfo> fixture_info(const std::string& package_name) {
        package_name == "forced-official" || package_name == "mixed-aur" ||
        package_name == "aur-presented" || package_name == "scope-aur" ||
        package_name == "system-update-a" ||
-       package_name == "system-devel-git") {
+       package_name == "system-devel-git" ||
+       package_name == "system-current" ||
+       package_name == "tree-sitter-cli-git" ||
+       package_name == "wezterm-git" ||
+       package_name == "xpadneo-dkms-git" ||
+       package_name == "system-required-git") {
         return package_info(package_name);
+    }
+    if(package_name == "system-required-root") {
+        AurPackageInfo info = package_info(package_name);
+        info.Depends = {"system-required-git"};
+        return info;
     }
     if(package_name == "constraint-block-root") {
         AurPackageInfo info = package_info(package_name);

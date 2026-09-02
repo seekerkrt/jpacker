@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.5.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-31 15:08+0900\n"
+"POT-Creation-Date: 2026-09-02 09:05+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -2321,6 +2321,12 @@ msgstr "未試行: 結果に矛盾があります"
 msgid "Unknown {} update target status."
 msgstr "不明な{}更新対象状態です。"
 
+msgid "skipped: devel update requires check: suffix candidate only; not automatically updated because authoritative build provenance is unavailable"
+msgstr "スキップ: devel更新は確認が必要です: suffixは候補根拠にすぎません。authoritativeなbuild provenanceがないため自動更新しません"
+
+msgid "Unknown devel RequiresCheck attention reason."
+msgstr "不明なdevel RequiresCheck attention reasonです。"
+
 msgid "preflight issue"
 msgstr "事前検証の問題"
 
@@ -3483,6 +3489,11 @@ msgstr "{}に失敗しました。"
 
 #. TRANSLATORS: AUR is a runtime project identity.
 #, c++-format
+msgid "The {} update was not attempted."
+msgstr "{}更新は試行されませんでした。"
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
 msgid "The repository system upgrade completed, but the fresh installed-package inventory for {} could not be obtained."
 msgstr "リポジトリのシステム更新は完了しましたが、{}向けの最新インストール済みパッケージ一覧を取得できませんでした。"
 
@@ -3514,6 +3525,9 @@ msgstr "リポジトリのシステム更新は完了しましたが、パッケ
 msgid "The completed repository system upgrade was not rolled back."
 msgstr "完了済みのリポジトリシステム更新はロールバックされていません。"
 
+msgid "The repository system upgrade completed."
+msgstr "リポジトリのシステム更新が完了しました。"
+
 #. TRANSLATORS: AUR is a runtime project identity.
 #, c++-format
 msgid "The repository and {} update result is inconsistent; no success was reported."
@@ -3521,14 +3535,6 @@ msgstr "リポジトリ更新と{}更新の結果に整合性がないため、�
 
 msgid "The repository system upgrade failed."
 msgstr "リポジトリのシステム更新に失敗しました。"
-
-#. TRANSLATORS: AUR is a runtime project identity.
-#, c++-format
-msgid "The {} update was not attempted."
-msgstr "{}更新は試行されませんでした。"
-
-msgid "The repository system upgrade completed."
-msgstr "リポジトリのシステム更新が完了しました。"
 
 msgid "The repository system upgrade was not attempted."
 msgstr "リポジトリのシステム更新は試行されませんでした。"
@@ -9168,6 +9174,11 @@ msgstr "現在状態に基づく通常{}段階:"
 #, c++-format
 msgid "System/{} projection has no current-state {} child observation."
 msgstr "システム/{}投影に現在状態の{}子観測がありません。"
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "A system/{} RequiresCheck attention is not supported by the renderer."
+msgstr "システム/{}のRequiresCheck attentionはレンダラーでサポートされていません。"
 
 #. TRANSLATORS: The placeholder is the literal XDG standard identity.
 #, c++-format

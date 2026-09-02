@@ -5,9 +5,11 @@
 #include "filtered_aur_update_operation.hpp"
 #include "localization.hpp"
 #include "logging.hpp"
+#include "runtime_diagnostic.hpp"
 #include "source_install.hpp"
 
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -47,6 +49,9 @@ std::string preflight_reason_label(AurUpdateExecutionReason reason) {
         case AurUpdateExecutionReason::UpToDate:
             return localization::translate_message("up to date");
         case AurUpdateExecutionReason::DevelRequiresCheck:
+            return localization::translate_message(
+                "devel update requires check");
+        case AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck:
             return localization::translate_message(
                 "devel update requires check");
         case AurUpdateExecutionReason::NonAurForeign:
@@ -114,6 +119,9 @@ std::string preparation_reason_label(AurUpdatePreparationReason reason) {
         case AurUpdatePreparationReason::BlockingPreflight:
             return localization::translate_message("blocking preflight");
         case AurUpdatePreparationReason::PreflightInconsistent:
+            return localization::translate_message("preflight inconsistent");
+        case AurUpdatePreparationReason::
+            DevelRequiresCheckPolicyInconsistent:
             return localization::translate_message("preflight inconsistent");
         case AurUpdatePreparationReason::BuildPlanMissing:
             return localization::translate_message("build plan missing");
@@ -226,6 +234,8 @@ std::string reduction_reason_label(AurUpdateOperationReductionReason reason) {
             return localization::translate_message("work item result inconsistent");
         case AurUpdateOperationReductionReason::InvocationResultInconsistent:
             return localization::translate_message("invocation result inconsistent");
+        case AurUpdateOperationReductionReason::
+            DevelRequiresCheckPolicyInconsistent:
         case AurUpdateOperationReductionReason::OtherCorrelationInconsistent:
             return localization::translate_message("other correlation inconsistency");
     }
@@ -306,6 +316,57 @@ std::string target_status_label(
         "Unknown {} update target status.", "AUR"));
 }
 
+const AurUpdateExecutionIssue*
+independent_requires_check_attention_issue(
+    const AurUpdateOperationResult& result,
+    const AurUpdateOperationTargetResult& target) noexcept {
+    if(result.devel_requires_check_policy !=
+           std::optional<DevelRequiresCheckPolicy>{
+               DevelRequiresCheckPolicy::SkipIndependentTarget} ||
+       target.status != AurUpdateOperationTargetStatus::Skipped ||
+       !is_valid_aur_update_independent_devel_skip_snapshot(
+           target.update, target.preflight_issues,
+           target.skip_kind,
+           DevelRequiresCheckPolicy::SkipIndependentTarget)) {
+        return nullptr;
+    }
+    return &target.preflight_issues.front();
+}
+
+std::string independent_requires_check_attention_message(
+    DevelRequiresCheckReason reason) {
+    if(reason == DevelRequiresCheckReason::SuffixCandidateOnly) {
+        return localization::translate_message(
+            "skipped: devel update requires check: suffix candidate only; not automatically updated because authoritative build provenance is unavailable");
+    }
+    throw std::logic_error(localization::translate_message(
+        "Unknown devel RequiresCheck attention reason."));
+}
+
+void report_independent_requires_check_attention(
+    const AurUpdateOperationTargetResult& target,
+    const AurUpdateExecutionIssue& issue) {
+    DiagnosticIdentity identity;
+    identity.source_kind = DiagnosticSourceKind::Aur;
+    identity.requested_package = target.update.installed_name;
+    identity.package_base = target.update.aur_package->package_base;
+    const NormalizedDiagnostic<AurUpdateExecutionSkipKind> diagnostic{
+        DiagnosticClass::RequiresCheck,
+        DiagnosticSeverity::Warning,
+        DiagnosticOperation::PacmanDelegation,
+        DiagnosticPhase::Preflight,
+        std::move(identity),
+        *target.skip_kind,
+        DiagnosticRequiredAction::InspectMetadata,
+        DiagnosticBlockingDecision::NonBlocking,
+        DiagnosticExitStatusEffect::SuccessPermitted,
+        std::nullopt};
+    report_runtime_diagnostic(
+        diagnostic,
+        independent_requires_check_attention_message(
+            *issue.devel_requires_check_reason));
+}
+
 bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
     switch(reason) {
         case AurUpdateExecutionReason::UpToDate:
@@ -313,6 +374,7 @@ bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
             return true;
         case AurUpdateExecutionReason::None:
         case AurUpdateExecutionReason::DevelRequiresCheck:
+        case AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck:
         case AurUpdateExecutionReason::AurMetadataUnavailable:
         case AurUpdateExecutionReason::VersionComparisonUnavailable:
         case AurUpdateExecutionReason::InstalledReasonUnknown:
@@ -349,7 +411,10 @@ std::string join_package_names(const std::vector<std::string>& package_names) {
 
 void print_preflight_issues(const AurUpdateOperationResult& result) {
     for(const auto& target : result.targets) {
+        const AurUpdateExecutionIssue* attention =
+            independent_requires_check_attention_issue(result, target);
         for(const auto& issue : target.preflight_issues) {
+            if(&issue == attention) continue;
             if(is_normal_skip_reason(issue.reason)) continue;
             Logger::error("  " + localization::translate_message("preflight issue") +
                           ": " + preflight_reason_label(issue.reason) + ": " +
@@ -415,6 +480,13 @@ void print_operation_result(
               << " " << operation_status_label(result.status)
               << std::endl;
     for(const auto& target : result.targets) {
+        if(const AurUpdateExecutionIssue* attention =
+               independent_requires_check_attention_issue(result, target);
+           attention != nullptr) {
+            report_independent_requires_check_attention(
+                target, *attention);
+            continue;
+        }
         std::cout << target.update.installed_name << ": "
                   << target_status_label(target, result.status)
                   << std::endl;
@@ -471,6 +543,7 @@ PreparedFilteredAurUpdateOperation prepare_upgrade_aur_operation(
     AurUpdateQueryResult query_result = query_installed_aur_updates();
     return prepare_filtered_aur_update_operation(
         std::move(query_result), NoExplicitSourceSatisfaction{},
+        DevelRequiresCheckPolicy::BlockOperation,
         SavedSourcePreferencePolicy::Strict, config);
 }
 
