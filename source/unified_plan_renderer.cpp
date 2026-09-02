@@ -5014,8 +5014,10 @@ UnifiedPlanRenderingResult render_system_aur_update_unified_plan(
                     UnifiedPlanRenderingIssueKind::UnsupportedValue,
                     UnifiedPlanRenderingSection::RouteSemantics,
                     index, attention.update_plan_index,
-                    localization::translate_message(
-                        "A system/AUR RequiresCheck attention is not supported by the renderer."));
+                    localization::format_translated_message(
+                        // TRANSLATORS: The placeholder is the AUR project identity.
+                        "A system/{} RequiresCheck attention is not supported by the renderer.",
+                        "AUR"));
                 state.output << localization::translate_message(
                                     "  unsupported")
                              << '\n';
