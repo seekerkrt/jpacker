@@ -77,6 +77,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/provider_installed_state.cpp
     source/provider_installed_state_presentation.cpp
     source/provider_selection.cpp
+    source/remote_aur_cleanup_candidate_collector.cpp
     source/repository_query.cpp
     source/reviewed_source_acceptance.cpp
     source/reviewed_source_git_parser.cpp
@@ -126,7 +127,6 @@ set(MOGUET_PRODUCTION_SOURCES
     source/upgrade_all_operation.cpp
     source/upgrade_all_operation_result.cpp
     source/upgrade_all_plan.cpp
-    source/upgrade_all_presentation_projection.cpp
     source/user_config.cpp
     source/vcs_source_identity.cpp
     source/xdg_directory_safety.cpp
