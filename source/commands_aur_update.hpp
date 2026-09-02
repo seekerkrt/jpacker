@@ -2,7 +2,17 @@
 
 #include "filtered_aur_update_operation.hpp"
 
+#include <string>
+
 struct AppConfig;
+
+// Repository-internal presentation-only mappings for shared AUR update
+// surfaces. They do not decide readiness or policy, reduce results, select
+// execution, or determine process exit status.
+std::string aur_update_preflight_reason_label(AurUpdateExecutionReason reason);
+std::string aur_update_preparation_reason_label(
+    AurUpdatePreparationReason reason);
+bool is_routine_aur_update_skip(AurUpdateExecutionReason reason);
 
 // Shared typed presentation for normal AUR update results. Callers provide
 // the retained query/result authority; status is never reconstructed from

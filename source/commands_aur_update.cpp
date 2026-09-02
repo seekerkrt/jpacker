@@ -42,7 +42,10 @@ std::string operation_status_label(AurUpdateOperationStatus status) {
         "Unknown {} update operation status.", "AUR"));
 }
 
-std::string preflight_reason_label(AurUpdateExecutionReason reason) {
+} // namespace
+
+std::string aur_update_preflight_reason_label(
+    AurUpdateExecutionReason reason) {
     switch(reason) {
         case AurUpdateExecutionReason::None:
             return localization::translate_message("none");
@@ -57,6 +60,7 @@ std::string preflight_reason_label(AurUpdateExecutionReason reason) {
         case AurUpdateExecutionReason::NonAurForeign:
             return localization::format_translated_message(
                 // TRANSLATORS: AUR is a runtime project identity.
+                // TRANSLATORS: The placeholder is the literal service name "AUR".
                 "non-{} foreign", "AUR");
         case AurUpdateExecutionReason::AurMetadataUnavailable:
             return localization::format_translated_message(
@@ -109,10 +113,12 @@ std::string preflight_reason_label(AurUpdateExecutionReason reason) {
     }
     throw std::logic_error(localization::format_translated_message(
         // TRANSLATORS: AUR is a runtime project identity.
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
         "Unknown {} update preflight reason.", "AUR"));
 }
 
-std::string preparation_reason_label(AurUpdatePreparationReason reason) {
+std::string aur_update_preparation_reason_label(
+    AurUpdatePreparationReason reason) {
     switch(reason) {
         case AurUpdatePreparationReason::None:
             return localization::translate_message("none");
@@ -161,8 +167,11 @@ std::string preparation_reason_label(AurUpdatePreparationReason reason) {
     }
     throw std::logic_error(localization::format_translated_message(
         // TRANSLATORS: AUR is a runtime project identity.
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
         "Unknown {} update preparation reason.", "AUR"));
 }
+
+namespace {
 
 std::string reduction_stage_label(AurUpdateOperationReductionStage stage) {
     switch(stage) {
@@ -254,10 +263,10 @@ std::string target_reason_label(const AurUpdateOperationTargetResult& target) {
             return localization::translate_message(
                 "devel update requires check: suffix candidate only");
         }
-        return std::string(preflight_reason_label(issue.reason));
+        return std::string(aur_update_preflight_reason_label(issue.reason));
     }
     if(!target.preparation_issues.empty()) {
-        return std::string(preparation_reason_label(
+        return std::string(aur_update_preparation_reason_label(
             target.preparation_issues.front().reason));
     }
     return localization::translate_message("reason unavailable");
@@ -367,7 +376,9 @@ void report_independent_requires_check_attention(
             *issue.devel_requires_check_reason));
 }
 
-bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
+} // namespace
+
+bool is_routine_aur_update_skip(AurUpdateExecutionReason reason) {
     switch(reason) {
         case AurUpdateExecutionReason::UpToDate:
         case AurUpdateExecutionReason::NonAurForeign:
@@ -396,9 +407,10 @@ bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
             return false;
     }
     throw std::logic_error(localization::format_translated_message(
-        // TRANSLATORS: AUR is a runtime project identity.
         "Unknown {} update preflight reason.", "AUR"));
 }
+
+namespace {
 
 std::string join_package_names(const std::vector<std::string>& package_names) {
     std::string joined;
@@ -415,9 +427,9 @@ void print_preflight_issues(const AurUpdateOperationResult& result) {
             independent_requires_check_attention_issue(result, target);
         for(const auto& issue : target.preflight_issues) {
             if(&issue == attention) continue;
-            if(is_normal_skip_reason(issue.reason)) continue;
+            if(is_routine_aur_update_skip(issue.reason)) continue;
             Logger::error("  " + localization::translate_message("preflight issue") +
-                          ": " + preflight_reason_label(issue.reason) + ": " +
+                          ": " + aur_update_preflight_reason_label(issue.reason) + ": " +
                           issue.diagnostic);
         }
     }
@@ -433,7 +445,7 @@ void print_preparation_details(const AurUpdateOperationResult& result) {
     }
     for(const auto& issue : result.preparation_issues) {
         Logger::error("  " + localization::translate_message("preparation issue") +
-                      ": " + preparation_reason_label(issue.reason) + ": " +
+                      ": " + aur_update_preparation_reason_label(issue.reason) + ": " +
                       issue.diagnostic);
     }
 }
