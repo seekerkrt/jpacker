@@ -102,8 +102,6 @@ class ValidatedCacheRoot final {
     friend ValidatedCacheRoot adopt_trusted_cache_root(
         const xdg_paths::CachePaths& paths,
         xdg_directory_safety::PreparedDirectory directory);
-    friend ValidatedCacheRoot require_unchanged_cache_root(
-        const ValidatedCacheRoot& root);
     friend ValidatedPrivateCacheRoot prepare_private_trusted_cache_root(
         const ValidatedCacheRoot& root);
     friend class ValidatedCachePath;
@@ -303,8 +301,6 @@ public:
 ValidatedCacheRoot adopt_trusted_cache_root(
     const xdg_paths::CachePaths& paths,
     xdg_directory_safety::PreparedDirectory directory);
-ValidatedCacheRoot require_unchanged_cache_root(
-    const ValidatedCacheRoot& root);
 
 ValidatedPrivateCacheRoot prepare_private_trusted_cache_root(
     const ValidatedCacheRoot& root);

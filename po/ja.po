@@ -4640,19 +4640,9 @@ msgstr "{}プロバイダー{}を確認できませんでした: {}"
 msgid "{} provider candidate metadata was not returned."
 msgstr "{}プロバイダー候補のメタデータが返されませんでした。"
 
-#. TRANSLATORS: The placeholders are dependency and provider identities.
-#, c++-format
-msgid "{} [provided by {}]"
-msgstr "{} [{}が提供]"
-
 #, c++-format
 msgid "Provider selection returned a candidate that was not offered for {}."
 msgstr "プロバイダー選択が {} に提示されていない候補を返しました。"
-
-#. TRANSLATORS: The placeholder is a dependency specification.
-#, c++-format
-msgid "version constraint for {} is not verified"
-msgstr "{}のバージョン制約は未検証です"
 
 #, c++-format
 msgid "{} package metadata constraint projection is inconsistent: {}"
@@ -7148,9 +7138,6 @@ msgstr "{} のソース取得またはビルド準備に失敗しました: {}"
 msgid "{} set source-build unexpectedly produced an update-status result."
 msgstr "{} セットのソースビルドが予期せず更新状態結果を生成しました。"
 
-msgid "Unknown source-build execution status."
-msgstr "ソースビルドの実行状態が不明です。"
-
 #, c++-format
 msgid "Registered source upgrade does not support split {} preference {} from {} {}; this route requires a singular package identity."
 msgstr "登録済みソースの更新は、分割された {} 設定 {}（{} {} 由来）に対応していません。この経路では単一のパッケージ識別情報が必要です。"
@@ -7176,6 +7163,9 @@ msgstr "選択したリポジトリプロバイダーのインストール理由
 #, c++-format
 msgid "Installing selected repository providers: {}"
 msgstr "選択したリポジトリプロバイダーをインストールしています: {}"
+
+msgid "Unknown source-build execution status."
+msgstr "ソースビルドの実行状態が不明です。"
 
 #, c++-format
 msgid "{} source-build result is incoherent for presentation."

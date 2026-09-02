@@ -395,10 +395,6 @@ const ExecutionReadiness& execution_readiness(
 std::vector<std::string> collect_build_dependencies(const AurPackageInfo& pkg);
 std::vector<TypedPackageDependency> collect_typed_build_dependencies(const AurPackageInfo& pkg);
 DesiredInstallReason desired_install_reason(const PlannedPackageTarget& target);
-DependencyClassification classify_dependencies(const std::vector<std::string>& dependencies);
-DependencyClassification classify_dependencies(
-    const std::vector<std::string>& dependencies,
-    const ProviderSelectionCallback& select_provider);
 std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(const AurPackageInfo& pkg);
 std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(
     const AurPackageInfo& pkg,

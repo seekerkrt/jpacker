@@ -197,11 +197,6 @@ InstalledExactPackageObservationResult query_installed_exact_package_strict(
     return InstalledExactPackageAbsent{package_name};
 }
 
-std::vector<ProvidedDependency> find_repo_providers(
-    const std::string& dependency_name) {
-    return repository_providers(dependency_name);
-}
-
 StrictRepositoryProvidersQueryResult query_repository_providers_strict(
     const std::string& dependency_name) {
     ++g_strict_repo_provider_queries;

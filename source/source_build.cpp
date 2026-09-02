@@ -2174,24 +2174,3 @@ execute_source_build_package_base_with_cleanup_authority(
         request, required_targets, cache_root, database_paths,
         config, &collector, work_item_index);
 }
-
-std::optional<ArtifactInstallExecutionOutcome> execute_source_build(
-    const SourceBuildRequest& request,
-    const ValidatedCacheRoot& cache_root,
-    DesiredInstallReason desired_reason,
-    const PacmanDatabasePaths& database_paths,
-    const AppConfig& config) {
-    const SourceBuildExecutionResult result = execute_source_build_typed(
-        request, cache_root, desired_reason, database_paths, config);
-    switch(result.status) {
-        case SourceBuildExecutionStatus::Installed:
-            return ArtifactInstallExecutionOutcome::Installed;
-        case SourceBuildExecutionStatus::SkippedAsNeeded:
-            return ArtifactInstallExecutionOutcome::SkippedAsNeeded;
-        case SourceBuildExecutionStatus::UpToDate:
-        case SourceBuildExecutionStatus::UpdateStatusUnknownSkipped:
-            return std::nullopt;
-    }
-    throw std::logic_error(localization::translate_message(
-        "Unknown source-build execution status."));
-}

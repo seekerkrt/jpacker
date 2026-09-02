@@ -77,7 +77,9 @@ InstalledExactPackageObservationResult query_installed_exact_package_strict(
     return InstalledExactPackageAbsent{package_name};
 }
 
-std::vector<ProvidedDependency> find_repo_providers(
+namespace {
+
+std::vector<ProvidedDependency> repository_provider_candidates(
     const std::string& dependency_name) {
     if(!is_valid_package_name(dependency_name)) return {};
 
@@ -130,10 +132,12 @@ std::vector<ProvidedDependency> find_repo_providers(
     return {};
 }
 
+} // namespace
+
 StrictRepositoryProvidersQueryResult query_repository_providers_strict(
     const std::string& dependency_name) {
     return RepositoryProviderQuerySnapshot{
-        find_repo_providers(dependency_name), {}};
+        repository_provider_candidates(dependency_name), {}};
 }
 
 std::vector<InstalledPackage> get_foreign_packages() {

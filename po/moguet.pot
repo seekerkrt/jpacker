@@ -4648,18 +4648,8 @@ msgstr ""
 msgid "{} provider candidate metadata was not returned."
 msgstr ""
 
-#. TRANSLATORS: The placeholders are dependency and provider identities.
-#, c++-format
-msgid "{} [provided by {}]"
-msgstr ""
-
 #, c++-format
 msgid "Provider selection returned a candidate that was not offered for {}."
-msgstr ""
-
-#. TRANSLATORS: The placeholder is a dependency specification.
-#, c++-format
-msgid "version constraint for {} is not verified"
 msgstr ""
 
 #, c++-format
@@ -7153,9 +7143,6 @@ msgstr ""
 msgid "{} set source-build unexpectedly produced an update-status result."
 msgstr ""
 
-msgid "Unknown source-build execution status."
-msgstr ""
-
 #, c++-format
 msgid "Registered source upgrade does not support split {} preference {} from {} {}; this route requires a singular package identity."
 msgstr ""
@@ -7180,6 +7167,9 @@ msgstr ""
 
 #, c++-format
 msgid "Installing selected repository providers: {}"
+msgstr ""
+
+msgid "Unknown source-build execution status."
 msgstr ""
 
 #, c++-format
