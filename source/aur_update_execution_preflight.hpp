@@ -12,8 +12,8 @@
 #include <vector>
 
 // RequiresCheckのexecution解釈はsaved source preferenceとは独立した
-// route policyである。Current production routeはBlockOperationを使い、
-// SkipIndependentTargetはdirect capabilityでdependency相関後にだけskipを確定する。
+// route policyである。ordinary exact target-less -Syuは
+// SkipIndependentTargetを使い、explicit upgrade routesはBlockOperationを使う。
 enum class DevelRequiresCheckPolicy {
     BlockOperation,
     SkipIndependentTarget,
@@ -97,7 +97,8 @@ constexpr bool is_known_devel_requires_check_reason(
 }
 
 // BuildPlan上の再登場をaffected rootへ帰属させるSkipIndependentTarget
-// capabilityのlossless record。Current production routeはBlockOperationのまま。
+// capabilityのlossless record。ordinary exact target-less -Syuで使用し、
+// explicit upgrade routesはBlockOperationを維持する。
 struct AurUpdateRequiredDevelTargetBlocker {
     AurUpdateRequiredDevelTargetBlocker() = delete;
 
