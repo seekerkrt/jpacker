@@ -334,8 +334,9 @@ ccache / mold parityは必要なreleaseでの追加validationであり、上記d
         README.md \
         README.ja.md \
         RELEASE_NOTES.md \
-        containers/arch-validation/Dockerfile \
         docs/DEVELOPMENT.md \
+        man/moguet.1.in \
+        man/ja/moguet.1.in \
         man/moguet.1 \
         man/ja/moguet.1 \
         po/moguet.pot \
@@ -348,14 +349,17 @@ ccache / mold parityは必要なreleaseでの追加validationであり、上記d
 
     gh pr create --base main --head release/vX.Y.Z
 
-上記の`git add`は、現在のv2.5.0 release preparationでstage対象とするpathを1件ずつ明示した
+上記の`git add`は、現在のv2.6.0 release preparationでstage対象とするpathを1件ずつ明示した
 current release用のexact path setです。`git add .`や代表pathだけのpartial listへ置き換えません。commit前に
 cached path一覧をこのreleaseのdiffと再照合し、release scopeのunstaged / untracked pathや
-unrelatedなstaged pathがないことを確認します。現在のv2.5.0 release preparationでは、上記の
-10-path listがstage対象のcurrent release scopeのauthorityです。`PKGBUILD`はroot `VERSION`を動的に
-読み、published tagへprojectします。man templateは`@VERSION@` authorityを維持し、completionは
-version independent、`po/POTFILES.in`はsource inventory変更なしのため、これらはcurrent listへ
-含めません。v2.1.0固有の履歴は、下記の
+unrelatedなstaged pathがないことを確認します。現在のv2.6.0 release preparationでは、上記の
+11-path listがstage対象のcurrent release scopeのauthorityです。`PKGBUILD`はroot `VERSION`を動的に
+読み、published tagへprojectするためcontent changeはありません。
+`containers/arch-validation/Dockerfile`にはv2.6.0 release metadataとしての変更contractがなく、
+`po/POTFILES.in`はsource extraction inventory変更なし、completionはversion independent、CMake、
+source、testsはrelease metadata preparationでは変更しないため、current listへ含めません。man
+templateは`@VERSION@` authorityを維持しつつrelease dateを更新し、generated pageとともにcurrent
+listへ含めます。v2.1.0固有の履歴は、下記の
 `v2.1.0 post-release closure`として別に扱い、current listの根拠にはしません。将来のrelease
 では、このlistを流用せず、そのreleaseで監査済みのexact path setへ置き換えます。
 
