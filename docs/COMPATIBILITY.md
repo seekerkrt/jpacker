@@ -358,7 +358,11 @@ Issue #355のgeneric current repository / AUR modelはexact source commitを保�
 
 repository root candidateはPackageBaseを保持しない。actual artifactはarchive内のPackageBase / architectureをread-only libalpm metadataとして保持するが、source / revisionは保持しない。internal read-only adapterはactual child / version / PackageBase / architectureと既存typed contextをexactに相関できる場合だけcomplete common identityを返し、`Missing` / `Malformed` / `Unavailable`なactual metadataをupper contextで補完しない。filename、package name、URL leaf、canonical source keyから不足fieldを逆算しない。PackageBaseを持たないrepository root、source contextを持たないartifact、installed-only dependency等はtyped failureであり、partial identityを公開しない。
 
-internal compatibility evaluatorはsource、PackageBase、child、revision、release、architectureをdimension別に判定し、`ExactMatch`、`SamePackageChild`、`SamePackageBase`、`Incompatible`、`Indeterminate`を区別する。structurally equalな`Unknown` / `Absent` / `Unavailable` / `Inapplicable`も`ExactMatch`へ昇格しない。これらのadapter / evaluatorは後続v3 model向けで、current production routeのdecisionには未接続である。詳細なstate、equality、compatibility、projection contractは[source-aware package identity contract](contracts/source-package-identity.md)を正本とする。
+internal compatibility evaluatorはsource、PackageBase、child、revision、release、architectureをdimension別に判定し、`ExactMatch`、`SamePackageChild`、`SamePackageBase`、`Incompatible`、`Indeterminate`を区別する。structurally equalな`Unknown` / `Absent` / `Unavailable` / `Inapplicable`も`ExactMatch`へ昇格しない。
+
+read-only projectionの一部はIssue #485のinternal production pathに限定接続されている。`project_dependency_source_package_identity()`は`SourceArtifactInstall`のtrusted bindingとinvocation-owned cleanup correlation / evidenceに、`project_artifact_source_package_identity()`はtrusted bindingのartifact整合とreceipt evidenceに利用される。このprojectionは既存のtrusted ownerへtyped identity / correlation evidenceを渡すだけであり、source-build routing、artifact identity、`SourceArtifactInstall` trusted transport、invocation-owned cleanupのauthorityをcommon modelへ移さず、既存routeを置換しない。
+
+generic compatibility evaluatorは引き続きpublic production workflow / routing decisionへ未接続である。public profile workflow、patch / revision authority、generic compatibility-driven routing、v3 source-build / profile architectureはcurrent featureではない。詳細なstate、equality、compatibility、projection contractは[source-aware package identity contract](contracts/source-package-identity.md)を正本とする。
 
 <a id="compat-packagebase-child-selection"></a>
 ## PackageBase / required-child compatibility
