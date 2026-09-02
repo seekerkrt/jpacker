@@ -207,12 +207,3 @@ execute_source_build_package_base_with_cleanup_authority(
     const AppConfig& config,
     RemoteAurCleanupCandidateCollector& collector,
     std::size_t work_item_index);
-
-// generic only-if-updated経路がinstall前に正常skipした場合だけnulloptを返す。
-// artifact transaction成功後はpackage stateのtyped outcomeを返すlegacy wrapper。
-std::optional<ArtifactInstallExecutionOutcome> execute_source_build(
-    const SourceBuildRequest& request,
-    const ValidatedCacheRoot& cache_root,
-    DesiredInstallReason desired_reason,
-    const PacmanDatabasePaths& database_paths,
-    const AppConfig& config);

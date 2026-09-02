@@ -252,19 +252,6 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
     return snapshot;
 }
 
-std::vector<ProvidedDependency> find_repo_providers(
-    const std::string& dependency_name) {
-    if(!is_valid_package_name(dependency_name)) return {};
-    StrictRepositoryProvidersQueryResult result =
-        query_repository_providers_strict(dependency_name);
-    if(const auto* snapshot =
-           std::get_if<RepositoryProviderQuerySnapshot>(&result);
-       snapshot != nullptr) {
-        return snapshot->candidates;
-    }
-    return {};
-}
-
 InstalledExactPackageObservationResult query_installed_exact_package_strict(
     const std::string& package_name) {
     require_valid_package_name(package_name);

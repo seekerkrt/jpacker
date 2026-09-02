@@ -2173,13 +2173,6 @@ void test_selection_enabled_metadata_failure_boundary() {
                 select_provider));
         },
         "strict dependency metadata failure");
-    expect_exception(
-        [&select_provider]() {
-            static_cast<void>(classify_dependencies(
-                {"preflight-dependency-failure-child"},
-                select_provider));
-        },
-        "strict dependency metadata failure");
 
     AurPackageInfo aur_failure_recursive_root;
     aur_failure_recursive_root.Name =
@@ -2231,13 +2224,6 @@ void test_selection_enabled_metadata_failure_boundary() {
         [&select_provider]() {
             static_cast<void>(resolve_fetch_plan(
                 "preflight-repository-exact-failure-root",
-                select_provider));
-        },
-        "strict repository exact metadata failure");
-    expect_exception(
-        [&select_provider]() {
-            static_cast<void>(classify_dependencies(
-                {"preflight-repository-exact-failure-child"},
                 select_provider));
         },
         "strict repository exact metadata failure");

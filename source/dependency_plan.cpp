@@ -101,10 +101,6 @@ std::string package_base_name(const AurPackageInfo& info) {
     return info.PackageBase;
 }
 
-bool has_distinct_package_base(const AurPackageInfo& info) {
-    return info.PackageBase != info.Name;
-}
-
 bool matches_selected_aur_provider_contract(
     const AurPackageInfo& info,
     const ProvidedDependency& selected_provider) {
@@ -562,43 +558,6 @@ void add_typed_dependency(
         TypedPackageDependency{dependency, role, requirement});
 }
 
-void add_classified_dependency(
-    std::vector<std::string>& dependencies, const std::string& dependency,
-    const std::string& package_name) {
-    std::string display;
-    if(dependency == package_name)
-        display = dependency;
-    else
-        display = dependency + " (" + package_name + ")";
-    dependencies.push_back(dependency_display_with_constraint_note(display, dependency));
-}
-
-void add_classified_aur_dependency(
-    std::vector<std::string>& dependencies, const std::string& dependency,
-    const AurPackageInfo& info) {
-    std::string display;
-    if(info.Name.empty() || dependency == info.Name)
-        display = dependency;
-    else
-        display = dependency + " (" + info.Name + ")";
-    if(has_distinct_package_base(info)) {
-        // NO_TRANSLATE(Issue #308): "base" is a stable BuildPlan relationship
-        // token joining package identities, not human-readable prose.
-        display += " (base: " + info.PackageBase + ")";
-    }
-    dependencies.push_back(dependency_display_with_constraint_note(display, dependency));
-}
-
-std::string provided_dependency_resolution_display(
-    const std::string& dependency, const ProvidedDependency& provider) {
-    return dependency_display_with_constraint_note(
-        localization::format_translated_message(
-            // TRANSLATORS: The placeholders are dependency and provider identities.
-            "{} [provided by {}]", dependency,
-            provided_dependency_display(provider)),
-        dependency);
-}
-
 void add_ambiguous_provider_dependency(
     std::vector<AmbiguousProvidedDependency>& dependencies, const std::string& dependency,
     const std::vector<ProvidedDependency>& candidates) {
@@ -642,14 +601,6 @@ std::optional<ProvidedDependency> select_provider_candidate(
     // Resolver-owned metadata is authoritative even when an injected selector
     // returns an identity-only value.
     return *matching_candidate;
-}
-
-void warn_unverified_version_constraint(const std::string& dependency) {
-    ParsedDependency parsed = parse_dependency_string(dependency);
-    if(!parsed.has_parseable_constraint()) return;
-    Logger::warn(localization::format_translated_message(
-        // TRANSLATORS: The placeholder is a dependency specification.
-        "version constraint for {} is not verified", parsed.raw));
 }
 
 } // namespace
@@ -716,106 +667,6 @@ std::vector<TypedPackageDependency> collect_typed_build_dependencies(const AurPa
     }
 
     return dependencies;
-}
-
-DependencyClassification classify_dependencies(
-    const std::vector<std::string>& dependencies,
-    const ProviderSelectionCallback& select_provider) {
-    DependencyClassification result;
-
-    for(const auto& dependency : dependencies) {
-        ParsedDependency parsed = parse_dependency_string(dependency);
-        std::string package_name = parsed.name;
-        if(!is_valid_package_name(package_name)) {
-            result.unknown.push_back(dependency);
-            continue;
-        }
-        if(parsed.has_malformed_constraint()) {
-            result.unknown.push_back(dependency_constraint_unresolved_reason(dependency));
-            continue;
-        }
-        warn_unverified_version_constraint(dependency);
-
-        if(query_repository_package(
-               package_name, BuildPlanResolutionMode::Legacy, nullptr,
-               static_cast<bool>(select_provider)) ==
-           RepositoryPackageQueryStatus::Present) {
-            add_classified_dependency(result.repo, dependency, package_name);
-            continue;
-        }
-
-        try {
-            std::optional<AurPackageInfo> info = select_provider
-                                                     ? AurClient::info_strict(package_name)
-                                                     : AurClient::info(package_name);
-            if(info.has_value()) {
-                add_classified_aur_dependency(result.aur, dependency, info.value());
-            } else {
-                ProviderCandidateDiscovery discovery =
-                    find_dependency_providers(
-                        package_name, nullptr,
-                        static_cast<bool>(select_provider));
-                if(!discovery.is_complete) {
-                    result.unknown.push_back(
-                        dependency_display_with_constraint_note(
-                            dependency, dependency));
-                    continue;
-                }
-                const std::vector<ProvidedDependency>& providers =
-                    discovery.candidates;
-                std::optional<ProvidedDependency> selected =
-                    select_provider_candidate(
-                        dependency, providers, select_provider);
-                if(selected.has_value()) {
-                    result.selected_providers.push_back(
-                        SelectedProvidedDependency{
-                            dependency, selected.value()});
-                } else if(providers.size() == 1) {
-                    result.provided.push_back(
-                        provided_dependency_resolution_display(
-                            dependency, providers.front()));
-                } else if(providers.size() > 1) {
-                    add_ambiguous_provider_dependency(
-                        result.ambiguous_providers, dependency,
-                        providers);
-                } else
-                    result.unknown.push_back(dependency_display_with_constraint_note(dependency, dependency));
-            }
-        } catch(const AurRpcResponseError&) {
-            throw;
-        } catch(const std::exception& e) {
-            if(select_provider) throw;
-            Logger::warn(localization::format_translated_message(
-                "Failed to check {} dependency {}: {}",
-                "AUR", package_name, e.what()));
-            std::vector<ProvidedDependency> providers =
-                find_repo_providers(package_name);
-            std::optional<ProvidedDependency> selected =
-                select_provider_candidate(
-                    dependency, providers, select_provider);
-            if(selected.has_value()) {
-                result.selected_providers.push_back(
-                    SelectedProvidedDependency{
-                        dependency, selected.value()});
-            } else if(providers.size() == 1) {
-                result.provided.push_back(
-                    provided_dependency_resolution_display(
-                        dependency, providers.front()));
-            } else if(providers.size() > 1) {
-                add_ambiguous_provider_dependency(
-                    result.ambiguous_providers, dependency,
-                    providers);
-            } else
-                result.unknown.push_back(dependency_display_with_constraint_note(dependency, dependency));
-        }
-    }
-
-    return result;
-}
-
-DependencyClassification classify_dependencies(
-    const std::vector<std::string>& dependencies) {
-    return classify_dependencies(dependencies, ProviderSelectionCallback{});
 }
 
 namespace {

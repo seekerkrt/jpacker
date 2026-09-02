@@ -77,7 +77,6 @@ using StrictRepositoryProvidersQueryResult = std::variant<
 
 bool is_installed_package(const std::string& pkg_name);
 bool is_repo_package(const std::string& pkg_name);
-std::vector<ProvidedDependency> find_repo_providers(const std::string& dependency_name);
 StrictRepositoryPackageQueryResult query_repository_package_strict(
     const std::string& package_name);
 // Reuses one already-resolved read-only repository configuration. The result

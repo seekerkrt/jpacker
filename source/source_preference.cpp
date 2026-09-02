@@ -1572,15 +1572,6 @@ StrictSourcePreferenceResult read_source_preference_strict(
     }
 }
 
-bool is_force_source(const std::string& package_name) {
-    StrictSourcePreferenceResult result =
-        read_source_preference_strict(package_name);
-    if(std::get_if<SourcePreferenceAbsent>(&result) != nullptr) return false;
-    if(std::get_if<SourcePreferenceLoaded>(&result) != nullptr) return true;
-    throw SourcePreferenceError(
-        std::get<SourcePreferenceFailure>(std::move(result)));
-}
-
 SourceBuildEnvironment get_package_env(
     const std::string& package_name, SourcePreferenceLoadHandler on_load,
     SourcePreferenceWarningHandler on_warning) {

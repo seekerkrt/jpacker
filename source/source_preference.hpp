@@ -50,8 +50,6 @@ struct SourcePreferenceListSnapshot {
 
 SourcePreferenceListSnapshot snapshot_source_preferences_for_listing();
 
-bool is_force_source(const std::string& package_name);
-
 struct SourcePreferenceAbsent {
     bool operator==(const SourcePreferenceAbsent&) const = default;
 };

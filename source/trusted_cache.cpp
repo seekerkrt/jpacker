@@ -1694,12 +1694,6 @@ ValidatedCacheRoot adopt_trusted_cache_root(
         paths, std::move(directory));
 }
 
-ValidatedCacheRoot require_unchanged_cache_root(
-    const ValidatedCacheRoot& root) {
-    root.require_unchanged_identity();
-    return root;
-}
-
 ValidatedPrivateCacheRoot prepare_private_trusted_cache_root(
     const ValidatedCacheRoot& root) {
     root.require_unchanged_identity();
