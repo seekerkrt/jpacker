@@ -161,6 +161,19 @@ state observation、plan constructionとcompletenessとexecution readiness、sev
 exit-status effectはそれぞれ独立したdimensionである。successful-unverifiedはrequired actionを
 伴うsuccessとして保持し、failureへ丸めない。`Unknown`も`NoOp`へ丸めない。
 
+### Terminal-safe human-readable presentation
+
+unified plan、runtime diagnostic、reviewed-source contentのterminal-facingなopaque textは、共通の
+terminal-safe UTF-8 policyを使う。通常のvalid Unicodeは元のUTF-8のまま表示する一方、invalid
+UTF-8、C0 / C1 / DEL、backslash、U+2028 / U+2029、Unicode bidi control、U+FEFFは、元byteを
+uppercase `\xHH`として可視化する。U+FEFFを削除・正規化したり、invalid UTF-8をreplacement
+characterへ置換したりしない。
+
+これはhuman-readable presentationのsecurity hardeningであり、JSON等のmachine-readable schemaを
+追加・変更するものではない。escape後のtextをpackage identity、path operation、comparison、
+dependency / source判断、subprocess argument、exit statusのauthorityへ逆流させない。localizedな
+program-owned textもcontrol-flow authorityにはしない。
+
 <a id="compat-interactive-confirmation"></a>
 ## Interactive confirmation compatibility
 

@@ -1598,8 +1598,6 @@ make_system_aur_retained_diagnostic_projection(
 
     DiagnosticIdentity identity;
     identity.source_kind = source_kind;
-    const std::string safe_detail =
-        terminal_safe_runtime_diagnostic_detail(retained_detail);
     const NormalizedDiagnostic<SystemAurUpdateOperationPhase> diagnostic{
         classification,
         DiagnosticSeverity::Error,
@@ -1610,9 +1608,9 @@ make_system_aur_retained_diagnostic_projection(
         required_action,
         DiagnosticBlockingDecision::StopsFollowingPhases,
         DiagnosticExitStatusEffect::Failure,
-        safe_detail};
+        retained_detail};
     return SystemAurRetainedDiagnosticProjection{
-        phase, present_runtime_diagnostic(diagnostic, safe_detail)};
+        phase, present_runtime_diagnostic(diagnostic, retained_detail)};
 }
 
 std::optional<SystemAurRetainedDiagnosticProjection>
@@ -1651,8 +1649,6 @@ project_system_aur_retained_diagnostic(
                     : result.foreign_inventory.diagnostic.value_or(
                           localization::translate_message(
                               "package metadata failure"));
-            const std::string safe_detail =
-                terminal_safe_runtime_diagnostic_detail(retained_detail);
             const auto diagnostic = project_package_metadata_diagnostic(
                 failure,
                 DiagnosticOperation::PacmanDelegation,
@@ -1660,7 +1656,7 @@ project_system_aur_retained_diagnostic(
                 std::move(identity));
             return SystemAurRetainedDiagnosticProjection{
                 SystemAurUpdateOperationPhase::ForeignInventory,
-                present_runtime_diagnostic(diagnostic, safe_detail)};
+                present_runtime_diagnostic(diagnostic, retained_detail)};
         }
         if(result.foreign_inventory.diagnostic.has_value()) {
             return make_system_aur_retained_diagnostic_projection(
