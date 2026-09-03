@@ -49,6 +49,8 @@ receipt_dependency_v2=$receipt_root/fixtures/dependency-v2/PKGBUILD
 receipt_target=$receipt_root/fixtures/target/PKGBUILD
 test_targets_file=$repo_root/cmake/MoguetTestTargets.cmake
 production_cmake_file=$repo_root/CMakeLists.txt
+artifact_identity_source=$repo_root/source/artifact_identity.cpp
+artifact_archive_metadata_source=$repo_root/source/artifact_archive_metadata.cpp
 installed_source_fixture=$repo_root/tests/source_artifact_install_installed_fixture.cpp
 production_source_runner=$repo_root/source/source_install.cpp
 
@@ -132,6 +134,9 @@ assert_regular_file "$source_receipt_runner" \
 assert_regular_file "$receipt_dependency_v1" 'trusted receipt dependency v1 fixture'
 assert_regular_file "$receipt_dependency_v2" 'trusted receipt dependency v2 fixture'
 assert_regular_file "$receipt_target" 'trusted receipt solver target fixture'
+assert_regular_file "$artifact_identity_source" 'production artifact identity owner'
+assert_regular_file "$artifact_archive_metadata_source" \
+    'production artifact archive metadata owner'
 
 assert_contains "$readme_file" "live laneは既存のoffline validation lane"
 assert_contains "$readme_file" "ベースイメージは \`archlinux:latest\` を利用する"
@@ -697,6 +702,11 @@ assert_contains "$aur_gateway" 'staged artifact path, content, or PKGINFO valida
 assert_contains "$aur_gateway" 'negative test case must never invoke real pacman'
 assert_contains "$aur_gateway" 'gateway_reject_status=97'
 assert_contains "$aur_gateway" \
+    'write_evidence_line "$evidence_directory/package-identity.txt"'
+assert_contains "$aur_gateway" "'transaction=exactly-once'"
+assert_contains "$aur_gateway" \
+    'write_evidence_line "$evidence_directory/real-pacman-exec.txt"'
+assert_contains "$aur_gateway" \
     'exec_real_pacman -U --noconfirm -- "$staged_artifact"'
 metadata_check_line=$(grep -n -F '"$metadata_helper" "$staged_artifact"' \
     "$aur_gateway" | cut -d: -f1)
@@ -743,6 +753,16 @@ assert_contains "$aur_metadata_helper" 'reject_entry("xattr"'
 assert_contains "$aur_metadata_helper" 'reject_entry("fflags"'
 assert_contains "$aur_metadata_helper" 'category=archive-read'
 
+# Normal production owns archive identity through libalpm.  Test-hook builds
+# may retain a process stub, but the live runner must not infer production
+# authority from that private implementation detail.
+assert_contains "$artifact_identity_source" \
+    'artifact_archive_metadata::query_with_libalpm('
+assert_contains "$artifact_archive_metadata_source" 'alpm_pkg_load('
+assert_contains "$artifact_archive_metadata_source" \
+    'independent from pacman output/localization parsing'
+assert_not_contains "$artifact_identity_source" 'Logger::raw_cmd'
+
 for gateway_rejection_shape in \
     'run_gateway_rejection syu "$gateway_case" -Syu' \
     'run_gateway_rejection remove "$gateway_case" -R "$package_name"' \
@@ -774,6 +794,18 @@ assert_contains "$aur_runner" "'makepkg' '-sc' '--noconfirm'"
 assert_contains "$aur_runner" 'PackageBase result: $package_base'
 assert_contains "$aur_runner" \
     'produced artifact: $AUR_CASE_DEBUG_PACKAGE_NAME $expected_version (not selected; not installed)'
+assert_not_contains "$aur_runner" \
+    "Running: LC_ALL=C 'pacman' '-Qp' '--color' 'never' '--'"
+assert_not_contains "$aur_runner" 'artifact_identity_query_prefix='
+assert_contains "$aur_runner" \
+    'gateway argv artifact does not match original artifact evidence'
+assert_contains "$aur_runner" 'gateway package identity evidence drift'
+assert_contains "$aur_runner" 'gateway validation-complete evidence drift'
+assert_contains "$aur_runner" 'gateway real-pacman execution evidence drift'
+assert_contains "$aur_runner" \
+    'moguet-live-aur-archive-metadata: accepted: entries='
+assert_contains "$aur_runner" \
+    'package_query=$(LC_ALL=C pacman -Qp --color never -- \'
 assert_contains "$aur_runner" 'production did not clean the original artifact workspace'
 assert_contains "$aur_runner" 'root gateway binary-content fail-closed test'
 assert_contains "$aur_runner" 'binary_payload_path=usr/bin/$package_name'
@@ -798,6 +830,7 @@ assert_contains "$aur_runner" 'one positive and five independent negative eviden
 assert_contains "$aur_runner" 'real pacman not reached'
 assert_contains "$aur_runner" 'pacman -Qe "$package_name"'
 assert_contains "$aur_runner" 'pacman -Qd "$package_name"'
+assert_contains "$aur_runner" 'pacman -Q "$AUR_CASE_DEBUG_PACKAGE_NAME"'
 assert_contains "$aur_runner" 'dependency version or install reason changed'
 assert_contains "$aur_runner" \
     'container pacman config does not retain the exact expected README'

@@ -1247,25 +1247,93 @@ do
         'root:moguet-validation:640:regular file' \
         "gateway $evidence_name"
 done
-python3 - "$evidence_directory/original-argv.nul" <<'PY'
-from pathlib import Path
-import sys
-
-values = Path(sys.argv[1]).read_bytes().split(b"\0")
-if not values or values[-1] != b"":
-    raise SystemExit("gateway argv evidence is not NUL terminated")
-actual = [value.decode("utf-8", "strict") for value in values[:-1]]
-if len(actual) != 6:
-    raise SystemExit(f"gateway argv cardinality drift: {actual!r}")
-if actual[:5] != ["sudo", "pacman", "-U", "--noconfirm", "--"]:
-    raise SystemExit(f"gateway argv shape drift: {actual!r}")
-if len(actual[5:]) != 1:
-    raise SystemExit(f"gateway accepted multiple artifacts: {actual!r}")
-PY
 original_artifact=$(sed -n '1p' \
     "$evidence_directory/original-artifact-path.txt")
 staged_artifact=$(sed -n '1p' \
     "$evidence_directory/staged-artifact-path.txt")
+# Production reads archive identity through libalpm.  The live authority is
+# the root gateway's exact artifact/transaction evidence, not a private
+# metadata-query command in production output.
+python3 - \
+    "$evidence_directory/original-argv.nul" \
+    "$evidence_directory/original-artifact-path.txt" \
+    "$evidence_directory/staged-artifact-path.txt" \
+    "$evidence_directory/package-identity.txt" \
+    "$evidence_directory/validation-complete.txt" \
+    "$evidence_directory/real-pacman-exec.txt" \
+    "$package_name" "$expected_version" "$expected_architecture" \
+    "$runtime_dependencies" "$gateway_staging_root/$gateway_case" <<'PY'
+from pathlib import Path
+import sys
+
+(
+    argv_path,
+    original_path,
+    staged_path,
+    identity_path,
+    completion_path,
+    execution_path,
+    package,
+    version,
+    architecture,
+    dependencies,
+    staging_directory,
+) = sys.argv[1:]
+
+def exact_lines(path: str, label: str) -> list[str]:
+    text = Path(path).read_text(encoding="utf-8")
+    if not text.endswith("\n"):
+        raise SystemExit(f"gateway {label} evidence lacks a terminal newline")
+    return text.splitlines()
+
+original_lines = exact_lines(original_path, "original artifact")
+if len(original_lines) != 1:
+    raise SystemExit(f"gateway original artifact evidence drift: {original_lines!r}")
+original_artifact = original_lines[0]
+
+staged_lines = exact_lines(staged_path, "staged artifact")
+expected_staged_artifact = str(
+    Path(staging_directory) / f"{package}-{version}-{architecture}.pkg.tar.zst"
+)
+if staged_lines != [expected_staged_artifact]:
+    raise SystemExit(f"gateway staged artifact evidence drift: {staged_lines!r}")
+staged_artifact = staged_lines[0]
+
+values = Path(argv_path).read_bytes().split(b"\0")
+if not values or values[-1] != b"":
+    raise SystemExit("gateway argv evidence is not NUL terminated")
+actual = [value.decode("utf-8", "strict") for value in values[:-1]]
+expected_argv = [
+    "sudo", "pacman", "-U", "--noconfirm", "--", original_artifact,
+]
+if actual != expected_argv:
+    raise SystemExit(f"gateway argv artifact does not match original artifact evidence: {actual!r}")
+
+expected_identity = [
+    f"package_name={package}",
+    f"package_version={version}",
+    f"package_architecture={architecture}",
+    f"package_dependency={dependencies}",
+    f"pacman_query={package}\t{version}",
+]
+identity_lines = exact_lines(identity_path, "package identity")
+if identity_lines != expected_identity:
+    raise SystemExit(f"gateway package identity evidence drift: {identity_lines!r}")
+
+completion_lines = exact_lines(completion_path, "validation completion")
+expected_completion = [
+    "validated=true",
+    "transaction=exactly-once",
+    "install_reason=Explicit",
+]
+if completion_lines != expected_completion:
+    raise SystemExit(f"gateway validation-complete evidence drift: {completion_lines!r}")
+
+execution_lines = exact_lines(execution_path, "real pacman execution")
+expected_execution = [f"argv=-U --noconfirm -- {staged_artifact}"]
+if execution_lines != expected_execution:
+    raise SystemExit(f"gateway real-pacman execution evidence drift: {execution_lines!r}")
+PY
 case "$original_artifact" in
     "$cache_root"/.artifact-workspace~-??????/"$package_name-$expected_version-$expected_architecture.pkg.tar.zst")
         ;;
@@ -1273,16 +1341,6 @@ case "$original_artifact" in
         fail 'gateway original artifact path escaped the exact workspace boundary'
         ;;
 esac
-artifact_identity_query_prefix="Running: LC_ALL=C 'pacman' '-Qp' '--color' 'never' '--'"
-debug_artifact=${original_artifact%/*}/$AUR_CASE_DEBUG_PACKAGE_NAME-$expected_version-$expected_architecture.pkg.tar.zst
-assert_contains "$artifact_identity_query_prefix '$original_artifact'" \
-    "$normalized_output"
-assert_contains "$artifact_identity_query_prefix '$debug_artifact'" \
-    "$normalized_output"
-artifact_identity_query_count=$(grep -F -c -- \
-    "$artifact_identity_query_prefix" "$normalized_output")
-[ "$artifact_identity_query_count" -eq 2 ] ||
-    fail "production queried $artifact_identity_query_count artifact identities instead of 2"
 [ ! -e "$original_artifact" ] && [ ! -L "$original_artifact" ] ||
     fail 'production did not clean the original artifact workspace'
 [ ! -e "$(dirname "$original_artifact")" ] ||
@@ -1331,6 +1389,8 @@ awk -F '\t' '
     $3 != "root" || $4 != "root" { exit 1 }
 ' "$evidence_directory/archive-members.tsv" ||
     fail 'gateway accepted an unsafe archive member identity'
+assert_contains 'moguet-live-aur-archive-metadata: accepted: entries=' \
+    "$evidence_directory/archive-metadata-check.txt"
 package_query=$(LC_ALL=C pacman -Qp --color never -- \
     "$staged_artifact") || fail 'real non-root package query of staged artifact failed'
 [ "$package_query" = "$package_name $expected_version" ] ||
