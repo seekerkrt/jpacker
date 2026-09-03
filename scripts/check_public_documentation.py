@@ -112,6 +112,14 @@ def shown_path(path: Path) -> str:
         return str(path)
 
 
+def read_current_project_version(repository_root: Path) -> str:
+    version_path = repository_root / "VERSION"
+    lines = read_text(version_path).splitlines()
+    if len(lines) != 1 or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", lines[0]) is None:
+        fail(f"{shown_path(version_path)} must contain exactly one X.Y.Z version")
+    return lines[0]
+
+
 def assert_semantic_text_contract(
     label: str,
     text: str,
@@ -1185,7 +1193,10 @@ def check_reviewed_source_documentation(
 
 def system_aur_update_documentation_contracts(
     repository_root: Path,
+    current_version: str | None = None,
 ) -> dict[Path, tuple[tuple[str, ...], tuple[str, ...]]]:
+    if current_version is None:
+        current_version = read_current_project_version(REPOSITORY_ROOT)
     return {
         repository_root / "README.md": (
             (
@@ -1250,9 +1261,9 @@ def system_aur_update_documentation_contracts(
         ),
         repository_root / "RELEASE_NOTES.md": (
             (
-                "Moguet v2.6.0 includes a behavior-changing compatibility correction",
-                "Before v2.6.0",
-                "Starting with v2.6.0",
+                f"Moguet v{current_version} includes a behavior-changing compatibility correction",
+                f"Before v{current_version}",
+                f"Starting with v{current_version}",
                 "does not roll back the completed repository transaction",
                 "moguet -Syu --repo",
                 "saved source-build preferences strictly",
@@ -1282,9 +1293,10 @@ def system_aur_update_documentation_contracts(
 
 def check_system_aur_update_documentation(
     repository_root: Path = REPOSITORY_ROOT,
+    current_version: str | None = None,
 ) -> None:
     for path, (required, forbidden) in system_aur_update_documentation_contracts(
-        repository_root
+        repository_root, current_version
     ).items():
         assert_document_contract(path, required, forbidden)
 
@@ -1352,9 +1364,7 @@ def main() -> int:
         read_text(arguments.help_ja),
     )
 
-    version = read_text(REPOSITORY_ROOT / "VERSION").strip()
-    if not version:
-        fail("VERSION is empty")
+    version = read_current_project_version(REPOSITORY_ROOT)
     check_generated_man(
         REPOSITORY_ROOT / "man/moguet.1.in",
         REPOSITORY_ROOT / "man/moguet.1",
@@ -1435,7 +1445,7 @@ def main() -> int:
 
     check_package_relation_documentation()
     check_reviewed_source_documentation()
-    check_system_aur_update_documentation()
+    check_system_aur_update_documentation(current_version=version)
     check_generated_completions(schema)
     print("public-documentation-check: all checks passed")
     return 0

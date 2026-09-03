@@ -44,13 +44,13 @@ Moguet v2.0.1は、採用済みXDG storage契約のうちsource-preference部分
 preferenceは実行user自身のXDG config contextだけを使い、公開済みv2.0.0のtag、Release、
 release noteは歴史的記録のまま変更しません。
 
-Moguet v2.5.0は最新releaseです。このminor releaseでは、authoritativeな追跡がまだ
-成立しないconventionalなVCS/devel AUR packageをfalse `UpToDate`へ丸めず
-`RequiresCheck`として公開し、repo/AURを跨ぐexact-version dependency lockに対する
-`upgrade-all`のtargeted diagnosticを追加します。また、invocation-owned dependency cleanupの
-安全基盤を整備しますが、public source-build `--rmdeps`はまだ有効化しません。利用者から
-見える変更の全体は[v2.5.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.5.0)を
-参照してください。
+Moguet v2.6.0は最新releaseです。exact target-less `moguet -Syu`はofficial repository
+system updateを実行し、その成功後にnormal installed-AUR updateを続けます。saved
+source-build preferenceは明示的なsource-aware `upgrade*` workflowだけに限定したままです。
+通常の`-Syu`ではindependent devel `RequiresCheck` targetを局所的にskipし、unrelatedな
+AUR updateをblockしません。一方、required `RequiresCheck` relationと明示的なupgrade
+workflowはstrictなままです。利用者から見える変更の全体は
+[v2.6.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.6.0)を参照してください。
 
 canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ちます。Moguet
 packageは`jpacker` command aliasを提供しません。AUR publicationは将来の別判断であり、

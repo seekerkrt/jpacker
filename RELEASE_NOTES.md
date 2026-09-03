@@ -1,4 +1,4 @@
-# Moguet v2.6.0 (Upcoming)
+# Moguet v2.6.0
 
 This tracked file is the source of truth for release bodies. The English and
 Japanese sections for each release describe the same scope.

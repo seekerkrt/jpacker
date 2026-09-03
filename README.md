@@ -49,15 +49,15 @@ a new storage direction: source-build preferences now use only the executing
 user's XDG config context, while the published v2.0.0 tag, Release, and release
 notes remain historical records.
 
-Moguet v2.5.0 is the latest release. This minor release adds conservative
-VCS/devel AUR tracking that surfaces `RequiresCheck` instead of a false
-`UpToDate` when a conventional devel package cannot yet be authoritatively
-tracked, and targeted `upgrade-all` diagnostics for repo/AUR cross-source
-exact-version dependency locks. It also establishes safety foundations for
-invocation-owned dependency cleanup without enabling public source-build
-`--rmdeps`. See the
-[v2.5.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.5.0) for
-the complete user-visible changes.
+Moguet v2.6.0 is the latest release. Exact target-less `moguet -Syu` now
+performs the official repository system update followed by the normal
+installed-AUR update after repository success, while saved source-build
+preferences remain limited to the explicit source-aware `upgrade*` workflows.
+Independent devel `RequiresCheck` targets in ordinary `-Syu` are skipped
+locally instead of blocking unrelated AUR updates, while required
+`RequiresCheck` relations and explicit upgrade workflows remain strict. See
+the [v2.6.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.6.0)
+for the complete user-visible changes.
 
 The canonical repository identity is Moguet on GitHub, with a GitLab mirror.
 The Moguet package does not provide a `jpacker` command alias. AUR publication
