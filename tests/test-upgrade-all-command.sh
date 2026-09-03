@@ -1468,7 +1468,7 @@ assert_contains \
     "確認済みソースの結果（PackageBase issue-455-aur-updated）: 正確なupstream commit 4444444444444444444444444444444444444444 の更新レビューを受理しました。" \
     "$stdout_file"
 assert_contains \
-    "確認済み状態（PackageBase issue-455-aur-updated）を世代 31として公開しました。ビルドとインストールの結果は別に報告します。" \
+    "確認済み状態（PackageBase issue-455-aur-updated）を世代 31 として確定しました。ビルドとインストールの結果は別に報告します。" \
     "$stdout_file"
 assert_contains \
     "この実行内のeditor変更" "$stdout_file"

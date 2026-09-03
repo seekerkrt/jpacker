@@ -6511,8 +6511,8 @@ msgid "Reviewed state for {} {} remains at generation {}; build and install outc
 msgstr "確認済み状態（{} {}）は世代 {}のままです。ビルドとインストールの結果は別に報告します。"
 
 #, c++-format
-msgid "Reviewed state for {} {} was published at generation {}; build and install outcomes are reported separately."
-msgstr "確認済み状態（{} {}）を世代 {}として公開しました。ビルドとインストールの結果は別に報告します。"
+msgid "Reviewed state for {} {} was finalized as generation {}; build and install outcomes are reported separately."
+msgstr "確認済み状態（{} {}）を世代 {} として確定しました。ビルドとインストールの結果は別に報告します。"
 
 #, c++-format
 msgid "Reviewed state for {} {} already matched the accepted target at publication; generation {} was retained and no state rewrite was needed."

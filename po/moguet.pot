@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.6.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-02 16:59+0900\n"
+"POT-Creation-Date: 2026-09-04 07:23+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -6519,7 +6519,7 @@ msgid "Reviewed state for {} {} remains at generation {}; build and install outc
 msgstr ""
 
 #, c++-format
-msgid "Reviewed state for {} {} was published at generation {}; build and install outcomes are reported separately."
+msgid "Reviewed state for {} {} was finalized as generation {}; build and install outcomes are reported separately."
 msgstr ""
 
 #, c++-format
