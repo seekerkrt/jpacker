@@ -1,4 +1,4 @@
-.TH MOGUET 1 "August 2026" "Moguet 2.5.0" "User Commands"
+.TH MOGUET 1 "September 2026" "Moguet 2.6.0" "User Commands"
 .\" parity:name
 .SH NAME
 moguet \- pacman-first AUR helper with verified source builds
@@ -13,6 +13,12 @@ moguet \- pacman-first AUR helper with verified source builds
 .B moguet
 .B -S --select [--needed]
 .I query
+.
+.B moguet
+.B -Syu [--needed]
+.
+.B moguet
+.B -Syu --repo [--needed]
 .
 .B moguet
 .BR -h | --help
@@ -66,6 +72,17 @@ that Moguet does not consume.
 When a target enters an AUR or source-build route, an option whose meaning
 cannot be preserved is rejected before external mutation instead of being
 silently ignored.
+Exact target-less
+.B -Syu
+is an intercepted ordinary AUR-helper update: it completes the official
+repository system upgrade and then performs a fresh normal installed-AUR
+update without reading saved source-build preferences.
+The explicit
+.BR upgrade ,
+.BR upgrade-aur ,
+and
+.B upgrade-all
+commands are source-aware workflows that check and apply saved preferences.
 Command and option tokens are locale-independent.
 Closed Moguet grammar accepts only environment assignments after the one
 primary remote or local build operand. It rejects an extra bare build operand,
@@ -112,12 +129,13 @@ explicit installed package is never demoted.
 .
 .TP
 .B "upgrade"
-Run the pacman-compatible system upgrade, then inspect registered source-build
-preferences and rebuild configured packages when the existing update contract
-requires it.
+Run the repository system upgrade, then strictly inspect registered
+source-build preferences and rebuild configured packages when the existing
+update contract requires it.
 Use
 .B -Syu
-instead when registered source preferences must not be scanned.
+for the ordinary repository plus normal-AUR update when registered source
+preferences must not be scanned.
 .
 .TP
 .B "upgrade-aur"
@@ -127,15 +145,20 @@ AUR version is reported as requiring a check and blocks the whole AUR
 execution before mutation; it is not rebuilt automatically.
 Moguet does not yet compare upstream VCS revisions or publish devel build
 provenance.
+For installed AUR targets, this source-aware workflow strictly checks and
+applies corresponding saved source-build preferences.
 This target-less operation does not run
 .B pacman -Syu
 and does not update packages selected only by source-build preferences.
+Its AUR-only scope means that it omits the repository system update, not that
+it ignores saved preferences.
 .
 .TP
 .B "upgrade-all"
 Run the system, registered-source, fresh foreign-inventory, and filtered AUR
 phases in that order.
 Explicit source preferences take priority over duplicate AUR targets.
+Saved source-build preferences are checked and applied strictly.
 Provider selection for the filtered AUR phase completes before clone, build,
 pacman, or sudo work in that phase; earlier phases may already have completed.
 This is not one atomic transaction: execution stops on the first failure,
@@ -335,12 +358,63 @@ On this route,
 applies only to each route-owned final installation.
 .
 .TP
-.B "-Syu"
-Perform a pacman-compatible system upgrade.
-This form does not scan every registered source-build preference.
-Use
-.B upgrade
-for that additional scope.
+.B "-Syu [--needed] | -Syu --repo [--needed]"
+The exact target-less Auto form is the ordinary AUR-helper update. It performs
+the official repository system upgrade first and, only after success, obtains
+a fresh installed-foreign inventory and exact AUR metadata, then plans and
+executes a normal installed-AUR update.
+It does not snapshot, enumerate, read, or apply saved source-build preferences,
+including a PackageBase fallback preference, and its preference-derived build
+environment is empty.
+Valid, invalid, unreadable, or failing preference data therefore does not
+affect this route.
+.
+.PP
+An independent devel target whose status is
+.B RequiresCheck
+is skipped with a non-blocking warning and does not stop unrelated normal AUR
+updates. This state remains unverified: it is neither UpToDate nor an automatic
+update decision. If another update candidate requires the target through a
+dependency, provider, or required-child relation, the affected root is blocked
+and the command remains non-zero. The explicit
+.B upgrade-aur
+and
+.B upgrade-all
+routes retain their strict whole-operation RequiresCheck blocker behavior.
+.
+.PP
+The phases are sequential, not atomic. A repository failure leaves the AUR
+phase not attempted and exits non-zero. If the repository phase completes but
+the AUR phase is blocked or fails, Moguet reports repository completion and a
+non-zero partial failure without rollback. Cleanup failure remains distinct
+from installation outcome, an inconsistent aggregate fails closed, and an AUR
+NoUpdates result alone does not make the whole operation NoOp.
+.
+.PP
+For Auto, the only initially supported pacman semantic option is
+.BR --needed ;
+it is kept only in the exact ordered repository transaction and is not applied
+to the later AUR transaction. Any other pacman semantic option or unsupported
+argument form is rejected before repository mutation, with guidance to use
+.BR "moguet -Syu --repo" .
+The RepoOnly form removes the semantic selector before invoking pacman,
+preserves the compatible pacman pass-through tail, performs only the
+repository system upgrade, and does not query AUR, read source preferences, or
+invoke cache, Git, makepkg, or source-runner work.
+.B -Syu --aur
+is unsupported; use source-aware
+.B upgrade-aur
+for an AUR-only update.
+.
+.PP
+Only the exact canonical target-less token has this combined meaning.
+.BR -Sy ,
+.BR -Su ,
+.BR -Suy ,
+separated or long modifier spellings, target-bearing
+.BR "-Syu <pkg>" ,
+and unknown modifier forms retain their existing routing and do not start an
+installed-AUR sweep.
 .
 .TP
 .B "-Ss <query>"
@@ -370,9 +444,14 @@ are shown with a check-required reason instead of a version-update arrow.
 This check-required result alone retains query exit status zero.
 This remains a pacman-compatible query and is distinct from executing
 .BR upgrade-aur .
-The pacman-compatible forms above are examples of delegated open grammar, not
-a closed allowlist. Arguments that Moguet does not consume remain owned by
-pacman when the selected route can preserve their meaning.
+Except for the two exact target-less
+.B -Syu
+semantic forms documented above, the pacman-compatible forms are examples of
+delegated open grammar, not a closed allowlist. The repository-only
+.B -Syu --repo
+form also keeps a compatible delegated pacman tail. Arguments that Moguet does
+not consume remain owned by pacman when the selected route can preserve their
+meaning.
 .\" PUBLIC COMMANDS END
 .
 .\" parity:options
@@ -436,6 +515,20 @@ The observation is not an approval token, prepared execution capability, or
 cached provider choice. A later actual invocation revalidates current state.
 Moguet v2.2.0 provides this human-readable surface only; no JSON or other
 machine-readable plan schema is introduced.
+.
+.PP
+For exact target-less
+.BR "--dry-run -Syu" ,
+the repository system-update intent and later normal-AUR transaction intents
+are displayed separately. The AUR assessment is based on the current installed
+state and is not a prediction of the post-repository state. Actual execution
+does not reuse the observation or a prepared capability; after repository
+success it obtains a fresh installed-foreign inventory, AUR metadata, plan,
+provider decisions, and preflight. A current-state AUR NoUpdates result does
+not turn the outer repository-bearing operation into NoOp.
+.BR "--dry-run -Syu --repo"
+displays only the repository intent and does not query AUR or source-build
+preferences.
 .
 .TP
 .B "--edit"
@@ -518,6 +611,12 @@ is a shared pacman option for both selected routes.
 .B "--needed"
 Treat this as a pacman-compatible option.
 Pacman-only routes keep it in the ordered argument list.
+For Auto combined
+.BR -Syu ,
+it is the only initially supported pacman semantic option and is kept only in
+the repository transaction, not the later normal-AUR transaction. RepoOnly
+.B -Syu --repo
+keeps it in the repository pass-through.
 On supported AUR or source-build
 .B -S
 routes, apply it only once to final
@@ -564,8 +663,12 @@ Limit supported
 and
 .B -Si
 forms to AUR, without official repository fallback.
-It is not supported for target-less upgrades or Moguet-specific inspection
-commands.
+It is not supported for
+.BR -Syu ,
+target-less upgrades, or Moguet-specific inspection commands. Use
+.B upgrade-aur
+for the source-aware AUR-only update; AUR-only means no repository system
+update and does not mean that saved source preferences are ignored.
 .
 .TP
 .B "--repo"
@@ -575,6 +678,12 @@ Limit supported
 and
 .B -Si
 forms to official binary repositories, without AUR or source-build fallback.
+With exact target-less
+.BR -Syu ,
+select the repository-only system upgrade. The selector is not passed to
+pacman, and compatible remaining pacman arguments are preserved. This form
+does not inventory or query AUR and does not invoke source preferences, cache,
+Git, makepkg, or the source runner.
 It does not delete an existing source preference.
 .\" PUBLIC OPTIONS END
 .
@@ -658,7 +767,12 @@ User-owned per-package source-build preference.
 The fallback is
 .IR $HOME/.config/moguet/source-build.d/<package-name> .
 The managed directories use mode 0700 and preference entries use mode 0600.
-All source-preference commands and build or upgrade readers use this authority.
+All source-preference commands, source-aware builds, and explicit
+.B upgrade*
+readers use this authority strictly. Exact target-less
+.B -Syu
+and its dry-run deliberately do not snapshot or read the directory, try a
+PackageBase fallback preference, or apply a preference-derived environment.
 .
 .TP
 .I $XDG_STATE_HOME/moguet/moguet.log
@@ -972,9 +1086,27 @@ A failure does not automatically roll back already completed package
 transactions.
 A cleanup failure after successful installation is partial success and must not
 be retried blindly.
+For exact target-less
+.BR -Syu ,
+the repository system transaction completes before any fresh AUR authority is
+obtained. Repository failure leaves the AUR phase not attempted; a later AUR
+blocker or failure is non-zero partial completion and does not roll back the
+repository transaction.
 .
 .\" parity:examples
 .SH EXAMPLES
+.TP
+Perform the ordinary repository plus normal installed-AUR update:
+.RS
+.B moguet -Syu
+.RE
+.
+.TP
+Perform only the repository system upgrade:
+.RS
+.B moguet -Syu --repo
+.RE
+.
 .TP
 Discover and explicitly select source-aware install targets:
 .RS
@@ -1031,6 +1163,23 @@ Temporarily restore review and normal build defaults over user config:
 .
 .\" parity:migration
 .SH MIGRATION
+Starting with Moguet v2.6.0, exact target-less
+.B moguet -Syu
+changes from repository-only behavior to the ordinary AUR-helper update:
+repository system update followed by a normal installed-AUR update, without
+reading or applying saved source-build preferences. Existing users who need
+the former repository-only behavior must use
+.BR "moguet -Syu --repo" .
+Use
+.BR "moguet upgrade" ,
+.BR "moguet upgrade-aur" ,
+or
+.B "moguet upgrade-all"
+when saved source-build preferences must be checked and applied. The combined
+route is sequential and non-atomic; a later AUR failure reports partial
+completion and does not roll back the completed repository transaction.
+.
+.PP
 An existing Moguet AUR cache from before reviewed-source state requires no
 manual migration. No record is a normal missing state and causes one initial
 full review for the first affected PackageBase. Moguet does not invent a

@@ -138,6 +138,7 @@ constexpr std::array AUR_PREFLIGHT_REASONS{
     AurUpdateExecutionReason::None,
     AurUpdateExecutionReason::UpToDate,
     AurUpdateExecutionReason::DevelRequiresCheck,
+    AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck,
     AurUpdateExecutionReason::NonAurForeign,
     AurUpdateExecutionReason::AurMetadataUnavailable,
     AurUpdateExecutionReason::VersionComparisonUnavailable,
@@ -162,6 +163,7 @@ constexpr std::array AUR_PREPARATION_REASONS{
     AurUpdatePreparationReason::None,
     AurUpdatePreparationReason::BlockingPreflight,
     AurUpdatePreparationReason::PreflightInconsistent,
+    AurUpdatePreparationReason::DevelRequiresCheckPolicyInconsistent,
     AurUpdatePreparationReason::BuildPlanMissing,
     AurUpdatePreparationReason::BuildPlanOrderEmpty,
     AurUpdatePreparationReason::RootAttributionInconsistent,
@@ -220,6 +222,8 @@ constexpr std::array AUR_REDUCTION_REASONS{
     AurUpdateOperationReductionReason::
         ExecutionResultWithPreparationIssues,
     AurUpdateOperationReductionReason::MissingExecutionResult,
+    AurUpdateOperationReductionReason::
+        DevelRequiresCheckPolicyInconsistent,
     AurUpdateOperationReductionReason::UnknownEnumValue,
     AurUpdateOperationReductionReason::WorkItemResultInconsistent,
     AurUpdateOperationReductionReason::InvocationResultInconsistent,
@@ -227,6 +231,8 @@ constexpr std::array AUR_REDUCTION_REASONS{
 
 constexpr std::array FILTERED_AUR_ISSUE_KINDS{
     FilteredAurUpdateOperationIssueKind::UnknownUpdateClassification,
+    FilteredAurUpdateOperationIssueKind::
+        DevelRequiresCheckPolicyInconsistent,
     FilteredAurUpdateOperationIssueKind::
         TargetPlannerMappingInconsistent,
     FilteredAurUpdateOperationIssueKind::
@@ -363,6 +369,7 @@ AurUpdateOperationTargetResult make_issue_449_split_up_to_date_target(
     target.update.aur_package->version = "2.004-1";
     target.update.aur_package->version_relation =
         AurVersionRelation::SameAsInstalled;
+    target.skip_kind = AurUpdateExecutionSkipKind::UpToDate;
     target.preflight_issues.emplace_back(
         AurUpdateExecutionReason::UpToDate,
         "ttf-noto-sans-mono-cjk-vf",
@@ -375,6 +382,14 @@ AurUpdateOperationTargetResult make_issue_449_split_up_to_date_target(
 FilteredAurUpdateExecutionResult make_filtered_result(
     AurUpdateOperationStatus status) {
     FilteredAurUpdateExecutionResult filtered;
+    filtered.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    filtered.preflight.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    filtered.preparation.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    filtered.reduced_operation_result.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     filtered.reduced_operation_result.status = status;
     if(status == AurUpdateOperationStatus::Completed) {
         filtered.reduced_operation_result.execution_status =
@@ -1169,6 +1184,7 @@ UpgradeAllOperationResult make_aur_skip_result() {
     up_to_date.update.classification = AurUpdateClassification::UpToDate;
     up_to_date.update.aur_package->version_relation =
         AurVersionRelation::SameAsInstalled;
+    up_to_date.skip_kind = AurUpdateExecutionSkipKind::UpToDate;
     AurUpdateExecutionIssue up_to_date_issue;
     up_to_date_issue.reason = AurUpdateExecutionReason::UpToDate;
     up_to_date_issue.package_name = "aur-up-to-date";
@@ -1182,6 +1198,8 @@ UpgradeAllOperationResult make_aur_skip_result() {
         AurUpdateClassification::NonAurForeign;
     non_aur.update.aur_package.reset();
     non_aur.package_base.reset();
+    non_aur.skip_kind =
+        AurUpdateExecutionSkipKind::NonAurForeign;
     AurUpdateExecutionIssue non_aur_issue;
     non_aur_issue.reason = AurUpdateExecutionReason::NonAurForeign;
     non_aur_issue.package_name = "non-aur-foreign";
@@ -2008,9 +2026,22 @@ UpgradeAllOperationResult make_target_status_matrix_result(
     switch(status) {
         case AurUpdateOperationTargetStatus::Updated:
         case AurUpdateOperationTargetStatus::NoChange:
-        case AurUpdateOperationTargetStatus::Skipped:
         case AurUpdateOperationTargetStatus::Unsupported:
         case AurUpdateOperationTargetStatus::Incomplete:
+            break;
+        case AurUpdateOperationTargetStatus::Skipped:
+            target.update.classification =
+                AurUpdateClassification::UpToDate;
+            target.update.aur_package->version_relation =
+                AurVersionRelation::SameAsInstalled;
+            target.skip_kind = AurUpdateExecutionSkipKind::UpToDate;
+            target.preflight_issues.push_back(
+                AurUpdateExecutionIssue{
+                    AurUpdateExecutionReason::UpToDate,
+                    "matrix-target",
+                    std::nullopt,
+                    std::nullopt,
+                    "matrix target is already up to date"});
             break;
         case AurUpdateOperationTargetStatus::Failed:
             target.execution_failure_kind =
@@ -2065,6 +2096,20 @@ UpgradeAllOperationResult make_preflight_reason_matrix_result(
         "matrix-base");
     target.preflight_issues.push_back(
         make_matrix_preflight_issue(reason));
+    if(reason == AurUpdateExecutionReason::UpToDate) {
+        target.update.classification =
+            AurUpdateClassification::UpToDate;
+        target.update.aur_package->version_relation =
+            AurVersionRelation::SameAsInstalled;
+        target.skip_kind = AurUpdateExecutionSkipKind::UpToDate;
+    } else if(reason == AurUpdateExecutionReason::NonAurForeign) {
+        target.update.classification =
+            AurUpdateClassification::NonAurForeign;
+        target.update.aur_package.reset();
+        target.package_base.reset();
+        target.skip_kind =
+            AurUpdateExecutionSkipKind::NonAurForeign;
+    }
     result.aur.operation_result->reduced_operation_result.targets.push_back(
         std::move(target));
     return result;

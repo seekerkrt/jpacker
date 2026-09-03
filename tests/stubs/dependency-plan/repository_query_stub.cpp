@@ -21,6 +21,7 @@ std::vector<ProvidedDependency> repository_providers(
     const auto provider = [](
                               std::string repository,
                               std::string package,
+                              std::string package_base,
                               std::string capability,
                               std::string package_version) {
         const std::size_t equals = capability.find('=');
@@ -39,6 +40,7 @@ std::vector<ProvidedDependency> repository_providers(
                                                            ObservedVersionUnknownReason::UnversionedProviderCapability);
         return ProvidedDependency::from_repository_constraint_metadata(
             std::move(repository), std::move(package),
+            std::move(package_base), "x86_64",
             ProviderConstraintMetadata{
                 std::move(parsed),
                 ObservedVersion::available(
@@ -48,26 +50,27 @@ std::vector<ProvidedDependency> repository_providers(
     };
     if(dependency_name == "case8-virtual") {
         return {
-            provider("extra", "case8-provider-a", "case8-virtual=2", "2.0-1"),
-            provider("community", "case8-provider-b", "case8-virtual=3", "3.0-1"),
+            provider("extra", "case8-provider-a", "case8-provider-a-base", "case8-virtual=2", "2.0-1"),
+            provider("community", "case8-provider-b", "case8-provider-b-base", "case8-virtual=3", "3.0-1"),
         };
     }
     if(dependency_name == "case11-ambiguous") {
         return {
-            provider("extra", "case11-provider-a", "case11-ambiguous=1", "1.0-1"),
-            provider("community", "case11-provider-b", "case11-ambiguous=2", "2.0-1"),
+            provider("extra", "case11-provider-a", "case11-provider-a-base", "case11-ambiguous=1", "1.0-1"),
+            provider("community", "case11-provider-b", "case11-provider-b-base", "case11-ambiguous=2", "2.0-1"),
         };
     }
     if(dependency_name == "case14-virtual") {
         return {provider(
-            "aur", "case14-provider", "case14-virtual=1", "1.0-1")};
+            "aur", "case14-provider", "case14-provider-base", "case14-virtual=1", "1.0-1")};
     }
     if(dependency_name == "case23-virtual") {
         ProviderCapability capability(
             "case23-virtual=6", "case23-virtual",
             std::optional<std::string>{"6"});
         return {ProvidedDependency::from_repository_constraint_metadata(
-            "extra", 1, "case23-provider",
+            "extra", 1, "case23-provider", "case23-provider-base",
+            "x86_64",
             ProviderConstraintMetadata{
                 capability,
                 ObservedVersion::available(
@@ -83,9 +86,11 @@ std::vector<ProvidedDependency> repository_providers(
         return {
             provider(
                 "extra", "conflict-provider-a",
+                "conflict-provider-a-base",
                 "conflict-virtual=2", "2.0-1"),
             provider(
                 "community", "conflict-provider-b",
+                "conflict-provider-b-base",
                 "conflict-virtual=3", "3.0-1"),
         };
     }
@@ -192,11 +197,6 @@ InstalledExactPackageObservationResult query_installed_exact_package_strict(
     return InstalledExactPackageAbsent{package_name};
 }
 
-std::vector<ProvidedDependency> find_repo_providers(
-    const std::string& dependency_name) {
-    return repository_providers(dependency_name);
-}
-
 StrictRepositoryProvidersQueryResult query_repository_providers_strict(
     const std::string& dependency_name) {
     ++g_strict_repo_provider_queries;
@@ -227,13 +227,16 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
                     ObservedVersion::available(
                         ObservedVersionSource::
                             RepositoryProviderCapability,
-                        "6")}}}}};
+                        "6")}},
+                std::string("x86_64")}}};
     }
     if(dependency_name ==
        "preflight-repository-partial-provider-virtual") {
         return RepositoryProviderQuerySnapshot{
             {ProvidedDependency::from_repository_constraint_metadata(
                 "core", "partial-repository-provider",
+                "partial-repository-provider-base",
+                "x86_64",
                 ProviderConstraintMetadata{
                     ProviderCapability(
                         "preflight-repository-partial-provider-virtual=1",
@@ -264,6 +267,8 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
             {
                 ProvidedDependency::from_repository_constraint_metadata(
                     "extra", "target-metadata-provider-a",
+                    "target-metadata-provider-a-base",
+                    "x86_64",
                     ProviderConstraintMetadata{
                         ProviderCapability(
                             capability,
@@ -280,6 +285,8 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
                             changed ? "3" : "2")}),
                 ProvidedDependency::from_repository_constraint_metadata(
                     "community", "target-metadata-provider-b",
+                    "target-metadata-provider-b-base",
+                    "x86_64",
                     ProviderConstraintMetadata{
                         ProviderCapability(
                             "target-metadata-change-virtual=4",
@@ -303,6 +310,8 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
         return RepositoryProviderQuerySnapshot{
             {ProvidedDependency::from_repository_constraint_metadata(
                 "extra", "selected-source-change-provider",
+                "selected-source-change-provider-base",
+                "x86_64",
                 ProviderConstraintMetadata{
                     ProviderCapability(
                         "selected-source-change-virtual=1",

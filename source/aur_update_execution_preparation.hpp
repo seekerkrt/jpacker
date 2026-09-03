@@ -14,6 +14,13 @@ struct AppConfig;
 struct AurUpdateSourceBuildPreparation;
 struct AurUpdateSourceBuildExecutionResult;
 
+// AUR update work itemへsaved per-package customizationを適用するpolicy。
+// Ignoreはpreference authorityをreadして結果を捨てるのではなく、authorityへ到達しない。
+enum class SavedSourcePreferencePolicy {
+    Strict,
+    Ignore,
+};
+
 // upgrade-all固有型へ依存せず、明示sourceが満たすbuild unitの根拠をowned保持する。
 struct AurUpdateExternalSatisfactionAttribution {
     std::vector<std::size_t> explicit_source_indexes;
@@ -54,6 +61,7 @@ enum class AurUpdatePreparationReason {
     None,
     BlockingPreflight,
     PreflightInconsistent,
+    DevelRequiresCheckPolicyInconsistent,
     BuildPlanMissing,
     BuildPlanOrderEmpty,
     RootAttributionInconsistent,
@@ -160,11 +168,15 @@ class PreparedAurUpdateSourceBuildInvocation final {
     prepare_aur_update_source_build_invocation(
         const AurUpdateExecutionPreflight& preflight,
         const AurUpdateBuildUnitSelection& build_unit_selection,
+        DevelRequiresCheckPolicy devel_requires_check_policy,
+        SavedSourcePreferencePolicy saved_source_preference_policy,
         bool needed,
         const AppConfig& config);
     friend AurUpdateSourceBuildPreparation
     prepare_aur_update_source_build_invocation(
         const AurUpdateExecutionPreflight& preflight,
+        DevelRequiresCheckPolicy devel_requires_check_policy,
+        SavedSourcePreferencePolicy saved_source_preference_policy,
         bool needed,
         const AppConfig& config);
     friend struct AurUpdateSourceBuildPreparation;
@@ -216,8 +228,34 @@ struct AurUpdateSourceBuildPreparation {
     std::vector<AurUpdateExternallySatisfiedBuildUnit>
         externally_satisfied_build_units;
     std::optional<PreparedAurUpdateSourceBuildInvocation> invocation;
+    std::optional<DevelRequiresCheckPolicy>
+        devel_requires_check_policy;
 
     bool is_prepared() const noexcept;
+    bool is_noop() const noexcept;
+    bool is_blocked() const noexcept;
+};
+
+// Dry-run/read-only assessment. It retains the exact production preflight
+// observation and update attribution, but no executor accepts this type and it
+// cannot carry PreparedAurUpdateSourceBuildInvocation.
+struct AurUpdateSourceBuildObservation {
+    std::vector<AurUpdatePreparationIssue> issues;
+    std::vector<AurUpdatePreparationWarning> warnings;
+    std::vector<AurUpdateExecutionTarget> affected_update_targets;
+    std::vector<RootTargetIdentity> affected_roots;
+    AurUpdateBuildUnitSelection build_unit_selection;
+    std::vector<AurUpdateProjectedBuildUnit> projected_build_units;
+    std::vector<AurUpdateExternallySatisfiedBuildUnit>
+        externally_satisfied_build_units;
+    std::vector<AurUpdatePreparedWorkItemAttribution>
+        work_item_attributions;
+    std::optional<ProductionSourceBuildPreparationObservation>
+        production_preflight;
+    std::optional<DevelRequiresCheckPolicy>
+        devel_requires_check_policy;
+
+    bool is_ready() const noexcept;
     bool is_noop() const noexcept;
     bool is_blocked() const noexcept;
 };
@@ -229,14 +267,36 @@ void seed_aur_update_source_build_cache(
     const ValidatedCacheRoot& cache_root);
 
 // Update preflightを、executionへ接続しないowned invocation snapshotへ射影する。
+// callerはsaved preference authorityへの到達可否をtyped policyで必ず指定する。
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     const AurUpdateExecutionPreflight& preflight,
     const AurUpdateBuildUnitSelection& build_unit_selection,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
     bool needed,
     const AppConfig& config);
 
-// 既存upgrade-aur経路はBuildPlan::order全件を従来どおりexecution対象にする。
+// Capability-free counterpart used by read-only route observations. Saved
+// preference policy and every downstream safety preflight remain explicit.
+AurUpdateSourceBuildObservation observe_aur_update_source_build_preparation(
+    const AurUpdateExecutionPreflight& preflight,
+    const AurUpdateBuildUnitSelection& build_unit_selection,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
+    bool needed,
+    const AppConfig& config);
+
+// BuildPlan::order全件をexecution対象にするroute-neutral convenience overload。
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     const AurUpdateExecutionPreflight& preflight,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
+    bool needed,
+    const AppConfig& config);
+
+AurUpdateSourceBuildObservation observe_aur_update_source_build_preparation(
+    const AurUpdateExecutionPreflight& preflight,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
     bool needed,
     const AppConfig& config);

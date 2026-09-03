@@ -82,10 +82,11 @@ void add_provider_candidate(
     }
 }
 
-void add_repository_provider_candidates(
+bool add_repository_provider_candidates(
     std::vector<ProvidedDependency>& candidates,
     const RepositoryExactPackage& package,
     const std::string& dependency_name) {
+    if(!package.architecture.has_value()) return false;
     for(const auto& provided : package.provides) {
         if(provided.capability.package_name() != dependency_name) continue;
         add_provider_candidate(
@@ -94,11 +95,14 @@ void add_repository_provider_candidates(
                 package.repository.repository_name,
                 package.repository.configured_order,
                 package.package_name,
+                package.package_base,
+                package.architecture.value(),
                 ProviderConstraintMetadata{
                     provided.capability,
                     package.package_version,
                     provided.provided_version}));
     }
+    return true;
 }
 
 } // namespace
@@ -220,8 +224,17 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
            source != nullptr) {
             for(const auto& package : source->packages) {
                 snapshot.observed_packages.push_back(package);
-                add_repository_provider_candidates(
-                    snapshot.candidates, package, dependency_name);
+                if(!add_repository_provider_candidates(
+                       snapshot.candidates, package,
+                       dependency_name)) {
+                    snapshot.source_failures.push_back(
+                        RepositoryMetadataFailure{
+                            RepositoryMetadataFailureKind::
+                                SyncDatabaseMalformed,
+                            package.repository.repository_name,
+                            localization::translate_message(
+                                "Repository provider package architecture is unavailable.")});
+                }
             }
             continue;
         }
@@ -237,19 +250,6 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
             failure.reason));
     }
     return snapshot;
-}
-
-std::vector<ProvidedDependency> find_repo_providers(
-    const std::string& dependency_name) {
-    if(!is_valid_package_name(dependency_name)) return {};
-    StrictRepositoryProvidersQueryResult result =
-        query_repository_providers_strict(dependency_name);
-    if(const auto* snapshot =
-           std::get_if<RepositoryProviderQuerySnapshot>(&result);
-       snapshot != nullptr) {
-        return snapshot->candidates;
-    }
-    return {};
 }
 
 InstalledExactPackageObservationResult query_installed_exact_package_strict(

@@ -49,6 +49,24 @@ void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
 }
 
+template <typename Identity>
+void expect_installed_identity_value(
+    const Identity& identity,
+    InstalledPackageMetadataValueState expected_state,
+    const std::optional<std::string>& expected_value,
+    const std::string& context) {
+    expect(identity.state() == expected_state,
+           context + ": unexpected metadata state");
+    const std::string* value = identity.value();
+    expect(
+        (value == nullptr) == !expected_value.has_value(),
+        context + ": metadata value presence differs");
+    if(value != nullptr) {
+        expect(*value == expected_value.value(),
+               context + ": metadata value differs");
+    }
+}
+
 PacmanDatabasePaths valid_database_paths() {
     return PacmanDatabasePaths{"/", "/var/lib/pacman"};
 }
@@ -825,6 +843,12 @@ void test_installed_package_state_snapshot_is_owned_and_keeps_reasons() {
     stub::set_local_packages({{"explicit-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT},
                               {"dependency-package", "2.0-3", ALPM_PKG_REASON_DEPEND},
                               {"unknown-package", "3.0-2", ALPM_PKG_REASON_UNKNOWN}});
+    stub::set_local_package_base(0, "explicit-base");
+    stub::set_local_package_architecture(0, "x86_64");
+    stub::set_local_package_base(1, "dependency-base");
+    stub::set_local_package_architecture(1, "any");
+    stub::set_local_package_base(2, "unknown-base");
+    stub::set_local_package_architecture(2, "aarch64");
 
     InstalledPackageStateSnapshot snapshot;
     {
@@ -849,6 +873,16 @@ void test_installed_package_state_snapshot_is_owned_and_keeps_reasons() {
             explicit_package.reason ==
                 InstalledPackageReason::Explicit,
         "state snapshot lost Explicit metadata");
+    expect_installed_identity_value(
+        explicit_package.package_base,
+        InstalledPackageMetadataValueState::Known,
+        std::string("explicit-base"),
+        "explicit snapshot PackageBase");
+    expect_installed_identity_value(
+        explicit_package.architecture,
+        InstalledPackageMetadataValueState::Known,
+        std::string("x86_64"),
+        "explicit snapshot architecture");
     const InstalledPackageMetadata& dependency_package =
         snapshot.at("dependency-package");
     expect(
@@ -857,6 +891,16 @@ void test_installed_package_state_snapshot_is_owned_and_keeps_reasons() {
             dependency_package.reason ==
                 InstalledPackageReason::Dependency,
         "state snapshot lost Dependency metadata");
+    expect_installed_identity_value(
+        dependency_package.package_base,
+        InstalledPackageMetadataValueState::Known,
+        std::string("dependency-base"),
+        "dependency snapshot PackageBase");
+    expect_installed_identity_value(
+        dependency_package.architecture,
+        InstalledPackageMetadataValueState::Known,
+        std::string("any"),
+        "dependency snapshot architecture");
     const InstalledPackageMetadata& unknown_package =
         snapshot.at("unknown-package");
     expect(
@@ -865,6 +909,50 @@ void test_installed_package_state_snapshot_is_owned_and_keeps_reasons() {
             unknown_package.reason ==
                 InstalledPackageReason::Unknown,
         "state snapshot rewrote Unknown install reason");
+    expect_installed_identity_value(
+        unknown_package.package_base,
+        InstalledPackageMetadataValueState::Known,
+        std::string("unknown-base"),
+        "unknown-reason snapshot PackageBase");
+    expect_installed_identity_value(
+        unknown_package.architecture,
+        InstalledPackageMetadataValueState::Known,
+        std::string("aarch64"),
+        "unknown-reason snapshot architecture");
+}
+
+void test_installed_package_state_snapshot_retains_incomplete_identity() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"missing-base", "1.0-1"},
+                              {"malformed-base", "2.0-1"}});
+    stub::set_local_package_base_null(0);
+    stub::set_local_package_architecture(0, "invalid architecture");
+    stub::set_local_package_base(1, "invalid/base");
+    stub::set_local_package_architecture_null(1);
+
+    PackageMetadataSession session =
+        PackageMetadataSession::open(valid_database_paths());
+    const InstalledPackageStateSnapshot snapshot =
+        require_result_alternative<InstalledPackageStateSnapshot>(
+            session.snapshot_installed_package_states(),
+            "incomplete installed identity snapshot");
+
+    expect_installed_identity_value(
+        snapshot.at("missing-base").package_base,
+        InstalledPackageMetadataValueState::Missing, std::nullopt,
+        "missing snapshot PackageBase");
+    expect_installed_identity_value(
+        snapshot.at("missing-base").architecture,
+        InstalledPackageMetadataValueState::Malformed, std::nullopt,
+        "malformed snapshot architecture");
+    expect_installed_identity_value(
+        snapshot.at("malformed-base").package_base,
+        InstalledPackageMetadataValueState::Malformed, std::nullopt,
+        "malformed snapshot PackageBase");
+    expect_installed_identity_value(
+        snapshot.at("malformed-base").architecture,
+        InstalledPackageMetadataValueState::Missing, std::nullopt,
+        "missing snapshot architecture");
 }
 
 void test_installed_package_state_snapshot_rejects_malformed_metadata() {
@@ -1025,6 +1113,8 @@ void test_package_absent() {
 void test_package_present() {
     stub::reset_alpm_stub();
     stub::set_package_metadata("test-package", "2.4.1-3", ALPM_PKG_REASON_EXPLICIT);
+    stub::set_local_package_base(0, "actual-package-base");
+    stub::set_local_package_architecture(0, "any");
     PackageMetadataSession session = PackageMetadataSession::open(valid_database_paths());
 
     InstalledPackageQueryResult result = session.query_installed_package("test-package");
@@ -1034,6 +1124,79 @@ void test_package_present() {
     expect(metadata.name == "test-package", "installed package name differs");
     expect(metadata.version == "2.4.1-3", "installed package version differs");
     expect(metadata.reason == InstalledPackageReason::Explicit, "installed package reason differs");
+    expect_installed_identity_value(
+        metadata.package_base,
+        InstalledPackageMetadataValueState::Known,
+        std::string("actual-package-base"),
+        "installed package PackageBase");
+    expect_installed_identity_value(
+        metadata.architecture,
+        InstalledPackageMetadataValueState::Known,
+        std::string("any"),
+        "installed package architecture");
+}
+
+void test_installed_package_identity_states_are_lossless() {
+    const InstalledPackageMetadata legacy{
+        "legacy-package", "1.0-1", InstalledPackageReason::Dependency};
+    expect_installed_identity_value(
+        legacy.package_base,
+        InstalledPackageMetadataValueState::Unknown, std::nullopt,
+        "legacy PackageBase authority");
+    expect_installed_identity_value(
+        legacy.architecture,
+        InstalledPackageMetadataValueState::Unknown, std::nullopt,
+        "legacy architecture authority");
+    expect_installed_identity_value(
+        InstalledPackageBaseIdentity::unavailable(),
+        InstalledPackageMetadataValueState::Unavailable, std::nullopt,
+        "unavailable PackageBase authority");
+    expect_installed_identity_value(
+        InstalledPackageArchitectureIdentity::unavailable(),
+        InstalledPackageMetadataValueState::Unavailable, std::nullopt,
+        "unavailable architecture authority");
+
+    stub::reset_alpm_stub();
+    stub::set_package_metadata(
+        "test-package", "1.0-1", ALPM_PKG_REASON_DEPEND);
+    stub::set_local_package_base_null(0);
+    stub::set_local_package_architecture(0, "invalid architecture");
+    {
+        PackageMetadataSession first =
+            PackageMetadataSession::open(valid_database_paths());
+        const InstalledPackageMetadata missing_base =
+            require_result_alternative<InstalledPackageMetadata>(
+                first.query_installed_package("test-package"),
+                "missing PackageBase query");
+        expect_installed_identity_value(
+            missing_base.package_base,
+            InstalledPackageMetadataValueState::Missing, std::nullopt,
+            "missing queried PackageBase");
+        expect_installed_identity_value(
+            missing_base.architecture,
+            InstalledPackageMetadataValueState::Malformed, std::nullopt,
+            "malformed queried architecture");
+    }
+
+    stub::reset_alpm_stub();
+    stub::set_package_metadata(
+        "test-package", "1.0-1", ALPM_PKG_REASON_DEPEND);
+    stub::set_local_package_base(0, "invalid/base");
+    stub::set_local_package_architecture_null(0);
+    PackageMetadataSession second =
+        PackageMetadataSession::open(valid_database_paths());
+    const InstalledPackageMetadata malformed_base =
+        require_result_alternative<InstalledPackageMetadata>(
+            second.query_installed_package("test-package"),
+            "malformed PackageBase query");
+    expect_installed_identity_value(
+        malformed_base.package_base,
+        InstalledPackageMetadataValueState::Malformed, std::nullopt,
+        "malformed queried PackageBase");
+    expect_installed_identity_value(
+        malformed_base.architecture,
+        InstalledPackageMetadataValueState::Missing, std::nullopt,
+        "missing queried architecture");
 }
 
 void test_returned_package_name_mismatch() {
@@ -2388,8 +2551,9 @@ void test_repository_exact_metadata_owns_authoritative_package_base() {
                 "ordinary exact PackageBase");
         expect(
             ordinary.package_name == "ordinary-package" &&
-                ordinary.package_base == "ordinary-package",
-            "Ordinary exact metadata lost its authoritative PackageBase");
+                ordinary.package_base == "ordinary-package" &&
+                ordinary.architecture == "x86_64",
+            "Ordinary exact metadata lost its authoritative PackageBase or architecture");
     }
 
     {
@@ -2400,6 +2564,8 @@ void test_repository_exact_metadata_owns_authoritative_package_base() {
             "extra", "suite-child", "2.0-1");
         stub::set_repository_package_base(
             "extra", "suite-child", "suite");
+        stub::set_repository_package_architecture(
+            "extra", "suite-child", "any");
         RepositoryPackageMetadataSession split_session =
             RepositoryPackageMetadataSession::open(
                 valid_repository_configuration({"extra"}));
@@ -2410,8 +2576,9 @@ void test_repository_exact_metadata_owns_authoritative_package_base() {
                 "split exact PackageBase");
         expect(
             split.package_name == "suite-child" &&
-                split.package_base == "suite",
-            "Split exact metadata flattened child and PackageBase identity");
+                split.package_base == "suite" &&
+                split.architecture == "any",
+            "Split exact metadata flattened child, PackageBase, or architecture identity");
     }
 }
 
@@ -2459,6 +2626,53 @@ void test_repository_exact_metadata_rejects_invalid_package_base() {
                 "core", "malformed-base", "invalid/base");
         },
         "malformed PackageBase");
+}
+
+void test_repository_exact_metadata_rejects_invalid_architecture() {
+    const auto require_invalid_architecture = [](
+                                                  const std::string& package_name,
+                                                  const auto& configure_architecture,
+                                                  const std::string& context) {
+        stub::reset_alpm_stub();
+        stub::set_repository_package_metadata(
+            "core", package_name, 10, 20);
+        stub::set_repository_package_version(
+            "core", package_name, "1.0-1");
+        configure_architecture();
+        RepositoryPackageMetadataSession session =
+            RepositoryPackageMetadataSession::open(
+                valid_repository_configuration({"core"}));
+        const PackageMetadataFailure failure =
+            require_exact_repository_source_failure(
+                session.query_repository_exact_package_metadata(
+                    package_name),
+                PackageMetadataErrorCode::MalformedMetadata,
+                context);
+        expect(!failure.diagnostic.empty(), context + ": empty diagnostic");
+    };
+
+    require_invalid_architecture(
+        "null-architecture",
+        []() {
+            stub::set_repository_package_architecture_null(
+                "core", "null-architecture");
+        },
+        "null repository architecture");
+    require_invalid_architecture(
+        "empty-architecture",
+        []() {
+            stub::set_repository_package_architecture(
+                "core", "empty-architecture", "");
+        },
+        "empty repository architecture");
+    require_invalid_architecture(
+        "malformed-architecture",
+        []() {
+            stub::set_repository_package_architecture(
+                "core", "malformed-architecture",
+                "invalid architecture");
+        },
+        "malformed repository architecture");
 }
 
 void test_repository_session_move_construction_does_not_double_release() {
@@ -2538,6 +2752,7 @@ int main() {
         test_local_package_version_snapshot_reports_invalid_cache_entry();
         test_moved_from_session_snapshot_reports_query_failure();
         test_installed_package_state_snapshot_is_owned_and_keeps_reasons();
+        test_installed_package_state_snapshot_retains_incomplete_identity();
         test_installed_package_state_snapshot_rejects_malformed_metadata();
         test_installed_package_state_snapshot_failure_is_not_empty_inventory();
         test_empty_installed_package_state_snapshot_confirms_no_entries();
@@ -2546,6 +2761,7 @@ int main() {
 
         test_package_absent();
         test_package_present();
+        test_installed_package_identity_states_are_lossless();
         test_returned_package_name_mismatch();
         test_null_package_name();
         test_null_package_version();
@@ -2617,6 +2833,7 @@ int main() {
         test_repository_root_search_free_function_uses_one_session();
         test_repository_exact_metadata_owns_authoritative_package_base();
         test_repository_exact_metadata_rejects_invalid_package_base();
+        test_repository_exact_metadata_rejects_invalid_architecture();
         test_repository_session_move_construction_does_not_double_release();
         test_repository_session_move_assignment_does_not_double_release();
     } catch(const std::exception& error) {

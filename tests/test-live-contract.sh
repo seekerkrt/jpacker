@@ -43,9 +43,16 @@ offline_runner=$repo_root/containers/arch-validation/run-tests.sh
 receipt_root=$repo_root/containers/arch-receipt-validation
 receipt_dockerfile=$receipt_root/Dockerfile
 receipt_runner=$receipt_root/run-installed-receipt.sh
+source_receipt_runner=$receipt_root/run-installed-source-artifact-receipt.py
 receipt_dependency_v1=$receipt_root/fixtures/dependency-v1/PKGBUILD
 receipt_dependency_v2=$receipt_root/fixtures/dependency-v2/PKGBUILD
 receipt_target=$receipt_root/fixtures/target/PKGBUILD
+test_targets_file=$repo_root/cmake/MoguetTestTargets.cmake
+production_cmake_file=$repo_root/CMakeLists.txt
+artifact_identity_source=$repo_root/source/artifact_identity.cpp
+artifact_archive_metadata_source=$repo_root/source/artifact_archive_metadata.cpp
+installed_source_fixture=$repo_root/tests/source_artifact_install_installed_fixture.cpp
+production_source_runner=$repo_root/source/source_install.cpp
 
 fail() {
     printf '%s\n' "$*" >&2
@@ -122,9 +129,14 @@ assert_regular_file "$offline_dockerfile" 'offline validation Dockerfile'
 assert_regular_file "$offline_runner" 'offline validation runner'
 assert_regular_file "$receipt_dockerfile" 'trusted receipt Dockerfile'
 assert_regular_file "$receipt_runner" 'trusted receipt installed runner'
+assert_regular_file "$source_receipt_runner" \
+    'source-artifact receipt installed runner'
 assert_regular_file "$receipt_dependency_v1" 'trusted receipt dependency v1 fixture'
 assert_regular_file "$receipt_dependency_v2" 'trusted receipt dependency v2 fixture'
 assert_regular_file "$receipt_target" 'trusted receipt solver target fixture'
+assert_regular_file "$artifact_identity_source" 'production artifact identity owner'
+assert_regular_file "$artifact_archive_metadata_source" \
+    'production artifact archive metadata owner'
 
 assert_contains "$readme_file" "live laneは既存のoffline validation lane"
 assert_contains "$readme_file" "ベースイメージは \`archlinux:latest\` を利用する"
@@ -690,6 +702,11 @@ assert_contains "$aur_gateway" 'staged artifact path, content, or PKGINFO valida
 assert_contains "$aur_gateway" 'negative test case must never invoke real pacman'
 assert_contains "$aur_gateway" 'gateway_reject_status=97'
 assert_contains "$aur_gateway" \
+    'write_evidence_line "$evidence_directory/package-identity.txt"'
+assert_contains "$aur_gateway" "'transaction=exactly-once'"
+assert_contains "$aur_gateway" \
+    'write_evidence_line "$evidence_directory/real-pacman-exec.txt"'
+assert_contains "$aur_gateway" \
     'exec_real_pacman -U --noconfirm -- "$staged_artifact"'
 metadata_check_line=$(grep -n -F '"$metadata_helper" "$staged_artifact"' \
     "$aur_gateway" | cut -d: -f1)
@@ -736,6 +753,16 @@ assert_contains "$aur_metadata_helper" 'reject_entry("xattr"'
 assert_contains "$aur_metadata_helper" 'reject_entry("fflags"'
 assert_contains "$aur_metadata_helper" 'category=archive-read'
 
+# Normal production owns archive identity through libalpm.  Test-hook builds
+# may retain a process stub, but the live runner must not infer production
+# authority from that private implementation detail.
+assert_contains "$artifact_identity_source" \
+    'artifact_archive_metadata::query_with_libalpm('
+assert_contains "$artifact_archive_metadata_source" 'alpm_pkg_load('
+assert_contains "$artifact_archive_metadata_source" \
+    'independent from pacman output/localization parsing'
+assert_not_contains "$artifact_identity_source" 'Logger::raw_cmd'
+
 for gateway_rejection_shape in \
     'run_gateway_rejection syu "$gateway_case" -Syu' \
     'run_gateway_rejection remove "$gateway_case" -R "$package_name"' \
@@ -767,6 +794,18 @@ assert_contains "$aur_runner" "'makepkg' '-sc' '--noconfirm'"
 assert_contains "$aur_runner" 'PackageBase result: $package_base'
 assert_contains "$aur_runner" \
     'produced artifact: $AUR_CASE_DEBUG_PACKAGE_NAME $expected_version (not selected; not installed)'
+assert_not_contains "$aur_runner" \
+    "Running: LC_ALL=C 'pacman' '-Qp' '--color' 'never' '--'"
+assert_not_contains "$aur_runner" 'artifact_identity_query_prefix='
+assert_contains "$aur_runner" \
+    'gateway argv artifact does not match original artifact evidence'
+assert_contains "$aur_runner" 'gateway package identity evidence drift'
+assert_contains "$aur_runner" 'gateway validation-complete evidence drift'
+assert_contains "$aur_runner" 'gateway real-pacman execution evidence drift'
+assert_contains "$aur_runner" \
+    'moguet-live-aur-archive-metadata: accepted: entries='
+assert_contains "$aur_runner" \
+    'package_query=$(LC_ALL=C pacman -Qp --color never -- \'
 assert_contains "$aur_runner" 'production did not clean the original artifact workspace'
 assert_contains "$aur_runner" 'root gateway binary-content fail-closed test'
 assert_contains "$aur_runner" 'binary_payload_path=usr/bin/$package_name'
@@ -791,6 +830,7 @@ assert_contains "$aur_runner" 'one positive and five independent negative eviden
 assert_contains "$aur_runner" 'real pacman not reached'
 assert_contains "$aur_runner" 'pacman -Qe "$package_name"'
 assert_contains "$aur_runner" 'pacman -Qd "$package_name"'
+assert_contains "$aur_runner" 'pacman -Q "$AUR_CASE_DEBUG_PACKAGE_NAME"'
 assert_contains "$aur_runner" 'dependency version or install reason changed'
 assert_contains "$aur_runner" \
     'container pacman config does not retain the exact expected README'
@@ -1168,6 +1208,12 @@ assert_contains "$receipt_dockerfile" 'COPY --chown=moguet-validation:moguet-val
 assert_contains "$receipt_dockerfile" 'PREFIX=/usr -j8 --output-sync=target'
 assert_contains "$receipt_dockerfile" 'RUN cmake --install build/cmake-production'
 assert_contains "$receipt_dockerfile" '/usr/libexec/moguet/moguet-alpm-receipt-helper'
+assert_contains "$receipt_dockerfile" \
+    '/usr/libexec/moguet/moguet-source-artifact-install-helper'
+assert_contains "$receipt_dockerfile" \
+    'moguet-source-artifact-install-installed-fixture'
+assert_contains "$receipt_dockerfile" \
+    '/etc/sudoers.d/moguet-source-artifact-receipt'
 assert_contains "$receipt_runner" 'root:root:755:regular file'
 assert_contains "$receipt_runner" '--hookdir "$install_hook_directory"'
 assert_contains "$receipt_runner" 'INSTALL'
@@ -1180,6 +1226,49 @@ printf '%s\n' "$receipt_target_body" | grep -F -- '--network=none' >/dev/null ||
     fail 'trusted receipt target lost its network-none boundary'
 printf '%s\n' "$receipt_target_body" | grep -F -- '--file containers/arch-receipt-validation/Dockerfile' >/dev/null ||
     fail 'trusted receipt target does not build its standalone installed fixture'
+assert_contains "$source_receipt_runner" 'os.MFD_ALLOW_SEALING'
+assert_contains "$source_receipt_runner" 'F_SEAL_WRITE'
+assert_contains "$source_receipt_runner" 'moguet-source-artifact-install-helper'
+assert_contains "$source_receipt_runner" 'TRANSPORT_FIXTURE'
+assert_contains "$source_receipt_runner" 'run_production_transport'
+assert_contains "$source_receipt_runner" 'run_cleanup_lifecycle'
+assert_contains "$source_receipt_runner" 'run_cleanup_authority_scenario'
+assert_contains "$source_receipt_runner" 'later-failed'
+assert_contains "$source_receipt_runner" 'later-not-attempted'
+assert_contains "$source_receipt_runner" 'CAUSAL'
+assert_contains "$source_receipt_runner" 'same-version reinstall became Install'
+assert_contains "$source_receipt_runner" 'downgrade became Install'
+assert_contains "$source_receipt_runner" '--needed skip became Install'
+assert_contains "$source_receipt_runner" 'multi-artifact Install set was not exact'
+source_receipt_target_body=$(make_target_body test-container-source-artifact-receipt)
+printf '%s\n' "$source_receipt_target_body" | grep -F -- '--network=none' >/dev/null ||
+    fail 'source-artifact receipt target lost its network-none boundary'
+printf '%s\n' "$source_receipt_target_body" | grep -F -- \
+    'run-installed-source-artifact-receipt.py' >/dev/null ||
+    fail 'source-artifact receipt target does not run its owner-specific fixture'
+cleanup_authority_target_body=$(make_target_body test-container-cleanup-authority)
+printf '%s\n' "$cleanup_authority_target_body" | grep -F -- '--network=none' >/dev/null ||
+    fail 'cleanup-authority target lost its network-none boundary'
+printf '%s\n' "$cleanup_authority_target_body" | grep -F -- \
+    'run-installed-source-artifact-receipt.py' >/dev/null ||
+    fail 'cleanup-authority target does not run its installed lifecycle fixture'
+printf '%s\n' "$cleanup_authority_target_body" | grep -F -- \
+    'later-failed later-not-attempted' >/dev/null ||
+    fail 'cleanup-authority target lost its production-runner scenario matrix'
+printf '%s\n' "$cleanup_authority_target_body" | grep -F -- \
+    'positive and installed transport matrix' >/dev/null ||
+    fail 'cleanup-authority target lost its existing installed transport matrix'
+assert_contains "$test_targets_file" 'source/source_install.cpp'
+assert_contains "$test_targets_file" \
+    'MOGUET_ENABLE_REMOTE_AUR_CLEANUP_RUNNER_TEST_HOOKS'
+assert_not_contains "$production_cmake_file" \
+    'MOGUET_ENABLE_REMOTE_AUR_CLEANUP_RUNNER_TEST_HOOKS'
+assert_contains "$production_source_runner" \
+    'execute_prepared_remote_aur_cleanup_invocation('
+assert_not_contains "$installed_source_fixture" \
+    'execute_prepared_remote_aur_cleanup_invocation('
+assert_contains "$installed_source_fixture" \
+    'execute_source_build_package_base_with_cleanup_authority('
 
 # The tracked fixture remains the Docker build input. Runtime cases consume its
 # pre-build root-owned authority and keep generated metadata case-local.

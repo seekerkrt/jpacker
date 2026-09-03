@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: Moguet 2.5.0\n"
+"Project-Id-Version: Moguet 2.6.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-28 17:49+0900\n"
+"POT-Creation-Date: 2026-09-02 16:59+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,25 +18,12 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
-#. TRANSLATORS: {} is the literal command name "pacman".
+#. TRANSLATORS: {} is the literal library name "libalpm".
 #, c++-format
-msgid "{} returned malformed package artifact identity."
+msgid "Failed to read package archive metadata with {}."
 msgstr ""
 
-#. TRANSLATORS: {} is the literal command name "pacman".
-#, c++-format
-msgid "{} returned no package artifact identity."
-msgstr ""
-
-#. TRANSLATORS: {} is the literal command name "pacman".
-#, c++-format
-msgid "{} returned an invalid package name for the artifact."
-msgstr ""
-
-#. TRANSLATORS: The first placeholder is the literal command
-#. name "pacman"; the second is its numeric exit code.
-#, c++-format
-msgid "{} failed to read package artifact identity with exit code {}."
+msgid "Package archive metadata contains an invalid name or version."
 msgstr ""
 
 msgid "Artifact package identity set must not be empty."
@@ -1350,15 +1337,13 @@ msgid "{} update preflight contains an unexpected target status."
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the literal service
-#. name "AUR" and internal type name "BuildPlan",
-#. respectively.
+#. name "AUR" and internal type name "BuildPlan".
 #, c++-format
 msgid "Executable {} update preflight has no combined {}."
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the literal service
-#. name "AUR" and internal type name "BuildPlan",
-#. respectively.
+#. name "AUR" and internal type name "BuildPlan".
 #, c++-format
 msgid "Executable {} update {} has an empty execution order."
 msgstr ""
@@ -1373,6 +1358,18 @@ msgid "Generic production source-build preparation failed unexpectedly: {}"
 msgstr ""
 
 msgid "Generic production source-build preparation failed with an unknown exception."
+msgstr ""
+
+#. TRANSLATORS: {} is the literal service name "AUR".
+#, c++-format
+msgid "Observed {} update source-build preflight correlation is inconsistent."
+msgstr ""
+
+#, c++-format
+msgid "Generic production source-build observation failed unexpectedly: {}"
+msgstr ""
+
+msgid "Generic production source-build observation failed with an unknown exception."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
@@ -2015,6 +2012,14 @@ msgid "Unknown operation: {}"
 msgstr ""
 
 #, c++-format
+msgid "A {} option is not supported for the combined {} route. Use {} for a repository-only system upgrade with full {} pass-through."
+msgstr ""
+
+#, c++-format
+msgid "A {} argument form is not supported for the combined {} route. Use {} for a repository-only system upgrade with full {} pass-through."
+msgstr ""
+
+#, c++-format
 msgid "Operation {} does not accept target operands."
 msgstr ""
 
@@ -2320,6 +2325,12 @@ msgstr ""
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
 #, c++-format
 msgid "Unknown {} update target status."
+msgstr ""
+
+msgid "skipped: devel update requires check: suffix candidate only; not automatically updated because authoritative build provenance is unavailable"
+msgstr ""
+
+msgid "Unknown devel RequiresCheck attention reason."
 msgstr ""
 
 msgid "preflight issue"
@@ -3483,6 +3494,63 @@ msgstr ""
 msgid "{} failed."
 msgstr ""
 
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The {} update was not attempted."
+msgstr ""
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository system upgrade completed, but the fresh installed-package inventory for {} could not be obtained."
+msgstr ""
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository system upgrade completed, but the fresh {} update query failed."
+msgstr ""
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository system upgrade completed, but the {} update was blocked before execution."
+msgstr ""
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository system upgrade completed, but the {} update could not start."
+msgstr ""
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository system upgrade completed, but the {} update failed."
+msgstr ""
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository system upgrade completed, but {} cleanup failed after a package transaction."
+msgstr ""
+
+msgid "The completed repository system upgrade was not rolled back."
+msgstr ""
+
+msgid "The repository system upgrade completed."
+msgstr ""
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository and {} update result is inconsistent; no success was reported."
+msgstr ""
+
+msgid "The repository system upgrade failed."
+msgstr ""
+
+msgid "The repository system upgrade was not attempted."
+msgstr ""
+
+#. TRANSLATORS: AUR is a runtime project identity.
+#, c++-format
+msgid "The repository system upgrade and normal {} update completed."
+msgstr ""
+
 #, c++-format
 msgid "Cannot combine {} refresh with {} info fallback for unqualified target: {}"
 msgstr ""
@@ -4580,18 +4648,8 @@ msgstr ""
 msgid "{} provider candidate metadata was not returned."
 msgstr ""
 
-#. TRANSLATORS: The placeholders are dependency and provider identities.
-#, c++-format
-msgid "{} [provided by {}]"
-msgstr ""
-
 #, c++-format
 msgid "Provider selection returned a candidate that was not offered for {}."
-msgstr ""
-
-#. TRANSLATORS: The placeholder is a dependency specification.
-#, c++-format
-msgid "version constraint for {} is not verified"
 msgstr ""
 
 #, c++-format
@@ -4798,6 +4856,14 @@ msgid "Dry-run projection produced an invalid observation."
 msgstr ""
 
 msgid "Dry-run observation has an unknown status."
+msgstr ""
+
+#, c++-format
+msgid "System and {} update dry-run projection did not produce an observation."
+msgstr ""
+
+#, c++-format
+msgid "System and {} update dry-run route is not executable."
 msgstr ""
 
 msgid "System/source upgrade preflight has no projection authority."
@@ -5154,6 +5220,11 @@ msgstr ""
 msgid "Failed to load the user configuration because of an unknown error."
 msgstr ""
 
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "The combined system and {} update request is incompatible."
+msgstr ""
+
 #, c++-format
 msgid "Started {} v{}."
 msgstr ""
@@ -5177,12 +5248,10 @@ msgstr ""
 msgid "Build one remote package or local {} root without saving a preference"
 msgstr ""
 
-msgid "Update the system and rebuild configured source packages"
+msgid "Run the source-aware system update and apply saved source-build preferences"
 msgstr ""
 
-#. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-#, c++-format
-msgid "Check registered source-build preferences after {}"
+msgid "Update repository packages before rebuilding configured source packages"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
@@ -5190,9 +5259,9 @@ msgstr ""
 msgid "Update installed {} packages only"
 msgstr ""
 
-#. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
+#. TRANSLATORS: The placeholder is the AUR project identity.
 #, c++-format
-msgid "Do not run {}; source-build preferences are optional"
+msgid "Do not update repository packages; apply saved source-build preferences for matching {} packages"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
@@ -5203,6 +5272,9 @@ msgstr ""
 #. TRANSLATORS: The placeholder is the literal PackageBase identity.
 #, c++-format
 msgid "Give explicit source preferences priority and avoid duplicate package/{} builds"
+msgstr ""
+
+msgid "Apply saved source-build preferences as a source-aware workflow"
 msgstr ""
 
 msgid "Do not accept target operands"
@@ -5285,12 +5357,25 @@ msgstr ""
 msgid "Require an interactive terminal; install selected repository roots first, then build selected {} roots only if that transaction succeeds"
 msgstr ""
 
-msgid "Upgrade the system"
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "Upgrade official repository packages and normal installed {} packages"
 msgstr ""
 
-#. TRANSLATORS: The placeholder is the literal pacman program identity.
+msgid "Do not read or apply saved source-build preferences"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
 #, c++-format
-msgid "Remain compatible with {}; do not scan all source-build preferences"
+msgid "Run repository and {} phases sequentially; a later failure does not roll back the repository upgrade"
+msgstr ""
+
+msgid "Run the repository system upgrade only"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the pacman program identity.
+#, c++-format
+msgid "Allow the full {}-compatible repository argument tail"
 msgstr ""
 
 msgid "Search for packages"
@@ -5320,6 +5405,11 @@ msgid "Reject unsupported routes and do not create state, cache, or workspaces"
 msgstr ""
 
 msgid "Show assessed conflict/replacement blockers before any supported mutation"
+msgstr ""
+
+#. TRANSLATORS: The placeholders are the literal -Syu token and AUR project identity.
+#, c++-format
+msgid "For {}, assess the current installed {} state; actual execution re-evaluates it after the repository upgrade succeeds"
 msgstr ""
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
@@ -5388,9 +5478,14 @@ msgstr ""
 msgid "Limit {}, {}, and {} to {}; do not fall back to repositories"
 msgstr ""
 
-#. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
+#. TRANSLATORS: The placeholders are literal -Syu, upgrade-aur, and AUR identities.
 #, c++-format
-msgid "Limit {}, {}, and {} to official binary repositories; do not use {} or source builds"
+msgid "Do not use with {}; use {} for an {}-only source-aware update"
+msgstr ""
+
+#. TRANSLATORS: -S, -Ss, -Si, -Syu, and AUR are literal CLI/project identities.
+#, c++-format
+msgid "Limit {}, {}, and {} to official binary repositories; with {}, run the repository system upgrade only; do not use {} or source builds"
 msgstr ""
 
 msgid "CONFIGURATION"
@@ -5673,6 +5768,12 @@ msgstr ""
 
 #, c++-format
 msgid "Repository package metadata contains an invalid {}."
+msgstr ""
+
+msgid "Repository package metadata is missing its architecture."
+msgstr ""
+
+msgid "Repository package metadata contains an invalid architecture."
 msgstr ""
 
 #, c++-format
@@ -6288,6 +6389,9 @@ msgid "Warning: installed state is unavailable for provider candidate {}: {}."
 msgstr ""
 
 msgid "Repository provider capability metadata is invalid."
+msgstr ""
+
+msgid "Repository provider package architecture is unavailable."
 msgstr ""
 
 msgid "Reviewed source review could not produce explicit acceptance; the build was not started."
@@ -7039,9 +7143,6 @@ msgstr ""
 msgid "{} set source-build unexpectedly produced an update-status result."
 msgstr ""
 
-msgid "Unknown source-build execution status."
-msgstr ""
-
 #, c++-format
 msgid "Registered source upgrade does not support split {} preference {} from {} {}; this route requires a singular package identity."
 msgstr ""
@@ -7066,6 +7167,9 @@ msgstr ""
 
 #, c++-format
 msgid "Installing selected repository providers: {}"
+msgstr ""
+
+msgid "Unknown source-build execution status."
 msgstr ""
 
 #, c++-format
@@ -7266,6 +7370,20 @@ msgstr ""
 
 #, c++-format
 msgid "Source preference entry changed before removal: {}"
+msgstr ""
+
+msgid "Repository configuration observation failed with an unknown exception."
+msgstr ""
+
+msgid "Foreign package inventory observation failed with an unknown exception."
+msgstr ""
+
+#, c++-format
+msgid "{} query failed with an unknown exception."
+msgstr ""
+
+#, c++-format
+msgid "{} assessment failed with an unknown exception."
 msgstr ""
 
 msgid "The system upgrade failed with an unknown exception."
@@ -7528,10 +7646,6 @@ msgid "Refusing unsafe clone rollback: unknown error."
 msgstr ""
 
 #, c++-format
-msgid "Refusing a non-absolute custom CA path in the trusted {} environment variable {}."
-msgstr ""
-
-#, c++-format
 msgid "Refusing unsafe local {} configuration in the managed checkout."
 msgstr ""
 
@@ -7541,6 +7655,10 @@ msgstr ""
 
 #, c++-format
 msgid "Refusing an invalid managed {} branch name."
+msgstr ""
+
+#, c++-format
+msgid "Refusing a non-absolute custom CA path in the trusted {} environment variable {}."
 msgstr ""
 
 #, c++-format
@@ -8306,17 +8424,34 @@ msgstr ""
 msgid "{} required artifact #{}: {}; target: {}/{}; install reason: {}"
 msgstr ""
 
-msgid "Transaction intents:"
+msgid "Repository package transaction"
 msgstr ""
 
-msgid "Repository package transaction"
+msgid "Repository system transaction intent"
+msgstr ""
+
+#, c++-format
+msgid "Later normal {} dependency/provider transaction intent"
+msgstr ""
+
+msgid "A repository transaction intent stage is not supported by the renderer."
+msgstr ""
+
+msgid "Source-built artifact install boundary"
+msgstr ""
+
+#, c++-format
+msgid "Later normal {} build/install transaction intent"
+msgstr ""
+
+msgid "A source transaction intent stage is not supported by the renderer."
+msgstr ""
+
+msgid "Transaction intents:"
 msgstr ""
 
 #, c++-format
 msgid "  {}. {} ({} policy: {})"
-msgstr ""
-
-msgid "Source-built artifact install boundary"
 msgstr ""
 
 #, c++-format
@@ -8784,6 +8919,14 @@ msgid "{} source preparation failure ({}); update plan indices: {}; roots: {}; p
 msgstr ""
 
 #, c++-format
+msgid "A filtered {} observation issue kind is not supported by the renderer."
+msgstr ""
+
+#, c++-format
+msgid "A system/{} dry-run issue kind is not supported by the renderer."
+msgstr ""
+
+#, c++-format
 msgid "An {} route preflight blocker has no affected identity or diagnostic detail."
 msgstr ""
 
@@ -8793,6 +8936,18 @@ msgstr ""
 
 #, c++-format
 msgid "{} route preflight failure ({}); package: {}; {}: {}; dependency: {}; artifact projection: {}; diagnostic: {}"
+msgstr ""
+
+#, c++-format
+msgid "A filtered {} observation issue is missing its diagnostic."
+msgstr ""
+
+#, c++-format
+msgid "Filtered {} observation inconsistency ({}); package: {}; {}: {}; diagnostic: {}"
+msgstr ""
+
+#, c++-format
+msgid "System/{} current-state observation failure ({}); details: {}"
 msgstr ""
 
 msgid "A system package snapshot issue is missing its package metadata failure."
@@ -8932,6 +9087,92 @@ msgstr ""
 
 #, c++-format
 msgid "  Status: {}"
+msgstr ""
+
+#, c++-format
+msgid "A system/{} aggregate status is not supported by the renderer."
+msgstr ""
+
+msgid "Repository system update plan:"
+msgstr ""
+
+#, c++-format
+msgid "System + normal {} update plan:"
+msgstr ""
+
+msgid "Repository update phase:"
+msgstr ""
+
+msgid "Combined update phases:"
+msgstr ""
+
+msgid "official repository system-upgrade intent"
+msgstr ""
+
+#, c++-format
+msgid "current installed foreign/{} state observation"
+msgstr ""
+
+#, c++-format
+msgid "current-state normal {} assessment"
+msgstr ""
+
+#, c++-format
+msgid "potential later normal {} build/install intents"
+msgstr ""
+
+#, c++-format
+msgid "A system/{} conceptual phase is not supported by the renderer."
+msgstr ""
+
+#, c++-format
+msgid "  Phase {}: {}"
+msgstr ""
+
+msgid "Freshness:"
+msgstr ""
+
+#, c++-format
+msgid "System/{} freshness or transaction semantics are incomplete."
+msgstr ""
+
+msgid "  unsupported"
+msgstr ""
+
+#, c++-format
+msgid "  {} assessment is based on the current installed state."
+msgstr ""
+
+#, c++-format
+msgid "  Actual execution re-evaluates {} state after the repository upgrade succeeds."
+msgstr ""
+
+#, c++-format
+msgid "  The repository system transaction and later normal {} transactions are separate intents."
+msgstr ""
+
+#, c++-format
+msgid "A system/{} projection mode is not supported by the renderer."
+msgstr ""
+
+msgid "Repository system phase:"
+msgstr ""
+
+#, c++-format
+msgid "System/{} projection has no repository child observation."
+msgstr ""
+
+#, c++-format
+msgid "Current-state normal {} phase:"
+msgstr ""
+
+#, c++-format
+msgid "System/{} projection has no current-state {} child observation."
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#, c++-format
+msgid "A system/{} RequiresCheck attention is not supported by the renderer."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal XDG standard identity.

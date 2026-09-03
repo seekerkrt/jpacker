@@ -195,6 +195,25 @@ assert_reply \
 run_completion moguet -S --select query extra ""
 assert_reply "source-aware select extra query後は候補を提示しない"
 
+run_completion moguet -Syu ""
+assert_reply \
+    "-Syu Autoはnormal AUR対応optionとRepoOnly escape hatchを提示" \
+    --edit --noedit --diff --nodiff --noconfirm --dry-run --build-mode= \
+    --rebuild --cleanbuild --needed --repo
+
+run_completion moguet -Syu --repo ""
+assert_reply \
+    "-Syu RepoOnlyはrepository surfaceだけを提示" \
+    --repo --needed --noconfirm --dry-run
+
+run_completion moguet -Syu package ""
+assert_reply \
+    "target-bearing -Syuはopen pacman grammarを維持" \
+    --needed --noconfirm
+
+run_completion moguet -Syu --a
+assert_reply "-Syuはunsupported --aurを提示しない"
+
 run_completion moguet -Q ""
 assert_reply "未列挙pacman operationもopen grammarとして扱う" --needed --noconfirm
 
@@ -316,6 +335,30 @@ CURRENT=6
 _moguet_collect_candidates -S
 (( ${#reply[@]} == 0 )) || fail 'selected -S extra query remained open'
 
+words=(moguet -Syu '')
+CURRENT=3
+_moguet_collect_candidates -Syu
+has_candidate --repo || fail '-Syu lost --repo'
+has_candidate --dry-run || fail '-Syu lost --dry-run'
+has_candidate --needed || fail '-Syu lost --needed'
+has_candidate --noconfirm || fail '-Syu lost --noconfirm'
+has_candidate --edit || fail '-Syu lost normal-AUR review options'
+has_candidate --aur && fail '-Syu exposed unsupported --aur'
+has_candidate --rmdeps && fail '-Syu exposed unsupported --rmdeps'
+
+words=(moguet -Syu --repo '')
+CURRENT=4
+_moguet_collect_candidates -Syu
+has_candidate --dry-run || fail '-Syu --repo lost --dry-run'
+has_candidate --edit && fail '-Syu --repo leaked AUR review options'
+has_candidate --aur && fail '-Syu --repo exposed --aur'
+
+words=(moguet -Syu package '')
+CURRENT=4
+_moguet_collect_candidates -Syu
+has_candidate --needed || fail 'target-bearing -Syu lost delegated options'
+has_candidate --repo && fail 'target-bearing -Syu leaked exact RepoOnly selector'
+
 words=(moguet add-src first V=1 second '')
 CURRENT=6
 _moguet_form_prefix_valid add-src 0 || fail 'add-src ordered multi-item form was closed'
@@ -403,6 +446,24 @@ set mock_words moguet -S --select query
 __moguet_candidate_available 18; or fail 'selected -S legal query was closed'
 set mock_words moguet -S --select query extra
 __moguet_candidate_available 18; and fail 'selected -S extra query remained open'
+
+set mock_words moguet -Syu
+__moguet_candidate_available 12; or fail '-Syu lost --repo'
+__moguet_candidate_available 5; or fail '-Syu lost --dry-run'
+__moguet_candidate_available 18; or fail '-Syu lost --needed'
+__moguet_candidate_available 4; or fail '-Syu lost --noconfirm'
+__moguet_candidate_available 0; or fail '-Syu lost normal-AUR review options'
+__moguet_candidate_available 11; and fail '-Syu exposed unsupported --aur'
+__moguet_candidate_available 9; and fail '-Syu exposed unsupported --rmdeps'
+
+set mock_words moguet -Syu --repo
+__moguet_candidate_available 5; or fail '-Syu --repo lost --dry-run'
+__moguet_candidate_available 0; and fail '-Syu --repo leaked AUR review options'
+__moguet_candidate_available 11; and fail '-Syu --repo exposed --aur'
+
+set mock_words moguet -Syu package
+__moguet_candidate_available 18; or fail 'target-bearing -Syu lost delegated options'
+__moguet_candidate_available 12; and fail 'target-bearing -Syu leaked exact RepoOnly selector'
 
 set mock_words moguet add-src first V=1 second
 __moguet_form_prefix_valid add-src 0; or fail 'add-src ordered multi-item form was closed'

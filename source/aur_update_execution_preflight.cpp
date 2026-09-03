@@ -1,5 +1,7 @@
 #include "aur_update_execution_preflight.hpp"
 
+#include "aur_update_required_devel_relation_projection.hpp"
+
 #include "dependency_provider.hpp"
 #include "dependency_spec.hpp"
 #include "localization.hpp"
@@ -23,6 +25,8 @@ namespace {
 constexpr std::string_view AUR_SERVICE_NAME = "AUR";
 constexpr std::string_view BUILD_PLAN_TYPE_NAME = "BuildPlan";
 constexpr std::string_view PACKAGE_BASE_FIELD_NAME = "PackageBase";
+constexpr char DUPLICATE_UPDATE_TARGET_DIAGNOSTIC[] =
+    "Update candidate occurs more than once in the invocation.";
 
 struct CandidateMapping {
     std::size_t candidate_index;
@@ -46,7 +50,9 @@ bool same_issue(
                rhs.devel_requires_check_reason &&
            lhs.build_plan_projection_issue ==
                rhs.build_plan_projection_issue &&
-           lhs.relation_reason == rhs.relation_reason;
+           lhs.relation_reason == rhs.relation_reason &&
+           lhs.required_devel_target_blocker ==
+               rhs.required_devel_target_blocker;
 }
 
 void add_issue(
@@ -102,9 +108,42 @@ bool is_unsupported_reason(AurUpdateExecutionReason reason) noexcept {
     }
 }
 
-bool is_skip_reason(AurUpdateExecutionReason reason) noexcept {
+bool is_skip_reason(
+    AurUpdateExecutionReason reason,
+    DevelRequiresCheckPolicy policy,
+    bool allow_devel_requires_check_skip) noexcept {
     return reason == AurUpdateExecutionReason::UpToDate ||
-           reason == AurUpdateExecutionReason::NonAurForeign;
+           reason == AurUpdateExecutionReason::NonAurForeign ||
+           (reason == AurUpdateExecutionReason::DevelRequiresCheck &&
+            policy ==
+                DevelRequiresCheckPolicy::SkipIndependentTarget &&
+            allow_devel_requires_check_skip);
+}
+
+std::optional<AurUpdateExecutionSkipKind> skip_kind_for_reason(
+    AurUpdateExecutionReason reason,
+    DevelRequiresCheckPolicy policy,
+    bool allow_devel_requires_check_skip,
+    bool is_required_devel_target) noexcept {
+    switch(reason) {
+        case AurUpdateExecutionReason::UpToDate:
+            return AurUpdateExecutionSkipKind::UpToDate;
+        case AurUpdateExecutionReason::NonAurForeign:
+            return AurUpdateExecutionSkipKind::NonAurForeign;
+        case AurUpdateExecutionReason::DevelRequiresCheck:
+            if(policy ==
+                   DevelRequiresCheckPolicy::SkipIndependentTarget &&
+               allow_devel_requires_check_skip) {
+                return is_required_devel_target
+                           ? AurUpdateExecutionSkipKind::
+                                 RequiredDevelRequiresCheck
+                           : AurUpdateExecutionSkipKind::
+                                 IndependentDevelRequiresCheck;
+            }
+            return std::nullopt;
+        default:
+            return std::nullopt;
+    }
 }
 
 std::string devel_requires_check_diagnostic(
@@ -142,16 +181,35 @@ bool contains_control_character(const std::string& value) noexcept {
         });
 }
 
-void reduce_target_status(AurUpdateExecutionTarget& target) noexcept {
+void reduce_target_status(
+    AurUpdateExecutionTarget& target,
+    DevelRequiresCheckPolicy policy,
+    bool allow_devel_requires_check_skip,
+    bool is_required_devel_target) noexcept {
     bool has_incomplete = false;
     bool has_unsupported = false;
     bool has_skip = false;
+    std::optional<AurUpdateExecutionSkipKind> skip_kind;
+    target.skip_kind.reset();
     for(const auto& issue : target.issues) {
         if(issue.reason == AurUpdateExecutionReason::None) continue;
         if(is_unsupported_reason(issue.reason)) {
             has_unsupported = true;
-        } else if(is_skip_reason(issue.reason)) {
+        } else if(is_skip_reason(
+                      issue.reason, policy,
+                      allow_devel_requires_check_skip)) {
             has_skip = true;
+            const auto current_skip_kind =
+                skip_kind_for_reason(
+                    issue.reason, policy,
+                    allow_devel_requires_check_skip,
+                    is_required_devel_target);
+            if(skip_kind.has_value() &&
+               skip_kind != current_skip_kind) {
+                skip_kind.reset();
+            } else if(!skip_kind.has_value()) {
+                skip_kind = current_skip_kind;
+            }
         } else {
             has_incomplete = true;
         }
@@ -164,6 +222,7 @@ void reduce_target_status(AurUpdateExecutionTarget& target) noexcept {
         target.status = AurUpdateExecutionTargetStatus::Unsupported;
     } else if(has_skip) {
         target.status = AurUpdateExecutionTargetStatus::Skipped;
+        target.skip_kind = skip_kind;
     } else {
         target.status = AurUpdateExecutionTargetStatus::Executable;
     }
@@ -1294,6 +1353,129 @@ std::vector<AttributedBuildPlanIssue> inspect_build_plan(
     return issues;
 }
 
+void reject_duplicate_requires_check_target_correlations(
+    AurUpdateExecutionPreflight& preflight) {
+    std::map<std::string, std::vector<std::size_t>> positions_by_name;
+    std::set<std::string> requires_check_names;
+    for(std::size_t position = 0; position < preflight.targets.size();
+        ++position) {
+        const AurUpdateExecutionTarget& target =
+            preflight.targets[position];
+        positions_by_name[target.update.installed_name].push_back(position);
+        if(target.update.aur_package.has_value() &&
+           target.update.aur_package->aur_name !=
+               target.update.installed_name) {
+            positions_by_name[target.update.aur_package->aur_name]
+                .push_back(position);
+        }
+        if(project_aur_update_effective_state(target.update) ==
+               AurUpdateEffectiveState::RequiresCheck &&
+           target.update.aur_package.has_value()) {
+            requires_check_names.insert(target.update.installed_name);
+            requires_check_names.insert(
+                target.update.aur_package->aur_name);
+        }
+    }
+
+    std::set<std::size_t> rejected_positions;
+    for(const auto& [package_name, positions] : positions_by_name) {
+        if(!requires_check_names.contains(package_name) ||
+           positions.size() <= 1) {
+            continue;
+        }
+        for(const std::size_t position : positions) {
+            if(!rejected_positions.insert(position).second) continue;
+            add_issue(
+                preflight.targets[position],
+                make_localized_execution_issue(
+                    AurUpdateExecutionReason::UpdatePlanInconsistent,
+                    localization::translate_message(
+                        DUPLICATE_UPDATE_TARGET_DIAGNOSTIC),
+                    package_name));
+        }
+    }
+}
+
+AurUpdateExecutionIssue make_required_devel_target_issue(
+    const AurUpdateExpectedRequiredDevelRelation& relation) {
+    return AurUpdateExecutionIssue{
+        AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck,
+        relation.blocker.package_name,
+        relation.blocker.package_base,
+        relation.dependency_specification,
+        devel_requires_check_diagnostic(
+            relation.blocker.devel_requires_check_reason),
+        std::nullopt,
+        std::nullopt,
+        relation.blocker.devel_requires_check_reason,
+        relation.blocker};
+}
+
+AurUpdateExecutionTarget* find_unique_update_target(
+    AurUpdateExecutionPreflight& preflight,
+    std::size_t update_plan_index) {
+    AurUpdateExecutionTarget* match = nullptr;
+    for(AurUpdateExecutionTarget& target : preflight.targets) {
+        if(target.update_plan_index != update_plan_index) continue;
+        if(match != nullptr) return nullptr;
+        match = &target;
+    }
+    return match;
+}
+
+void retain_required_devel_projection_failure(
+    AurUpdateExecutionPreflight& preflight,
+    const std::vector<CandidateMapping>& candidates) {
+    const AurUpdateExecutionIssue issue = make_localized_execution_issue(
+        AurUpdateExecutionReason::BuildPlanInconsistent,
+        localization::format_translated_message(
+            // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+            "A blocking {} issue could not be attributed to every affected root.",
+            BUILD_PLAN_TYPE_NAME));
+    for(const CandidateMapping& candidate : candidates) {
+        if(AurUpdateExecutionTarget* target = find_unique_update_target(
+               preflight, candidate.update_plan_index);
+           target != nullptr) {
+            add_issue(*target, issue);
+        }
+    }
+}
+
+void apply_required_devel_relation_projection(
+    AurUpdateExecutionPreflight& preflight,
+    const std::vector<CandidateMapping>& candidates,
+    const AurUpdateRequiredDevelRelationProjection& projection) {
+    const bool has_existing_blocker = std::any_of(
+        preflight.targets.begin(), preflight.targets.end(),
+        [](const AurUpdateExecutionTarget& target) {
+            return std::any_of(
+                target.issues.begin(), target.issues.end(),
+                [](const AurUpdateExecutionIssue& issue) {
+                    return issue.reason != AurUpdateExecutionReason::None &&
+                           issue.reason !=
+                               AurUpdateExecutionReason::UpToDate &&
+                           issue.reason != AurUpdateExecutionReason::
+                                               NonAurForeign &&
+                           issue.reason != AurUpdateExecutionReason::
+                                               DevelRequiresCheck;
+                });
+        });
+    bool has_mapping_failure =
+        !projection.authority_is_complete && !has_existing_blocker;
+    for(const AurUpdateExpectedRequiredDevelRelation& relation :
+        projection.relations) {
+        AurUpdateExecutionTarget* owner = find_unique_update_target(
+            preflight, relation.owner_update_plan_index);
+        if(owner == nullptr) {
+            has_mapping_failure = true;
+            continue;
+        }
+        add_issue(*owner, make_required_devel_target_issue(relation));
+    }
+    if(projection.requires_global_fail_closed || has_mapping_failure) {
+        retain_required_devel_projection_failure(preflight, candidates);
+    }
+}
 AurUpdateExecutionTarget& candidate_target(
     AurUpdateExecutionPreflight& preflight,
     const CandidateMapping& candidate) {
@@ -1487,15 +1669,20 @@ void inspect_combined_build_plan_consistency(
 } // namespace
 
 AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
-    const AurUpdatePlan& update_plan) {
+    const AurUpdatePlan& update_plan,
+    DevelRequiresCheckPolicy devel_requires_check_policy) {
     return resolve_aur_update_execution_preflight(
-        update_plan, ProviderSelectionCallback{});
+        update_plan, devel_requires_check_policy,
+        ProviderSelectionCallback{});
 }
 
 AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
     const AurUpdatePlan& update_plan,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     const ProviderSelectionCallback& select_provider) {
     AurUpdateExecutionPreflight preflight;
+    preflight.devel_requires_check_policy =
+        devel_requires_check_policy;
     preflight.targets.reserve(update_plan.entries.size());
 
     std::vector<CandidateMapping> candidates;
@@ -1543,6 +1730,19 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
         preflight.targets.push_back(std::move(target));
     }
 
+    if(!is_known_devel_requires_check_policy(
+           devel_requires_check_policy)) {
+        for(auto& target : preflight.targets)
+            reduce_target_status(
+                target, devel_requires_check_policy, false, false);
+        return preflight;
+    }
+
+    if(devel_requires_check_policy ==
+       DevelRequiresCheckPolicy::SkipIndependentTarget) {
+        reject_duplicate_requires_check_target_correlations(preflight);
+    }
+
     bool has_duplicate_candidate = false;
     for(const auto& [package_name, plan_indices] :
         candidate_indices_by_name) {
@@ -1560,7 +1760,8 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
 
     if(candidates.empty()) {
         for(auto& target : preflight.targets)
-            reduce_target_status(target);
+            reduce_target_status(
+                target, devel_requires_check_policy, true, false);
         return preflight;
     }
 
@@ -1574,7 +1775,8 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
                     "Combined {} resolution was skipped because the candidate set is inconsistent.",
                     BUILD_PLAN_TYPE_NAME)));
         for(auto& target : preflight.targets)
-            reduce_target_status(target);
+            reduce_target_status(
+                target, devel_requires_check_policy, false, false);
         return preflight;
     }
 
@@ -1588,12 +1790,59 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
     preflight.build_plan = resolve_build_plan_for_preflight(
         candidate_names, select_provider);
     inspect_combined_build_plan_consistency(preflight, candidates);
+    std::vector<AttributedBuildPlanIssue> attributed_issues =
+        inspect_build_plan(preflight.build_plan.value());
+    AurUpdateRequiredDevelRelationProjection required_devel_projection;
+    if(devel_requires_check_policy ==
+       DevelRequiresCheckPolicy::SkipIndependentTarget) {
+        required_devel_projection =
+            project_aur_update_required_devel_relations(preflight);
+        apply_required_devel_relation_projection(
+            preflight, candidates, required_devel_projection);
+    }
     apply_attributed_build_plan_issues(
-        preflight, candidates,
-        inspect_build_plan(preflight.build_plan.value()));
+        preflight, candidates, attributed_issues);
 
-    for(auto& target : preflight.targets)
-        reduce_target_status(target);
+    for(auto& target : preflight.targets) {
+        const bool is_required =
+            std::find(
+                required_devel_projection.required_update_plan_indices
+                    .begin(),
+                required_devel_projection.required_update_plan_indices.end(),
+                target.update_plan_index) !=
+            required_devel_projection.required_update_plan_indices.end();
+        reduce_target_status(
+            target, devel_requires_check_policy, true,
+            is_required);
+    }
+    if(devel_requires_check_policy ==
+           DevelRequiresCheckPolicy::SkipIndependentTarget &&
+       !has_complete_aur_update_required_devel_relation_snapshot(
+           preflight) &&
+       !std::any_of(
+           preflight.targets.begin(), preflight.targets.end(),
+           [](const AurUpdateExecutionTarget& target) {
+               return target.status ==
+                          AurUpdateExecutionTargetStatus::Incomplete ||
+                      target.status ==
+                          AurUpdateExecutionTargetStatus::Unsupported;
+           })) {
+        retain_required_devel_projection_failure(preflight, candidates);
+        for(auto& target : preflight.targets) {
+            const bool is_required =
+                std::find(
+                    required_devel_projection
+                        .required_update_plan_indices.begin(),
+                    required_devel_projection
+                        .required_update_plan_indices.end(),
+                    target.update_plan_index) !=
+                required_devel_projection
+                    .required_update_plan_indices.end();
+            reduce_target_status(
+                target, devel_requires_check_policy, true,
+                is_required);
+        }
+    }
     return preflight;
 }
 
@@ -1609,6 +1858,9 @@ bool has_executable_targets(
 
 bool has_blocking_targets(
     const AurUpdateExecutionPreflight& preflight) noexcept {
+    if(!has_valid_aur_update_execution_policy_snapshot(preflight)) {
+        return true;
+    }
     return std::any_of(
         preflight.targets.begin(), preflight.targets.end(),
         [](const AurUpdateExecutionTarget& target) {

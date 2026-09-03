@@ -106,6 +106,8 @@ constexpr std::array PUBLIC_SPECIAL_OPERATION_ORDER = {
     SpecialOperationId::PkgbuildExport,
     SpecialOperationId::PkgbuildPrint,
     SpecialOperationId::SyncSelect,
+    SpecialOperationId::SystemAurUpdate,
+    SpecialOperationId::SystemRepositoryUpdate,
 };
 
 } // namespace

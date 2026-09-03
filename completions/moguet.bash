@@ -18,6 +18,8 @@
 #   -G <pkg> [--output-dir=DIR]
 #   -Gp <pkg>
 #   -S --select [--needed] <query>
+#   -Syu [--needed]
+#   -Syu --repo [--needed]
 
 _moguet_option_id() {
     case "$1" in
@@ -172,6 +174,14 @@ _moguet_form_prefix_valid() {
             ;;
         -S:0)
             (( ${#operands[@]} <= 1 )) && return 0
+            return 1
+            ;;
+        -Syu:0)
+            (( ${#operands[@]} <= 0 )) && return 0
+            return 1
+            ;;
+        -Syu:1)
+            (( ${#operands[@]} <= 0 )) && return 0
             return 1
             ;;
         *) return 1 ;;
@@ -331,7 +341,19 @@ _moguet() {
                 candidates=(--needed --noconfirm --select)
             fi
             ;;
-        -Syu) candidates=(--needed --noconfirm) ;;
+        -Syu)
+            if _moguet_has_option_id 12; then
+                if _moguet_form_prefix_valid -Syu 1; then
+                    candidates=(--repo --needed --noconfirm --dry-run)
+                else
+                    candidates=()
+                fi
+            elif _moguet_has_operand -Syu; then
+                candidates=(--needed --noconfirm)
+            else
+                candidates=(--edit --noedit --diff --nodiff --noconfirm --dry-run --build-mode= --rebuild --cleanbuild --needed --repo)
+            fi
+            ;;
         -Ss) candidates=(--needed --noconfirm) ;;
         -Si) candidates=(--needed --noconfirm) ;;
         -Qua) candidates=(--needed --noconfirm) ;;

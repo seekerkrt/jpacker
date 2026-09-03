@@ -17,6 +17,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -34,6 +35,7 @@ constexpr std::size_t MAX_ALPM_DIAGNOSTIC_LENGTH = 160;
 // pacman.confのsignature policyを再実行するものではない。
 constexpr alpm_siglevel_t READ_ONLY_SYNC_DATABASE_SIGLEVEL =
     static_cast<alpm_siglevel_t>(0);
+constexpr const char* CLEANUP_POLICY_BASE_DEVEL_NAME = "base-devel";
 
 [[noreturn]] void throw_package_metadata_error(
     PackageMetadataErrorCode code,
@@ -535,6 +537,45 @@ InstalledPackageReason map_install_reason(alpm_pkgreason_t reason) {
     }
 }
 
+InstalledPackageBaseIdentity snapshot_installed_package_base(
+    alpm_pkg_t* package) {
+    const char* raw_package_base = alpm_pkg_get_base(package);
+    if(raw_package_base == nullptr) {
+        return InstalledPackageBaseIdentity::missing();
+    }
+
+    std::string package_base(raw_package_base);
+    if(!is_valid_package_name(package_base)) {
+        return InstalledPackageBaseIdentity::malformed();
+    }
+    return InstalledPackageBaseIdentity::known(std::move(package_base));
+}
+
+bool is_valid_package_architecture_metadata(
+    const std::string& architecture) noexcept {
+    return !architecture.empty() &&
+           std::none_of(
+               architecture.begin(), architecture.end(),
+               [](unsigned char character) {
+                   return character <= 0x20 || character == 0x7f;
+               });
+}
+
+InstalledPackageArchitectureIdentity snapshot_installed_package_architecture(
+    alpm_pkg_t* package) {
+    const char* raw_architecture = alpm_pkg_get_arch(package);
+    if(raw_architecture == nullptr) {
+        return InstalledPackageArchitectureIdentity::missing();
+    }
+
+    std::string architecture(raw_architecture);
+    if(!is_valid_package_architecture_metadata(architecture)) {
+        return InstalledPackageArchitectureIdentity::malformed();
+    }
+    return InstalledPackageArchitectureIdentity::known(
+        std::move(architecture));
+}
+
 RepositoryProvidedPackageRelation map_provided_package_relation(
     alpm_depmod_t relation) noexcept {
     switch(relation) {
@@ -566,6 +607,10 @@ using RepositoryPackageBaseSnapshotResult = std::variant<
     std::string,
     PackageMetadataFailure>;
 
+using RepositoryPackageArchitectureSnapshotResult = std::variant<
+    std::string,
+    PackageMetadataFailure>;
+
 RepositoryPackageBaseSnapshotResult snapshot_repository_package_base(
     alpm_pkg_t* package) {
     const char* package_base = alpm_pkg_get_base(package);
@@ -577,6 +622,26 @@ RepositoryPackageBaseSnapshotResult snapshot_repository_package_base(
                 "PackageBase")};
     }
     return std::string(package_base);
+}
+
+RepositoryPackageArchitectureSnapshotResult
+snapshot_repository_package_architecture(alpm_pkg_t* package) {
+    const char* raw_architecture = alpm_pkg_get_arch(package);
+    if(raw_architecture == nullptr) {
+        return PackageMetadataFailure{
+            PackageMetadataErrorCode::MalformedMetadata,
+            localization::translate_message(
+                "Repository package metadata is missing its architecture.")};
+    }
+
+    std::string architecture(raw_architecture);
+    if(!is_valid_package_architecture_metadata(architecture)) {
+        return PackageMetadataFailure{
+            PackageMetadataErrorCode::MalformedMetadata,
+            localization::translate_message(
+                "Repository package metadata contains an invalid architecture.")};
+    }
+    return architecture;
 }
 
 RepositoryProvidedPackageMetadataResult snapshot_package_provides(
@@ -894,6 +959,743 @@ ForeignPackageInventory query_foreign_package_inventory_read_phase(
     return inventory;
 }
 
+using CleanupPolicyCandidateMetadataResult = std::variant<
+    CleanupPolicyCandidatePackageMetadata,
+    PackageMetadataFailure>;
+using CleanupPolicyMetaPackageMetadataResult = std::variant<
+    CleanupPolicyMetaPackageMetadata,
+    PackageMetadataFailure>;
+using CleanupPolicyCandidateEvaluationResult = std::variant<
+    CleanupPolicyCandidateEvaluation,
+    PackageMetadataFailure>;
+
+CleanupPolicyAuthorityEvidence make_unobserved_cleanup_policy_authority(
+    CleanupPolicyAuthorityKind authority_kind) {
+    return CleanupPolicyAuthorityEvidence{
+        authority_kind,
+        CleanupPolicyAuthorityObservation::NotObserved,
+        CleanupPolicyMetadataCompleteness::Incomplete,
+        CleanupPolicyCandidateEvaluation::NotEvaluated,
+        CleanupPolicyMetadataCompleteness::Incomplete,
+        {},
+        std::nullopt};
+}
+
+CleanupPolicyProtectionEvidence make_empty_cleanup_policy_evidence() {
+    return CleanupPolicyProtectionEvidence{
+        CleanupPolicyMetadataCompleteness::Incomplete,
+        CleanupPolicyMetadataCompleteness::Incomplete,
+        std::nullopt,
+        make_unobserved_cleanup_policy_authority(
+            CleanupPolicyAuthorityKind::InstalledBaseDevelMetaPackage),
+        make_unobserved_cleanup_policy_authority(
+            CleanupPolicyAuthorityKind::ConfiguredSyncBaseDevelMetaPackage),
+        make_unobserved_cleanup_policy_authority(
+            CleanupPolicyAuthorityKind::BaseDevelGroupCompatibility),
+        CleanupPolicyEvidenceConsistency::Consistent,
+        {}};
+}
+
+using CleanupPolicyDependencySnapshotResult = std::variant<
+    std::vector<std::string>,
+    PackageMetadataFailure>;
+
+CleanupPolicyDependencySnapshotResult snapshot_cleanup_policy_dependencies(
+    alpm_list_t* dependencies,
+    const std::string& malformed_diagnostic,
+    bool require_nonempty) {
+    std::vector<std::string> snapshot;
+    std::set<std::string> observed_dependencies;
+    for(alpm_list_t* node = dependencies; node != nullptr; node = node->next) {
+        if(node->data == nullptr) {
+            return query_failure(
+                PackageMetadataErrorCode::MalformedMetadata,
+                malformed_diagnostic);
+        }
+
+        const auto* dependency =
+            static_cast<const alpm_depend_t*>(node->data);
+        if(dependency->name == nullptr ||
+           !is_valid_package_name(dependency->name)) {
+            return query_failure(
+                PackageMetadataErrorCode::MalformedMetadata,
+                malformed_diagnostic);
+        }
+
+        std::unique_ptr<char, decltype(&std::free)> specification(
+            alpm_dep_compute_string(dependency), &std::free);
+        if(specification == nullptr || specification.get()[0] == '\0') {
+            return query_failure(
+                PackageMetadataErrorCode::MalformedMetadata,
+                malformed_diagnostic);
+        }
+
+        std::string owned_specification(specification.get());
+        if(!observed_dependencies.insert(owned_specification).second) {
+            return query_failure(
+                PackageMetadataErrorCode::MalformedMetadata,
+                malformed_diagnostic);
+        }
+        snapshot.push_back(std::move(owned_specification));
+    }
+
+    if(require_nonempty && snapshot.empty()) {
+        return query_failure(
+            PackageMetadataErrorCode::MalformedMetadata,
+            malformed_diagnostic);
+    }
+    return snapshot;
+}
+
+using CleanupPolicyGroupSnapshotResult = std::variant<
+    std::vector<std::string>,
+    PackageMetadataFailure>;
+
+CleanupPolicyGroupSnapshotResult snapshot_cleanup_policy_groups(
+    alpm_pkg_t* package);
+CleanupPolicyCandidateMetadataResult snapshot_cleanup_policy_candidate(
+    alpm_pkg_t* package,
+    const std::string& expected_package_name);
+CleanupPolicyMetaPackageMetadataResult snapshot_cleanup_policy_meta_package(
+    alpm_pkg_t* package,
+    CleanupPolicyAuthorityKind authority_kind,
+    std::optional<std::size_t> configured_repository_order,
+    std::optional<std::string> repository_name);
+CleanupPolicyCandidateEvaluationResult
+evaluate_cleanup_policy_candidate_satisfaction(
+    alpm_pkg_t* candidate,
+    const std::vector<std::string>& dependency_specifications);
+std::vector<std::string> canonical_dependency_inventory(
+    const CleanupPolicyMetaPackageMetadata& metadata);
+
+} // namespace
+
+struct PackageMetadataSession::Impl {
+    Impl(
+        UniqueAlpmHandle owned_handle,
+        alpm_db_t* borrowed_local_db,
+        alpm_list_t* borrowed_local_package_cache) noexcept
+        : handle(std::move(owned_handle)),
+          local_db(borrowed_local_db),
+          local_package_cache(borrowed_local_package_cache) {
+    }
+
+    UniqueAlpmHandle handle;
+    alpm_db_t* local_db;
+    alpm_list_t* local_package_cache;
+};
+
+struct RepositoryPackageMetadataSession::Impl {
+    struct RegisteredRepository {
+        std::string repository_name;
+        alpm_db_t* database;
+        alpm_list_t* package_cache;
+    };
+
+    Impl(
+        UniqueAlpmHandle owned_handle,
+        std::vector<RegisteredRepository> registered_repositories) noexcept
+        : handle(std::move(owned_handle)),
+          repositories(std::move(registered_repositories)) {
+    }
+
+    UniqueAlpmHandle handle;
+    std::vector<RegisteredRepository> repositories;
+};
+
+CleanupPolicyProtectionEvidence query_cleanup_policy_protection_evidence(
+    const PacmanRepositoryConfiguration& configuration,
+    const std::string& candidate_package_name) {
+    CleanupPolicyProtectionEvidence evidence =
+        make_empty_cleanup_policy_evidence();
+
+    if(!is_valid_package_name(candidate_package_name)) {
+        evidence.candidate_metadata_completeness =
+            CleanupPolicyMetadataCompleteness::Failed;
+        evidence.failures.push_back(query_failure(
+            PackageMetadataErrorCode::InvalidPackageName,
+            "Cleanup policy candidate package name is invalid."));
+        return evidence;
+    }
+
+    std::optional<PackageMetadataSession> local_session;
+    try {
+        local_session.emplace(PackageMetadataSession::open(
+            configuration.database_paths));
+    } catch(const PackageMetadataError& error) {
+        evidence.local_database_completeness =
+            CleanupPolicyMetadataCompleteness::Failed;
+        evidence.failures.push_back(error.failure());
+        return evidence;
+    }
+    evidence.local_database_completeness =
+        CleanupPolicyMetadataCompleteness::Complete;
+
+    PackageMetadataSession::Impl* local = local_session->impl_.get();
+    alpm_pkg_t* candidate = alpm_db_get_pkg(
+        local->local_db, candidate_package_name.c_str());
+    if(candidate == nullptr) {
+        const alpm_errno_t query_error = alpm_errno(local->handle.get());
+        if(query_error == ALPM_ERR_PKG_NOT_FOUND) {
+            evidence.candidate_metadata_completeness =
+                CleanupPolicyMetadataCompleteness::Incomplete;
+        } else {
+            evidence.candidate_metadata_completeness =
+                CleanupPolicyMetadataCompleteness::Failed;
+            evidence.failures.push_back(query_failure(
+                PackageMetadataErrorCode::QueryFailed,
+                installed_package_query_failure(query_error)));
+        }
+        return evidence;
+    }
+
+    CleanupPolicyCandidateMetadataResult candidate_metadata =
+        snapshot_cleanup_policy_candidate(candidate, candidate_package_name);
+    if(const auto* failure =
+           std::get_if<PackageMetadataFailure>(&candidate_metadata);
+       failure != nullptr) {
+        evidence.candidate_metadata_completeness =
+            CleanupPolicyMetadataCompleteness::Failed;
+        evidence.failures.push_back(*failure);
+        return evidence;
+    }
+    evidence.candidate =
+        std::get<CleanupPolicyCandidatePackageMetadata>(
+            std::move(candidate_metadata));
+    evidence.candidate_metadata_completeness =
+        CleanupPolicyMetadataCompleteness::Complete;
+
+    CleanupPolicyAuthorityEvidence& installed_authority =
+        evidence.installed_base_devel;
+    alpm_pkg_t* installed_base_devel = alpm_db_get_pkg(
+        local->local_db, CLEANUP_POLICY_BASE_DEVEL_NAME);
+    if(installed_base_devel == nullptr) {
+        const alpm_errno_t query_error = alpm_errno(local->handle.get());
+        if(query_error != ALPM_ERR_PKG_NOT_FOUND) {
+            installed_authority.observation =
+                CleanupPolicyAuthorityObservation::Unavailable;
+            installed_authority.inventory_completeness =
+                CleanupPolicyMetadataCompleteness::Failed;
+            installed_authority.evaluation_completeness =
+                CleanupPolicyMetadataCompleteness::Failed;
+            evidence.failures.push_back(query_failure(
+                PackageMetadataErrorCode::QueryFailed,
+                installed_package_query_failure(query_error)));
+            return evidence;
+        }
+        installed_authority.observation =
+            CleanupPolicyAuthorityObservation::Absent;
+        installed_authority.inventory_completeness =
+            CleanupPolicyMetadataCompleteness::Complete;
+    } else {
+        installed_authority.observation =
+            CleanupPolicyAuthorityObservation::Present;
+        CleanupPolicyMetaPackageMetadataResult metadata =
+            snapshot_cleanup_policy_meta_package(
+                installed_base_devel,
+                CleanupPolicyAuthorityKind::InstalledBaseDevelMetaPackage,
+                std::nullopt, std::nullopt);
+        if(const auto* failure =
+               std::get_if<PackageMetadataFailure>(&metadata);
+           failure != nullptr) {
+            installed_authority.inventory_completeness =
+                CleanupPolicyMetadataCompleteness::Failed;
+            installed_authority.evaluation_completeness =
+                CleanupPolicyMetadataCompleteness::Failed;
+            evidence.failures.push_back(*failure);
+            return evidence;
+        }
+
+        installed_authority.meta_packages.push_back(
+            std::get<CleanupPolicyMetaPackageMetadata>(
+                std::move(metadata)));
+        installed_authority.inventory_completeness =
+            CleanupPolicyMetadataCompleteness::Complete;
+
+        if(evidence.candidate->package_name ==
+           CLEANUP_POLICY_BASE_DEVEL_NAME) {
+            installed_authority.candidate_evaluation =
+                CleanupPolicyCandidateEvaluation::Protected;
+            installed_authority.evaluation_completeness =
+                CleanupPolicyMetadataCompleteness::Complete;
+            return evidence;
+        }
+
+        CleanupPolicyCandidateEvaluationResult evaluation =
+            evaluate_cleanup_policy_candidate_satisfaction(
+                candidate,
+                installed_authority.meta_packages.front().dependencies);
+        if(const auto* failure =
+               std::get_if<PackageMetadataFailure>(&evaluation);
+           failure != nullptr) {
+            installed_authority.evaluation_completeness =
+                CleanupPolicyMetadataCompleteness::Failed;
+            evidence.failures.push_back(*failure);
+            return evidence;
+        }
+        installed_authority.candidate_evaluation =
+            std::get<CleanupPolicyCandidateEvaluation>(evaluation);
+        installed_authority.evaluation_completeness =
+            CleanupPolicyMetadataCompleteness::Complete;
+        return evidence;
+    }
+
+    std::optional<RepositoryPackageMetadataSession> sync_session;
+    try {
+        sync_session.emplace(
+            RepositoryPackageMetadataSession::open(configuration));
+    } catch(const PackageMetadataError& error) {
+        CleanupPolicyAuthorityEvidence& sync_authority =
+            evidence.configured_sync_base_devel;
+        sync_authority.observation =
+            CleanupPolicyAuthorityObservation::Unavailable;
+        sync_authority.inventory_completeness =
+            CleanupPolicyMetadataCompleteness::Failed;
+        sync_authority.evaluation_completeness =
+            CleanupPolicyMetadataCompleteness::Failed;
+        evidence.failures.push_back(error.failure());
+        return evidence;
+    }
+
+    RepositoryPackageMetadataSession::Impl* sync = sync_session->impl_.get();
+    CleanupPolicyAuthorityEvidence& sync_authority =
+        evidence.configured_sync_base_devel;
+    if(sync->repositories.empty()) {
+        sync_authority.observation =
+            CleanupPolicyAuthorityObservation::Unavailable;
+        sync_authority.inventory_completeness =
+            CleanupPolicyMetadataCompleteness::Failed;
+        sync_authority.evaluation_completeness =
+            CleanupPolicyMetadataCompleteness::Failed;
+        evidence.failures.push_back(query_failure(
+            PackageMetadataErrorCode::RepositoryNotConfigured,
+            "No configured sync database is available for cleanup policy metadata."));
+        return evidence;
+    }
+    bool saw_exact_meta_package = false;
+    bool saw_sync_failure = false;
+    bool saw_complete_positive = false;
+    bool saw_complete_negative = false;
+    std::optional<std::vector<std::string>> expected_dependency_inventory;
+
+    for(std::size_t repository_order = 0;
+        repository_order < sync->repositories.size();
+        ++repository_order) {
+        const auto& repository = sync->repositories[repository_order];
+        alpm_pkg_t* package = alpm_db_get_pkg(
+            repository.database, CLEANUP_POLICY_BASE_DEVEL_NAME);
+        if(package == nullptr) {
+            const alpm_errno_t query_error = alpm_errno(sync->handle.get());
+            if(query_error == ALPM_ERR_PKG_NOT_FOUND) continue;
+
+            saw_sync_failure = true;
+            evidence.failures.push_back(query_failure(
+                PackageMetadataErrorCode::QueryFailed,
+                repository_package_query_failure(query_error)));
+            continue;
+        }
+
+        saw_exact_meta_package = true;
+        CleanupPolicyMetaPackageMetadataResult metadata =
+            snapshot_cleanup_policy_meta_package(
+                package,
+                CleanupPolicyAuthorityKind::
+                    ConfiguredSyncBaseDevelMetaPackage,
+                repository_order, repository.repository_name);
+        if(const auto* failure =
+               std::get_if<PackageMetadataFailure>(&metadata);
+           failure != nullptr) {
+            saw_sync_failure = true;
+            evidence.failures.push_back(*failure);
+            continue;
+        }
+
+        CleanupPolicyMetaPackageMetadata owned_metadata =
+            std::get<CleanupPolicyMetaPackageMetadata>(
+                std::move(metadata));
+        const std::vector<std::string> dependency_inventory =
+            canonical_dependency_inventory(owned_metadata);
+        if(!expected_dependency_inventory.has_value()) {
+            expected_dependency_inventory = dependency_inventory;
+        } else if(expected_dependency_inventory.value() !=
+                  dependency_inventory) {
+            evidence.consistency =
+                CleanupPolicyEvidenceConsistency::Contradictory;
+        }
+
+        CleanupPolicyCandidateEvaluationResult evaluation =
+            evaluate_cleanup_policy_candidate_satisfaction(
+                candidate, owned_metadata.dependencies);
+        if(const auto* failure =
+               std::get_if<PackageMetadataFailure>(&evaluation);
+           failure != nullptr) {
+            saw_sync_failure = true;
+            evidence.failures.push_back(*failure);
+        } else if(std::get<CleanupPolicyCandidateEvaluation>(evaluation) ==
+                  CleanupPolicyCandidateEvaluation::Protected) {
+            saw_complete_positive = true;
+        } else {
+            saw_complete_negative = true;
+        }
+        sync_authority.meta_packages.push_back(
+            std::move(owned_metadata));
+    }
+
+    if(saw_exact_meta_package) {
+        sync_authority.observation =
+            CleanupPolicyAuthorityObservation::Present;
+        sync_authority.inventory_completeness =
+            saw_sync_failure
+                ? CleanupPolicyMetadataCompleteness::Incomplete
+                : CleanupPolicyMetadataCompleteness::Complete;
+        if(saw_complete_positive) {
+            // A complete positive satisfier observation is sufficient to
+            // protect even when a separate configured source failed.  The
+            // same partial inventory can never prove NotProtected.
+            sync_authority.candidate_evaluation =
+                CleanupPolicyCandidateEvaluation::Protected;
+            sync_authority.evaluation_completeness =
+                CleanupPolicyMetadataCompleteness::Complete;
+        } else if(!saw_sync_failure && saw_complete_negative) {
+            sync_authority.candidate_evaluation =
+                CleanupPolicyCandidateEvaluation::NotProtected;
+            sync_authority.evaluation_completeness =
+                CleanupPolicyMetadataCompleteness::Complete;
+        } else {
+            sync_authority.evaluation_completeness =
+                saw_sync_failure
+                    ? CleanupPolicyMetadataCompleteness::Failed
+                    : CleanupPolicyMetadataCompleteness::Incomplete;
+        }
+        return evidence;
+    }
+
+    if(saw_sync_failure) {
+        sync_authority.observation =
+            CleanupPolicyAuthorityObservation::Unavailable;
+        sync_authority.inventory_completeness =
+            CleanupPolicyMetadataCompleteness::Incomplete;
+        sync_authority.evaluation_completeness =
+            CleanupPolicyMetadataCompleteness::Failed;
+        return evidence;
+    }
+
+    sync_authority.observation =
+        CleanupPolicyAuthorityObservation::Absent;
+    sync_authority.inventory_completeness =
+        CleanupPolicyMetadataCompleteness::Complete;
+
+    CleanupPolicyAuthorityEvidence& group_authority =
+        evidence.base_devel_group;
+    CleanupPolicyGroupMetadata group_metadata{
+        CLEANUP_POLICY_BASE_DEVEL_NAME, {}, {}, {}};
+    group_metadata.repository_order.reserve(sync->repositories.size());
+    bool found_exact_group = false;
+    for(const auto& repository : sync->repositories) {
+        group_metadata.repository_order.push_back(
+            repository.repository_name);
+        alpm_group_t* group = alpm_db_get_group(
+            repository.database, CLEANUP_POLICY_BASE_DEVEL_NAME);
+        // POLICY: open() preloaded every configured package cache.  At this
+        // point nullptr is an authoritative exact-group miss; group fallback
+        // is never inferred from a missing cache or registration failure.
+        if(group == nullptr) continue;
+        found_exact_group = true;
+        if(group->name == nullptr ||
+           std::string_view(group->name) !=
+               CLEANUP_POLICY_BASE_DEVEL_NAME) {
+            group_authority.observation =
+                CleanupPolicyAuthorityObservation::Present;
+            group_authority.inventory_completeness =
+                CleanupPolicyMetadataCompleteness::Failed;
+            group_authority.evaluation_completeness =
+                CleanupPolicyMetadataCompleteness::Failed;
+            evidence.failures.push_back(query_failure(
+                PackageMetadataErrorCode::MalformedMetadata,
+                "Cleanup policy base-devel group metadata is malformed."));
+            return evidence;
+        }
+        group_metadata.repositories_with_group.push_back(
+            repository.repository_name);
+    }
+
+    if(!found_exact_group) {
+        group_authority.observation =
+            CleanupPolicyAuthorityObservation::Absent;
+        group_authority.inventory_completeness =
+            CleanupPolicyMetadataCompleteness::Complete;
+        return evidence;
+    }
+
+    std::vector<alpm_list_t> database_nodes(sync->repositories.size());
+    for(std::size_t index = 0; index < sync->repositories.size(); ++index) {
+        database_nodes[index].data = sync->repositories[index].database;
+        database_nodes[index].prev =
+            index == 0 ? nullptr : &database_nodes[index - 1];
+        database_nodes[index].next =
+            index + 1 == database_nodes.size()
+                ? nullptr
+                : &database_nodes[index + 1];
+    }
+    alpm_list_t* database_list =
+        database_nodes.empty() ? nullptr : &database_nodes.front();
+    UniqueAlpmList group_packages(alpm_find_group_pkgs(
+        database_list, CLEANUP_POLICY_BASE_DEVEL_NAME));
+    if(group_packages == nullptr) {
+        group_authority.observation =
+            CleanupPolicyAuthorityObservation::Present;
+        group_authority.inventory_completeness =
+            CleanupPolicyMetadataCompleteness::Incomplete;
+        group_authority.evaluation_completeness =
+            CleanupPolicyMetadataCompleteness::Failed;
+        evidence.failures.push_back(query_failure(
+            PackageMetadataErrorCode::MalformedMetadata,
+            "Cleanup policy base-devel group inventory is empty or unavailable."));
+        return evidence;
+    }
+
+    std::set<std::string> observed_group_members;
+    for(alpm_list_t* node = group_packages.get();
+        node != nullptr;
+        node = node->next) {
+        auto* package = static_cast<alpm_pkg_t*>(node->data);
+        alpm_db_t* package_database =
+            package == nullptr ? nullptr : alpm_pkg_get_db(package);
+        std::optional<std::size_t> source_order;
+        for(std::size_t index = 0;
+            index < sync->repositories.size();
+            ++index) {
+            if(sync->repositories[index].database == package_database) {
+                source_order = index;
+                break;
+            }
+        }
+        const char* package_name =
+            package == nullptr ? nullptr : alpm_pkg_get_name(package);
+        if(!source_order.has_value() || package_name == nullptr ||
+           !is_valid_package_name(package_name) ||
+           !observed_group_members.insert(package_name).second) {
+            group_authority.observation =
+                CleanupPolicyAuthorityObservation::Present;
+            group_authority.inventory_completeness =
+                CleanupPolicyMetadataCompleteness::Failed;
+            group_authority.evaluation_completeness =
+                CleanupPolicyMetadataCompleteness::Failed;
+            evidence.failures.push_back(query_failure(
+                PackageMetadataErrorCode::MalformedMetadata,
+                "Cleanup policy base-devel group inventory is malformed."));
+            return evidence;
+        }
+
+        CleanupPolicyGroupSnapshotResult package_groups =
+            snapshot_cleanup_policy_groups(package);
+        const auto* group_failure =
+            std::get_if<PackageMetadataFailure>(&package_groups);
+        const auto* groups =
+            std::get_if<std::vector<std::string>>(&package_groups);
+        if(group_failure != nullptr || groups == nullptr ||
+           std::find(
+               groups->begin(), groups->end(),
+               CLEANUP_POLICY_BASE_DEVEL_NAME) == groups->end()) {
+            group_authority.observation =
+                CleanupPolicyAuthorityObservation::Present;
+            group_authority.inventory_completeness =
+                CleanupPolicyMetadataCompleteness::Failed;
+            group_authority.evaluation_completeness =
+                CleanupPolicyMetadataCompleteness::Failed;
+            evidence.failures.push_back(
+                group_failure != nullptr
+                    ? *group_failure
+                    : query_failure(
+                          PackageMetadataErrorCode::MalformedMetadata,
+                          "Cleanup policy base-devel group membership is inconsistent."));
+            return evidence;
+        }
+
+        group_metadata.members.push_back(
+            CleanupPolicyGroupMemberMetadata{
+                source_order.value(),
+                sync->repositories[source_order.value()].repository_name,
+                package_name});
+    }
+
+    group_authority.observation =
+        CleanupPolicyAuthorityObservation::Present;
+    group_authority.inventory_completeness =
+        CleanupPolicyMetadataCompleteness::Complete;
+    group_authority.group = std::move(group_metadata);
+    const bool candidate_declares_exact_group =
+        std::find(
+            evidence.candidate->groups.begin(),
+            evidence.candidate->groups.end(),
+            CLEANUP_POLICY_BASE_DEVEL_NAME) !=
+        evidence.candidate->groups.end();
+    group_authority.candidate_evaluation =
+        candidate_declares_exact_group
+            ? CleanupPolicyCandidateEvaluation::Protected
+            : CleanupPolicyCandidateEvaluation::NotProtected;
+    group_authority.evaluation_completeness =
+        CleanupPolicyMetadataCompleteness::Complete;
+    return evidence;
+}
+
+namespace {
+
+CleanupPolicyGroupSnapshotResult snapshot_cleanup_policy_groups(
+    alpm_pkg_t* package) {
+    std::vector<std::string> groups;
+    std::set<std::string> observed_groups;
+    for(alpm_list_t* node = alpm_pkg_get_groups(package);
+        node != nullptr;
+        node = node->next) {
+        if(node->data == nullptr) {
+            return query_failure(
+                PackageMetadataErrorCode::MalformedMetadata,
+                "Candidate package metadata contains an invalid group entry.");
+        }
+        const auto* raw_group_name = static_cast<const char*>(node->data);
+        if(raw_group_name[0] == '\0' ||
+           contains_control_character(raw_group_name)) {
+            return query_failure(
+                PackageMetadataErrorCode::MalformedMetadata,
+                "Candidate package metadata contains an invalid group entry.");
+        }
+
+        std::string group_name(raw_group_name);
+        if(!observed_groups.insert(group_name).second) {
+            return query_failure(
+                PackageMetadataErrorCode::MalformedMetadata,
+                "Candidate package metadata contains a duplicate group entry.");
+        }
+        groups.push_back(std::move(group_name));
+    }
+    return groups;
+}
+
+CleanupPolicyCandidateMetadataResult snapshot_cleanup_policy_candidate(
+    alpm_pkg_t* package,
+    const std::string& expected_package_name) {
+    if(package == nullptr) {
+        return query_failure(
+            PackageMetadataErrorCode::QueryFailed,
+            "Cleanup policy candidate query returned an invalid package entry.");
+    }
+
+    const char* raw_package_name = alpm_pkg_get_name(package);
+    const char* raw_version = alpm_pkg_get_version(package);
+    if(raw_package_name == nullptr ||
+       expected_package_name != raw_package_name ||
+       !is_valid_package_name(raw_package_name) || raw_version == nullptr ||
+       raw_version[0] == '\0') {
+        return query_failure(
+            PackageMetadataErrorCode::MalformedMetadata,
+            "Cleanup policy candidate metadata is incomplete or malformed.");
+    }
+
+    CleanupPolicyDependencySnapshotResult provides =
+        snapshot_cleanup_policy_dependencies(
+            alpm_pkg_get_provides(package),
+            "Cleanup policy candidate metadata contains an invalid provided capability.",
+            false);
+    if(const auto* failure =
+           std::get_if<PackageMetadataFailure>(&provides);
+       failure != nullptr) {
+        return *failure;
+    }
+
+    CleanupPolicyGroupSnapshotResult groups =
+        snapshot_cleanup_policy_groups(package);
+    if(const auto* failure = std::get_if<PackageMetadataFailure>(&groups);
+       failure != nullptr) {
+        return *failure;
+    }
+
+    return CleanupPolicyCandidatePackageMetadata{
+        raw_package_name,
+        raw_version,
+        std::get<std::vector<std::string>>(std::move(provides)),
+        std::get<std::vector<std::string>>(std::move(groups))};
+}
+
+CleanupPolicyMetaPackageMetadataResult snapshot_cleanup_policy_meta_package(
+    alpm_pkg_t* package,
+    CleanupPolicyAuthorityKind authority_kind,
+    std::optional<std::size_t> configured_repository_order,
+    std::optional<std::string> repository_name) {
+    if(package == nullptr) {
+        return query_failure(
+            PackageMetadataErrorCode::QueryFailed,
+            "Cleanup policy meta-package query returned an invalid package entry.");
+    }
+
+    const char* raw_package_name = alpm_pkg_get_name(package);
+    const char* raw_version = alpm_pkg_get_version(package);
+    if(raw_package_name == nullptr ||
+       std::string_view(raw_package_name) != CLEANUP_POLICY_BASE_DEVEL_NAME ||
+       raw_version == nullptr || raw_version[0] == '\0') {
+        return query_failure(
+            PackageMetadataErrorCode::MalformedMetadata,
+            "Cleanup policy base-devel metadata is incomplete or malformed.");
+    }
+
+    CleanupPolicyDependencySnapshotResult dependencies =
+        snapshot_cleanup_policy_dependencies(
+            alpm_pkg_get_depends(package),
+            "Cleanup policy base-devel dependency metadata is incomplete or malformed.",
+            true);
+    if(const auto* failure =
+           std::get_if<PackageMetadataFailure>(&dependencies);
+       failure != nullptr) {
+        return *failure;
+    }
+
+    return CleanupPolicyMetaPackageMetadata{
+        authority_kind,
+        configured_repository_order,
+        std::move(repository_name),
+        raw_package_name,
+        raw_version,
+        std::get<std::vector<std::string>>(std::move(dependencies))};
+}
+
+CleanupPolicyCandidateEvaluationResult
+evaluate_cleanup_policy_candidate_satisfaction(
+    alpm_pkg_t* candidate,
+    const std::vector<std::string>& dependency_specifications) {
+    if(candidate == nullptr || dependency_specifications.empty()) {
+        return query_failure(
+            PackageMetadataErrorCode::QueryFailed,
+            "Cleanup policy satisfier evaluation received incomplete metadata.");
+    }
+
+    alpm_list_t candidate_node{candidate, nullptr, nullptr};
+    for(const std::string& dependency : dependency_specifications) {
+        if(dependency.empty()) {
+            return query_failure(
+                PackageMetadataErrorCode::MalformedMetadata,
+                "Cleanup policy satisfier evaluation received an invalid dependency.");
+        }
+        alpm_pkg_t* satisfier =
+            alpm_find_satisfier(&candidate_node, dependency.c_str());
+        if(satisfier == candidate) {
+            return CleanupPolicyCandidateEvaluation::Protected;
+        }
+        if(satisfier != nullptr) {
+            return query_failure(
+                PackageMetadataErrorCode::QueryFailed,
+                "Cleanup policy satisfier evaluation returned an unrelated package.");
+        }
+    }
+    return CleanupPolicyCandidateEvaluation::NotProtected;
+}
+
+std::vector<std::string> canonical_dependency_inventory(
+    const CleanupPolicyMetaPackageMetadata& metadata) {
+    std::vector<std::string> dependencies = metadata.dependencies;
+    std::sort(dependencies.begin(), dependencies.end());
+    return dependencies;
+}
+
 } // namespace
 
 PackageMetadataError::PackageMetadataError(PackageMetadataFailure failure)
@@ -988,21 +1790,6 @@ ForeignPackageInventoryResult query_foreign_package_inventory(
         return error.failure();
     }
 }
-
-struct PackageMetadataSession::Impl {
-    Impl(
-        UniqueAlpmHandle owned_handle,
-        alpm_db_t* borrowed_local_db,
-        alpm_list_t* borrowed_local_package_cache) noexcept
-        : handle(std::move(owned_handle)),
-          local_db(borrowed_local_db),
-          local_package_cache(borrowed_local_package_cache) {
-    }
-
-    UniqueAlpmHandle handle;
-    alpm_db_t* local_db;
-    alpm_list_t* local_package_cache;
-};
 
 PackageMetadataSession::PackageMetadataSession(std::unique_ptr<Impl> impl) noexcept
     : impl_(std::move(impl)) {
@@ -1116,7 +1903,9 @@ InstalledPackageQueryResult PackageMetadataSession::query_installed_package(
     return InstalledPackageMetadata{
         returned_name,
         installed_version,
-        map_install_reason(alpm_pkg_get_reason(package))};
+        map_install_reason(alpm_pkg_get_reason(package)),
+        snapshot_installed_package_base(package),
+        snapshot_installed_package_architecture(package)};
 }
 
 InstalledExactPackageMetadataQueryResult
@@ -1263,7 +2052,9 @@ PackageMetadataSession::snapshot_installed_package_states() const {
         InstalledPackageMetadata metadata{
             package_name,
             raw_package_version,
-            map_install_reason(alpm_pkg_get_reason(package))};
+            map_install_reason(alpm_pkg_get_reason(package)),
+            snapshot_installed_package_base(package),
+            snapshot_installed_package_architecture(package)};
         if(!snapshot.emplace(std::move(package_name), std::move(metadata))
                 .second) {
             return query_failure(
@@ -1448,24 +2239,6 @@ query_installed_package_runtime_dependency_metadata(
             {}, std::nullopt, error.failure()};
     }
 }
-
-struct RepositoryPackageMetadataSession::Impl {
-    struct RegisteredRepository {
-        std::string repository_name;
-        alpm_db_t* database;
-        alpm_list_t* package_cache;
-    };
-
-    Impl(
-        UniqueAlpmHandle owned_handle,
-        std::vector<RegisteredRepository> registered_repositories) noexcept
-        : handle(std::move(owned_handle)),
-          repositories(std::move(registered_repositories)) {
-    }
-
-    UniqueAlpmHandle handle;
-    std::vector<RegisteredRepository> repositories;
-};
 
 RepositoryPackageMetadataSession::RepositoryPackageMetadataSession(
     std::unique_ptr<Impl> impl) noexcept
@@ -1666,6 +2439,20 @@ RepositoryPackageMetadataSession::query_repository_exact_package_metadata(
             continue;
         }
 
+        RepositoryPackageArchitectureSnapshotResult architecture_result =
+            snapshot_repository_package_architecture(package);
+        if(const auto* failure =
+               std::get_if<PackageMetadataFailure>(&architecture_result);
+           failure != nullptr) {
+            snapshot.source_results.push_back(
+                RepositoryExactPackageMetadataSourceFailure{
+                    repository_order,
+                    repository.repository_name,
+                    package_name,
+                    *failure});
+            continue;
+        }
+
         RepositoryProvidedPackageMetadataResult provides_result =
             snapshot_package_provides(package);
         if(const auto* failure =
@@ -1690,7 +2477,8 @@ RepositoryPackageMetadataSession::query_repository_exact_package_metadata(
                 ? std::nullopt
                 : std::optional<std::string>(package_version),
             std::move(std::get<std::vector<RepositoryProvidedPackageMetadata>>(
-                provides_result))});
+                provides_result)),
+            std::get<std::string>(std::move(architecture_result))});
     }
     return snapshot;
 }
@@ -1780,6 +2568,15 @@ RepositoryPackageMetadataSession::query_repository_provider_package_metadata(
                 source_failure = *failure;
                 break;
             }
+            RepositoryPackageArchitectureSnapshotResult architecture_result =
+                snapshot_repository_package_architecture(package);
+            if(const auto* failure =
+                   std::get_if<PackageMetadataFailure>(
+                       &architecture_result);
+               failure != nullptr) {
+                source_failure = *failure;
+                break;
+            }
             const char* package_version = alpm_pkg_get_version(package);
             source.packages.push_back(RepositoryExactPackageMetadata{
                 repository_order,
@@ -1790,7 +2587,8 @@ RepositoryPackageMetadataSession::query_repository_provider_package_metadata(
                 package_version == nullptr
                     ? std::nullopt
                     : std::optional<std::string>(package_version),
-                std::move(provides)});
+                std::move(provides),
+                std::get<std::string>(std::move(architecture_result))});
         }
 
         if(source_failure.has_value()) {

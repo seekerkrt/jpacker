@@ -116,14 +116,6 @@ DevelChildSuffixEvidence DevelChildSuffixEvidence::classify(
         std::move(package_name), candidate_kind);
 }
 
-const std::string& DevelChildSuffixEvidence::package_name() const noexcept {
-    return package_name_;
-}
-
-const VcsKind* DevelChildSuffixEvidence::candidate_kind() const noexcept {
-    return candidate_kind_.has_value() ? &candidate_kind_.value() : nullptr;
-}
-
 DevelPackageSuffixEvidence::DevelPackageSuffixEvidence(
     std::string package_base,
     std::optional<VcsKind> package_base_candidate_kind,
@@ -148,32 +140,6 @@ DevelPackageSuffixEvidence DevelPackageSuffixEvidence::classify(
         std::move(package_base),
         package_base_candidate_kind,
         std::move(child_evidence));
-}
-
-const std::string& DevelPackageSuffixEvidence::package_base() const noexcept {
-    return package_base_;
-}
-
-const VcsKind*
-DevelPackageSuffixEvidence::package_base_candidate_kind() const noexcept {
-    return package_base_candidate_kind_.has_value()
-               ? &package_base_candidate_kind_.value()
-               : nullptr;
-}
-
-const std::vector<DevelChildSuffixEvidence>&
-DevelPackageSuffixEvidence::installed_children() const noexcept {
-    return installed_children_;
-}
-
-bool DevelPackageSuffixEvidence::has_candidate() const noexcept {
-    if(package_base_candidate_kind_.has_value()) return true;
-    return std::any_of(
-        installed_children_.begin(),
-        installed_children_.end(),
-        [](const DevelChildSuffixEvidence& child) {
-            return child.candidate_kind() != nullptr;
-        });
 }
 
 TrustedDevelSourceMetadata::TrustedDevelSourceMetadata(
@@ -285,29 +251,4 @@ DevelPackageClassification DevelPackageClassification::classify(
         std::move(suffix_evidence),
         std::move(trusted_metadata),
         std::move(successful_build_confirmations));
-}
-
-DevelEvidenceLevel DevelPackageClassification::evidence_level()
-    const noexcept {
-    return evidence_level_;
-}
-
-DevelSourceFormDisposition
-DevelPackageClassification::source_form_disposition() const noexcept {
-    return source_form_disposition_;
-}
-
-const DevelPackageSuffixEvidence&
-DevelPackageClassification::suffix_evidence() const noexcept {
-    return suffix_evidence_;
-}
-
-const std::vector<TrustedDevelSourceMetadata>&
-DevelPackageClassification::trusted_metadata() const noexcept {
-    return trusted_metadata_;
-}
-
-const std::vector<SuccessfulBuildSourceConfirmation>&
-DevelPackageClassification::successful_build_confirmations() const noexcept {
-    return successful_build_confirmations_;
 }

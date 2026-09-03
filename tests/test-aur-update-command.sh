@@ -13,6 +13,7 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 case_count=0
 
@@ -57,6 +58,7 @@ setup_case() {
     export MOGUET_TEST_AUR_UPDATE_SCENARIO=$scenario_name
     export MOGUET_TEST_PACMAN_EXIT_CODE=91
     export MOGUET_TEST_SUDO_EXIT_CODE=92
+    unset MOGUET_TEST_SYSTEM_AUR_PRESENTATION_CASE
     case_count=$((case_count + 1))
 }
 
@@ -107,6 +109,16 @@ assert_not_contains() {
     file=$2
     if grep -F -- "$unexpected" "$file" >/dev/null; then
         fail_case "unexpected text: $unexpected"
+    fi
+}
+
+assert_output_count() {
+    expected_count=$1
+    expected=$2
+    file=$3
+    actual_count=$(validation_grep_count -Fc -- "$expected" "$file")
+    if [ "$actual_count" -ne "$expected_count" ]; then
+        fail_case "unexpected output count for '$expected': $actual_count (expected $expected_count)"
     fi
 }
 
@@ -191,6 +203,8 @@ assert_contains \
     "  preflight issue: devel update requires check: fixture suffix candidate only; authoritative build provenance is unavailable" \
     "$stderr_file"
 assert_not_contains "manual-check-git 1.0-1 ->" "$stdout_file"
+assert_not_contains "Warning: Requires check" "$stdout_file"
+assert_not_contains "Warning: Requires check" "$stderr_file"
 assert_exact_line "reduce execution=no" "$command_log"
 assert_no_external_mutation
 assert_cache_absent
@@ -203,6 +217,21 @@ assert_exact_line \
     "manual-check-git: devel update requires check: suffix candidate only" \
     "$stdout_file"
 assert_not_contains "prompt" "$command_log"
+assert_not_contains "Warning: Requires check" "$stdout_file"
+assert_not_contains "Warning: Requires check" "$stderr_file"
+assert_no_external_mutation
+assert_cache_absent
+assert_state_absent
+
+# The dry-run command uses the same filtered-operation owner but has its own
+# production call site. The operation stub rejects any policy other than the
+# explicit current BlockOperation contract.
+setup_case devel-requires-check-dry-run devel-requires-check
+run_status 1 --dry-run upgrade-aur
+assert_contains "Unified plan:" "$stdout_file"
+assert_contains "  Status: Blocked" "$stdout_file"
+assert_exact_line "preflight" "$command_log"
+assert_contains "prepare needed=false" "$command_log"
 assert_no_external_mutation
 assert_cache_absent
 assert_state_absent
@@ -741,12 +770,88 @@ assert_contains \
 assert_pipeline_absent
 assert_cache_absent
 
-# Existing system routes remain exact and never enter the new pipeline.
-setup_case syu-routing-unchanged no-installed-foreign
+# Repository-only system routes remain exact and never enter the AUR pipeline.
+setup_case syu-repository-routing no-installed-foreign
 export MOGUET_TEST_SUDO_EXIT_CODE=0
-run_status 0 -Syu
+run_status 0 -Syu --repo
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_pipeline_absent
+
+setup_case syu-inconsistent-presentation no-installed-foreign
+export MOGUET_TEST_SYSTEM_AUR_PRESENTATION_CASE=inconsistent
+run_status 1 -Syu
+assert_contains \
+    "The repository and AUR update result is inconsistent; no success was reported." \
+    "$stderr_file"
+assert_not_contains "The repository system upgrade completed." "$stdout_file"
+assert_not_contains \
+    "The repository system upgrade and normal AUR update completed." \
+    "$stdout_file"
+assert_pipeline_absent
+assert_no_external_mutation
+
+setup_case syu-repository-exception-diagnostic no-installed-foreign
+export MOGUET_TEST_SYSTEM_AUR_PRESENTATION_CASE=repository-exception
+run_status 1 -Syu
+assert_contains "The repository system upgrade failed." "$stderr_file"
+assert_contains \
+    "Execution failure: fixture repository exception\\x0A\\x1Bunsafe\\x5Cdetail [source=pacman]" \
+    "$stderr_file"
+assert_output_count 1 "fixture repository exception" "$stderr_file"
+assert_exact_line "The AUR update was not attempted." "$stdout_file"
+assert_pipeline_absent
+assert_no_external_mutation
+
+setup_case syu-preparation-exception-diagnostic no-installed-foreign
+export MOGUET_TEST_SYSTEM_AUR_PRESENTATION_CASE=preparation-exception
+run_status 1 -Syu
+assert_exact_line "The repository system upgrade completed." "$stdout_file"
+assert_contains \
+    "The repository system upgrade completed, but the AUR update was blocked before execution." \
+    "$stderr_file"
+assert_contains \
+    "Blocked: fixture preparation exception\\x0A\\x1Bunsafe\\x5Cdetail [source=aur]" \
+    "$stderr_file"
+assert_output_count 1 "fixture preparation exception" "$stderr_file"
+assert_not_contains "The AUR update was not attempted." "$stdout_file"
+assert_contains \
+    "The completed repository system upgrade was not rolled back." \
+    "$stdout_file"
+assert_pipeline_absent
+assert_no_external_mutation
+
+setup_case syu-execution-exception-diagnostic no-installed-foreign
+export MOGUET_TEST_SYSTEM_AUR_PRESENTATION_CASE=execution-exception
+run_status 1 -Syu
+assert_exact_line "The repository system upgrade completed." "$stdout_file"
+assert_contains \
+    "The repository and AUR update result is inconsistent; no success was reported." \
+    "$stderr_file"
+assert_contains \
+    "The repository system upgrade completed, but the AUR update failed." \
+    "$stderr_file"
+assert_contains \
+    "Internal inconsistency: fixture execution exception\\x0A\\x1Bunsafe\\x5Cdetail [source=aur]" \
+    "$stderr_file"
+assert_output_count 1 "fixture execution exception" "$stderr_file"
+assert_contains \
+    "The completed repository system upgrade was not rolled back." \
+    "$stdout_file"
+assert_pipeline_absent
+assert_no_external_mutation
+
+setup_case syu-child-diagnostic-owned-once query-recoverable-failure
+export MOGUET_TEST_SYSTEM_AUR_PRESENTATION_CASE=child-query-failure
+run_status 1 -Syu
+assert_exact_line "The repository system upgrade completed." "$stdout_file"
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_contains \
+    "The repository system upgrade completed, but the fresh AUR update query failed." \
+    "$stderr_file"
+assert_contains "fixture RPC timeout" "$stderr_file"
+assert_output_count 1 "fixture RPC timeout" "$stderr_file"
+assert_not_contains \
+    "Query failure: fixture RPC timeout [source=aur]" "$stderr_file"
 
 setup_case upgrade-routing-unchanged no-installed-foreign
 export MOGUET_TEST_SUDO_EXIT_CODE=0
@@ -754,7 +859,7 @@ run_status 0 upgrade
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_pipeline_absent
 
-if [ "$case_count" -ne 49 ]; then
+if [ "$case_count" -ne 55 ]; then
     fail_case "internal test case count changed: $case_count"
 fi
 echo "AUR update command integration tests passed ($case_count cases)."

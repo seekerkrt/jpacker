@@ -1,6 +1,7 @@
 #include "cli_runtime_contract.hpp"
 
 #include "application_identity.hpp"
+#include "cli_routing.hpp"
 #include "localization.hpp"
 #include "source_environment.hpp"
 
@@ -113,6 +114,9 @@ DiagnosticOperation diagnostic_operation(
             return DiagnosticOperation::PkgbuildPrint;
         case SpecialOperationId::SyncSelect:
             return DiagnosticOperation::RootPackageSelection;
+        case SpecialOperationId::SystemRepositoryUpdate:
+        case SpecialOperationId::SystemAurUpdate:
+            return DiagnosticOperation::PacmanDelegation;
         case SpecialOperationId::DelegatedPacmanGrammar:
             return DiagnosticOperation::PacmanDelegation;
         case SpecialOperationId::Help:
@@ -308,7 +312,7 @@ bool CliInvocationValidation::is_valid() const noexcept {
 }
 
 ResolvedCliRuntimeContract resolve_cli_runtime_contract(
-    const ParsedCliArguments& parsed) noexcept {
+    const ParsedCliArguments& parsed) {
     if(const cli_authority::OperationSpec* legacy =
            cli_authority::find_moguet_operation(parsed.operation);
        legacy != nullptr) {
@@ -331,8 +335,24 @@ ResolvedCliRuntimeContract resolve_cli_runtime_contract(
               parsed.operation == "-S") {
         special = &cli_authority::special_operation_spec(
             SpecialOperationId::SyncSelect);
-    } else if(parsed.operation == cli_authority::HELP_SHORT_OPTION ||
-              parsed.operation == cli_authority::HELP_LONG_OPTION) {
+    } else {
+        const SyncInvocationRouteClassification sync_route =
+            classify_sync_invocation_route(parsed);
+        if(std::holds_alternative<RepoOnlySystemUpdateRouteCandidate>(
+               sync_route)) {
+            special = &cli_authority::special_operation_spec(
+                SpecialOperationId::SystemRepositoryUpdate);
+        } else if(!std::holds_alternative<OtherSyncRoute>(sync_route)) {
+            special = &cli_authority::special_operation_spec(
+                SpecialOperationId::SystemAurUpdate);
+        }
+    }
+    if(special != nullptr) {
+        return ResolvedCliRuntimeContract{
+            nullptr, nullptr, special, special->owner};
+    }
+    if(parsed.operation == cli_authority::HELP_SHORT_OPTION ||
+       parsed.operation == cli_authority::HELP_LONG_OPTION) {
         special = &cli_authority::special_operation_spec(
             SpecialOperationId::Help);
     } else if(parsed.operation == cli_authority::VERSION_SHORT_OPTION ||
@@ -412,6 +432,30 @@ CliInvocationValidation validate_cli_invocation_contract(
                 DiagnosticOperation::RootPackageSelection);
         }
     }
+    const SyncInvocationRouteClassification sync_route =
+        classify_sync_invocation_route(parsed);
+    if(const auto* auto_candidate =
+           std::get_if<AutoSystemUpdateRouteCandidate>(&sync_route)) {
+        if(const auto* incompatible = std::get_if<
+               IncompatibleAutoSystemUpdatePacmanArguments>(
+               &auto_candidate->pacman_compatibility)) {
+            const CliInvocationIssueKind kind =
+                incompatible->kind ==
+                        AutoSystemUpdatePacmanIncompatibilityKind::
+                            UnsupportedOption
+                    ? CliInvocationIssueKind::
+                          UnsupportedAutoSystemUpdateOption
+                    : CliInvocationIssueKind::
+                          UnsupportedAutoSystemUpdateArgumentForm;
+            return invalid_invocation(
+                contract,
+                CliInvocationIssue{
+                    kind, parsed.operation, incompatible->token,
+                    TargetPolicy::None, OperandKind::None},
+                DiagnosticClass::Unsupported,
+                DiagnosticOperation::PacmanDelegation);
+        }
+    }
     if(contract.is_delegated()) return CliInvocationValidation{contract, {}};
 
     std::optional<CliInvocationIssue> issue;
@@ -449,6 +493,15 @@ std::string cli_invocation_issue_message(
             return localization::format_translated_message(
                 "Option {} is supported only with plain {}.",
                 "--select", "-S");
+        case CliInvocationIssueKind::UnsupportedAutoSystemUpdateOption:
+            return localization::format_translated_message(
+                "A {} option is not supported for the combined {} route. Use {} for a repository-only system upgrade with full {} pass-through.",
+                "pacman", "-Syu", "moguet -Syu --repo", "pacman");
+        case CliInvocationIssueKind::
+            UnsupportedAutoSystemUpdateArgumentForm:
+            return localization::format_translated_message(
+                "A {} argument form is not supported for the combined {} route. Use {} for a repository-only system upgrade with full {} pass-through.",
+                "pacman", "-Syu", "moguet -Syu --repo", "pacman");
         case CliInvocationIssueKind::ExtraOperand:
             if(issue.target_policy == TargetPolicy::None) {
                 return localization::format_translated_message(

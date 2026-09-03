@@ -18,6 +18,7 @@
 #include "logging.hpp"
 #include "runtime_diagnostic.hpp"
 #include "source_install.hpp"
+#include "system_aur_update_operation.hpp"
 #include "system_source_upgrade.hpp"
 #include "unified_plan_projection.hpp"
 #include "unified_plan_renderer.hpp"
@@ -68,6 +69,52 @@ int render_dry_run_projection(
         "Dry-run observation has an unknown status."));
 }
 
+int render_system_aur_update_dry_run_projection(
+    const std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>&
+        projection) {
+    if(projection == nullptr) {
+        throw std::logic_error(localization::format_translated_message(
+            "System and {} update dry-run projection did not produce an observation.",
+            "AUR"));
+    }
+    const UnifiedPlanRenderingResult rendered =
+        render_system_aur_update_unified_plan(*projection);
+    std::cout << rendered.text;
+    return projection->status() ==
+                   SystemAurUpdateUnifiedPlanStatus::Ready
+               ? 0
+               : DRY_RUN_BLOCKED_STATUS;
+}
+
+int run_system_aur_update_dry_run(
+    const SyncInvocationRouteClassification& route,
+    const AppConfig& config) {
+    std::optional<SystemAurUpdateDryRunRequest> request;
+    if(const auto* auto_candidate =
+           std::get_if<AutoSystemUpdateRouteCandidate>(&route)) {
+        // Normal AUR execution options must be rejected before observing any
+        // repository or AUR authority, matching the actual pre-mutation gate.
+        require_supported_production_source_build_options(config);
+        request = SystemAurUpdateDryRunRequest::from_auto_candidate(
+            *auto_candidate);
+    } else if(const auto* repo_only =
+                  std::get_if<RepoOnlySystemUpdateRouteCandidate>(
+                      &route)) {
+        request.emplace(*repo_only);
+    }
+    if(!request.has_value()) {
+        throw std::logic_error(localization::format_translated_message(
+            "System and {} update dry-run route is not executable.",
+            "AUR"));
+    }
+
+    const SystemAurUpdateDryRunObservation observation =
+        observe_system_aur_update_dry_run(
+            std::move(request.value()), config);
+    return render_system_aur_update_dry_run_projection(
+        project_system_aur_update_unified_plan(observation));
+}
+
 int run_root_selection_dry_run(
     const ParsedCliArguments& parsed,
     const AppConfig& config) {
@@ -92,6 +139,11 @@ int run_sync_dry_run(
     const AppConfig& config) {
     if(parsed.root_package_selection_requested) {
         return run_root_selection_dry_run(parsed, config);
+    }
+    const SyncInvocationRouteClassification route =
+        classify_sync_invocation_route(parsed);
+    if(!std::holds_alternative<OtherSyncRoute>(route)) {
+        return run_system_aur_update_dry_run(route, config);
     }
     SyncInstallPreparation preparation = prepare_sync_install(
         parsed, system_update, parsed.source_selection, config);
@@ -212,7 +264,9 @@ int run_upgrade_aur_dry_run(const AppConfig& config) {
     AurUpdateQueryResult query_result = query_installed_aur_updates();
     PreparedFilteredAurUpdateOperation preparation =
         prepare_filtered_aur_update_operation(
-            std::move(query_result), {}, config, std::nullopt);
+            std::move(query_result), NoExplicitSourceSatisfaction{},
+            DevelRequiresCheckPolicy::BlockOperation,
+            SavedSourcePreferencePolicy::Strict, config, std::nullopt);
     return render_dry_run_projection(
         project_filtered_aur_update_unified_plan(preparation));
 }

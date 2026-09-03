@@ -1,4 +1,4 @@
-.TH MOGUET 1 "August 2026" "Moguet 2.5.0" "ユーザーコマンド"
+.TH MOGUET 1 "September 2026" "Moguet 2.6.0" "ユーザーコマンド"
 .\" parity:name
 .SH 名前
 .na
@@ -15,6 +15,12 @@ moguet \- 検証済みsource buildを備えたpacman-first AUR helper
 .B moguet
 .B -S --select [--needed]
 .I query
+.
+.B moguet
+.B -Syu [--needed]
+.
+.B moguet
+.B -Syu --repo [--needed]
 .
 .B moguet
 .BR -h | --help
@@ -68,6 +74,15 @@ pacmanだけで完結するoperationは、Moguetが消費しないcompatibleなp
 保持します。
 targetがAUR / source-build routeへ進む場合、意味を維持できないoptionは黙って
 無視せずexternal mutation前に拒否します。
+exact target-less
+.B -Syu
+はMoguetがinterceptする通常のAUR helper updateです。official repository system upgradeを
+完了してからfreshなnormal installed-AUR updateを実行し、saved source-build preferenceは
+読みません。明示的な
+.BR upgrade 、
+.BR upgrade-aur 、
+.B upgrade-all
+はsaved preferenceを確認・適用するsource-aware workflowです。
 command / option tokenはlocale非依存です。
 closed Moguet grammarはremote / local buildのprimary operand 1件より後にenvironment
 assignmentだけを許し、extra bare build operandを拒否します。
@@ -109,11 +124,11 @@ dependencyへ降格しません。
 .
 .TP
 .B "upgrade"
-pacman-compatible system upgradeを実行した後、registered source-build preferenceを
+repository system upgradeを実行した後、registered source-build preferenceをStrictに
 調査し、既存update契約が必要とするpackageをrebuildします。
 registered source preferenceを走査しない場合は
 .B -Syu
-を使います。
+による通常のrepository + normal-AUR updateを使います。
 .
 .TP
 .B "upgrade-aur"
@@ -122,15 +137,20 @@ conventionalなdevel suffix根拠だけを持ち、normal AUR versionが新し�
 packageは確認が必要な状態として表示し、AUR mutationより前にoperation全体をblockします。
 automatic rebuildは行いません。
 upstream VCS revisionの比較とdevel build provenanceのpublicationはまだ行いません。
+installed AUR targetに対応するsaved source-build preferenceをStrictに確認・適用する
+source-aware workflowです。
 このtarget-less operationは
 .B pacman -Syu
 を実行せず、source-build preferenceだけで選ばれるpackageを更新しません。
+AUR-onlyというscopeはrepository system updateを行わないことを意味し、saved preferenceを
+無視する意味ではありません。
 .
 .TP
 .B "upgrade-all"
 system、registered source、fresh foreign inventory、filtered AURの各phaseをこの順で
 実行します。
 explicit source preferenceは重複するAUR targetより優先します。
+saved source-build preferenceをStrictに確認・適用します。
 filtered AUR phaseではprovider selectionを完了してから
 clone、build、pacman、sudoを開始します。
 先行phaseは完了済みの場合があります。
@@ -309,12 +329,55 @@ source-awareなofficial repository / AUR candidateを表示して、interactive�
 をroute-owned final installationだけへ適用します。
 .
 .TP
-.B "-Syu"
-pacman-compatible system upgradeを実行します。
-この形式はregistered source-build preference全体を走査しません。
-そのscopeも必要な場合は
-.B upgrade
+.B "-Syu [--needed] | -Syu --repo [--needed]"
+exact target-less Auto formは通常のAUR helper updateです。official repository system
+upgradeを先に実行し、成功後にだけfreshなinstalled-foreign inventoryとexact AUR metadataを
+取得して、normal installed-AUR updateをplan・実行します。
+saved source-build preference directoryのsnapshot、列挙、read、適用を行わず、PackageBase
+fallback preferenceも参照せず、preference-derived build environmentはemptyです。valid、
+invalid、unreadable、failureとなるpreference dataのいずれもこのrouteへ影響しません。
+.
+.PP
+statusが
+.B RequiresCheck
+のindependent devel targetはnon-blocking warning付きでskipし、unrelatedなnormal AUR
+updateを停止しません。このstateは未検証のままで、UpToDateでもautomatic update decisionでも
+ありません。別のupdate candidateがdependency、provider、required-child relationとして
+そのtargetを必要とする場合はaffected rootをblockし、commandをnon-zeroにします。明示的な
+.B upgrade-aur
+と
+.B upgrade-all
+はstrictなwhole-operation RequiresCheck blocker behaviorを維持します。
+.
+.PP
+phaseはsequentialでatomicではありません。repository failure時はAUR phaseをnot attemptedの
+ままnon-zeroで終了します。repository phase完了後にAUR phaseがblock / failした場合は、
+repository completionとnon-zeroのpartial failureを表示し、rollbackしません。cleanup failureは
+install outcomeと分離し、inconsistent aggregateはfail closedです。AUR NoUpdatesだけを根拠に
+operation全体をNoOpと呼びません。
+.
+.PP
+Autoでinitially対応するpacman semantic optionは
+.B --needed
+だけです。exact ordered repository transactionにだけ保持し、later AUR transactionへ適用しません。
+その他のpacman semantic optionやunsupported argument formはrepository mutation前に拒否し、
+.B "moguet -Syu --repo"
+を案内します。RepoOnly formはsemantic selectorをpacmanへ渡さず、compatibleなpacman
+pass-through tailを維持してrepository system upgradeだけを行います。AUR query、source
+preference、cache、Git、makepkg、source runnerへ到達しません。
+.B -Syu --aur
+はunsupportedです。AUR-only updateにはsource-awareな
+.B upgrade-aur
 を使います。
+.
+.PP
+combined semanticsを持つのはexact canonical target-less tokenだけです。
+.BR -Sy 、
+.BR -Su 、
+.BR -Suy 、
+separated / long modifier spelling、target-bearing
+.BR "-Syu <pkg>" 、
+unknown modifier formはexisting routingを維持し、installed-AUR sweepを開始しません。
 .
 .TP
 .B "-Ss <query>"
@@ -344,9 +407,13 @@ update arrowではなく確認が必要なreason付きで表示します。
 pacman-compatible queryであり、
 .B upgrade-aur
 の実行とは別です。
-上記のpacman-compatible formはdelegated open grammarの例であり、closed allowlistでは
-ありません。Moguetが消費しないargumentは、選択routeが意味を維持できる場合にpacmanが
-所有します。
+上記で文書化した2つのexact target-less
+.B -Syu
+semantic formを除き、pacman-compatible formはdelegated open grammarの例であり、closed
+allowlistではありません。repository-only
+.B -Syu --repo
+もcompatibleなdelegated pacman tailを維持します。Moguetが消費しないargumentは、選択routeが
+意味を維持できる場合にpacmanが所有します。
 .\" PUBLIC COMMANDS END
 .
 .\" parity:options
@@ -408,6 +475,18 @@ local routeは既存の安全なdescriptorだけを使い、metadata評価が必
 後のactual invocationはcurrent stateを再validationします。
 Moguet v2.2.0ではhuman-readable surfaceだけを提供し、JSONその他のmachine-readable plan
 schemaは追加しません。
+.
+.PP
+exact target-less
+.B "--dry-run -Syu"
+ではrepository system-update intentとlater normal-AUR transaction intentを分けて表示します。
+AUR assessmentは現在インストールされている状態に基づき、repository update後のstateを予測・
+保証しません。actual executionはobservationやprepared capabilityを再利用せず、repository成功後に
+freshなinstalled-foreign inventory、AUR metadata、plan、provider decision、preflightを
+取り直します。current-state AUR NoUpdatesでもrepository intentを持つouter operationをNoOpへ
+変えません。
+.B "--dry-run -Syu --repo"
+はrepository intentだけを表示し、AURやsource-build preferenceへqueryしません。
 .
 .TP
 .B "--edit"
@@ -483,6 +562,12 @@ plain
 .B "--needed"
 pacman-compatible optionとして扱います。
 pacman-only routeではordered argument listに保持します。
+Auto combined
+.B -Syu
+ではinitially唯一対応するpacman semantic optionであり、repository transactionだけへ保持して
+later normal-AUR transactionへ適用しません。RepoOnly
+.B -Syu --repo
+ではrepository pass-throughへ保持します。
 対応するAUR / source-build
 .B -S
 routeではfinal
@@ -527,7 +612,12 @@ custom orphan cleanupへ変換しません。
 .BR -Ss 、
 .B -Si
 をofficial repository fallbackなしのAURへ限定します。
-target-less upgradeやMoguet固有inspection commandではunsupportedです。
+.BR -Syu 、
+target-less upgrade、Moguet固有inspection commandではunsupportedです。source-awareなAUR-only
+updateには
+.B upgrade-aur
+を使います。AUR-onlyはrepository system updateを行わないという意味であり、saved source
+preferenceを無視する意味ではありません。
 .
 .TP
 .B "--repo"
@@ -536,6 +626,11 @@ target-less upgradeやMoguet固有inspection commandではunsupportedです。
 .BR -Ss 、
 .B -Si
 をAUR / source-build fallbackなしのofficial binary repositoryへ限定します。
+exact target-less
+.B -Syu
+ではrepository-only system upgradeを選びます。selectorはpacmanへ渡さず、compatibleな残りの
+pacman argumentを保持します。このformはAUR inventory / query、source preference、cache、Git、
+makepkg、source runnerへ到達しません。
 既存source preferenceを削除しません。
 .\" PUBLIC OPTIONS END
 .
@@ -618,7 +713,12 @@ user所有のpackage別source-build preferenceです。
 fallbackは
 .I $HOME/.config/moguet/source-build.d/<package-name>
 です。managed directoryはmode 0700、preference entryはmode 0600です。
-全source-preference commandとbuild / upgrade readerがこのauthorityを使います。
+全source-preference command、source-aware build、明示的な
+.B upgrade*
+readerはこのauthorityをStrictに使います。exact target-less
+.B -Syu
+とそのdry-runはdirectoryのsnapshot / read、PackageBase fallback preference、
+preference-derived environment適用を意図的に行いません。
 .
 .TP
 .I $XDG_STATE_HOME/moguet/moguet.log
@@ -910,10 +1010,27 @@ unknown、missing、duplicate、unexpected、表現不能なidentityはfail clos
 複数phase updateはatomicではありません。
 failureは完了済みpackage transactionを自動rollbackしません。
 install成功後のcleanup failureはpartial successであり、盲目的に再試行してはいけません。
+exact target-less
+.B -Syu
+ではfreshなAUR authorityを取得する前にrepository system transactionを完了します。
+repository failure時はAUR phaseをnot attemptedとし、後続AUR blocker / failureはnon-zeroの
+partial completionとして、repository transactionをrollbackせず報告します。
 .
 .\" parity:examples
 .SH 例
 .na
+.TP
+通常のrepository + normal installed-AUR updateを実行する:
+.RS
+.B moguet -Syu
+.RE
+.
+.TP
+repository system upgradeだけを実行する:
+.RS
+.B moguet -Syu --repo
+.RE
+.
 .TP
 source-awareなinstall targetを検索して明示選択する:
 .RS
@@ -971,6 +1088,20 @@ user configよりreviewとnormal build defaultを今回だけ優先する:
 .\" parity:migration
 .SH MIGRATION
 .na
+Moguet v2.6.0以降、exact target-less
+.B moguet -Syu
+はrepository-only behaviorから通常のAUR helper updateへ変わります。repository system updateの
+後にnormal installed-AUR updateを実行し、saved source-build preferenceはread・適用しません。
+以前のrepository-only behaviorが必要な利用者は
+.B "moguet -Syu --repo"
+を使ってください。saved source-build preferenceを確認・適用する場合は
+.BR "moguet upgrade" 、
+.BR "moguet upgrade-aur" 、
+.B "moguet upgrade-all"
+を使います。combined routeはsequentialかつnon-atomicです。後続AUR failureはpartial
+completionとして報告し、完了済みrepository transactionをrollbackしません。
+.
+.PP
 reviewed-source state導入前から存在するMoguet AUR cacheにmanual migrationは不要です。
 recordがない状態はnormalなmissing stateであり、最初に対象となるPackageBaseを一度initial
 full reviewします。legacy checkout HEAD、branch、remote ref、build artifactからreviewed

@@ -43,6 +43,9 @@ struct ProvidedDependency {
     ProviderOrigin origin;
     std::string package_name;
     std::string package_base;
+    // Strict repository observations retain the exact libalpm architecture.
+    // Legacy and non-repository adapters leave this Unknown as nullopt.
+    std::optional<std::string> package_architecture;
     std::string provided_dependency_name;
     std::string provided_dependency_specification;
     std::optional<std::string> package_version;
@@ -64,6 +67,7 @@ struct ProvidedDependency {
                 std::move(repository_name), configured_order},
             std::move(package_name),
             {},
+            std::nullopt,
             {},
             {},
             std::nullopt,
@@ -79,6 +83,7 @@ struct ProvidedDependency {
             RepositoryProviderOrigin{std::move(repository_name)},
             std::move(package_name),
             {},
+            std::nullopt,
             std::move(provided_dependency_name),
             std::move(provided_dependency_specification),
             std::move(package_version),
@@ -87,21 +92,53 @@ struct ProvidedDependency {
 
     static ProvidedDependency from_repository_constraint_metadata(
         std::string repository_name, std::string package_name,
+        std::string package_base,
         ProviderConstraintMetadata constraint_metadata) {
         return from_repository_constraint_metadata(
             std::move(repository_name), std::nullopt,
-            std::move(package_name), std::move(constraint_metadata));
+            std::move(package_name), std::move(package_base),
+            std::nullopt,
+            std::move(constraint_metadata));
+    }
+
+    static ProvidedDependency from_repository_constraint_metadata(
+        std::string repository_name, std::string package_name,
+        std::string package_base, std::string package_architecture,
+        ProviderConstraintMetadata constraint_metadata) {
+        return from_repository_constraint_metadata(
+            std::move(repository_name), std::nullopt,
+            std::move(package_name), std::move(package_base),
+            std::move(package_architecture),
+            std::move(constraint_metadata));
     }
 
     static ProvidedDependency from_repository_constraint_metadata(
         std::string repository_name,
         std::size_t configured_order,
         std::string package_name,
+        std::string package_base,
         ProviderConstraintMetadata constraint_metadata) {
         return from_repository_constraint_metadata(
             std::move(repository_name),
             std::optional<std::size_t>{configured_order},
-            std::move(package_name), std::move(constraint_metadata));
+            std::move(package_name), std::move(package_base),
+            std::nullopt,
+            std::move(constraint_metadata));
+    }
+
+    static ProvidedDependency from_repository_constraint_metadata(
+        std::string repository_name,
+        std::size_t configured_order,
+        std::string package_name,
+        std::string package_base,
+        std::string package_architecture,
+        ProviderConstraintMetadata constraint_metadata) {
+        return from_repository_constraint_metadata(
+            std::move(repository_name),
+            std::optional<std::size_t>{configured_order},
+            std::move(package_name), std::move(package_base),
+            std::move(package_architecture),
+            std::move(constraint_metadata));
     }
 
 private:
@@ -109,6 +146,8 @@ private:
         std::string repository_name,
         std::optional<std::size_t> configured_order,
         std::string package_name,
+        std::string package_base,
+        std::optional<std::string> package_architecture,
         ProviderConstraintMetadata constraint_metadata) {
         const ProviderCapability& capability =
             constraint_metadata.provided_capability;
@@ -139,11 +178,25 @@ private:
         }
         const std::string* package_version =
             constraint_metadata.package_version.version();
+        if(package_architecture.has_value()) {
+            const std::string& architecture = package_architecture.value();
+            if(architecture.empty()) {
+                throw std::invalid_argument(
+                    "Repository provider architecture is empty.");
+            }
+            for(const unsigned char character : architecture) {
+                if(character <= 0x20 || character == 0x7f) {
+                    throw std::invalid_argument(
+                        "Repository provider architecture is malformed.");
+                }
+            }
+        }
         return ProvidedDependency{
             RepositoryProviderOrigin{
                 std::move(repository_name), configured_order},
             std::move(package_name),
-            {},
+            std::move(package_base),
+            std::move(package_architecture),
             capability.package_name(),
             capability.raw_specification(),
             package_version == nullptr
@@ -168,6 +221,7 @@ public:
         return ProvidedDependency{
             AurProviderOrigin{}, std::move(package_name),
             std::move(package_base),
+            std::nullopt,
             std::move(provided_dependency_name),
             std::move(provided_dependency_specification),
             std::move(package_version), std::nullopt};
@@ -209,6 +263,7 @@ public:
             AurProviderOrigin{},
             std::move(package_name),
             std::move(package_base),
+            std::nullopt,
             capability.package_name(),
             capability.raw_specification(),
             package_version == nullptr
@@ -223,12 +278,14 @@ private:
     ProvidedDependency(
         ProviderOrigin origin, std::string package_name,
         std::string package_base,
+        std::optional<std::string> package_architecture,
         std::string provided_dependency_name,
         std::string provided_dependency_specification,
         std::optional<std::string> package_version,
         std::optional<ProviderConstraintMetadata> constraint_metadata)
         : origin(std::move(origin)), package_name(std::move(package_name)),
           package_base(std::move(package_base)),
+          package_architecture(std::move(package_architecture)),
           provided_dependency_name(std::move(provided_dependency_name)),
           provided_dependency_specification(
               std::move(provided_dependency_specification)),

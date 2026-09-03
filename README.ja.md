@@ -44,13 +44,13 @@ Moguet v2.0.1は、採用済みXDG storage契約のうちsource-preference部分
 preferenceは実行user自身のXDG config contextだけを使い、公開済みv2.0.0のtag、Release、
 release noteは歴史的記録のまま変更しません。
 
-Moguet v2.5.0は最新releaseです。このminor releaseでは、authoritativeな追跡がまだ
-成立しないconventionalなVCS/devel AUR packageをfalse `UpToDate`へ丸めず
-`RequiresCheck`として公開し、repo/AURを跨ぐexact-version dependency lockに対する
-`upgrade-all`のtargeted diagnosticを追加します。また、invocation-owned dependency cleanupの
-安全基盤を整備しますが、public source-build `--rmdeps`はまだ有効化しません。利用者から
-見える変更の全体は[v2.5.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.5.0)を
-参照してください。
+Moguet v2.6.0は最新releaseです。exact target-less `moguet -Syu`はofficial repository
+system updateを実行し、その成功後にnormal installed-AUR updateを続けます。saved
+source-build preferenceは明示的なsource-aware `upgrade*` workflowだけに限定したままです。
+通常の`-Syu`ではindependent devel `RequiresCheck` targetを局所的にskipし、unrelatedな
+AUR updateをblockしません。一方、required `RequiresCheck` relationと明示的なupgrade
+workflowはstrictなままです。利用者から見える変更の全体は
+[v2.6.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.6.0)を参照してください。
 
 canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ちます。Moguet
 packageは`jpacker` command aliasを提供しません。AUR publicationは将来の別判断であり、
@@ -156,6 +156,11 @@ fail-closedで停止します。v2.xは、Moguetのsource-aware入口、安全�
   だけ失敗した場合、packageはinstall済みの可能性があるため、結果を確認せず再試行
   しないでください。`upgrade-all`のprovider selectionはfiltered AUR phaseのclone、build、
   pacman、sudoより前に行いますが、それ以前のphaseは完了済みの場合があります。
+- exact target-less `moguet -Syu`もsequentialです。official repository system updateを
+  完了してから、freshなinstalled foreign / AUR inventoryを取得し、normal AUR updateを
+  実行します。repository failure時はAUR phaseを開始しません。repository完了後のblocker、
+  execution failure、cleanup failureはnon-zeroのpartial outcomeとして報告し、完了済み
+  repository transactionをrollbackしません。
 
 詳細なcompatibility / routing契約は
 [docs/COMPATIBILITY.md](https://github.com/seekerkrt/moguet/blob/develop/docs/COMPATIBILITY.md)、
@@ -223,11 +228,20 @@ find "$stage_dir" -type f -print
 同じCMake graphへmappingされます。
 
 current development packageはprivate implementation helper
-`/usr/libexec/moguet/moguet-alpm-receipt-helper`もinstallします。これはpackage-ownedな
-root transaction helperであり、public commandではありません。`PATH`外でman pageを持たず、
-executableやdestination pathを引数に取らず、source / build treeのhelperで置き換えては
-なりません。current public source-buildの`--rmdeps`は引き続きunsupported / fail-closedであり、
-helperのinstallによってdependency cleanupが有効になるわけではありません。
+`/usr/libexec/moguet/moguet-alpm-receipt-helper`と
+`/usr/libexec/moguet/moguet-source-artifact-install-helper`もinstallします。両者はowner / protocol /
+stateを分離したpackage-owned root transaction authorityで、public commandではありません。`PATH`外で
+man pageを持たず、executable、state root、destination pathを引数に取らず、source / build treeのhelperで
+置き換えてはなりません。source-artifact helperはwrite-sealedなvalidated artifact bytesだけをprivateな
+root-owned transaction stateへstageしてからfixed `pacman -U`へ渡します。current public source-buildの
+`--rmdeps`は引き続きunsupported / fail-closedであり、どちらのhelperのinstallもdependency cleanupを
+有効化しません。
+
+current development treeは、これらowner-specific helperを単一のclosed remote AUR lifecycle内部で使い、
+internal cleanup-candidate assessmentを構築します。full invocationとcurrent metadata / policy observationが
+成功し、exactにcorrelateされたactual dependency `Install`だけがinternal `Eligible`へ到達できます。
+このassessmentはpublic preview、prompt、removalへ接続せず、makepkg sync dependencyのownershipも
+独立した未解決authorityのままです。
 
 v2.0.0のpackage名と唯一のexecutableは`moguet`で、`/usr/bin/jpacker`をinstall
 しません。payloadはjpacker v1.16.0 packageと重複しないため、metadataには
@@ -265,8 +279,9 @@ makepkg -si
 `makepkg -si`は、そのtag付きreleaseをbuildし、同じ操作で`pacman -U`によってlive
 systemへinstallします。これは、development treeをその場でbuild・確認するだけで
 何もinstallしない、上記の`make`や`./moguet --help`とは異なります。`PKGBUILD`はcanonicalな
-production CMake build / install consumerとして`BUILD_TESTING=OFF`を指定し、96個のdeveloper
-C++ test executableと119件のCTest registrationはhost / CI / release validation側で扱います。
+production CMake build / install consumerとして`BUILD_TESTING=OFF`を指定し、99個のdeveloper
+C++ test-ledger executable、1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、124件のCTest
+registrationはhost / CI / release validation側で扱います。
 この`PKGBUILD`は
 repository同梱のpackaging経路であり、AUR submissionではありません。Moguetはまだ
 AUR pageを公開していません。
@@ -298,9 +313,13 @@ revert <pkg>...
 -G <pkg> [--output-dir=DIR]
 -Gp <pkg>
 -S --select [--needed] <query>
+-Syu [--needed]
+-Syu --repo [--needed]
 ```
 <!-- CLI CANONICAL GRAMMAR END -->
 
+2つのexact target-less `-Syu` formはMoguetがinterceptするsemantic routeです。
+repository-only formはcompatibleなdelegated pacman tailを引き続き受理します。
 その他のpacman operation formは、Moguetのallowlistではなくdelegated open grammarのまま
 です。closed grammarはremote / local `build`の2つ目のbare operandを拒否し、`upgrade`、
 `upgrade-aur`、`upgrade-all`、`clean`、`list-src`のtarget operandを拒否します。`...`を
@@ -313,8 +332,11 @@ moguet -S --select [--needed] <query>
 moguet -Ss <query>
 moguet -Si <pkg>
 
-# pacman-compatible system upgrade
+# 通常のAUR helper update: official repositoryの後にnormal installed AUR
 moguet -Syu
+
+# repository-only system upgrade
+moguet -Syu --repo
 
 # configured source package、installed AUR package、または両方を更新
 moguet upgrade
@@ -349,6 +371,7 @@ moguet -Gp <pkg>
 # persistent stateを変更せず、対応する全mutating routeを観測
 moguet --dry-run -S <pkg>
 moguet --dry-run -Syu
+moguet --dry-run -Syu --repo
 moguet --dry-run fetch <pkg>...
 moguet --dry-run build <pkg>
 moguet --dry-run build --local <directory>
@@ -382,6 +405,14 @@ token、execution capability、cached provider choiceとして再利用せず、
 current stateを再validationします。v2.2.0のsurfaceはhuman-readableだけで、JSONその他の
 machine-readable plan schemaは追加しません。
 
+exact target-less `moguet --dry-run -Syu`では、repository system-update intentと後続の
+normal-AUR transaction intentを分けて表示します。AUR assessmentはrepository transactionを
+仮に実行した後のstateではなく、現在インストールされている状態に基づきます。actual
+`moguet -Syu`はこのobservationやprepared capabilityを再利用せず、repository upgrade成功後に
+freshなinstalled-foreign inventory、AUR metadata、plan、provider decision、preflightを
+取り直します。`moguet --dry-run -Syu --repo`はrepository intentだけを表示し、AURや
+source-build preferenceへqueryしません。
+
 human-readable diagnosticはtyped stateのprojectionであり、classificationを決める
 authorityではありません。英日ともnormal summary、attention-required detail、route-owned
 necessary detailの順を保ちます。operation outcomeとpackage state observationを分け、plan
@@ -389,12 +420,31 @@ construction、completeness、execution readinessを独立して表示します�
 unverifiedな観測はrequired check付きのsuccessとして維持し、`Unknown`を`NoOp`へ書き換えず、
 severity、blocking、exit-status effectも別dimensionとして扱います。
 
-**upgrade commandの選択:** 通常のpackage install、search、system upgradeでは、
-pacmanや他のAUR helperと同様に`-S`、`-Ss`、`-Syu`等のpacman-compatible
-operationを使用してください。保存済みsource-build preferenceの適用、installed AUR
-packageのsource build、またはそれらを組み合わせたMoguet固有のmulti-phase upgradeを
-明示的に実行する場合は、対応する`upgrade`、`upgrade-aur`、`upgrade-all`を使用します。
-これらは通常の`-Syu`の別名ではありません。
+**upgrade commandの選択:** 通常のAUR helper updateにはexact target-less
+`moguet -Syu`を使います。official repository system upgradeを完了した後、installed
+foreign / AUR stateを再評価し、normal AUR updateを実行します。このrouteはsaved
+source-build preferenceを列挙・readせず、PackageBase fallback preferenceも参照せず、
+preference dataをAUR work environmentへ適用しません。valid、invalid、unreadable、その他
+failureとなるsaved preferenceのいずれも、このrouteへ影響しません。
+
+明示的な`upgrade*` commandはMoguetのsource-aware workflowであり、saved preferenceを
+Strictに扱います。`upgrade`はrepository system updateとconfigured source-build
+preference、`upgrade-aur`はinstalled AUR packageだけを更新しつつ、対応するsaved
+source-build preferenceを確認・適用します。`upgrade-aur`はrepository system updateを
+実行しません。`upgrade-all`はrepository update、configured-source lifecycle、remaining
+AUR updateを実行します。これらは通常の`-Syu`の別名ではありません。
+
+combined routeへ入るのはexact target-less canonical `-Syu` tokenだけです。`-Sy`、`-Su`、
+modifierのalternate / separated spelling、target-bearing `-Syu <pkg>`、unknown modifier
+formは既存routingを維持し、installed-AUR sweepを開始しません。Auto combined `-Syu`で
+initially対応するpacman semantic optionは`--needed`だけで、repository transactionだけへ
+適用します。他のpacman semantic optionやunsupported argument formはrepository mutation前に
+失敗し、`moguet -Syu --repo`を案内します。repository-only formはsemantic selectorを
+pacmanへ渡さず、compatibleなpacman pass-through surfaceを維持し、AUR inventory、AUR RPC、
+preference、cache、Git、makepkgへ到達しません。`moguet -Syu --aur`はunsupportedです。
+AUR-only source-aware updateには`moguet upgrade-aur`を使います。`--noconfirm`はprovider、
+conflict / replacement、required `RequiresCheck`等のsafety guardを突破せず、未検証の
+devel updateを承認しません。
 
 Moguet v2.5.0では、exact AUR packageとして解決できるinstalled packageについて、
 `-git`、`-svn`、`-hg`、`-bzr`、`-cvs`、`-darcs`というconventionalなsuffix
@@ -403,17 +453,27 @@ Moguet v2.5.0では、exact AUR packageとして解決できるinstalled package
 reason付きの`RequiresCheck`を表示します。normal AUR versionが新しい場合は既存の
 update candidate authorityを優先します。
 
-`RequiresCheck`はautomatic rebuild candidateではありません。`upgrade-aur`、そのdry-run、
-`upgrade-all`のfresh AUR phaseはAUR mutationより前にblockし、non-TTYや`--noconfirm`でも
-promptを追加せずrebuildを承認しません。v2.5.0ではupstream VCS revisionのquery / 比較や
-devel build provenanceのpublicationを行いません。read-only Git observerとinstalled artifactへ
-束縛したauthoritative comparisonはfollow-upの
-[Issue #475](https://github.com/seekerkrt/moguet/issues/475)と
-[Issue #476](https://github.com/seekerkrt/moguet/issues/476)が所有します。
+`RequiresCheck`は`UpToDate`でもautomatic rebuild decisionでもありません。通常のexact
+target-less `-Syu`では、independentなtargetだけをnon-blocking warning付きでskipし、
+unrelatedなnormal AUR updateを継続してaggregate successを許します。update statusは
+未検証のままです。別のupdate candidateがdependency、provider、required-child relationとして
+そのtargetを必要とする場合は、affected rootをblockしてoperationをnon-zeroにします。
+`upgrade-aur`、そのdry-run、`upgrade-all`のfresh AUR phaseは、strictなwhole-operation
+blocker semanticsを維持します。non-TTYや`--noconfirm`でもpromptを追加せずrebuildを承認しません。
 
-`--aur`は対応する`-S`、`-Ss`、`-Si`をAURへ限定し、`--repo`はofficial binary
-repositoryへ限定します。両selectorの併用はexternal commandやAUR queryより前に
-失敗します。pacman-only routeではcompatibleなpacman optionを保持し、source-build
+v2.5.0ではupstream VCS revisionのquery / 比較やdevel build provenanceのpublicationを
+行いません。current development treeには
+[Issue #475](https://github.com/seekerkrt/moguet/issues/475)のtrusted HTTPS Git remote revision
+observer foundationが入り、default HEAD / exact branchとcompleteなSHA-1 / SHA-256 resultだけへ
+限定されています。ただしproduction source-authority producer / callerはなく、AUR update assessmentへ
+未接続です。installed artifactへ束縛したprovenanceとauthoritativeな`UpdateAvailable` / `UpToDate`
+比較は引き続き[Issue #476](https://github.com/seekerkrt/moguet/issues/476)の責務であり、current CLIから
+VCS package revisionを自動比較することはまだできません。
+
+`--aur`は対応する`-S`、`-Ss`、`-Si`をAURへ限定します。`--repo`はこれらのformを
+official binary repositoryへ限定し、exact target-less `-Syu`ではrepository-only selectorに
+なります。`--aur`は`-Syu`で受理しません。両selectorの併用はexternal commandやAUR query
+より前に失敗します。pacman-only routeではcompatibleなpacman optionを保持し、source-build
 routeで意味を維持できないoptionは黙って無視せず拒否します。
 
 `-S --select [--needed] <query>`はinteractiveなsource-aware discovery形式です。source selectorを
@@ -588,12 +648,14 @@ ${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/<package-name>
 ```
 
 TOML configではありません。`add-src`、`edit-src`、`list-src`、`del-src`、`revert`と、
-build / upgrade側の全readerがこの1つのauthorityを使います。storeまたはentryがない場合
-だけを保存済みpreferenceなしとして扱い、invalid name、unsafe entry、permission error、
-I/O failureはhard errorです。read / list operationはdirectoryを作成しません。storageを
-最初に必要とする`add-src`または`edit-src`だけがmanaged directoryをmode `0700`、entryを
-mode `0600`で作成します。package install / reinstall / uninstallはXDG preferenceも
-legacy dataもcreate、migrate、removeしません。
+source-aware build / 明示的な`upgrade*`側の全readerがこの1つのauthorityを使います。
+exact target-less `-Syu`とそのdry-runは、このdirectoryのsnapshot、列挙、readを意図的に
+行わず、child名 / PackageBase名のfallback preferenceも適用しません。Strict readerでは
+storeまたはentryがない場合だけを保存済みpreferenceなしとして扱い、invalid name、unsafe
+entry、permission error、I/O failureはhard errorです。read / list operationはdirectoryを
+作成しません。storageを最初に必要とする`add-src`または`edit-src`だけがmanaged directoryを
+mode `0700`、entryをmode `0600`で作成します。package install / reinstall / uninstallは
+XDG preferenceもlegacy dataもcreate、migrate、removeしません。
 
 <!-- parity:xdg -->
 ## XDG config・source preference・state・cache
@@ -646,6 +708,14 @@ Moguetはpacman-firstですが、すべてのsource-build routeで完全なpacma
 pacmanだけで完結するoperationはMoguetが消費しないoptionをpass-throughします。AUR /
 source-build routeをMoguetが所有する場合は、対応関係を明示したoptionだけを保持し、
 意味を維持できないものはmutation前に拒否します。
+
+Moguet v2.6.0では、exact target-less `moguet -Syu`をrepository-onlyから通常のAUR helper
+behaviorへ変更します。repository system updateの後にnormal installed-AUR updateを行い、
+saved source-build preferenceはread・適用しません。以前のrepository-only behaviorが必要な
+利用者は`moguet -Syu --repo`へmigrationしてください。saved source-build preferenceを確認・
+適用する場合は`moguet upgrade`、`moguet upgrade-aur`、`moguet upgrade-all`を使います。
+new combined routeはsequentialでatomicではありません。後続AUR failure時も完了済み
+repository transactionをrollbackせず、non-zeroのpartial completionとして報告します。
 
 reviewed-source stateが存在する前からのAUR cacheに手動migrationは不要です。recordがない状態は
 正常で、最初に対象となるPackageBaseを一度initial full reviewします。legacy checkout HEAD、

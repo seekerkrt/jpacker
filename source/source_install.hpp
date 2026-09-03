@@ -21,6 +21,7 @@
 struct AppConfig;
 class LocalBuildPlan;
 class LocalSourceBuildDependencyPreparation;
+class RemoteAurCleanupCandidateCollector;
 struct PreparedProductionSourceBuildInvocation;
 
 PreparedProductionSourceBuildInvocation
@@ -261,6 +262,11 @@ struct ProductionSourceBuildWorkItem {
     // 利用者が選択したofficial providerを、対応するAUR build unitの
     // execution前dependency transactionまでtyped identityのまま保持する。
     std::vector<ProvidedDependency> selected_repository_providers;
+    // AUR BuildPlan projectionだけが、artifact targetとselected repository
+    // providerをexact edge indexへ束縛する。別routeはemptyのままであり、
+    // 後段がpackage nameからedgeを再推定してはならない。
+    std::vector<std::size_t> build_plan_dependency_edge_indices;
+    std::vector<std::size_t> selected_repository_provider_edge_indices;
     // required targetのauthorityとartifact execution selectorを別domainで保持する。
     RequiredTargetProvenance required_target_provenance =
         RequiredTargetProvenance::Unspecified;
@@ -287,6 +293,58 @@ struct PreparedProductionSourceBuildInvocation {
     std::optional<ValidatedCacheRoot> cache_root;
     std::optional<LocalSourceBuildInvocationAuthority>
         local_source_authority = std::nullopt;
+};
+
+enum class ReviewedSourceFatalStateObservationStatus {
+    Inapplicable,
+    Completed,
+};
+
+// Value-only request snapshot. The single-consumption reviewed-state slot is
+// deliberately replaced with its completed/inapplicable observation status.
+struct SourceBuildRequestObservation {
+    std::string package_name;
+    std::string checkout_name;
+    std::string git_url;
+    SourceBuildEnvironment custom_environment;
+    SourceEnvironmentEmptyValuePolicy empty_value_policy =
+        SourceEnvironmentEmptyValuePolicy::Omit;
+    std::optional<SourceUpdateBaseline> update_baseline;
+    std::optional<SourceInstalledSnapshot> installed_snapshot;
+    bool only_if_updated = false;
+    bool needed = false;
+    std::optional<PackageBaseIdentity> aur_review_identity;
+    ReviewedSourceFatalStateObservationStatus reviewed_state =
+        ReviewedSourceFatalStateObservationStatus::Inapplicable;
+};
+
+// Value-only work-item projection. It intentionally has neither cache_root nor
+// a ReviewedSourceFatalStatePreflightSlot and cannot be passed to an executor.
+struct ProductionSourceBuildWorkItemObservation {
+    SourceBuildRequestObservation request;
+    std::vector<RequiredPackageArtifactTarget> required_targets;
+    std::vector<ProvidedDependency> selected_repository_providers;
+    std::vector<std::size_t> build_plan_dependency_edge_indices;
+    std::vector<std::size_t>
+        selected_repository_provider_edge_indices;
+    RequiredTargetProvenance required_target_provenance =
+        RequiredTargetProvenance::Unspecified;
+    ArtifactLifecycleIntent artifact_lifecycle_intent =
+        ArtifactLifecycleIntent::Unspecified;
+    std::optional<ResolvedRepositorySourceBuildIdentity>
+        repository_identity;
+    bool uses_system_update_baseline = false;
+    std::optional<std::vector<std::string>>
+        configured_repository_order;
+};
+
+// Read-only production preflight snapshot. Unlike
+// PreparedProductionSourceBuildInvocation, this type is not accepted by any
+// executor and never retains a cache capability.
+struct ProductionSourceBuildPreparationObservation {
+    std::vector<ProductionSourceBuildWorkItemObservation> work_items;
+    std::vector<ProvidedDependency> selected_repository_providers;
+    PacmanDatabasePaths database_paths;
 };
 
 enum class ProductionSourceBuildWorkItemStatus {
@@ -425,6 +483,7 @@ enum class SelectedRepositoryProviderTransactionStatus {
     BlockedBeforeExecution,
     Succeeded,
     Failed,
+    OutcomeUnknown,
 };
 
 // provider transactionをsource work-itemへ誤帰属させず、selected identityと
@@ -445,6 +504,7 @@ struct SelectedRepositoryProviderTransactionResult {
             case SelectedRepositoryProviderTransactionStatus::
                 BlockedBeforeExecution:
             case SelectedRepositoryProviderTransactionStatus::Failed:
+            case SelectedRepositoryProviderTransactionStatus::OutcomeUnknown:
                 return false;
         }
         return false;
@@ -460,13 +520,170 @@ public:
         return SelectedRepositoryProviderTrustedReceiptRequest{};
     }
 
+    [[nodiscard]] static SelectedRepositoryProviderTrustedReceiptRequest
+    capture_actual_installs(CleanupInvocationAuthority authority) noexcept {
+        return SelectedRepositoryProviderTrustedReceiptRequest(
+            std::move(authority));
+    }
+
+    [[nodiscard]] const std::optional<CleanupInvocationAuthority>&
+    invocation_authority() const noexcept {
+        return invocation_authority_;
+    }
+
 private:
     SelectedRepositoryProviderTrustedReceiptRequest() noexcept = default;
+    explicit SelectedRepositoryProviderTrustedReceiptRequest(
+        CleanupInvocationAuthority authority) noexcept
+        : invocation_authority_(std::move(authority)) {
+    }
+
+    std::optional<CleanupInvocationAuthority> invocation_authority_;
 };
 
-struct SelectedRepositoryProviderTrustedReceiptExecutionResult {
+// One selected-provider transaction can satisfy several BuildPlan edges. The
+// token therefore remains transaction-owned while each exact decision keeps
+// its own work-item attribution.
+struct SelectedRepositoryProviderTrustedExecutionBinding {
+    std::size_t work_item_index;
+    std::size_t build_plan_edge_index;
+    std::string parent_package_base;
+    DependencyRequirement requirement;
+    BuildPlanProvidedDependency selected_decision;
+    ProvidedDependency provider;
+    ProviderResolutionKind resolution;
+};
+
+// Positive selected-provider factual authority. Raw receipt/capture/result
+// aggregates cannot construct this value; only the executor that ran the
+// session-owned exact transaction can close it.
+class SelectedRepositoryProviderTrustedExecutionEvidence final {
+public:
+    SelectedRepositoryProviderTrustedExecutionEvidence() = delete;
+    SelectedRepositoryProviderTrustedExecutionEvidence(
+        const SelectedRepositoryProviderTrustedExecutionEvidence&) = default;
+    SelectedRepositoryProviderTrustedExecutionEvidence(
+        SelectedRepositoryProviderTrustedExecutionEvidence&&) noexcept =
+        default;
+    SelectedRepositoryProviderTrustedExecutionEvidence& operator=(
+        const SelectedRepositoryProviderTrustedExecutionEvidence&) = default;
+    SelectedRepositoryProviderTrustedExecutionEvidence& operator=(
+        SelectedRepositoryProviderTrustedExecutionEvidence&&) noexcept =
+        default;
+    ~SelectedRepositoryProviderTrustedExecutionEvidence() = default;
+
+    [[nodiscard]] InvocationDependencyTransactionOwner owner() const noexcept {
+        return InvocationDependencyTransactionOwner::
+            SelectedRepositoryProvider;
+    }
+    [[nodiscard]] const CleanupInvocationAuthority& invocation_authority()
+        const noexcept {
+        return authority_;
+    }
+    [[nodiscard]] const std::string& transaction_token() const noexcept {
+        return transaction_token_;
+    }
+    [[nodiscard]] const std::vector<
+        SelectedRepositoryProviderTrustedExecutionBinding>&
+    bindings() const noexcept {
+        return bindings_;
+    }
+    [[nodiscard]] const SelectedRepositoryProviderTransactionResult&
+    transaction() const noexcept {
+        return transaction_;
+    }
+    [[nodiscard]] const TrustedAlpmReceiptCaptureResult& receipt_capture()
+        const noexcept {
+        return receipt_capture_;
+    }
+    [[nodiscard]] const std::vector<ProvidedDependency>& selected_providers()
+        const noexcept {
+        return transaction_.selected_providers;
+    }
+    [[nodiscard]] const std::vector<std::string>& actual_install_set()
+        const noexcept {
+        return actual_install_set_;
+    }
+
+#ifdef MOGUET_ENABLE_CLEANUP_INVOCATION_SESSION_TEST_HOOKS
+    [[nodiscard]] static SelectedRepositoryProviderTrustedExecutionEvidence
+    make_for_test(
+        CleanupInvocationAuthority authority,
+        std::string transaction_token,
+        std::vector<SelectedRepositoryProviderTrustedExecutionBinding>
+            bindings,
+        SelectedRepositoryProviderTransactionResult transaction,
+        TrustedAlpmReceiptCaptureResult receipt_capture,
+        std::vector<std::string> actual_install_set) noexcept {
+        return SelectedRepositoryProviderTrustedExecutionEvidence(
+            std::move(authority), std::move(transaction_token),
+            std::move(bindings), std::move(transaction),
+            std::move(receipt_capture), std::move(actual_install_set));
+    }
+#endif
+
+private:
+    SelectedRepositoryProviderTrustedExecutionEvidence(
+        CleanupInvocationAuthority authority,
+        std::string transaction_token,
+        std::vector<SelectedRepositoryProviderTrustedExecutionBinding>
+            bindings,
+        SelectedRepositoryProviderTransactionResult transaction,
+        TrustedAlpmReceiptCaptureResult receipt_capture,
+        std::vector<std::string> actual_install_set) noexcept
+        : authority_(std::move(authority)),
+          transaction_token_(std::move(transaction_token)),
+          bindings_(std::move(bindings)),
+          transaction_(std::move(transaction)),
+          receipt_capture_(std::move(receipt_capture)),
+          actual_install_set_(std::move(actual_install_set)) {
+    }
+
+    CleanupInvocationAuthority authority_;
+    std::string transaction_token_;
+    std::vector<SelectedRepositoryProviderTrustedExecutionBinding> bindings_;
+    SelectedRepositoryProviderTransactionResult transaction_;
+    TrustedAlpmReceiptCaptureResult receipt_capture_;
+    std::vector<std::string> actual_install_set_;
+
+    friend class SelectedRepositoryProviderTrustedReceiptExecutor;
+};
+
+// The public fields remain a non-authoritative diagnostic result. Making this
+// a non-aggregate keeps the closed optional private: rewrapping a raw capture
+// can never populate positive execution evidence.
+class SelectedRepositoryProviderTrustedReceiptExecutionResult final {
+public:
+    SelectedRepositoryProviderTrustedReceiptExecutionResult() = default;
+    SelectedRepositoryProviderTrustedReceiptExecutionResult(
+        SelectedRepositoryProviderTransactionResult transaction,
+        std::optional<TrustedAlpmReceiptCaptureResult> receipt_capture) noexcept;
+    SelectedRepositoryProviderTrustedReceiptExecutionResult(
+        const SelectedRepositoryProviderTrustedReceiptExecutionResult&) =
+        default;
+    SelectedRepositoryProviderTrustedReceiptExecutionResult(
+        SelectedRepositoryProviderTrustedReceiptExecutionResult&&) noexcept =
+        default;
+    SelectedRepositoryProviderTrustedReceiptExecutionResult& operator=(
+        const SelectedRepositoryProviderTrustedReceiptExecutionResult&) =
+        default;
+    SelectedRepositoryProviderTrustedReceiptExecutionResult& operator=(
+        SelectedRepositoryProviderTrustedReceiptExecutionResult&&) noexcept =
+        default;
+    ~SelectedRepositoryProviderTrustedReceiptExecutionResult() = default;
+
     SelectedRepositoryProviderTransactionResult transaction;
     std::optional<TrustedAlpmReceiptCaptureResult> receipt_capture;
+
+    [[nodiscard]] const std::optional<
+        SelectedRepositoryProviderTrustedExecutionEvidence>&
+    trusted_execution_evidence() const noexcept;
+
+private:
+    std::optional<SelectedRepositoryProviderTrustedExecutionEvidence>
+        trusted_execution_evidence_;
+
+    friend class SelectedRepositoryProviderTrustedReceiptExecutor;
 };
 
 #ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
@@ -767,6 +984,45 @@ PreparedProductionSourceBuildInvocation prepare_production_source_build_invocati
     std::vector<ProductionSourceBuildWorkItem> work_items,
     const AppConfig& config);
 
+// Runs the same mutation-free static, reviewed-source, and pacman-database
+// preflight without minting an invocation that execution can consume.
+ProductionSourceBuildPreparationObservation
+observe_production_source_build_preparation(
+    std::vector<ProductionSourceBuildWorkItem> work_items,
+    const AppConfig& config);
+
+inline ProductionSourceBuildWorkItemObservation
+make_production_source_build_work_item_observation(
+    const ProductionSourceBuildWorkItem& work_item) {
+    const bool requires_reviewed_state =
+        work_item.request.aur_review_identity.has_value();
+
+    return ProductionSourceBuildWorkItemObservation{
+        SourceBuildRequestObservation{
+            work_item.request.package_name,
+            work_item.request.checkout_name,
+            work_item.request.git_url,
+            work_item.request.custom_environment,
+            work_item.request.empty_value_policy,
+            work_item.request.update_baseline,
+            work_item.request.installed_snapshot,
+            work_item.request.only_if_updated,
+            work_item.request.needed,
+            work_item.request.aur_review_identity,
+            requires_reviewed_state
+                ? ReviewedSourceFatalStateObservationStatus::Completed
+                : ReviewedSourceFatalStateObservationStatus::Inapplicable},
+        work_item.required_targets,
+        work_item.selected_repository_providers,
+        work_item.build_plan_dependency_edge_indices,
+        work_item.selected_repository_provider_edge_indices,
+        work_item.required_target_provenance,
+        work_item.artifact_lifecycle_intent,
+        work_item.repository_identity,
+        work_item.uses_system_update_baseline,
+        work_item.configured_repository_order};
+}
+
 // Generic production preparationのnonempty契約は維持し、local root ownerが
 // 存在するこの境界だけremote AUR dependency 0件を許可する。
 PreparedProductionSourceBuildInvocation
@@ -840,4 +1096,11 @@ execute_prepared_source_build_work_item(
 // 検証済みのsingular compatibilityへroutingする。DB snapshotを再queryしない。
 ProductionSourceBuildInvocationResult execute_prepared_source_build_invocation(
     PreparedProductionSourceBuildInvocation invocation,
+    const AppConfig& config);
+
+// Closed remote-AUR collector entry. The collector owns the invocation/session
+// and this function cannot mint or accept independent cleanup evidence.
+ProductionSourceBuildInvocationResult
+execute_prepared_remote_aur_cleanup_invocation(
+    RemoteAurCleanupCandidateCollector& collector,
     const AppConfig& config);

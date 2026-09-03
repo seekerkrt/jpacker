@@ -13,11 +13,12 @@ permissions:
 
 concurrency:
   group: gitlab-mirror
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   mirror:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Configure SSH

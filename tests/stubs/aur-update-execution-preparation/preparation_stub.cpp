@@ -27,6 +27,7 @@ struct PreparationStubState {
     std::optional<std::size_t> reviewed_preflight_failure_call;
     std::string reviewed_preflight_failure_diagnostic;
     std::vector<std::string> preference_reads;
+    std::size_t preference_directory_snapshot_calls = 0;
     std::vector<bool> supported_options_guards;
     std::vector<SourceBuildEnvironment> pkgdest_guards;
     std::size_t database_calls = 0;
@@ -95,6 +96,10 @@ const std::vector<std::string>& strict_preference_read_history() {
     return g_state.preference_reads;
 }
 
+std::size_t source_preference_directory_snapshot_call_count() {
+    return g_state.preference_directory_snapshot_calls;
+}
+
 const std::vector<bool>& supported_options_guard_history() {
     return g_state.supported_options_guards;
 }
@@ -148,6 +153,11 @@ StrictSourcePreferenceResult read_source_preference_strict(
         std::move(scripted->second.front());
     scripted->second.pop_front();
     return result;
+}
+
+SourcePreferenceDirectorySnapshot snapshot_source_preference_directory() {
+    ++g_state.preference_directory_snapshot_calls;
+    return {};
 }
 
 PacmanDatabasePaths resolve_pacman_database_paths() {

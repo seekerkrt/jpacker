@@ -177,9 +177,6 @@ PresentationItem project_registered_source_presentation_item(
 PresentationItem project_aur_update_presentation_item(
     const AurUpdateOperationTargetResult& result);
 
-PresentationProjection project_upgrade_all_presentation(
-    const UpgradeAllOperationResult& result);
-
 PresentationProjection project_upgrade_all_presentation_with_operation_state(
     const UpgradeAllOperationResult& result,
     const OperationStateProjection& operation_state);

@@ -4,14 +4,18 @@
 #include "aur_update_execution_preflight.hpp"
 #include "aur_update_query.hpp"
 #include "commands_sync.hpp"
+#include "filtered_aur_update_operation.hpp"
 #include "local_dependency_plan_projection.hpp"
 #include "localization.hpp"
 #include "package_relation_presentation.hpp"
 #include "system_source_upgrade.hpp"
+#include "system_aur_update_operation.hpp"
+#include "unified_plan_projection.hpp"
 #include "upgrade_all_operation.hpp"
 
 #include <exception>
 #include <filesystem>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -1456,6 +1460,48 @@ void render_source_transaction_target(
     state.output << '\n';
 }
 
+std::string repository_transaction_intent_display(
+    UnifiedPlanTransactionIntentStage stage, std::size_t intent_index,
+    RenderState& state) {
+    switch(stage) {
+        case UnifiedPlanTransactionIntentStage::RouteOwned:
+            return localization::translate_message(
+                "Repository package transaction");
+        case UnifiedPlanTransactionIntentStage::RepositorySystemUpgrade:
+            return localization::translate_message(
+                "Repository system transaction intent");
+        case UnifiedPlanTransactionIntentStage::LaterNormalAur:
+            return localization::format_translated_message(
+                "Later normal {} dependency/provider transaction intent",
+                "AUR");
+    }
+    return unsupported_display(
+        state, UnifiedPlanRenderingSection::TransactionIntents,
+        intent_index, std::nullopt,
+        localization::translate_message(
+            "A repository transaction intent stage is not supported by the renderer."));
+}
+
+std::string source_transaction_intent_display(
+    UnifiedPlanTransactionIntentStage stage, std::size_t intent_index,
+    RenderState& state) {
+    switch(stage) {
+        case UnifiedPlanTransactionIntentStage::RouteOwned:
+            return localization::translate_message(
+                "Source-built artifact install boundary");
+        case UnifiedPlanTransactionIntentStage::LaterNormalAur:
+            return localization::format_translated_message(
+                "Later normal {} build/install transaction intent", "AUR");
+        case UnifiedPlanTransactionIntentStage::RepositorySystemUpgrade:
+            break;
+    }
+    return unsupported_display(
+        state, UnifiedPlanRenderingSection::TransactionIntents,
+        intent_index, std::nullopt,
+        localization::translate_message(
+            "A source transaction intent stage is not supported by the renderer."));
+}
+
 void render_transaction_intents(
     const UnifiedPlanObservation& observation, RenderState& state) {
     state.output << localization::translate_message(
@@ -1477,8 +1523,9 @@ void render_transaction_intents(
                     state.output << localization::format_translated_message(
                                         "  {}. {} ({} policy: {})",
                                         intent_index + 1,
-                                        localization::translate_message(
-                                            "Repository package transaction"),
+                                        repository_transaction_intent_display(
+                                            intent.stage, intent_index,
+                                            state),
                                         "pacman --needed",
                                         yes_no_display(
                                             intent.policy.needed))
@@ -1494,8 +1541,9 @@ void render_transaction_intents(
                     state.output << localization::format_translated_message(
                                         "  {}. {} ({} policy: {})",
                                         intent_index + 1,
-                                        localization::translate_message(
-                                            "Source-built artifact install boundary"),
+                                        source_transaction_intent_display(
+                                            intent.stage, intent_index,
+                                            state),
                                         "pacman --needed",
                                         yes_no_display(intent.needed))
                                  << '\n';
@@ -2952,6 +3000,8 @@ std::string aur_update_execution_reason_display(
             return "AurUpdateExecutionReason::UpToDate";
         case AurUpdateExecutionReason::DevelRequiresCheck:
             return "AurUpdateExecutionReason::DevelRequiresCheck";
+        case AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck:
+            return "AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck";
         case AurUpdateExecutionReason::NonAurForeign:
             return "AurUpdateExecutionReason::NonAurForeign";
         case AurUpdateExecutionReason::AurMetadataUnavailable:
@@ -3672,6 +3722,9 @@ std::string aur_update_preparation_reason_display(
             return "AurUpdatePreparationReason::BlockingPreflight";
         case AurUpdatePreparationReason::PreflightInconsistent:
             return "AurUpdatePreparationReason::PreflightInconsistent";
+        case AurUpdatePreparationReason::
+            DevelRequiresCheckPolicyInconsistent:
+            return "AurUpdatePreparationReason::DevelRequiresCheckPolicyInconsistent";
         case AurUpdatePreparationReason::BuildPlanMissing:
             return "AurUpdatePreparationReason::BuildPlanMissing";
         case AurUpdatePreparationReason::BuildPlanOrderEmpty:
@@ -3771,6 +3824,75 @@ std::string aur_update_preparation_issue_display(
                 "AUR"))));
 }
 
+std::string filtered_aur_observation_issue_kind_display(
+    FilteredAurUpdateOperationIssueKind kind,
+    std::size_t blocker_index, RenderState& state) {
+    switch(kind) {
+        case FilteredAurUpdateOperationIssueKind::UnknownUpdateClassification:
+            return "FilteredAurUpdateOperationIssueKind::UnknownUpdateClassification";
+        case FilteredAurUpdateOperationIssueKind::
+            DevelRequiresCheckPolicyInconsistent:
+            return "FilteredAurUpdateOperationIssueKind::DevelRequiresCheckPolicyInconsistent";
+        case FilteredAurUpdateOperationIssueKind::TargetPlannerMappingInconsistent:
+            return "FilteredAurUpdateOperationIssueKind::TargetPlannerMappingInconsistent";
+        case FilteredAurUpdateOperationIssueKind::FilteredTargetMappingInconsistent:
+            return "FilteredAurUpdateOperationIssueKind::FilteredTargetMappingInconsistent";
+        case FilteredAurUpdateOperationIssueKind::PreflightTargetMappingInconsistent:
+            return "FilteredAurUpdateOperationIssueKind::PreflightTargetMappingInconsistent";
+        case FilteredAurUpdateOperationIssueKind::PreflightInvocationIndexOutOfRange:
+            return "FilteredAurUpdateOperationIssueKind::PreflightInvocationIndexOutOfRange";
+        case FilteredAurUpdateOperationIssueKind::PreflightInvocationIdentityMismatch:
+            return "FilteredAurUpdateOperationIssueKind::PreflightInvocationIdentityMismatch";
+        case FilteredAurUpdateOperationIssueKind::BuildPlanRootIndexMissing:
+            return "FilteredAurUpdateOperationIssueKind::BuildPlanRootIndexMissing";
+        case FilteredAurUpdateOperationIssueKind::BuildPlanRootIndexOutOfRange:
+            return "FilteredAurUpdateOperationIssueKind::BuildPlanRootIndexOutOfRange";
+        case FilteredAurUpdateOperationIssueKind::BuildPlanRootIdentityMismatch:
+            return "FilteredAurUpdateOperationIssueKind::BuildPlanRootIdentityMismatch";
+        case FilteredAurUpdateOperationIssueKind::BuildPlanRootPackageIdentityMismatch:
+            return "FilteredAurUpdateOperationIssueKind::BuildPlanRootPackageIdentityMismatch";
+        case FilteredAurUpdateOperationIssueKind::BuildUnitOrderIdentityMismatch:
+            return "FilteredAurUpdateOperationIssueKind::BuildUnitOrderIdentityMismatch";
+        case FilteredAurUpdateOperationIssueKind::BuildUnitRootAttributionInconsistent:
+            return "FilteredAurUpdateOperationIssueKind::BuildUnitRootAttributionInconsistent";
+        case FilteredAurUpdateOperationIssueKind::BuildUnitSelectionMappingInconsistent:
+            return "FilteredAurUpdateOperationIssueKind::BuildUnitSelectionMappingInconsistent";
+        case FilteredAurUpdateOperationIssueKind::ExecutionBuildUnitMappingInconsistent:
+            return "FilteredAurUpdateOperationIssueKind::ExecutionBuildUnitMappingInconsistent";
+        case FilteredAurUpdateOperationIssueKind::ReducedTargetMappingInconsistent:
+            return "FilteredAurUpdateOperationIssueKind::ReducedTargetMappingInconsistent";
+    }
+    return unsupported_display(
+        state, UnifiedPlanRenderingSection::Blockers, blocker_index,
+        std::nullopt,
+        localization::format_translated_message(
+            "A filtered {} observation issue kind is not supported by the renderer.",
+            "AUR"));
+}
+
+std::string system_aur_dry_run_issue_kind_display(
+    SystemAurUpdateDryRunIssueKind kind,
+    std::size_t blocker_index, RenderState& state) {
+    switch(kind) {
+        case SystemAurUpdateDryRunIssueKind::RepositoryConfigurationFailure:
+            return "SystemAurUpdateDryRunIssueKind::RepositoryConfigurationFailure";
+        case SystemAurUpdateDryRunIssueKind::ForeignInventoryFailure:
+            return "SystemAurUpdateDryRunIssueKind::ForeignInventoryFailure";
+        case SystemAurUpdateDryRunIssueKind::AurQueryFailure:
+            return "SystemAurUpdateDryRunIssueKind::AurQueryFailure";
+        case SystemAurUpdateDryRunIssueKind::AurAssessmentFailure:
+            return "SystemAurUpdateDryRunIssueKind::AurAssessmentFailure";
+        case SystemAurUpdateDryRunIssueKind::InconsistentObservation:
+            return "SystemAurUpdateDryRunIssueKind::InconsistentObservation";
+    }
+    return unsupported_display(
+        state, UnifiedPlanRenderingSection::Blockers, blocker_index,
+        std::nullopt,
+        localization::format_translated_message(
+            "A system/{} dry-run issue kind is not supported by the renderer.",
+            "AUR"));
+}
+
 std::string route_preflight_blocker_display(
     const RoutePreflightUnifiedPlanBlocker& blocker,
     std::size_t blocker_index, RenderState& state) {
@@ -3840,6 +3962,49 @@ std::string route_preflight_blocker_display(
                                         AurUpdatePreparationIssue>>) {
                 return aur_update_preparation_issue_display(
                     detail, blocker_index, state);
+            } else if constexpr(std::is_same_v<
+                                    Reference,
+                                    UnifiedPlanBorrowedAuthorityReference<
+                                        FilteredAurUpdateOperationIssue>>) {
+                return localization::format_translated_message(
+                    "Filtered {} observation inconsistency ({}); package: {}; {}: {}; diagnostic: {}",
+                    "AUR",
+                    filtered_aur_observation_issue_kind_display(
+                        detail.kind, blocker_index, state),
+                    optional_string_display(detail.package_name),
+                    "PackageBase",
+                    optional_string_display(detail.package_base),
+                    terminal_safe_text_display(required_string_display(
+                        detail.diagnostic, state,
+                        UnifiedPlanRenderingSection::Blockers,
+                        blocker_index, std::nullopt,
+                        localization::format_translated_message(
+                            "A filtered {} observation issue is missing its diagnostic.",
+                            "AUR"))));
+            } else if constexpr(std::is_same_v<
+                                    Reference,
+                                    UnifiedPlanBorrowedAuthorityReference<
+                                        SystemAurUpdateDryRunIssue>>) {
+                std::vector<std::string> nested_details;
+                if(detail.package_metadata_failure.has_value()) {
+                    nested_details.push_back(
+                        package_metadata_failure_display(
+                            *detail.package_metadata_failure,
+                            blocker_index, state));
+                }
+                if(!detail.diagnostic.empty()) {
+                    nested_details.push_back(
+                        terminal_safe_text_display(detail.diagnostic));
+                }
+                return localization::format_translated_message(
+                    "System/{} current-state observation failure ({}); details: {}",
+                    "AUR",
+                    system_aur_dry_run_issue_kind_display(
+                        detail.kind, blocker_index, state),
+                    nested_details.empty()
+                        ? localization::translate_message(
+                              "not observed")
+                        : join_display_values(nested_details));
             } else if constexpr(std::is_same_v<
                                     Reference,
                                     UnifiedPlanBorrowedAuthorityReference<
@@ -4607,6 +4772,11 @@ std::string invalid_snapshot_raw_value_display(std::string_view value) {
     return display;
 }
 
+std::string independent_requires_check_attention_message() {
+    return localization::translate_message(
+        "skipped: devel update requires check: suffix candidate only; not automatically updated because authoritative build provenance is unavailable");
+}
+
 } // namespace
 
 UnifiedPlanRenderingResult render_unified_plan_observation(
@@ -4626,6 +4796,244 @@ UnifiedPlanRenderingResult render_unified_plan_observation(
     render_required_artifacts(observation, state);
     render_transaction_intents(observation, state);
     render_blockers(observation, state);
+    return UnifiedPlanRenderingResult{
+        state.output.str(), std::move(state.issues)};
+}
+
+UnifiedPlanRenderingResult render_system_aur_update_unified_plan(
+    const SystemAurUpdateUnifiedPlanProjection& projection) {
+    RenderState state;
+    std::string status;
+    switch(projection.status()) {
+        case SystemAurUpdateUnifiedPlanStatus::Ready:
+            status = localization::translate_message("Ready");
+            break;
+        case SystemAurUpdateUnifiedPlanStatus::Blocked:
+            status = localization::translate_message("Blocked");
+            break;
+        default:
+            status = unsupported_display(
+                state, UnifiedPlanRenderingSection::RouteSemantics, 0,
+                std::nullopt,
+                localization::format_translated_message(
+                    "A system/{} aggregate status is not supported by the renderer.",
+                    "AUR"));
+            break;
+    }
+    const bool is_repository_only =
+        projection.mode() == SystemAurUpdateUnifiedPlanMode::RepoOnly;
+    if(is_repository_only) {
+        state.output << localization::translate_message(
+                            "Repository system update plan:")
+                     << '\n';
+    } else {
+        state.output << localization::format_translated_message(
+                            "System + normal {} update plan:", "AUR")
+                     << '\n';
+    }
+    state.output << localization::format_translated_message(
+                        "  Status: {}", status)
+                 << '\n';
+    if(is_repository_only) {
+        state.output << localization::translate_message(
+                            "Repository update phase:")
+                     << '\n';
+    } else {
+        state.output << localization::translate_message(
+                            "Combined update phases:")
+                     << '\n';
+    }
+    for(std::size_t index = 0; index < projection.phases().size(); ++index) {
+        std::string phase;
+        switch(projection.phases()[index]) {
+            case SystemAurUpdateUnifiedPlanPhase::
+                RepositorySystemTransactionIntent:
+                phase = localization::translate_message(
+                    "official repository system-upgrade intent");
+                break;
+            case SystemAurUpdateUnifiedPlanPhase::
+                CurrentForeignInventoryObservation:
+                phase = localization::format_translated_message(
+                    "current installed foreign/{} state observation",
+                    "AUR");
+                break;
+            case SystemAurUpdateUnifiedPlanPhase::
+                CurrentNormalAurAssessment:
+                phase = localization::format_translated_message(
+                    "current-state normal {} assessment", "AUR");
+                break;
+            case SystemAurUpdateUnifiedPlanPhase::
+                PotentialLaterAurTransactions:
+                phase = localization::format_translated_message(
+                    "potential later normal {} build/install intents",
+                    "AUR");
+                break;
+            default:
+                phase = unsupported_display(
+                    state, UnifiedPlanRenderingSection::RouteSemantics,
+                    index, std::nullopt,
+                    localization::format_translated_message(
+                        "A system/{} conceptual phase is not supported by the renderer.",
+                        "AUR"));
+                break;
+        }
+        state.output << localization::format_translated_message(
+                            "  Phase {}: {}", index + 1, phase)
+                     << '\n';
+    }
+
+    if(projection.mode() == SystemAurUpdateUnifiedPlanMode::Auto) {
+        const bool has_supported_semantics =
+            projection.freshness() ==
+                std::optional<SystemAurUpdateUnifiedPlanFreshness>{
+                    SystemAurUpdateUnifiedPlanFreshness::
+                        CurrentInstalledState} &&
+            projection.actual_refresh() ==
+                std::optional<SystemAurUpdateUnifiedPlanActualRefresh>{
+                    SystemAurUpdateUnifiedPlanActualRefresh::
+                        AfterRepositorySuccess} &&
+            projection.transaction_relationship() ==
+                std::optional<
+                    SystemAurUpdateUnifiedPlanTransactionRelationship>{
+                    SystemAurUpdateUnifiedPlanTransactionRelationship::
+                        SeparateSequentialTransactions};
+        state.output << localization::translate_message(
+                            "Freshness:")
+                     << '\n';
+        if(!has_supported_semantics) {
+            state.add_issue(
+                UnifiedPlanRenderingIssueKind::UnsupportedValue,
+                UnifiedPlanRenderingSection::RouteSemantics, 0,
+                std::nullopt,
+                localization::format_translated_message(
+                    "System/{} freshness or transaction semantics are incomplete.",
+                    "AUR"));
+            state.output << localization::translate_message(
+                                "  unsupported")
+                         << '\n';
+        } else {
+            state.output << localization::format_translated_message(
+                                "  {} assessment is based on the current installed state.",
+                                "AUR")
+                         << '\n';
+            state.output << localization::format_translated_message(
+                                "  Actual execution re-evaluates {} state after the repository upgrade succeeds.",
+                                "AUR")
+                         << '\n';
+            state.output << localization::format_translated_message(
+                                "  The repository system transaction and later normal {} transactions are separate intents.",
+                                "AUR")
+                         << '\n';
+        }
+    } else if(projection.mode() !=
+              SystemAurUpdateUnifiedPlanMode::RepoOnly) {
+        state.add_issue(
+            UnifiedPlanRenderingIssueKind::UnsupportedValue,
+            UnifiedPlanRenderingSection::RouteSemantics, 0,
+            std::nullopt,
+            localization::format_translated_message(
+                "A system/{} projection mode is not supported by the renderer.",
+                "AUR"));
+    }
+
+    state.output << localization::translate_message(
+                        "Repository system phase:")
+                 << '\n';
+    const UnifiedPlanObservation* repository_observation =
+        projection.repository_projection().observation_result().observation();
+    if(repository_observation == nullptr) {
+        state.add_issue(
+            UnifiedPlanRenderingIssueKind::MissingReferencedValue,
+            UnifiedPlanRenderingSection::RouteSemantics, 0,
+            std::nullopt,
+            localization::format_translated_message(
+                "System/{} projection has no repository child observation.",
+                "AUR"));
+        return UnifiedPlanRenderingResult{
+            state.output.str(), std::move(state.issues)};
+    }
+    UnifiedPlanRenderingResult repository =
+        render_unified_plan_observation(*repository_observation);
+    state.output << repository.text;
+    state.issues.insert(
+        state.issues.end(),
+        std::make_move_iterator(repository.issues.begin()),
+        std::make_move_iterator(repository.issues.end()));
+
+    if(const UnifiedPlanProjection* aur = projection.aur_projection();
+       aur != nullptr) {
+        state.output << localization::format_translated_message(
+                            "Current-state normal {} phase:", "AUR")
+                     << '\n';
+        const UnifiedPlanObservation* aur_observation =
+            aur->observation_result().observation();
+        if(aur_observation == nullptr) {
+            state.add_issue(
+                UnifiedPlanRenderingIssueKind::MissingReferencedValue,
+                UnifiedPlanRenderingSection::RouteSemantics, 0,
+                std::nullopt,
+                localization::format_translated_message(
+                    "System/{} projection has no current-state {} child observation.",
+                    "AUR", "AUR"));
+            return UnifiedPlanRenderingResult{
+                state.output.str(), std::move(state.issues)};
+        }
+        UnifiedPlanRenderingResult aur_rendering =
+            render_unified_plan_observation(*aur_observation);
+        state.output << aur_rendering.text;
+        state.issues.insert(
+            state.issues.end(),
+            std::make_move_iterator(aur_rendering.issues.begin()),
+            std::make_move_iterator(aur_rendering.issues.end()));
+    }
+
+    if(!projection.requires_check_attentions().empty()) {
+        state.output << localization::translate_message(
+                            "Attention-required details:")
+                     << '\n';
+        for(std::size_t index = 0;
+            index < projection.requires_check_attentions().size();
+            ++index) {
+            const SystemAurUpdateRequiresCheckAttention& attention =
+                projection.requires_check_attentions()[index];
+            const bool is_supported =
+                projection.mode() == SystemAurUpdateUnifiedPlanMode::Auto &&
+                attention.reason ==
+                    DevelRequiresCheckReason::SuffixCandidateOnly &&
+                attention.skip_kind ==
+                    AurUpdateExecutionSkipKind::
+                        IndependentDevelRequiresCheck &&
+                attention.observation_state ==
+                    AurUpdateEffectiveState::RequiresCheck &&
+                has_valid_requires_check_package_identity_shape(
+                    attention.package_name) &&
+                has_valid_requires_check_package_identity_shape(
+                    attention.package_base);
+            if(!is_supported) {
+                state.add_issue(
+                    UnifiedPlanRenderingIssueKind::UnsupportedValue,
+                    UnifiedPlanRenderingSection::RouteSemantics,
+                    index, attention.update_plan_index,
+                    localization::format_translated_message(
+                        // TRANSLATORS: The placeholder is the AUR project identity.
+                        "A system/{} RequiresCheck attention is not supported by the renderer.",
+                        "AUR"));
+                state.output << localization::translate_message(
+                                    "  unsupported")
+                             << '\n';
+                continue;
+            }
+            state.output << "  "
+                         << invalid_snapshot_raw_value_display(
+                                attention.package_name)
+                         << " (PackageBase: "
+                         << invalid_snapshot_raw_value_display(
+                                attention.package_base)
+                         << "): "
+                         << independent_requires_check_attention_message()
+                         << '\n';
+        }
+    }
     return UnifiedPlanRenderingResult{
         state.output.str(), std::move(state.issues)};
 }

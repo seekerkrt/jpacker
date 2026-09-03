@@ -17,29 +17,6 @@ void require_unknown_reason(DevelUnknownReason reason) {
     throw std::invalid_argument("Devel unknown reason is invalid.");
 }
 
-void require_check_reason(DevelRequiresCheckReason reason) {
-    switch(reason) {
-        case DevelRequiresCheckReason::SuffixCandidateOnly:
-        case DevelRequiresCheckReason::NoAuthoritativeBuildProvenance:
-        case DevelRequiresCheckReason::InstalledArtifactDrift:
-        case DevelRequiresCheckReason::AurRecipeAdvanced:
-        case DevelRequiresCheckReason::SourceMetadataMissing:
-        case DevelRequiresCheckReason::SourceMetadataMalformed:
-        case DevelRequiresCheckReason::SourceIdentityChanged:
-        case DevelRequiresCheckReason::TransportRequiresCheck:
-        case DevelRequiresCheckReason::SelectorRequiresCheck:
-        case DevelRequiresCheckReason::MultipleFloatingSources:
-        case DevelRequiresCheckReason::ArchitectureSpecificSourceUnresolved:
-        case DevelRequiresCheckReason::ProvenanceMissing:
-        case DevelRequiresCheckReason::ProvenanceInvalid:
-        case DevelRequiresCheckReason::ProvenanceCorrupted:
-        case DevelRequiresCheckReason::ProvenanceFutureSchema:
-        case DevelRequiresCheckReason::BuildSourceProofUnavailable:
-            return;
-    }
-    throw std::invalid_argument("Devel check-required reason is invalid.");
-}
-
 void require_unsupported_reason(DevelUnsupportedReason reason) {
     switch(reason) {
         case DevelUnsupportedReason::UnsupportedVcs:
@@ -66,13 +43,6 @@ DevelUpdateAssessment DevelUpdateAssessment::unknown(
     require_unknown_reason(reason);
     return DevelUpdateAssessment(
         DevelUpdateAssessmentState::Unknown, reason);
-}
-
-DevelUpdateAssessment DevelUpdateAssessment::requires_check(
-    DevelRequiresCheckReason reason) {
-    require_check_reason(reason);
-    return DevelUpdateAssessment(
-        DevelUpdateAssessmentState::RequiresCheck, reason);
 }
 
 DevelUpdateAssessment DevelUpdateAssessment::unsupported(

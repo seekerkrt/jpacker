@@ -17,6 +17,8 @@
 
 struct AppConfig;
 struct RootPackageSelectionInvocation;
+class PreparedSystemAurUpdateOperation;
+struct SystemAurUpdateOperationResult;
 
 // Root selection後の全static preflightを通過したinstall invocation。
 // repository targetはexact repo/package、source invocationはcache未activateの
@@ -226,6 +228,29 @@ SyncInstallPreparation prepare_sync_install(
 int execute_prepared_sync_install(
     PreparedSyncInstall prepared,
     const AppConfig& config);
+
+// parser/classifier authorityが保持するexact ordered pacman argvを、一つの
+// repository transactionへ渡すowner。route判定やargv再構築は行わない。
+int execute_ordered_repository_sync_transaction(
+    const std::vector<std::string>& ordered_pacman_args,
+    const AppConfig& config);
+
+// Execute and present the exact targetless Auto -Syu composite result.
+// Composite commands use the established custom-command exit convention:
+// complete typed success is 0; every partial/inconsistent outcome is 1.
+int cmd_system_aur_update(
+    PreparedSystemAurUpdateOperation prepared,
+    const AppConfig& config);
+
+void present_system_aur_update_operation_result(
+    SystemAurUpdateOperationResult result);
+
+#ifdef MOGUET_ENABLE_SYSTEM_AUR_UPDATE_PRESENTATION_TEST_HOOKS
+// Test-only seam: feed coherent childless failures, a child-owned failure, or
+// a moved-from capability into the public presenter without system mutation.
+int run_system_aur_update_presentation_test(
+    const std::string& test_case);
+#endif
 
 // productionはTTY gateをcandidate queryより先に確定する。
 RootPackageInstallPreparation prepare_root_package_install(

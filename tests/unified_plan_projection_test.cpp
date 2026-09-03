@@ -5,6 +5,7 @@
 #include "local_dependency_plan_projection.hpp"
 #include "package_relation_assessment_fixture.hpp"
 #include "root_package_route_projection.hpp"
+#include "system_aur_update_operation.hpp"
 #include "system_source_upgrade.hpp"
 #include "unified_plan_projection.hpp"
 #include "upgrade_all_operation.hpp"
@@ -78,6 +79,11 @@ concept HasArgvMember = requires(T value) { value.argv; };
 template <typename T>
 concept HasArtifactProjectionAccessor = requires(const T& value) {
     value.artifact_target_projections();
+};
+
+template <typename T>
+concept CanProjectSystemAurUpdate = requires(T&& value) {
+    project_system_aur_update_unified_plan(std::forward<T>(value));
 };
 
 template <typename T>
@@ -203,6 +209,33 @@ static_assert(!std::constructible_from<
 static_assert(!std::constructible_from<
               std::reference_wrapper<const UpgradeAllOperationResult>,
               UpgradeAllOperationResult&&>);
+static_assert(!HasExecuteMember<SystemAurUpdateDryRunObservation>);
+static_assert(!HasCommandMember<SystemAurUpdateDryRunObservation>);
+static_assert(!HasArgvMember<SystemAurUpdateDryRunObservation>);
+static_assert(!HasExecuteMember<SystemAurUpdateUnifiedPlanProjection>);
+static_assert(!HasCommandMember<SystemAurUpdateUnifiedPlanProjection>);
+static_assert(!HasArgvMember<SystemAurUpdateUnifiedPlanProjection>);
+static_assert(!std::is_copy_constructible_v<
+              SystemAurUpdateUnifiedPlanProjection>);
+static_assert(!std::is_move_constructible_v<
+              SystemAurUpdateUnifiedPlanProjection>);
+static_assert(!std::constructible_from<
+              PreparedSystemAurUpdateOperation,
+              SystemAurUpdateDryRunObservation>);
+static_assert(!std::convertible_to<
+              SystemAurUpdateDryRunObservation,
+              PreparedSystemAurUpdateOperation>);
+static_assert(!std::invocable<
+              decltype(&prepare_system_aur_update_operation),
+              SystemAurUpdateDryRunObservation>);
+static_assert(!std::invocable<
+              decltype(&execute_prepared_system_aur_update_operation),
+              SystemAurUpdateDryRunObservation,
+              const AppConfig&>);
+static_assert(CanProjectSystemAurUpdate<
+              const SystemAurUpdateDryRunObservation&>);
+static_assert(!CanProjectSystemAurUpdate<
+              SystemAurUpdateDryRunObservation>);
 
 void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
@@ -320,7 +353,7 @@ BuildPlan build_plan_fixture(
             DependencyVersionRelation::GreaterThanOrEqual, "2"});
     const ProvidedDependency provider =
         ProvidedDependency::from_repository_constraint_metadata(
-            "extra", 1, "runtime-provider",
+            "extra", 1, "runtime-provider", "runtime-provider-base",
             ProviderConstraintMetadata{
                 ProviderCapability(
                     "virtual-runtime=2", "virtual-runtime",
@@ -388,6 +421,11 @@ ProductionSourceBuildWorkItem source_work_item(
     } else {
         work.request.git_url =
             "https://aur.archlinux.org/" + package_base + ".git";
+        work.request.aur_review_identity = PackageBaseIdentity::make(
+            PackageSourceIdentity::aur(
+                SourceLocationIdentity::known_git_remote(
+                    work.request.git_url)),
+            package_base);
     }
     work.uses_system_update_baseline =
         source_kind == SourceBuildSourceKind::Repository;
@@ -480,7 +518,9 @@ AurUpdateQueryResult update_query(
 AurUpdateExecutionPreflight executable_update_preflight(
     BuildPlan plan,
     InstalledPackageReason install_reason =
-        InstalledPackageReason::Explicit) {
+        InstalledPackageReason::Explicit,
+    DevelRequiresCheckPolicy devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation) {
     AurUpdateExecutionTarget target;
     target.update_plan_index = 0;
     target.build_plan_root_index = 0;
@@ -491,7 +531,8 @@ AurUpdateExecutionPreflight executable_update_preflight(
         install_reason == InstalledPackageReason::Dependency
             ? DesiredInstallReason::Dependency
             : DesiredInstallReason::Explicit;
-    return AurUpdateExecutionPreflight{{std::move(target)}, std::move(plan)};
+    return AurUpdateExecutionPreflight{
+        {std::move(target)}, std::move(plan), devel_requires_check_policy};
 }
 
 AurUpdateExecutionPreflight no_op_update_preflight() {
@@ -499,7 +540,15 @@ AurUpdateExecutionPreflight no_op_update_preflight() {
     target.update_plan_index = 0;
     target.update = update_entry(AurUpdateClassification::UpToDate);
     target.status = AurUpdateExecutionTargetStatus::Skipped;
-    return AurUpdateExecutionPreflight{{std::move(target)}, std::nullopt};
+    target.skip_kind = AurUpdateExecutionSkipKind::UpToDate;
+    target.issues.push_back(AurUpdateExecutionIssue{
+        AurUpdateExecutionReason::UpToDate,
+        target.update.installed_name,
+        target.update.aur_package->package_base,
+        std::nullopt,
+        "fixture target is already up to date"});
+    return AurUpdateExecutionPreflight{
+        {std::move(target)}, std::nullopt, DevelRequiresCheckPolicy::SkipIndependentTarget};
 }
 
 RegisteredSourcePreferenceSnapshot registered_source(
@@ -557,6 +606,440 @@ SystemSourceUpgradeIssue system_issue(
     issue.impact = impact;
     issue.phase = phase;
     return issue;
+}
+
+SystemAurUpdateDryRunRequest system_aur_auto_request(
+    bool repository_needed = false) {
+    std::vector<std::string> ordered_pacman_args{"-Syu"};
+    if(repository_needed) ordered_pacman_args.push_back("--needed");
+    std::optional<SystemAurUpdateDryRunRequest> request =
+        SystemAurUpdateDryRunRequest::from_auto_candidate(
+            AutoSystemUpdateRouteCandidate{
+                CompatibleAutoSystemUpdatePacmanArguments{},
+                std::move(ordered_pacman_args), repository_needed});
+    expect(request.has_value(), "system/AUR Auto fixture was rejected");
+    return std::move(request.value());
+}
+
+SystemAurUpdateDryRunRequest system_aur_repo_only_request() {
+    return SystemAurUpdateDryRunRequest(
+        RepoOnlySystemUpdateRouteCandidate{{"-Syu"}, false});
+}
+
+AurUpdateSourceBuildObservation ready_source_build_observation(
+    const AurUpdateExecutionPreflight& preflight) {
+    expect(
+        preflight.build_plan.has_value() &&
+            preflight.targets.size() == 1 &&
+            preflight.devel_requires_check_policy.has_value() &&
+            preflight.build_plan->root_targets.size() == 1 &&
+            preflight.build_plan->order.size() == 1,
+        "system/AUR source observation fixture is malformed");
+    const BuildPlan& plan = *preflight.build_plan;
+    const AurUpdateExecutionTarget& update_target =
+        preflight.targets.front();
+    const RootTargetIdentity& root = plan.root_targets.front();
+    const BuildPlanEntry& build_unit = plan.order.front();
+    expect(
+        update_target.desired_install_reason.has_value() &&
+            build_unit.package_names.size() == 1,
+        "system/AUR source observation fixture lacks authority");
+
+    AurUpdateRequiredTargetAttribution required_target{
+        RequiredPackageArtifactTarget{
+            build_unit.package_base, build_unit.package_names.front(),
+            *update_target.desired_install_reason},
+        {update_target.update_plan_index},
+        {root},
+        {PackageRole::Root}};
+    AurUpdateProjectedBuildUnit projected_unit{
+        0,
+        build_unit.package_base,
+        {required_target},
+        {update_target.update_plan_index},
+        {root}};
+    AurUpdatePreparedWorkItemAttribution work_attribution{
+        0,
+        0,
+        build_unit.package_names.front(),
+        build_unit.package_base,
+        {required_target},
+        {update_target.update_plan_index},
+        {root}};
+
+    ProductionSourceBuildPreparationObservation production_preflight;
+    ProductionSourceBuildWorkItemObservation observed_work_item =
+        make_production_source_build_work_item_observation(
+            source_work_item(
+                build_unit.package_base,
+                build_unit.package_names.front(),
+                *update_target.desired_install_reason,
+                ArtifactLifecycleIntent::PackageBaseSet,
+                SourceBuildSourceKind::Aur));
+    observed_work_item.configured_repository_order =
+        plan.configured_repository_order;
+    for(const BuildPlanProvidedDependency& provided : plan.provided) {
+        if(provided.resolution != ProviderResolutionKind::UserSelected ||
+           !std::holds_alternative<RepositoryProviderOrigin>(
+               provided.provider.origin)) {
+            continue;
+        }
+        observed_work_item.selected_repository_providers.push_back(
+            provided.provider);
+        production_preflight.selected_repository_providers.push_back(
+            provided.provider);
+    }
+    production_preflight.work_items.push_back(
+        std::move(observed_work_item));
+
+    AurUpdateSourceBuildObservation observation;
+    observation.affected_update_targets = preflight.targets;
+    observation.affected_roots.push_back(root);
+    observation.build_unit_selection.entries.push_back(
+        AurUpdateBuildUnitSelectionEntry{
+            0,
+            build_unit.package_base,
+            build_unit.package_names,
+            AurUpdateBuildUnitSelectionStatus::SelectedForAurExecution,
+            0,
+            std::nullopt});
+    observation.projected_build_units.push_back(
+        std::move(projected_unit));
+    observation.work_item_attributions.push_back(
+        std::move(work_attribution));
+    observation.production_preflight.emplace(
+        std::move(production_preflight));
+    observation.devel_requires_check_policy =
+        *preflight.devel_requires_check_policy;
+    expect(
+        observation.issues.empty() &&
+            observation.affected_update_targets.size() == 1 &&
+            observation.affected_roots.size() == 1 &&
+            observation.build_unit_selection.entries.size() == 1 &&
+            observation.projected_build_units.size() == 1 &&
+            observation.work_item_attributions.size() == 1 &&
+            observation.production_preflight.has_value() &&
+            observation.production_preflight->work_items.size() == 1,
+        "system/AUR source observation fixture lost typed authority");
+    return observation;
+}
+
+FilteredAurUpdateObservation ready_filtered_aur_observation() {
+    FilteredAurUpdateObservation filtered;
+    filtered.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    filtered.query_result = update_query();
+    filtered.preflight = executable_update_preflight(
+        build_plan_fixture(), InstalledPackageReason::Explicit,
+        DevelRequiresCheckPolicy::SkipIndependentTarget);
+    filtered.source_build_observation.emplace(
+        ready_source_build_observation(filtered.preflight));
+    expect(
+        filtered.issues.empty() &&
+            filtered.query_result.plan.entries.size() == 1 &&
+            filtered.preflight.targets.size() == 1 &&
+            filtered.preflight.targets.front().status ==
+                AurUpdateExecutionTargetStatus::Executable &&
+            filtered.preflight.build_plan.has_value() &&
+            filtered.source_build_observation.has_value() &&
+            filtered.source_build_observation->issues.empty() &&
+            filtered.source_build_observation->production_preflight
+                .has_value(),
+        "filtered AUR Ready fixture lost typed authority");
+    return filtered;
+}
+
+FilteredAurUpdateObservation
+multi_unit_partial_provider_filtered_aur_observation() {
+    constexpr std::string_view provider_child = "provider-child";
+    constexpr std::string_view provider_base = "provider-base";
+    constexpr std::string_view plain_child = "plain-child";
+    constexpr std::string_view plain_base = "plain-base";
+
+    BuildPlan plan = build_plan_fixture(
+        std::string(provider_child), std::string(provider_base));
+    const RootTargetIdentity plain_root{1, std::string(plain_child)};
+    plan.root_targets.push_back(plain_root);
+    plan.order.push_back(BuildPlanEntry{
+        std::string(plain_base), {std::string(plain_child)}});
+    plan.package_targets.push_back(PlannedPackageTarget{
+        std::string(plain_child), std::string(plain_base), {PackageRole::Root}, {plain_root}});
+
+    const auto update = [](
+                            std::string_view package_name,
+                            std::string_view package_base) {
+        return AurUpdatePlanEntry{
+            std::string(package_name),
+            "1.0",
+            InstalledPackageReason::Explicit,
+            AurUpdateRemotePackage{
+                std::string(package_name), std::string(package_base),
+                "2.0", AurVersionRelation::NewerThanInstalled},
+            AurUpdateClassification::UpdateAvailable};
+    };
+
+    FilteredAurUpdateObservation filtered;
+    filtered.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    filtered.query_result.plan.entries = {
+        update(provider_child, provider_base),
+        update(plain_child, plain_base)};
+    for(std::size_t index = 0;
+        index < filtered.query_result.plan.entries.size(); ++index) {
+        AurUpdateExecutionTarget target;
+        target.update_plan_index = index;
+        target.build_plan_root_index = index;
+        target.update = filtered.query_result.plan.entries[index];
+        target.status = AurUpdateExecutionTargetStatus::Executable;
+        target.desired_install_reason = DesiredInstallReason::Explicit;
+        filtered.preflight.targets.push_back(std::move(target));
+    }
+    filtered.preflight.build_plan.emplace(std::move(plan));
+    filtered.preflight.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    const BuildPlan& retained_plan = *filtered.preflight.build_plan;
+    const ProvidedDependency& repository_provider =
+        retained_plan.provided.front().provider;
+
+    AurUpdateSourceBuildObservation source;
+    source.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    source.affected_update_targets = filtered.preflight.targets;
+    source.affected_roots = retained_plan.root_targets;
+    source.production_preflight.emplace();
+    source.production_preflight->selected_repository_providers.push_back(
+        repository_provider);
+    for(std::size_t index = 0; index < retained_plan.order.size(); ++index) {
+        const BuildPlanEntry& unit = retained_plan.order[index];
+        const RootTargetIdentity& root = retained_plan.root_targets[index];
+        const std::string& package_name = unit.package_names.front();
+        const std::string git_url =
+            "https://aur.archlinux.org/" + unit.package_base + ".git";
+        const RequiredPackageArtifactTarget required_target{
+            unit.package_base, package_name,
+            DesiredInstallReason::Explicit};
+        const AurUpdateRequiredTargetAttribution child_attribution{
+            required_target,
+            {index},
+            {root},
+            {PackageRole::Root}};
+
+        source.build_unit_selection.entries.push_back(
+            AurUpdateBuildUnitSelectionEntry{
+                index,
+                unit.package_base,
+                unit.package_names,
+                AurUpdateBuildUnitSelectionStatus::
+                    SelectedForAurExecution,
+                index,
+                std::nullopt});
+        source.projected_build_units.push_back(
+            AurUpdateProjectedBuildUnit{
+                index,
+                unit.package_base,
+                {child_attribution},
+                {index},
+                {root}});
+        source.work_item_attributions.push_back(
+            AurUpdatePreparedWorkItemAttribution{
+                index,
+                index,
+                package_name,
+                unit.package_base,
+                {child_attribution},
+                {index},
+                {root}});
+
+        ProductionSourceBuildWorkItemObservation work_item{
+            SourceBuildRequestObservation{
+                package_name,
+                unit.package_base,
+                git_url,
+                SourceBuildEnvironment{},
+                SourceEnvironmentEmptyValuePolicy::Omit,
+                std::nullopt,
+                std::nullopt,
+                false,
+                false,
+                PackageBaseIdentity::make(
+                    PackageSourceIdentity::aur(
+                        SourceLocationIdentity::known_git_remote(
+                            git_url)),
+                    unit.package_base),
+                ReviewedSourceFatalStateObservationStatus::Completed},
+            {required_target},
+            {},
+            {},
+            {},
+            RequiredTargetProvenance::AurBuildPlanProjection,
+            ArtifactLifecycleIntent::PackageBaseSet,
+            std::nullopt,
+            false,
+            retained_plan.configured_repository_order};
+        if(index == 0) {
+            work_item.selected_repository_providers.push_back(
+                repository_provider);
+        }
+        source.production_preflight->work_items.push_back(
+            std::move(work_item));
+    }
+    expect(
+        source.production_preflight->work_items.size() == 2 &&
+            source.production_preflight->work_items[0]
+                    .selected_repository_providers ==
+                std::vector<ProvidedDependency>{repository_provider} &&
+            source.production_preflight->work_items[1]
+                .selected_repository_providers.empty(),
+        "multi-unit source fixture lost PackageBase-local provider scope");
+    filtered.source_build_observation.emplace(std::move(source));
+    return filtered;
+}
+
+FilteredAurUpdateObservation no_op_filtered_aur_observation() {
+    FilteredAurUpdateObservation filtered;
+    filtered.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    filtered.query_result = update_query(AurUpdateClassification::UpToDate);
+    filtered.preflight = no_op_update_preflight();
+    filtered.source_build_observation.emplace();
+    filtered.source_build_observation->devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    expect(
+        filtered.issues.empty() &&
+            filtered.preflight.targets.size() == 1 &&
+            filtered.preflight.targets.front().status ==
+                AurUpdateExecutionTargetStatus::Skipped &&
+            !filtered.preflight.build_plan.has_value() &&
+            filtered.source_build_observation.has_value() &&
+            filtered.source_build_observation->issues.empty() &&
+            !filtered.source_build_observation->production_preflight
+                 .has_value(),
+        "filtered AUR NoOp fixture retained execution authority");
+    return filtered;
+}
+
+FilteredAurUpdateObservation blocked_filtered_aur_observation() {
+    FilteredAurUpdateObservation filtered;
+    filtered.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    filtered.query_result = update_query();
+    AurUpdateExecutionTarget target;
+    target.update_plan_index = 0;
+    target.update = filtered.query_result.plan.entries.front();
+    target.status = AurUpdateExecutionTargetStatus::Incomplete;
+    target.issues.push_back(AurUpdateExecutionIssue{
+        AurUpdateExecutionReason::AmbiguousProvider,
+        "suite-child", "suite-base", "virtual-runtime>=2",
+        "fixture current-state provider ambiguity"});
+    filtered.preflight.targets.push_back(std::move(target));
+    filtered.preflight.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    filtered.source_build_observation.emplace();
+    filtered.source_build_observation->devel_requires_check_policy =
+        DevelRequiresCheckPolicy::SkipIndependentTarget;
+    AurUpdatePreparationIssue issue;
+    issue.reason = AurUpdatePreparationReason::BlockingPreflight;
+    issue.diagnostic = "fixture current-state preparation blocker";
+    filtered.source_build_observation->issues.push_back(std::move(issue));
+    expect(
+        filtered.preflight.targets.size() == 1 &&
+            filtered.preflight.targets.front().status ==
+                AurUpdateExecutionTargetStatus::Incomplete &&
+            filtered.preflight.targets.front().issues.size() == 1 &&
+            filtered.preflight.targets.front().issues.front().reason ==
+                AurUpdateExecutionReason::AmbiguousProvider &&
+            filtered.source_build_observation.has_value() &&
+            filtered.source_build_observation->issues.size() == 1 &&
+            !filtered.source_build_observation->production_preflight
+                 .has_value(),
+        "filtered AUR Blocked fixture lost typed blockers");
+    return filtered;
+}
+
+SystemAurUpdateDryRunObservation system_aur_auto_observation(
+    FilteredAurUpdateObservation filtered,
+    bool repository_needed = false) {
+    ForeignPackageInventory inventory;
+    PacmanRepositoryConfiguration repository_configuration;
+    if(filtered.execution_preflight().build_plan.has_value() &&
+       filtered.execution_preflight()
+           .build_plan->configured_repository_order.has_value()) {
+        repository_configuration.repository_names =
+            *filtered.execution_preflight()
+                 .build_plan->configured_repository_order;
+    }
+    for(const AurUpdatePlanEntry& entry :
+        filtered.original_query_result().plan.entries) {
+        inventory.push_back(InstalledPackageMetadata{
+            entry.installed_name, entry.installed_version,
+            entry.install_reason});
+    }
+    SystemAurUpdateDryRunObservation observation{
+        system_aur_auto_request(repository_needed),
+        SystemAurUpdateDryRunAurObservationBasis::CurrentInstalledState,
+        SystemAurUpdateDryRunActualAuthorityRefresh::AfterRepositorySuccess,
+        NoExplicitSourceSatisfaction{},
+        SavedSourcePreferencePolicy::Ignore,
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        std::move(repository_configuration),
+        std::move(inventory),
+        std::move(filtered),
+        {}};
+    expect(
+        observation.request.mode() == SystemAurUpdateDryRunMode::Auto &&
+            !observation.request.ordered_pacman_args().empty() &&
+            observation.aur_observation_basis ==
+                std::optional<SystemAurUpdateDryRunAurObservationBasis>{
+                    SystemAurUpdateDryRunAurObservationBasis::
+                        CurrentInstalledState} &&
+            observation.actual_authority_refresh ==
+                std::optional<
+                    SystemAurUpdateDryRunActualAuthorityRefresh>{
+                    SystemAurUpdateDryRunActualAuthorityRefresh::
+                        AfterRepositorySuccess} &&
+            observation.explicit_source_satisfaction.has_value() &&
+            observation.saved_source_preference_policy ==
+                std::optional<SavedSourcePreferencePolicy>{
+                    SavedSourcePreferencePolicy::Ignore} &&
+            observation.devel_requires_check_policy ==
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::
+                        SkipIndependentTarget} &&
+            observation.repository_configuration.has_value() &&
+            observation.aur_observation.has_value() &&
+            observation.issues.empty(),
+        "system/AUR Auto fixture lost freshness or source policy");
+    return observation;
+}
+
+const RepositoryPackageTransactionIntent*
+repository_transaction_intent(
+    const UnifiedPlanTransactionIntent& transaction) {
+    return std::get_if<RepositoryPackageTransactionIntent>(&transaction);
+}
+
+bool has_repository_system_upgrade_intent(
+    const UnifiedPlanObservation& observation) {
+    return std::any_of(
+        observation.transaction_intents().begin(),
+        observation.transaction_intents().end(),
+        [](const UnifiedPlanTransactionIntent& transaction) {
+            const RepositoryPackageTransactionIntent* repository =
+                repository_transaction_intent(transaction);
+            return repository != nullptr &&
+                   repository->stage ==
+                       UnifiedPlanTransactionIntentStage::
+                           RepositorySystemUpgrade &&
+                   repository->targets.size() == 1 &&
+                   std::holds_alternative<RepositorySystemUpgradeIntent>(
+                       repository->targets.front());
+        });
+}
+
+UnifiedPlanTransactionIntentStage transaction_stage(
+    const UnifiedPlanTransactionIntent& transaction) {
+    return std::visit(
+        [](const auto& typed) { return typed.stage; }, transaction);
 }
 
 void test_projection_lifetime_and_root_authorities() {
@@ -868,6 +1351,7 @@ void test_build_plan_partial_failure_remains_typed() {
     const ProvidedDependency similar_provider =
         ProvidedDependency::from_repository_constraint_metadata(
             "core", 0, "similar-runtime-provider",
+            "similar-runtime-provider-base",
             ProviderConstraintMetadata{
                 ProviderCapability(
                     "virtual-runtime=1", "virtual-runtime",
@@ -1093,6 +1577,8 @@ void test_aur_update_source_preparation_blocker() {
     const AurUpdateExecutionPreflight preflight =
         executable_update_preflight(build_plan_fixture());
     AurUpdateSourceBuildPreparation source_preparation;
+    source_preparation.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     AurUpdatePreparationIssue issue;
     issue.reason = AurUpdatePreparationReason::SourcePreferenceUnavailable;
     issue.package_name = "suite-child";
@@ -1128,6 +1614,8 @@ void test_aur_update_source_preparation_blocker() {
 AurUpdateSourceBuildPreparation blocking_preflight_preparation_fixture(
     const AurUpdateExecutionPreflight& preflight) {
     AurUpdateSourceBuildPreparation preparation;
+    preparation.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     for(const AurUpdateExecutionTarget& target : preflight.targets) {
         for(const AurUpdateExecutionIssue& preflight_issue : target.issues) {
             // Mirror retain_preflight_blockers(): the wrapper keeps an owned
@@ -1237,7 +1725,8 @@ AurUpdateExecutionPreflight blocking_preflight_fixture(
     target.update = update_entry();
     target.status = AurUpdateExecutionTargetStatus::Incomplete;
     target.issues.push_back(std::move(issue));
-    return AurUpdateExecutionPreflight{{std::move(target)}, std::nullopt};
+    return AurUpdateExecutionPreflight{
+        {std::move(target)}, std::nullopt, DevelRequiresCheckPolicy::BlockOperation};
 }
 
 BuildPlanArtifactTargetProjectionIssue projection_issue_fixture(
@@ -1276,7 +1765,7 @@ AurUpdateExecutionPreflight projection_blocking_preflight_fixture(
     target.status = AurUpdateExecutionTargetStatus::Incomplete;
     target.issues.push_back(std::move(issue));
     return AurUpdateExecutionPreflight{
-        {std::move(target)}, std::move(plan)};
+        {std::move(target)}, std::move(plan), DevelRequiresCheckPolicy::BlockOperation};
 }
 
 void test_aur_update_blocking_preflight_wrapper_is_not_duplicated() {
@@ -1318,12 +1807,99 @@ void test_aur_update_blocking_preflight_wrapper_is_not_duplicated() {
         "suite-child", "suite-base", "fixture-runtime",
         "fixture second blocking issue"});
     const AurUpdateExecutionPreflight multiple_preflight{
-        {std::move(multiple_target)}, std::nullopt};
+        {std::move(multiple_target)}, std::nullopt, DevelRequiresCheckPolicy::BlockOperation};
     const AurUpdateSourceBuildPreparation multiple_preparation =
         blocking_preflight_preparation_fixture(multiple_preflight);
     expect_blocking_preflight_projection(
         query, multiple_preflight, multiple_preparation, 2, {},
         "multiple unrelated blocking preflight issues");
+}
+
+AurUpdateExecutionIssue required_devel_blocker_issue_fixture() {
+    AurUpdateRequiredDevelTargetBlocker blocker{
+        AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+        7,
+        "required-devel-git",
+        DevelRequiresCheckReason::SuffixCandidateOnly};
+    blocker.dependency_edge_index = 3;
+    blocker.build_plan_order_index = 2;
+    blocker.package_base = "required-devel-base";
+    blocker.roles = {PackageRole::RuntimeDependency};
+    blocker.affected_roots = {{0, "suite-child"}};
+
+    AurUpdateExecutionIssue issue;
+    issue.reason =
+        AurUpdateExecutionReason::RequiredDevelTargetRequiresCheck;
+    issue.package_name = "suite-child";
+    issue.package_base = "suite-base";
+    issue.diagnostic = "fixture required-devel blocker";
+    issue.devel_requires_check_reason =
+        DevelRequiresCheckReason::SuffixCandidateOnly;
+    issue.required_devel_target_blocker = std::move(blocker);
+    return issue;
+}
+
+void test_required_devel_blocker_wrapper_identity_is_lossless() {
+    const AurUpdateQueryResult query = update_query();
+    const AurUpdateExecutionPreflight preflight =
+        blocking_preflight_fixture(
+            required_devel_blocker_issue_fixture());
+    const AurUpdateSourceBuildPreparation exact_preparation =
+        blocking_preflight_preparation_fixture(preflight);
+    expect_blocking_preflight_projection(
+        query, preflight, exact_preparation, 1, {},
+        "exact required-devel blocker wrapper");
+
+    struct DriftCase {
+        std::string_view name;
+        std::function<void(AurUpdateRequiredDevelTargetBlocker&)>
+            mutate;
+    };
+    const std::vector<DriftCase> drift_cases{
+        {"relation", [](auto& blocker) {
+             blocker.relation =
+                 AurUpdateRequiredDevelTargetRelation::AurProvider;
+         }},
+        {"target index", [](auto& blocker) {
+             blocker.requires_check_update_plan_index = 8;
+         }},
+        {"dependency edge", [](auto& blocker) {
+             blocker.dependency_edge_index = 4;
+         }},
+        {"build order", [](auto& blocker) {
+             blocker.build_plan_order_index = 3;
+         }},
+        {"package child", [](auto& blocker) {
+             blocker.package_name = "other-required-devel-git";
+         }},
+        {"package base", [](auto& blocker) {
+             blocker.package_base = "other-required-devel-base";
+         }},
+        {"roles", [](auto& blocker) {
+             blocker.roles.push_back(PackageRole::BuildDependency);
+         }},
+        {"reason", [](auto& blocker) {
+             blocker.devel_requires_check_reason =
+                 DevelRequiresCheckReason::NoAuthoritativeBuildProvenance;
+         }},
+        {"affected roots", [](auto& blocker) {
+             blocker.affected_roots = {{1, "other-root"}};
+         }},
+    };
+
+    for(const DriftCase& drift_case : drift_cases) {
+        AurUpdateSourceBuildPreparation drifted =
+            blocking_preflight_preparation_fixture(preflight);
+        AurUpdateExecutionIssue& wrapped_issue =
+            *drifted.issues.front().preflight_issue;
+        drift_case.mutate(
+            *wrapped_issue.required_devel_target_blocker);
+        expect_blocking_preflight_projection(
+            query, preflight, drifted, 1,
+            {AurUpdatePreparationReason::BlockingPreflight},
+            std::string{"required-devel blocker "} +
+                std::string{drift_case.name} + " drift");
+    }
 }
 
 void test_malformed_blocking_preflight_wrappers_are_retained() {
@@ -2541,7 +3117,7 @@ void test_actual_production_blocked_results() {
         "suite-child", "suite-base", std::nullopt,
         "fixture route preflight blocker"});
     const AurUpdateExecutionPreflight route_preflight{
-        {route_target}, std::nullopt};
+        {route_target}, std::nullopt, DevelRequiresCheckPolicy::BlockOperation};
     const std::unique_ptr<UnifiedPlanProjection> route_projection =
         project_aur_update_unified_plan(
             AurUpdateUnifiedPlanProjectionInput{
@@ -2623,6 +3199,431 @@ void test_actual_production_blocked_results() {
         "upgrade-all nested production failure exposed mutation intent");
 }
 
+void test_system_aur_auto_projection_separates_current_observation() {
+    SystemAurUpdateDryRunObservation combined =
+        system_aur_auto_observation(
+            ready_filtered_aur_observation(), true);
+
+    const std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>
+        projection = project_system_aur_update_unified_plan(combined);
+    expect(
+        projection->status() ==
+                SystemAurUpdateUnifiedPlanStatus::Ready &&
+            projection->mode() ==
+                SystemAurUpdateUnifiedPlanMode::Auto &&
+            projection->requires_check_attentions().empty(),
+        "system/AUR Auto projection did not remain Ready");
+    expect(
+        projection->phases() ==
+            std::vector<SystemAurUpdateUnifiedPlanPhase>{
+                SystemAurUpdateUnifiedPlanPhase::
+                    RepositorySystemTransactionIntent,
+                SystemAurUpdateUnifiedPlanPhase::
+                    CurrentForeignInventoryObservation,
+                SystemAurUpdateUnifiedPlanPhase::
+                    CurrentNormalAurAssessment,
+                SystemAurUpdateUnifiedPlanPhase::
+                    PotentialLaterAurTransactions},
+        "system/AUR Auto projection lost its four typed phases");
+    expect(
+        projection->freshness() ==
+                std::optional<SystemAurUpdateUnifiedPlanFreshness>{
+                    SystemAurUpdateUnifiedPlanFreshness::
+                        CurrentInstalledState} &&
+            projection->actual_refresh() ==
+                std::optional<SystemAurUpdateUnifiedPlanActualRefresh>{
+                    SystemAurUpdateUnifiedPlanActualRefresh::
+                        AfterRepositorySuccess} &&
+            projection->transaction_relationship() ==
+                std::optional<
+                    SystemAurUpdateUnifiedPlanTransactionRelationship>{
+                    SystemAurUpdateUnifiedPlanTransactionRelationship::
+                        SeparateSequentialTransactions},
+        "system/AUR Auto projection flattened freshness or sequencing");
+
+    const UnifiedPlanObservation& repository = require_observation(
+        projection->repository_projection(),
+        "system/AUR repository child");
+    expect(
+        repository.status() == UnifiedPlanObservationStatus::Ready &&
+            repository.transaction_intents().size() == 1 &&
+            repository.required_artifacts().empty() &&
+            has_repository_system_upgrade_intent(repository),
+        "repository child lost its isolated system-upgrade intent");
+    const RepositoryPackageTransactionIntent* repository_transaction =
+        repository_transaction_intent(
+            repository.transaction_intents().front());
+    expect(
+        repository_transaction != nullptr &&
+            repository_transaction->policy.needed,
+        "repository child lost the exact --needed policy");
+
+    expect(
+        projection->aur_projection() != nullptr,
+        "system/AUR Auto projection lost its AUR child");
+    const UnifiedPlanObservation& aur = require_observation(
+        *projection->aur_projection(), "system/AUR current-state child");
+    expect(
+        aur.status() == UnifiedPlanObservationStatus::Ready &&
+            !aur.transaction_intents().empty() &&
+            !aur.required_artifacts().empty(),
+        "current-state AUR child lost its later mutation intents");
+
+    bool has_later_provider_transaction = false;
+    bool has_later_artifact_transaction = false;
+    for(const UnifiedPlanTransactionIntent& transaction :
+        aur.transaction_intents()) {
+        expect(
+            transaction_stage(transaction) ==
+                UnifiedPlanTransactionIntentStage::LaterNormalAur,
+            "AUR child transaction was merged into the repository stage");
+        if(const RepositoryPackageTransactionIntent* repository_intent =
+               repository_transaction_intent(transaction);
+           repository_intent != nullptr) {
+            for(const RepositoryInstallIntentTarget& target :
+                repository_intent->targets) {
+                expect(
+                    !std::holds_alternative<
+                        RepositorySystemUpgradeIntent>(target),
+                    "later provider transaction retained a system-upgrade target");
+                has_later_provider_transaction =
+                    has_later_provider_transaction ||
+                    std::holds_alternative<
+                        RepositoryProviderInstallIntent>(target);
+            }
+            continue;
+        }
+        if(std::holds_alternative<
+               SourceBuiltArtifactInstallBoundaryIntent>(transaction)) {
+            has_later_artifact_transaction = true;
+        }
+    }
+    expect(
+        has_later_provider_transaction &&
+            has_later_artifact_transaction &&
+            !has_repository_system_upgrade_intent(aur),
+        "later provider/artifact intents were not kept outside the system transaction");
+}
+
+void test_system_aur_multi_unit_provider_scope_projection() {
+    SystemAurUpdateDryRunObservation combined =
+        system_aur_auto_observation(
+            multi_unit_partial_provider_filtered_aur_observation());
+    const std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>
+        projection = project_system_aur_update_unified_plan(combined);
+    expect(
+        projection->status() ==
+                SystemAurUpdateUnifiedPlanStatus::Ready &&
+            projection->aur_projection() != nullptr,
+        "multi-unit partial-provider projection was not Ready");
+
+    const UnifiedPlanObservation& aur = require_observation(
+        *projection->aur_projection(),
+        "multi-unit partial-provider AUR child");
+    std::size_t provider_target_count = 0;
+    std::size_t artifact_target_count = 0;
+    for(const UnifiedPlanTransactionIntent& transaction :
+        aur.transaction_intents()) {
+        expect(
+            transaction_stage(transaction) ==
+                UnifiedPlanTransactionIntentStage::LaterNormalAur,
+            "multi-unit transaction escaped the later AUR stage");
+        if(const RepositoryPackageTransactionIntent* repository =
+               repository_transaction_intent(transaction);
+           repository != nullptr) {
+            provider_target_count +=
+                static_cast<std::size_t>(std::count_if(
+                    repository->targets.begin(),
+                    repository->targets.end(),
+                    [](const RepositoryInstallIntentTarget& target) {
+                        return std::holds_alternative<
+                            RepositoryProviderInstallIntent>(target);
+                    }));
+            continue;
+        }
+        if(const auto* artifacts =
+               std::get_if<SourceBuiltArtifactInstallBoundaryIntent>(
+                   &transaction);
+           artifacts != nullptr) {
+            artifact_target_count += artifacts->targets.size();
+        }
+    }
+    expect(
+        aur.status() == UnifiedPlanObservationStatus::Ready &&
+            aur.required_artifacts().size() == 2 &&
+            provider_target_count == 1 && artifact_target_count == 2,
+        "multi-unit provider scope was flattened across AUR build units");
+}
+
+void test_system_aur_noop_and_repo_only_do_not_false_noop() {
+    SystemAurUpdateDryRunObservation no_updates =
+        system_aur_auto_observation(no_op_filtered_aur_observation());
+    const std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>
+        no_updates_projection =
+            project_system_aur_update_unified_plan(no_updates);
+    expect(
+        no_updates_projection->status() ==
+                SystemAurUpdateUnifiedPlanStatus::Ready &&
+            no_updates_projection->requires_check_attentions().empty() &&
+            has_repository_system_upgrade_intent(require_observation(
+                no_updates_projection->repository_projection(),
+                "system/AUR no-update repository child")),
+        "current AUR NoOp falsely collapsed the combined operation");
+    expect(
+        no_updates_projection->aur_projection() != nullptr,
+        "current AUR NoOp lost its explicit child observation");
+    const UnifiedPlanObservation& no_update_aur = require_observation(
+        *no_updates_projection->aur_projection(),
+        "system/AUR no-update AUR child");
+    expect(
+        no_update_aur.status() == UnifiedPlanObservationStatus::NoOp &&
+            no_update_aur.transaction_intents().empty(),
+        "current AUR NoOp fabricated a later transaction");
+
+    SystemAurUpdateDryRunObservation repo_only{
+        system_aur_repo_only_request(),
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        {},
+        std::nullopt,
+        {}};
+    expect(
+        repo_only.request.mode() ==
+                SystemAurUpdateDryRunMode::RepoOnly &&
+            !repo_only.aur_observation_basis.has_value() &&
+            !repo_only.actual_authority_refresh.has_value() &&
+            !repo_only.explicit_source_satisfaction.has_value() &&
+            !repo_only.saved_source_preference_policy.has_value() &&
+            !repo_only.devel_requires_check_policy.has_value() &&
+            !repo_only.repository_configuration.has_value() &&
+            repo_only.foreign_inventory.empty() &&
+            !repo_only.aur_observation.has_value() &&
+            repo_only.issues.empty(),
+        "RepoOnly fixture retained AUR authority");
+    const std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>
+        repo_only_projection =
+            project_system_aur_update_unified_plan(repo_only);
+    expect(
+        repo_only_projection->status() ==
+                SystemAurUpdateUnifiedPlanStatus::Ready &&
+            repo_only_projection->mode() ==
+                SystemAurUpdateUnifiedPlanMode::RepoOnly &&
+            repo_only_projection->phases() ==
+                std::vector<SystemAurUpdateUnifiedPlanPhase>{
+                    SystemAurUpdateUnifiedPlanPhase::
+                        RepositorySystemTransactionIntent} &&
+            repo_only_projection->aur_projection() == nullptr &&
+            repo_only_projection->requires_check_attentions().empty() &&
+            !repo_only_projection->freshness().has_value() &&
+            !repo_only_projection->actual_refresh().has_value() &&
+            !repo_only_projection->transaction_relationship().has_value(),
+        "RepoOnly projection retained AUR observation authority");
+    expect(
+        has_repository_system_upgrade_intent(require_observation(
+            repo_only_projection->repository_projection(),
+            "RepoOnly repository child")),
+        "RepoOnly projection lost its repository system intent");
+}
+
+void test_system_aur_blockers_preserve_repository_child() {
+    SystemAurUpdateDryRunObservation blocked =
+        system_aur_auto_observation(blocked_filtered_aur_observation());
+    const std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>
+        blocked_projection =
+            project_system_aur_update_unified_plan(blocked);
+    expect(
+        blocked_projection->status() ==
+                SystemAurUpdateUnifiedPlanStatus::Blocked &&
+            has_repository_system_upgrade_intent(require_observation(
+                blocked_projection->repository_projection(),
+                "blocked system/AUR repository child")),
+        "AUR blocker erased the independent repository intent");
+    expect(
+        blocked_projection->aur_projection() != nullptr,
+        "blocked system/AUR projection lost its AUR child");
+    const UnifiedPlanObservation& blocked_aur = require_observation(
+        *blocked_projection->aur_projection(),
+        "blocked system/AUR AUR child");
+    expect(
+        blocked_aur.status() == UnifiedPlanObservationStatus::Blocked &&
+            blocked_aur.transaction_intents().empty() &&
+            count_route_preflight_blockers<AurUpdateExecutionIssue>(
+                blocked_aur) == 1,
+        "current-state provider ambiguity did not remain typed Blocked");
+
+    SystemAurUpdateDryRunObservation query_failure{
+        system_aur_auto_request(),
+        SystemAurUpdateDryRunAurObservationBasis::CurrentInstalledState,
+        SystemAurUpdateDryRunActualAuthorityRefresh::AfterRepositorySuccess,
+        NoExplicitSourceSatisfaction{},
+        SavedSourcePreferencePolicy::Ignore,
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        PacmanRepositoryConfiguration{},
+        ForeignPackageInventory{InstalledPackageMetadata{
+            "suite-child", "1.0", InstalledPackageReason::Explicit}},
+        std::nullopt,
+        {SystemAurUpdateDryRunIssue{
+            SystemAurUpdateDryRunIssueKind::AurQueryFailure,
+            std::nullopt, "fixture exact AUR query failure"}}};
+    expect(
+        query_failure.issues.size() == 1 &&
+            query_failure.issues.front().kind ==
+                SystemAurUpdateDryRunIssueKind::AurQueryFailure &&
+            !query_failure.aur_observation.has_value(),
+        "system/AUR query failure fixture lost typed failure authority");
+    const std::unique_ptr<SystemAurUpdateUnifiedPlanProjection>
+        failure_projection =
+            project_system_aur_update_unified_plan(query_failure);
+    const UnifiedPlanObservation& failure_aur = require_observation(
+        *failure_projection->aur_projection(),
+        "query-failed system/AUR AUR child");
+    expect(
+        failure_projection->status() ==
+                SystemAurUpdateUnifiedPlanStatus::Blocked &&
+            has_repository_system_upgrade_intent(require_observation(
+                failure_projection->repository_projection(),
+                "query-failed system/AUR repository child")) &&
+            failure_aur.status() == UnifiedPlanObservationStatus::Blocked &&
+            count_route_preflight_blockers<SystemAurUpdateDryRunIssue>(
+                failure_aur) == 1,
+        "typed AUR query failure erased or contaminated the repository child");
+}
+
+void test_system_aur_projection_rejects_malformed_authority() {
+    SystemAurUpdateDryRunObservation strict =
+        system_aur_auto_observation(ready_filtered_aur_observation());
+    strict.saved_source_preference_policy =
+        SavedSourcePreferencePolicy::Strict;
+    expect_invalid_argument(
+        [&strict] {
+            (void)project_system_aur_update_unified_plan(strict);
+        },
+        "system/AUR Strict saved-preference policy");
+
+    SystemAurUpdateDryRunObservation missing_devel_policy =
+        system_aur_auto_observation(ready_filtered_aur_observation());
+    missing_devel_policy.devel_requires_check_policy.reset();
+    expect_invalid_argument(
+        [&missing_devel_policy] {
+            (void)project_system_aur_update_unified_plan(
+                missing_devel_policy);
+        },
+        "system/AUR missing RequiresCheck policy");
+
+    SystemAurUpdateDryRunObservation unknown_devel_policy =
+        system_aur_auto_observation(ready_filtered_aur_observation());
+    unknown_devel_policy.devel_requires_check_policy =
+        static_cast<DevelRequiresCheckPolicy>(-1);
+    expect_invalid_argument(
+        [&unknown_devel_policy] {
+            (void)project_system_aur_update_unified_plan(
+                unknown_devel_policy);
+        },
+        "system/AUR unknown RequiresCheck policy");
+
+    SystemAurUpdateDryRunObservation mismatched_devel_policy =
+        system_aur_auto_observation(ready_filtered_aur_observation());
+    mismatched_devel_policy.aur_observation
+        ->devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    expect_invalid_argument(
+        [&mismatched_devel_policy] {
+            (void)project_system_aur_update_unified_plan(
+                mismatched_devel_policy);
+        },
+        "system/AUR mismatched RequiresCheck policy");
+
+    FilteredAurUpdateObservation malformed_skip =
+        no_op_filtered_aur_observation();
+    malformed_skip.preflight.targets.front().skip_kind =
+        AurUpdateExecutionSkipKind::IndependentDevelRequiresCheck;
+    SystemAurUpdateDryRunObservation malformed_skip_observation =
+        system_aur_auto_observation(std::move(malformed_skip));
+    expect_invalid_argument(
+        [&malformed_skip_observation] {
+            (void)project_system_aur_update_unified_plan(
+                malformed_skip_observation);
+        },
+        "system/AUR independent RequiresCheck skip snapshot");
+
+    FilteredAurUpdateObservation hidden_required_payload =
+        ready_filtered_aur_observation();
+    AurUpdateExecutionIssue hidden_required_issue;
+    hidden_required_issue.required_devel_target_blocker =
+        AurUpdateRequiredDevelTargetBlocker{
+            AurUpdateRequiredDevelTargetRelation::AurExactDependency,
+            1,
+            "required-devel-git",
+            DevelRequiresCheckReason::SuffixCandidateOnly};
+    hidden_required_payload.source_build_observation
+        ->affected_update_targets.front()
+        .issues.push_back(std::move(hidden_required_issue));
+    expect(
+        has_valid_aur_update_execution_policy_snapshot(
+            hidden_required_payload.preflight),
+        "Hidden required-devel observation drift contaminated preflight authority");
+    SystemAurUpdateDryRunObservation hidden_required_observation =
+        system_aur_auto_observation(
+            std::move(hidden_required_payload));
+    expect_invalid_argument(
+        [&hidden_required_observation] {
+            (void)project_system_aur_update_unified_plan(
+                hidden_required_observation);
+        },
+        "system/AUR executable hidden required-devel payload");
+
+    SystemAurUpdateDryRunObservation identity_mismatch =
+        system_aur_auto_observation(ready_filtered_aur_observation());
+    identity_mismatch.foreign_inventory.front().name =
+        "other-installed-identity";
+    expect_invalid_argument(
+        [&identity_mismatch] {
+            (void)project_system_aur_update_unified_plan(
+                identity_mismatch);
+        },
+        "system/AUR inventory/query identity mismatch");
+
+    SystemAurUpdateDryRunObservation repo_only_with_aur_authority{
+        system_aur_repo_only_request(),
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        SavedSourcePreferencePolicy::Ignore,
+        std::nullopt,
+        std::nullopt,
+        {},
+        std::nullopt,
+        {}};
+    expect_invalid_argument(
+        [&repo_only_with_aur_authority] {
+            (void)project_system_aur_update_unified_plan(
+                repo_only_with_aur_authority);
+        },
+        "RepoOnly observation with retained AUR authority");
+
+    SystemAurUpdateDryRunObservation missing_typed_failure{
+        system_aur_auto_request(),
+        SystemAurUpdateDryRunAurObservationBasis::CurrentInstalledState,
+        SystemAurUpdateDryRunActualAuthorityRefresh::AfterRepositorySuccess,
+        NoExplicitSourceSatisfaction{},
+        SavedSourcePreferencePolicy::Ignore,
+        DevelRequiresCheckPolicy::SkipIndependentTarget,
+        PacmanRepositoryConfiguration{},
+        {},
+        std::nullopt,
+        {}};
+    expect_invalid_argument(
+        [&missing_typed_failure] {
+            (void)project_system_aur_update_unified_plan(
+                missing_typed_failure);
+        },
+        "system/AUR missing AUR authority without typed failure");
+}
+
 void test_missing_system_source_plan_is_rejected() {
     SystemSourceUpgradePreparedSnapshot snapshot;
     snapshot.registered_sources.push_back(registered_source(
@@ -2658,6 +3659,7 @@ int main() {
         test_local_and_no_op_phases();
         test_aur_update_source_preparation_blocker();
         test_aur_update_blocking_preflight_wrapper_is_not_duplicated();
+        test_required_devel_blocker_wrapper_identity_is_lossless();
         test_malformed_blocking_preflight_wrappers_are_retained();
         test_strict_preparation_blockers_are_not_suppressed();
         test_fetch_and_remote_source_build_adapters();
@@ -2669,6 +3671,11 @@ int main() {
         test_full_identity_correlation_fail_closed();
         test_repository_configuration_correlation();
         test_actual_production_blocked_results();
+        test_system_aur_auto_projection_separates_current_observation();
+        test_system_aur_multi_unit_provider_scope_projection();
+        test_system_aur_noop_and_repo_only_do_not_false_noop();
+        test_system_aur_blockers_preserve_repository_child();
+        test_system_aur_projection_rejects_malformed_authority();
         test_missing_system_source_plan_is_rejected();
         std::cout << "unified plan projection tests passed\n";
         return 0;

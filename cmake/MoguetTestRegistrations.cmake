@@ -37,6 +37,22 @@ _moguet_add_direct_ctest(
     source-package-identity-test
 )
 _moguet_add_direct_ctest(
+    cpp.git_remote_revision_observer
+    git-remote-revision-observer-test
+)
+moguet_add_ctest(
+    NAME cpp.git_remote_revision_observer_integration
+    TARGETS git-remote-revision-observer-test
+    COMMAND
+        sh
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test-git-remote-revision-observer-integration.sh"
+        "$<TARGET_FILE:git-remote-revision-observer-test>"
+)
+set_tests_properties(
+    cpp.git_remote_revision_observer_integration
+    PROPERTIES TIMEOUT 180
+)
+_moguet_add_direct_ctest(
     cpp.source_package_identity_projection
     source-package-identity-projection-test
 )
@@ -47,6 +63,13 @@ _moguet_add_direct_ctest(
 _moguet_add_direct_ctest(
     cpp.invocation_owned_cleanup_model
     invocation-owned-cleanup-model-test
+)
+moguet_add_ctest(
+    NAME cpp.remote_aur_cleanup_collector
+    TARGETS invocation-owned-cleanup-model-test
+    COMMAND
+        "$<TARGET_FILE:invocation-owned-cleanup-model-test>"
+        --collector-only
 )
 _moguet_add_direct_ctest(cpp.reviewed_source_state reviewed-source-state-test)
 _moguet_add_direct_ctest(
@@ -94,12 +117,17 @@ _moguet_add_direct_ctest(
     cpp.package_base_artifact_install_executor
     package-base-artifact-install-executor-test
 )
+_moguet_add_direct_ctest(
+    cpp.source_artifact_install_trusted_transport
+    source-artifact-install-trusted-transport-test
+)
 _moguet_add_direct_ctest(cpp.separated_source_build separated-source-build-test)
 _moguet_add_direct_ctest(
     cpp.separated_package_base_source_build
     separated-package-base-source-build-test
 )
 _moguet_add_direct_ctest(cpp.process_capture process-capture-test)
+_moguet_add_direct_ctest(cpp.bounded_process bounded-process-test)
 _moguet_add_direct_ctest(cpp.process_stdin_fd process-stdin-fd-test)
 _moguet_add_direct_ctest(cpp.aur_update_plan aur-update-plan-test)
 _moguet_add_direct_ctest(cpp.upgrade_all_plan upgrade-all-plan-test)
@@ -324,7 +352,7 @@ unset(_moguet_repository_query_case)
 
 # Existing shell and PTY drivers remain the behavioral authority.  TARGETS
 # lists only C++ test executables; the production `moguet` target used by the
-# runtime-identity driver is intentionally outside the 96-target test ledger.
+# runtime-identity driver is intentionally outside the 98-target test ledger.
 moguet_add_ctest(
     NAME localization.contract
     TARGETS

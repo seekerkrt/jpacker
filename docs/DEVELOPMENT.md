@@ -107,8 +107,9 @@ include / link graph、negative compile recipeを所有しない。
 | `build/cmake-production` | `BUILD_TESTING=OFF` | 通常の`make`、install / uninstall、production smoke |
 | `build/cmake-testing` | `BUILD_TESTING=ON` | developer、CTest、host / release validation、focused test |
 
-通常の`make`はproduction treeだけから`moguet`をbuildし、96個のC++ test executableや119件の
-CTest registrationを不用意にbuildしない。`make test`はtesting treeをbuildし、CTestを実行してから
+通常の`make`はproduction treeだけから`moguet`をbuildし、99個のC++ test-ledger executable、
+1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、124件のCTest registrationを不用意にbuildしない。
+`make test`はtesting treeをbuildし、CTestを実行してから
 gettext、shell、docs、packaging等のrepository-specific validationを実行する。`make test-<area>`は
 互換entrypointとして残るが、exact target / CTest selectionは
 `cmake/MoguetFocusedTests.cmake`が所有する。
@@ -179,16 +180,17 @@ inventoryを所有する。
 
 | Inventory | Expected |
 | --- | ---: |
-| C++ test executables | 96 |
-| support / stub translation units | 29 |
+| C++ test executables | 99 |
+| installed transport fixture harnesses (`EXCLUDE_FROM_ALL`) | 1 |
+| support / stub translation units | 30 |
 | link firewalls | 49 |
 | firewall descriptors | 49 |
-| CTest registrations | 119 |
+| CTest registrations | 124 |
 
 stub / real implementation exclusion、replacement ABI、ALPM stub、exact source closureをtarget-localに
 維持する。単一production libraryを全testへ無条件linkしない。negative compileはCTest registrationから
 effective CMake compiler / launcher / compile optionを取得し、GNU Make recursive compileへ戻さない。
-Make focused aliasとCMake focused targetは各99件で一致し、missing / unexpectedを0に保つ。
+Make focused aliasとCMake focused targetは各103件で一致し、missing / unexpectedを0に保つ。
 
 completion生成が使う`moguet-cli-authority-exporter`もCMake targetであり、Python generatorはcompilerを
 直接起動しない。このtargetは`EXCLUDE_FROM_ALL`なので通常のproduction/package buildへ混ざらず、
@@ -205,8 +207,10 @@ Makeの`PREFIX`、`BINDIR`、internal `LIBEXECDIR`、completion、man、license�
 mappingし、別のMake install graphを持たない。`PKGBUILD`はgenerator-neutralなCMake configure / build /
 install consumerで、`BUILD_TESTING=OFF`を指定する。package payload / permission / layout validationは
 repository validation側で維持し、通常のpackage buildへfull CTestを追加しない。current internal payloadには
-`/usr/libexec/moguet/moguet-alpm-receipt-helper` mode `0755`を含む。public commandとして扱わず、
-production root hookはconfigure / install graphが確定したabsolute helper pathだけを使用する。
+`/usr/libexec/moguet/moguet-alpm-receipt-helper`と
+`/usr/libexec/moguet/moguet-source-artifact-install-helper` mode `0755`を含む。両者をpublic commandとして
+扱わず、owner-specific production root hookはconfigure / install graphが確定した対応するabsolute
+helper pathだけを使用する。
 
 ### Host validation execution graph
 
@@ -269,6 +273,28 @@ solver-introduced dependency、transaction failure / ABORTをephemeral container
 host package database、host `/run`、development-tree helperを共有しない。このtargetはsecurity Slice evidenceであり、
 host A–D、offline E、actual provider / AUR / local Fを相互に代替しない。
 
+Issue #485 Slice 2のSourceArtifactInstall boundaryは、selected-provider laneを上書きせず、別targetで確認する。
+
+    make test-container-source-artifact-receipt
+
+同じstandalone image infrastructureをreuseするが、実行owner、helper、protocol、`/run` state、assertionは
+`SourceArtifactInstall`専用である。write-sealed artifact bytesからroot-owned stagingを作り、actual
+`pacman -U`のInstall、Upgrade、same-version reinstall、downgrade、`--needed` skip、failure、
+multi-artifact、replay / cross-owner isolationをephemeral container package databaseで確認する。単一artifact
+matrixはproduction C++ transportから`SourceArtifactInstallReceiptObservation`とcausal evidenceまで通す。
+`test-container-receipt`のselected-provider evidenceとは相互に代替しない。
+
+Issue #485 Slice 5のclosed lifecycle / authoritative candidate gateは、同じnetworkless installed imageを
+使う専用targetで確認する。
+
+    make test-container-cleanup-authority
+
+このtargetはsynthetic remote AUR rootとproduction collectorを使い、session mint、mutation前baseline、
+actual `SourceArtifactInstall` dependency transaction、Install-only receipt、full successful invocation、
+post-success current / policy query、correlation、aggregate、classifierまでを通してexact candidateが
+`Eligible`になることを確認する。同じrunner内のUpgrade / reinstall / downgrade / `--needed` / failure / multi / owner isolation
+matrixはnegative authorityを維持する。public `--rmdeps`、preview、prompt、removalを実行せず、host package DB / `/run`を共有しない。
+
 Issue #372のlive aggregate gateは、provider selection、real AUR install、real local
 PKGBUILD build / installを単一のfail-fast recipeから別containerで順に実行する。parallel makeの
 contextでも後続laneを並行開始せず、providerまたはAUR failure後は残りのlaneを開始しない。
@@ -308,12 +334,16 @@ ccache / mold parityは必要なreleaseでの追加validationであり、上記d
         README.md \
         README.ja.md \
         RELEASE_NOTES.md \
-        containers/arch-validation/Dockerfile \
+        containers/arch-live-validation/run-aur-install.sh \
         docs/DEVELOPMENT.md \
+        man/moguet.1.in \
+        man/ja/moguet.1.in \
         man/moguet.1 \
         man/ja/moguet.1 \
         po/moguet.pot \
-        po/ja.po
+        po/ja.po \
+        scripts/check_public_documentation.py \
+        tests/test-live-contract.sh
 
     git diff --cached --name-only | LC_ALL=C sort
     git status --short
@@ -322,14 +352,21 @@ ccache / mold parityは必要なreleaseでの追加validationであり、上記d
 
     gh pr create --base main --head release/vX.Y.Z
 
-上記の`git add`は、現在のv2.5.0 release preparationでstage対象とするpathを1件ずつ明示した
+上記の`git add`は、現在のv2.6.0 release preparationでstage対象とするpathを1件ずつ明示した
 current release用のexact path setです。`git add .`や代表pathだけのpartial listへ置き換えません。commit前に
 cached path一覧をこのreleaseのdiffと再照合し、release scopeのunstaged / untracked pathや
-unrelatedなstaged pathがないことを確認します。現在のv2.5.0 release preparationでは、上記の
-10-path listがstage対象のcurrent release scopeのauthorityです。`PKGBUILD`はroot `VERSION`を動的に
-読み、published tagへprojectします。man templateは`@VERSION@` authorityを維持し、completionは
-version independent、`po/POTFILES.in`はsource inventory変更なしのため、これらはcurrent listへ
-含めません。v2.1.0固有の履歴は、下記の
+unrelatedなstaged pathがないことを確認します。現在のv2.6.0 release preparationでは、上記の
+14-path listがstage対象のcurrent release scopeのauthorityです。`PKGBUILD`はroot `VERSION`を動的に
+読み、published tagへprojectするためcontent changeはありません。
+`containers/arch-validation/Dockerfile`にはv2.6.0 release metadataとしての変更contractがなく、
+`po/POTFILES.in`はsource extraction inventory変更なし、completionはversion independent、CMake、
+source、その他testsはrelease metadata preparationでは変更しないため、current listへ含めません。man
+templateは`@VERSION@` authorityを維持しつつrelease dateを更新し、generated pageとともにcurrent
+listへ含めます。`scripts/check_public_documentation.py`はrelease-noteのcurrent version assertionをroot
+`VERSION`から導出し、formal RCのSSOT blockerを解消するためcurrent listへ含めます。
+`containers/arch-live-validation/run-aur-install.sh`と`tests/test-live-contract.sh`は、Formal RCで検出した
+AUR live artifact-evidence authority driftをcurrent production ownerへ同期するvalidation-side fixとして
+current listへ含めます。v2.1.0固有の履歴は、下記の
 `v2.1.0 post-release closure`として別に扱い、current listの根拠にはしません。将来のrelease
 では、このlistを流用せず、そのreleaseで監査済みのexact path setへ置き換えます。
 

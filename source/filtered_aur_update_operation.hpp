@@ -8,10 +8,30 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
+
+// explicit-source overlayの有無とsaved preference policyを直交させる。
+// NoExplicitはnormal AUR target/build-unit selectionであり、Ignoreを意味しない。
+struct NoExplicitSourceSatisfaction {
+    bool operator==(const NoExplicitSourceSatisfaction&) const = default;
+};
+
+// upgrade-allのexplicit source overlay。identitiesがemptyでもNoExplicitとは異なる。
+struct UpgradeAllExplicitSourceSatisfaction {
+    std::vector<UpgradeAllExplicitSourceIdentity> identities;
+
+    bool operator==(
+        const UpgradeAllExplicitSourceSatisfaction&) const = default;
+};
+
+using FilteredAurUpdateExplicitSourceSatisfaction = std::variant<
+    NoExplicitSourceSatisfaction,
+    UpgradeAllExplicitSourceSatisfaction>;
 
 enum class FilteredAurUpdateOperationIssueKind {
     UnknownUpdateClassification,
+    DevelRequiresCheckPolicyInconsistent,
     TargetPlannerMappingInconsistent,
     FilteredTargetMappingInconsistent,
     PreflightTargetMappingInconsistent,
@@ -48,6 +68,7 @@ struct FilteredAurUpdateOperationIssue {
 
 enum class FilteredAurUpdateTargetAdapterDisposition {
     NormalSkip,
+    RequiresCheckPolicySkip,
     PlannerTarget,
 };
 
@@ -57,6 +78,10 @@ struct FilteredAurUpdateTargetAdapterEntry {
     AurUpdatePlanEntry update;
     FilteredAurUpdateTargetAdapterDisposition disposition =
         FilteredAurUpdateTargetAdapterDisposition::NormalSkip;
+    std::optional<DevelRequiresCheckPolicy>
+        devel_requires_check_policy;
+    std::optional<DevelRequiresCheckReason>
+        devel_requires_check_reason;
     std::optional<std::size_t> planner_target_index;
     std::optional<std::size_t> filtered_update_plan_index;
 };
@@ -114,7 +139,10 @@ class PreparedFilteredAurUpdateOperation final {
     friend PreparedFilteredAurUpdateOperation
     prepare_filtered_aur_update_operation(
         AurUpdateQueryResult query_result,
-        std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
+        FilteredAurUpdateExplicitSourceSatisfaction
+            explicit_source_satisfaction,
+        DevelRequiresCheckPolicy devel_requires_check_policy,
+        SavedSourcePreferencePolicy saved_source_preference_policy,
         const AppConfig& config,
         std::optional<ValidatedCacheRoot> cache_root);
     friend FilteredAurUpdateExecutionResult
@@ -127,6 +155,8 @@ class PreparedFilteredAurUpdateOperation final {
     friend struct FilteredAurUpdateOperationMutableAccess;
 
     bool valid_ = true;
+    std::optional<DevelRequiresCheckPolicy>
+        devel_requires_check_policy;
 
     AurUpdateQueryResult query_result;
     FilteredAurUpdateTargetAdapter target_adapter;
@@ -179,11 +209,60 @@ public:
     }
     const std::vector<FilteredAurUpdateOperationIssue>& operation_issues()
         const noexcept;
+    const std::optional<DevelRequiresCheckPolicy>&
+    devel_requires_check_policy_snapshot() const noexcept {
+        return devel_requires_check_policy;
+    }
 
     bool is_valid() const noexcept;
     bool is_prepared() const noexcept;
     bool is_noop() const noexcept;
     bool is_blocked() const noexcept;
+};
+
+// Capability-free counterpart for read-only observations. It retains the
+// exact adapter/planner/preflight correlation firewall and source-build safety
+// observation, but no executor or cache-seeding API accepts this type.
+struct FilteredAurUpdateObservation {
+    AurUpdateQueryResult query_result;
+    FilteredAurUpdateTargetAdapter target_adapter;
+    UpgradeAllPlan upgrade_all_plan;
+    AurUpdatePlan filtered_update_plan;
+    std::vector<std::size_t> filtered_to_original_query_plan_index;
+    std::vector<std::optional<std::size_t>>
+        original_query_plan_to_filtered_index;
+    std::vector<FilteredAurUpdateTargetCorrelation> target_correlations;
+    AurUpdateExecutionPreflight preflight;
+    std::vector<FilteredAurUpdateBuildUnitCorrelation>
+        build_unit_correlations;
+    std::optional<AurUpdateSourceBuildObservation> source_build_observation;
+    std::vector<FilteredAurUpdateOperationIssue> issues;
+    std::optional<DevelRequiresCheckPolicy>
+        devel_requires_check_policy;
+
+    const AurUpdateQueryResult& original_query_result() const noexcept {
+        return query_result;
+    }
+    const AurUpdateExecutionPreflight& execution_preflight() const noexcept {
+        return preflight;
+    }
+    const UpgradeAllPlan& target_and_build_unit_plan() const noexcept {
+        return upgrade_all_plan;
+    }
+    const std::optional<AurUpdateSourceBuildObservation>&
+    source_build_preflight() const noexcept {
+        return source_build_observation;
+    }
+    const std::vector<FilteredAurUpdateOperationIssue>& operation_issues()
+        const noexcept {
+        return issues;
+    }
+
+    bool is_ready() const noexcept;
+    bool is_noop() const noexcept;
+    bool is_blocked() const noexcept;
+    bool has_consistent_devel_requires_check_policy_snapshot()
+        const noexcept;
 };
 
 struct FilteredAurUpdateExecutionResult {
@@ -203,6 +282,8 @@ struct FilteredAurUpdateExecutionResult {
     AurUpdateOperationResult reduced_operation_result;
     std::vector<FilteredAurUpdateSelectedTargetResult> selected_target_results;
     std::vector<FilteredAurUpdateOperationIssue> issues;
+    std::optional<DevelRequiresCheckPolicy>
+        devel_requires_check_policy;
 
     bool is_success() const noexcept;
     PackageStateChange package_state_change() const noexcept;
@@ -213,17 +294,31 @@ struct FilteredAurUpdateExecutionResult {
     bool has_query_failure() const noexcept;
     bool has_planning_issue() const noexcept;
     bool has_duplicate_exclusions() const noexcept;
+    bool has_consistent_devel_requires_check_policy_snapshot()
+        const noexcept;
 };
 
 FilteredAurUpdateTargetAdapter adapt_aur_update_plan_for_upgrade_all(
     const AurUpdatePlan& update_plan,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     std::vector<FilteredAurUpdateOperationIssue>& issues);
 
 PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
     AurUpdateQueryResult query_result,
-    std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
+    FilteredAurUpdateExplicitSourceSatisfaction
+        explicit_source_satisfaction,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
     const AppConfig& config,
     std::optional<ValidatedCacheRoot> cache_root = std::nullopt);
+
+FilteredAurUpdateObservation observe_filtered_aur_update_operation(
+    AurUpdateQueryResult query_result,
+    FilteredAurUpdateExplicitSourceSatisfaction
+        explicit_source_satisfaction,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
+    const AppConfig& config);
 
 // A route aggregate that retained a cache authority can seed the already
 // resolved filtered invocation immediately before actual execution.

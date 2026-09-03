@@ -18,6 +18,8 @@
 #   -G <pkg> [--output-dir=DIR]
 #   -Gp <pkg>
 #   -S --select [--needed] <query>
+#   -Syu [--needed]
+#   -Syu --repo [--needed]
 
 function __moguet_option_id --argument-names word
     switch $word
@@ -187,6 +189,12 @@ function __moguet_form_prefix_valid --argument-names expected_operation form_ind
         case '-S:0'
             test (count $operands) -le 1; and return 0
             return 1
+        case '-Syu:0'
+            test (count $operands) -le 0; and return 0
+            return 1
+        case '-Syu:1'
+            test (count $operands) -le 0; and return 0
+            return 1
     end
     return 1
 end
@@ -261,7 +269,16 @@ function __moguet_operation_allows --argument-names option_id
                 contains -- $option_id 18 4 10; and return 0; or return 1
             end
         case '-Syu'
-            contains -- $option_id 18 4; and return 0; or return 1
+            set -l selected false
+            __moguet_has_option_id 12; and set selected true
+            if test $selected = true
+                __moguet_form_prefix_valid '-Syu' 1; or return 1
+                contains -- $option_id 12 18 4 5 19; and return 0; or return 1
+            else if __moguet_has_operand '-Syu'
+                contains -- $option_id 18 4; and return 0; or return 1
+            else
+                contains -- $option_id 0 1 2 3 4 5 6 7 8 18 12 19; and return 0; or return 1
+            end
         case '-Ss'
             contains -- $option_id 18 4; and return 0; or return 1
         case '-Si'
@@ -312,9 +329,9 @@ function __moguet_no_operation
 end
 
 complete -c moguet -f -n '__moguet_no_operation' -a 'build' -d 'Build one remote package or local PKGBUILD root without saving a preference'
-complete -c moguet -f -n '__moguet_no_operation' -a 'upgrade' -d 'Update the system and rebuild configured source packages'
-complete -c moguet -f -n '__moguet_no_operation' -a 'upgrade-aur' -d 'Update installed AUR packages only'
-complete -c moguet -f -n '__moguet_no_operation' -a 'upgrade-all' -d 'Update the system, registered source packages, and remaining installed AUR packages'
+complete -c moguet -f -n '__moguet_no_operation' -a 'upgrade' -d 'Run the source-aware system update and apply saved source-build preferences'
+complete -c moguet -f -n '__moguet_no_operation' -a 'upgrade-aur' -d 'Update only installed AUR packages while applying saved source-build preferences'
+complete -c moguet -f -n '__moguet_no_operation' -a 'upgrade-all' -d 'Run the full source-aware repository, configured-source, and remaining-AUR update'
 complete -c moguet -f -n '__moguet_no_operation' -a 'clean' -d 'Clean package and build caches'
 complete -c moguet -f -n '__moguet_no_operation' -a 'deps' -d 'Classify AUR dependencies for one or more packages'
 complete -c moguet -f -n '__moguet_no_operation' -a 'plan' -d 'Show the AUR build-order plan for one or more packages'
@@ -327,7 +344,7 @@ complete -c moguet -f -n '__moguet_no_operation' -a 'revert' -d 'Remove preferen
 complete -c moguet -f -n '__moguet_no_operation' -a '-G' -d 'Export one AUR PackageBase repository without building or installing'
 complete -c moguet -f -n '__moguet_no_operation' -a '-Gp' -d 'Print one AUR PackageBase PKGBUILD without keeping a checkout'
 complete -c moguet -f -n '__moguet_no_operation' -a '-S' -d 'Install packages'
-complete -c moguet -f -n '__moguet_no_operation' -a '-Syu' -d 'Upgrade the system'
+complete -c moguet -f -n '__moguet_no_operation' -a '-Syu' -d 'Update repository packages and normal installed AUR packages without saved source-build preferences'
 complete -c moguet -f -n '__moguet_no_operation' -a '-Ss' -d 'Search for packages'
 complete -c moguet -f -n '__moguet_no_operation' -a '-Si' -d 'Show package information'
 complete -c moguet -f -n '__moguet_no_operation' -a '-Qua' -d 'Check AUR and foreign-package updates'
@@ -347,8 +364,8 @@ complete -c moguet -f -n '__moguet_candidate_available 8' -a '--cleanbuild' -d '
 complete -c moguet -f -n '__moguet_candidate_available 9' -a '--rmdeps' -d 'Unsupported for separated source builds; no dependency cleanup is performed'
 complete -c moguet -f -n '__moguet_candidate_available 10' -a '--select' -d 'Interactively select source-aware package candidates for plain -S'
 complete -c moguet -f -n '__moguet_candidate_available 11' -a '--aur' -d 'Limit supported sync operations to AUR'
-complete -c moguet -f -n '__moguet_candidate_available 12' -a '--repo' -d 'Limit supported sync operations to official binary repositories'
+complete -c moguet -f -n '__moguet_candidate_available 12' -a '--repo' -d 'Use only official binary repositories; with -Syu, run the repository system upgrade only'
 complete -c moguet -f -n '__moguet_candidate_available 15' -a '--local' -d 'Use one local PKGBUILD directory as the build root'
 complete -c moguet -f -n '__moguet_candidate_available 16' -a '--output-dir=' -d 'Select an existing export parent for -G'
 complete -c moguet -f -n '__moguet_candidate_available 17' -a '--recursive' -d 'Resolve dependencies recursively'
-complete -c moguet -f -n '__moguet_candidate_available 18' -a '--needed' -d 'Skip reinstall at final package installation'
+complete -c moguet -f -n '__moguet_candidate_available 18' -a '--needed' -d 'Preserve pacman --needed semantics at the installation phase owned by the selected route'

@@ -61,9 +61,12 @@ CMAKE_FOCUSED_ALIASES := \
 	test-user-config \
 	test-package-identifier \
 	test-source-package-identity \
+	test-git-remote-revision-observer \
 	test-source-package-identity-projection \
 	test-source-package-compatibility \
 	test-invocation-owned-cleanup-model \
+	test-remote-aur-cleanup-collector \
+	test-source-artifact-install-trusted-transport \
 	test-reviewed-source-state \
 	test-reviewed-source-state-store \
 	test-reviewed-source-lifecycle \
@@ -91,6 +94,7 @@ CMAKE_FOCUSED_ALIASES := \
 	test-separated-package-base-source-build \
 	test-production-source-build \
 	test-process-capture \
+	test-bounded-process \
 	test-aur-update-plan \
 	test-upgrade-all-plan \
 	test-system-source-upgrade \
@@ -288,7 +292,9 @@ export MOGUET_FRONTEND_USE_DEFAULT_COMPILE_OPTIONS
 	test-container-live-provider \
 	test-container-live-aur \
 	test-container-live-local \
-	test-container-receipt
+	test-container-receipt \
+	test-container-cleanup-authority \
+	test-container-source-artifact-receipt
 .PHONY: check-reviewed-source-pinned-build-authority $(CMAKE_FOCUSED_ALIASES)
 
 all: $(TARGET) $(MANPAGES)
@@ -649,6 +655,40 @@ test-container-receipt:
 		printf '%s\n' ':: Running trusted ALPM receipt validation container'; \
 		$(DOCKER) run --rm --network=none \
 			"$(ARCH_RECEIPT_VALIDATION_IMAGE)"
+
+test-container-source-artifact-receipt:
+	@set -eu; \
+		printf '%s\n' ':: Building source-artifact receipt validation image'; \
+		$(DOCKER) build --network=none \
+			--tag "$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
+			--file containers/arch-receipt-validation/Dockerfile \
+			.; \
+		printf '%s\n' ':: Running source-artifact receipt validation container'; \
+		$(DOCKER) run --rm --network=none \
+			"$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
+			/usr/bin/python3 \
+			containers/arch-receipt-validation/run-installed-source-artifact-receipt.py
+
+test-container-cleanup-authority:
+	@set -eu; \
+		printf '%s\n' ':: Building closed cleanup-authority validation image'; \
+		$(DOCKER) build --network=none \
+			--tag "$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
+			--file containers/arch-receipt-validation/Dockerfile \
+			.; \
+		printf '%s\n' ':: Running closed cleanup-authority positive and installed transport matrix'; \
+		$(DOCKER) run --rm --network=none \
+			"$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
+			/usr/bin/python3 \
+			containers/arch-receipt-validation/run-installed-source-artifact-receipt.py; \
+		for scenario in later-failed later-not-attempted; do \
+			printf '%s\n' ":: Running closed cleanup-authority validation container: $$scenario"; \
+			$(DOCKER) run --rm --network=none \
+				"$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
+				/usr/bin/python3 \
+				containers/arch-receipt-validation/run-installed-source-artifact-receipt.py \
+				--cleanup-authority-scenario "$$scenario"; \
+		done
 
 test-container-live:
 	+@set -eu; \

@@ -31,6 +31,7 @@ foreach(_moguet_direct_focus IN ITEMS
     source-package-identity-projection
     source-package-compatibility
     invocation-owned-cleanup-model
+    source-artifact-install-trusted-transport
     reviewed-source-state
     reviewed-source-state-store
     reviewed-source-lifecycle
@@ -57,6 +58,7 @@ foreach(_moguet_direct_focus IN ITEMS
     separated-package-base-source-build
     production-source-build
     process-capture
+    bounded-process
     aur-update-plan
     upgrade-all-plan
     system-source-upgrade
@@ -81,6 +83,17 @@ foreach(_moguet_direct_focus IN ITEMS
         TESTS "cpp.${_moguet_direct_ctest}"
     )
 endforeach()
+
+moguet_add_focused_ctest_alias(
+    test-git-remote-revision-observer
+    TESTS
+        cpp.git_remote_revision_observer
+        cpp.git_remote_revision_observer_integration
+)
+moguet_add_focused_ctest_alias(
+    test-remote-aur-cleanup-collector
+    TESTS cpp.remote_aur_cleanup_collector
+)
 
 moguet_add_focused_ctest_alias(
     test-localization

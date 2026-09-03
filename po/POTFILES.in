@@ -1,4 +1,4 @@
-source/artifact_identity.cpp
+source/artifact_archive_metadata.cpp
 source/artifact_identity_set.cpp
 source/artifact_install_executor.cpp
 source/artifact_install_plan.cpp
@@ -52,9 +52,11 @@ source/separated_source_build.cpp
 source/source_build.cpp
 source/source_install.cpp
 source/source_preference.cpp
+source/system_aur_update_operation.cpp
 source/system_source_upgrade.cpp
 source/trusted_cache.cpp
 source/trusted_git.cpp
+source/trusted_git_process_policy.cpp
 source/upgrade_all_operation.cpp
 source/upgrade_all_plan.cpp
 source/user_config.cpp

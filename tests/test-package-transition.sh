@@ -413,6 +413,7 @@ assert_archive_layout() {
     archive_listing=$2
     executable_path=$3
     internal_executable_path=${4:-}
+    second_internal_executable_path=${5:-}
 
     LC_ALL=C bsdtar --numeric-owner -tvf "$archive_path" >"$archive_listing"
     if ! awk '
@@ -428,7 +429,8 @@ assert_archive_layout() {
 
     if ! awk \
         -v executable_path="$executable_path" \
-        -v internal_executable_path="$internal_executable_path" '
+        -v internal_executable_path="$internal_executable_path" \
+        -v second_internal_executable_path="$second_internal_executable_path" '
         {
             entry_type = substr($1, 1, 1)
             entry_path = $NF
@@ -436,7 +438,8 @@ assert_archive_layout() {
                 expected_mode = "drwxr-xr-x"
             } else if (entry_type == "-") {
                 expected_mode = (entry_path == executable_path || \
-                                 entry_path == internal_executable_path) \
+                                 entry_path == internal_executable_path || \
+                                 entry_path == second_internal_executable_path) \
                     ? "-rwxr-xr-x" : "-rw-r--r--"
             } else {
                 print "unexpected archive entry type: " $0
@@ -709,7 +712,8 @@ assert_archive_layout "$v1_package_archive" \
 assert_archive_layout "$v2_package_archive" \
     "$tmp_dir/v2-archive-listing.txt" \
     "usr/bin/$COMMAND_NAME" \
-    usr/libexec/moguet/moguet-alpm-receipt-helper
+    usr/libexec/moguet/moguet-alpm-receipt-helper \
+    usr/libexec/moguet/moguet-source-artifact-install-helper
 bsdtar -xf "$v1_package_archive" -C "$v1_archive_root"
 bsdtar -xf "$v2_package_archive" -C "$v2_archive_root"
 assert_no_symlinks "$v1_archive_root"

@@ -2,7 +2,9 @@
 
 #include "app_config.hpp"
 #include "aur_rpc.hpp"
+#include "aur_update_cli_presentation.hpp"
 #include "cli_routing.hpp"
+#include "commands_aur_update.hpp"
 #include "dependency_plan.hpp"
 #include "diagnostic_projection.hpp"
 #include "localization.hpp"
@@ -17,6 +19,7 @@
 #include "shell_words.hpp"
 #include "source_install.hpp"
 #include "source_preference.hpp"
+#include "system_aur_update_operation.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -1543,10 +1546,8 @@ int execute_prepared_sync_install(
     }
 
     if(prepared.repository_transaction_required) {
-        if(run_command(
-               "sudo pacman " +
-               join_pacman_args(
-                   prepared.repository_pacman_args, config)) != 0) {
+        if(execute_ordered_repository_sync_transaction(
+               prepared.repository_pacman_args, config) != 0) {
             throw std::runtime_error(
                 localization::format_translated_message(
                     "{} failed.", "Pacman"));
@@ -1564,22 +1565,536 @@ int execute_prepared_sync_install(
     return 0;
 }
 
+int execute_ordered_repository_sync_transaction(
+    const std::vector<std::string>& ordered_pacman_args,
+    const AppConfig& config) {
+    if(ordered_pacman_args.empty()) {
+        throw std::logic_error(localization::format_translated_message(
+            "Prepared repository transaction has no {} arguments.",
+            "pacman"));
+    }
+    return run_command(
+        "sudo pacman " +
+        join_pacman_args(ordered_pacman_args, config));
+}
+
+namespace {
+
+struct SystemAurRetainedDiagnosticProjection {
+    SystemAurUpdateOperationPhase phase =
+        SystemAurUpdateOperationPhase::None;
+    RuntimeDiagnosticPresentation presentation;
+};
+
+std::optional<SystemAurRetainedDiagnosticProjection>
+make_system_aur_retained_diagnostic_projection(
+    SystemAurUpdateOperationPhase phase,
+    DiagnosticClass classification,
+    DiagnosticPhase diagnostic_phase,
+    DiagnosticSourceKind source_kind,
+    DiagnosticRequiredAction required_action,
+    const std::string& retained_detail) {
+    if(retained_detail.empty()) return std::nullopt;
+
+    DiagnosticIdentity identity;
+    identity.source_kind = source_kind;
+    const std::string safe_detail =
+        terminal_safe_runtime_diagnostic_detail(retained_detail);
+    const NormalizedDiagnostic<SystemAurUpdateOperationPhase> diagnostic{
+        classification,
+        DiagnosticSeverity::Error,
+        DiagnosticOperation::PacmanDelegation,
+        diagnostic_phase,
+        std::move(identity),
+        phase,
+        required_action,
+        DiagnosticBlockingDecision::StopsFollowingPhases,
+        DiagnosticExitStatusEffect::Failure,
+        safe_detail};
+    return SystemAurRetainedDiagnosticProjection{
+        phase, present_runtime_diagnostic(diagnostic, safe_detail)};
+}
+
+std::optional<SystemAurRetainedDiagnosticProjection>
+project_system_aur_retained_diagnostic(
+    const SystemAurUpdateOperationResult& result) {
+    // POLICY(#505): a retained typed child owns its own diagnostic projection.
+    // Outer raw detail is considered only for a childless fatal boundary, so
+    // suppression depends on capability state rather than matching strings.
+    if(result.aur.operation_result.has_value()) return std::nullopt;
+
+    if(result.stopped_phase == SystemAurUpdateOperationPhase::Repository &&
+       result.repository.status ==
+           SystemAurUpdateRepositoryPhaseStatus::Failed &&
+       result.repository.diagnostic.has_value()) {
+        return make_system_aur_retained_diagnostic_projection(
+            SystemAurUpdateOperationPhase::Repository,
+            DiagnosticClass::ExecutionFailure,
+            DiagnosticPhase::Install,
+            DiagnosticSourceKind::Pacman,
+            DiagnosticRequiredAction::ResolveBlocker,
+            *result.repository.diagnostic);
+    }
+
+    if(result.stopped_phase ==
+           SystemAurUpdateOperationPhase::ForeignInventory &&
+       result.foreign_inventory.status ==
+           SystemAurUpdateForeignInventoryPhaseStatus::Failed) {
+        DiagnosticIdentity identity;
+        identity.source_kind = DiagnosticSourceKind::Pacman;
+        if(result.foreign_inventory.failure.has_value()) {
+            const PackageMetadataFailure& failure =
+                *result.foreign_inventory.failure;
+            const std::string retained_detail =
+                !failure.diagnostic.empty()
+                    ? failure.diagnostic
+                    : result.foreign_inventory.diagnostic.value_or(
+                          localization::translate_message(
+                              "package metadata failure"));
+            const std::string safe_detail =
+                terminal_safe_runtime_diagnostic_detail(retained_detail);
+            const auto diagnostic = project_package_metadata_diagnostic(
+                failure,
+                DiagnosticOperation::PacmanDelegation,
+                DiagnosticPhase::Query,
+                std::move(identity));
+            return SystemAurRetainedDiagnosticProjection{
+                SystemAurUpdateOperationPhase::ForeignInventory,
+                present_runtime_diagnostic(diagnostic, safe_detail)};
+        }
+        if(result.foreign_inventory.diagnostic.has_value()) {
+            return make_system_aur_retained_diagnostic_projection(
+                SystemAurUpdateOperationPhase::ForeignInventory,
+                DiagnosticClass::QueryFailure,
+                DiagnosticPhase::Query,
+                DiagnosticSourceKind::Pacman,
+                DiagnosticRequiredAction::RetryQuery,
+                *result.foreign_inventory.diagnostic);
+        }
+        return std::nullopt;
+    }
+
+    if(result.stopped_phase == SystemAurUpdateOperationPhase::AurQuery &&
+       result.query.status == SystemAurUpdateQueryPhaseStatus::Failed &&
+       !result.query.query_result.has_value() &&
+       result.query.diagnostic.has_value()) {
+        return make_system_aur_retained_diagnostic_projection(
+            SystemAurUpdateOperationPhase::AurQuery,
+            DiagnosticClass::QueryFailure,
+            DiagnosticPhase::Query,
+            DiagnosticSourceKind::Aur,
+            DiagnosticRequiredAction::RetryQuery,
+            *result.query.diagnostic);
+    }
+
+    if(result.stopped_phase ==
+           SystemAurUpdateOperationPhase::AurPreparation &&
+       result.aur.diagnostic.has_value()) {
+        const bool is_inconsistent =
+            result.aur.status ==
+            SystemAurUpdateAurPhaseStatus::InconsistentResult;
+        if(is_inconsistent ||
+           result.aur.status ==
+               SystemAurUpdateAurPhaseStatus::BlockedBeforeExecution) {
+            return make_system_aur_retained_diagnostic_projection(
+                SystemAurUpdateOperationPhase::AurPreparation,
+                is_inconsistent
+                    ? DiagnosticClass::InternalInconsistency
+                    : DiagnosticClass::Blocked,
+                DiagnosticPhase::Planning,
+                DiagnosticSourceKind::Aur,
+                is_inconsistent
+                    ? DiagnosticRequiredAction::ReportInconsistency
+                    : DiagnosticRequiredAction::ResolveBlocker,
+                *result.aur.diagnostic);
+        }
+    }
+
+    if(result.stopped_phase ==
+           SystemAurUpdateOperationPhase::AurExecution &&
+       result.aur.status ==
+           SystemAurUpdateAurPhaseStatus::InconsistentResult &&
+       result.aur.diagnostic.has_value()) {
+        return make_system_aur_retained_diagnostic_projection(
+            SystemAurUpdateOperationPhase::AurExecution,
+            DiagnosticClass::InternalInconsistency,
+            DiagnosticPhase::Install,
+            DiagnosticSourceKind::Aur,
+            DiagnosticRequiredAction::ReportInconsistency,
+            *result.aur.diagnostic);
+    }
+    return std::nullopt;
+}
+
+void report_system_aur_retained_diagnostic(
+    const SystemAurUpdateOperationResult& result) {
+    const std::optional<SystemAurRetainedDiagnosticProjection> projection =
+        project_system_aur_retained_diagnostic(result);
+    if(projection.has_value()) {
+        report_runtime_diagnostic(projection->presentation);
+    }
+}
+
+void report_system_aur_not_attempted(
+    const SystemAurUpdateOperationResult& result) {
+    if(result.aur.status !=
+       SystemAurUpdateAurPhaseStatus::NotAttempted) {
+        return;
+    }
+    std::cout << localization::format_translated_message(
+                     // TRANSLATORS: AUR is a runtime project identity.
+                     "The {} update was not attempted.", "AUR")
+              << std::endl;
+}
+
+void report_system_aur_partial_failure(
+    const SystemAurUpdateOperationResult& result) {
+    switch(result.status) {
+        case SystemAurUpdateOperationStatus::StoppedBeforeAurExecution:
+            switch(result.stopped_phase) {
+                case SystemAurUpdateOperationPhase::ForeignInventory:
+                    Logger::error(localization::format_translated_message(
+                        // TRANSLATORS: AUR is a runtime project identity.
+                        "The repository system upgrade completed, but the fresh installed-package inventory for {} could not be obtained.",
+                        "AUR"));
+                    break;
+                case SystemAurUpdateOperationPhase::AurQuery:
+                    Logger::error(localization::format_translated_message(
+                        // TRANSLATORS: AUR is a runtime project identity.
+                        "The repository system upgrade completed, but the fresh {} update query failed.",
+                        "AUR"));
+                    break;
+                case SystemAurUpdateOperationPhase::AurPreparation:
+                    Logger::error(localization::format_translated_message(
+                        // TRANSLATORS: AUR is a runtime project identity.
+                        "The repository system upgrade completed, but the {} update was blocked before execution.",
+                        "AUR"));
+                    break;
+                case SystemAurUpdateOperationPhase::None:
+                case SystemAurUpdateOperationPhase::Repository:
+                case SystemAurUpdateOperationPhase::AurExecution:
+                case SystemAurUpdateOperationPhase::Reduction:
+                    Logger::error(localization::format_translated_message(
+                        // TRANSLATORS: AUR is a runtime project identity.
+                        "The repository system upgrade completed, but the {} update could not start.",
+                        "AUR"));
+                    break;
+            }
+            break;
+        case SystemAurUpdateOperationStatus::StoppedOnAurFailure:
+            Logger::error(localization::format_translated_message(
+                // TRANSLATORS: AUR is a runtime project identity.
+                "The repository system upgrade completed, but the {} update failed.",
+                "AUR"));
+            break;
+        case SystemAurUpdateOperationStatus::
+            StoppedAfterAurCleanupFailure:
+            Logger::error(localization::format_translated_message(
+                // TRANSLATORS: AUR is a runtime project identity.
+                "The repository system upgrade completed, but {} cleanup failed after a package transaction.",
+                "AUR"));
+            break;
+        case SystemAurUpdateOperationStatus::Completed:
+        case SystemAurUpdateOperationStatus::StoppedOnRepositoryFailure:
+            break;
+        case SystemAurUpdateOperationStatus::InconsistentResult:
+            if(result.stopped_phase ==
+               SystemAurUpdateOperationPhase::AurPreparation) {
+                Logger::error(localization::format_translated_message(
+                    // TRANSLATORS: AUR is a runtime project identity.
+                    "The repository system upgrade completed, but the {} update was blocked before execution.",
+                    "AUR"));
+            } else if(result.stopped_phase ==
+                      SystemAurUpdateOperationPhase::AurExecution) {
+                Logger::error(localization::format_translated_message(
+                    // TRANSLATORS: AUR is a runtime project identity.
+                    "The repository system upgrade completed, but the {} update failed.",
+                    "AUR"));
+            }
+            break;
+    }
+    report_system_aur_retained_diagnostic(result);
+    report_system_aur_not_attempted(result);
+    Logger::warn(localization::translate_message(
+        "The completed repository system upgrade was not rolled back."));
+}
+
+} // namespace
+
+void present_system_aur_update_operation_result(
+    SystemAurUpdateOperationResult result) {
+    const SystemAurUpdateOperationResult authority =
+        reduce_system_aur_update_result(std::move(result));
+
+    // Validate the nested presenter before emitting the repository success
+    // fact. A malformed child must fail closed without leaking a success line.
+    if(authority.aur.operation_result.has_value()) {
+        static_cast<void>(format_aur_update_cli_presentation(
+            authority.aur.operation_result->reduced_operation_result));
+    }
+
+    // Incoherent aggregate state never emits aggregate success. A childless
+    // exception with a reducer-validated repository prefix may still expose
+    // that completed phase before its typed AUR failure detail.
+    if(authority.has_inconsistency() ||
+       authority.status ==
+           SystemAurUpdateOperationStatus::InconsistentResult) {
+        const std::optional<SystemAurRetainedDiagnosticProjection>
+            retained_diagnostic =
+                project_system_aur_retained_diagnostic(authority);
+        const bool has_coherent_post_repository_failure =
+            retained_diagnostic.has_value() &&
+            authority.repository.status ==
+                SystemAurUpdateRepositoryPhaseStatus::Completed &&
+            (retained_diagnostic->phase ==
+                 SystemAurUpdateOperationPhase::AurPreparation ||
+             retained_diagnostic->phase ==
+                 SystemAurUpdateOperationPhase::AurExecution);
+        if(has_coherent_post_repository_failure) {
+            std::cout << localization::translate_message(
+                             "The repository system upgrade completed.")
+                      << std::endl;
+        }
+        Logger::error(localization::format_translated_message(
+            // TRANSLATORS: AUR is a runtime project identity.
+            "The repository and {} update result is inconsistent; no success was reported.",
+            "AUR"));
+        if(has_coherent_post_repository_failure) {
+            report_system_aur_partial_failure(authority);
+        } else {
+            report_system_aur_retained_diagnostic(authority);
+        }
+        return;
+    }
+
+    switch(authority.repository.status) {
+        case SystemAurUpdateRepositoryPhaseStatus::Failed:
+            Logger::error(localization::translate_message(
+                "The repository system upgrade failed."));
+            report_system_aur_retained_diagnostic(authority);
+            report_system_aur_not_attempted(authority);
+            return;
+        case SystemAurUpdateRepositoryPhaseStatus::Completed:
+            std::cout << localization::translate_message(
+                             "The repository system upgrade completed.")
+                      << std::endl;
+            break;
+        case SystemAurUpdateRepositoryPhaseStatus::NotAttempted:
+            Logger::error(localization::translate_message(
+                "The repository system upgrade was not attempted."));
+            return;
+    }
+
+    if(authority.aur.operation_result.has_value()) {
+        present_filtered_aur_update_execution_result(
+            authority.aur.operation_result.value());
+    }
+
+    if(authority.status == SystemAurUpdateOperationStatus::Completed) {
+        std::cout << localization::format_translated_message(
+                         // TRANSLATORS: AUR is a runtime project identity.
+                         "The repository system upgrade and normal {} update completed.",
+                         "AUR")
+                  << std::endl;
+        return;
+    }
+    report_system_aur_partial_failure(authority);
+}
+
+int cmd_system_aur_update(
+    PreparedSystemAurUpdateOperation prepared,
+    const AppConfig& config) {
+    SystemAurUpdateOperationResult result =
+        execute_prepared_system_aur_update_operation(
+            std::move(prepared), config);
+    const bool is_success = result.is_success();
+    present_system_aur_update_operation_result(std::move(result));
+    return is_success ? 0 : 1;
+}
+
+#ifdef MOGUET_ENABLE_SYSTEM_AUR_UPDATE_PRESENTATION_TEST_HOOKS
+namespace {
+
+CompatibleSystemAurUpdateRequest compatible_system_aur_request_for_test() {
+    std::optional<CompatibleSystemAurUpdateRequest> request =
+        make_compatible_system_aur_update_request(
+            AutoSystemUpdateRouteCandidate{
+                CompatibleAutoSystemUpdatePacmanArguments{},
+                {"-Syu"},
+                false});
+    if(!request.has_value()) {
+        throw std::logic_error(
+            "Test-only system/AUR request construction failed.");
+    }
+    return std::move(request.value());
+}
+
+SystemAurUpdateOperationResult completed_system_aur_prefix_for_test(
+    const AurUpdateQueryResult& query_result) {
+    SystemAurUpdateOperationResult result;
+    result.repository.status =
+        SystemAurUpdateRepositoryPhaseStatus::Completed;
+    result.repository.compatible_request =
+        compatible_system_aur_request_for_test();
+    result.repository.ordered_pacman_args = {"-Syu"};
+    result.repository.command_exit_status = 0;
+    result.foreign_inventory.status =
+        SystemAurUpdateForeignInventoryPhaseStatus::Completed;
+    result.foreign_inventory.repository_configuration =
+        PacmanRepositoryConfiguration{
+            PacmanDatabasePaths{
+                "/fixture/root", "/fixture/database"},
+            {"core"}};
+    for(const AurUpdatePlanEntry& entry : query_result.plan.entries) {
+        result.foreign_inventory.inventory.push_back(
+            InstalledPackageMetadata{
+                entry.installed_name,
+                entry.installed_version,
+                entry.install_reason});
+    }
+    result.query.status = query_result.recoverable_failures.empty()
+                              ? SystemAurUpdateQueryPhaseStatus::Completed
+                              : SystemAurUpdateQueryPhaseStatus::Failed;
+    result.query.query_result = query_result;
+    return result;
+}
+
+AurUpdateQueryResult executable_system_aur_query_for_test() {
+    AurUpdateQueryResult result;
+    result.plan.entries.push_back(AurUpdatePlanEntry{
+        "fixture-child",
+        "1.0-1",
+        InstalledPackageReason::Explicit,
+        AurUpdateRemotePackage{
+            "fixture-child",
+            "fixture-base",
+            "2.0-1",
+            AurVersionRelation::NewerThanInstalled},
+        AurUpdateClassification::UpdateAvailable});
+    return result;
+}
+
+int present_system_aur_test_result(
+    SystemAurUpdateOperationResult result) {
+    SystemAurUpdateOperationResult reduced =
+        reduce_system_aur_update_result(std::move(result));
+    const bool is_success = reduced.is_success();
+    present_system_aur_update_operation_result(std::move(reduced));
+    return is_success ? 0 : 1;
+}
+
+} // namespace
+
+int run_system_aur_update_presentation_test(
+    const std::string& test_case) {
+    if(test_case == "repository-exception") {
+        SystemAurUpdateOperationResult result;
+        result.repository.status =
+            SystemAurUpdateRepositoryPhaseStatus::Failed;
+        result.repository.compatible_request =
+            compatible_system_aur_request_for_test();
+        result.repository.ordered_pacman_args = {"-Syu"};
+        result.repository.diagnostic =
+            std::string{"fixture repository exception\n"} +
+            std::string{"\x1b", 1} + "unsafe\\detail";
+        result.foreign_inventory.status =
+            SystemAurUpdateForeignInventoryPhaseStatus::NotAttempted;
+        result.foreign_inventory.not_attempted_reason =
+            SystemAurUpdateNotAttemptedReason::RepositoryFailure;
+        result.query.status =
+            SystemAurUpdateQueryPhaseStatus::NotAttempted;
+        result.query.not_attempted_reason =
+            SystemAurUpdateNotAttemptedReason::RepositoryFailure;
+        result.aur.status = SystemAurUpdateAurPhaseStatus::NotAttempted;
+        result.aur.not_attempted_reason =
+            SystemAurUpdateNotAttemptedReason::RepositoryFailure;
+        return present_system_aur_test_result(std::move(result));
+    }
+
+    if(test_case == "preparation-exception") {
+        SystemAurUpdateOperationResult result =
+            completed_system_aur_prefix_for_test(
+                executable_system_aur_query_for_test());
+        result.aur.status =
+            SystemAurUpdateAurPhaseStatus::BlockedBeforeExecution;
+        result.aur.diagnostic =
+            std::string{"fixture preparation exception\n"} +
+            std::string{"\x1b", 1} + "unsafe\\detail";
+        return present_system_aur_test_result(std::move(result));
+    }
+
+    if(test_case == "execution-exception") {
+        SystemAurUpdateOperationResult result =
+            completed_system_aur_prefix_for_test(
+                executable_system_aur_query_for_test());
+        result.aur.status =
+            SystemAurUpdateAurPhaseStatus::InconsistentResult;
+        result.aur.diagnostic =
+            std::string{"fixture execution exception\n"} +
+            std::string{"\x1b", 1} + "unsafe\\detail";
+        result.stopped_phase =
+            SystemAurUpdateOperationPhase::AurExecution;
+        return present_system_aur_test_result(std::move(result));
+    }
+
+    if(test_case == "child-query-failure") {
+        const AppConfig config;
+        FilteredAurUpdateExecutionResult child =
+            execute_prepared_filtered_aur_update_operation(
+                prepare_upgrade_aur_operation(config), config);
+        // The command stub produces the strict upgrade-aur snapshot. This
+        // test-only wrapper changes every policy snapshot together so the
+        // retained child models the ordinary system+AUR route instead.
+        child.devel_requires_check_policy =
+            DevelRequiresCheckPolicy::SkipIndependentTarget;
+        child.preflight.devel_requires_check_policy =
+            DevelRequiresCheckPolicy::SkipIndependentTarget;
+        child.preparation.devel_requires_check_policy =
+            DevelRequiresCheckPolicy::SkipIndependentTarget;
+        child.reduced_operation_result.devel_requires_check_policy =
+            DevelRequiresCheckPolicy::SkipIndependentTarget;
+        SystemAurUpdateOperationResult result =
+            completed_system_aur_prefix_for_test(child.query_result);
+        result.aur.operation_result.emplace(std::move(child));
+        return present_system_aur_test_result(std::move(result));
+    }
+
+    if(test_case != "inconsistent") {
+        throw std::logic_error(
+            "Unknown test-only system/AUR presentation case: " +
+            test_case);
+    }
+
+    CompatibleSystemAurUpdateRequest request =
+        compatible_system_aur_request_for_test();
+    PreparedSystemAurUpdateOperation prepared =
+        prepare_system_aur_update_operation(
+            std::move(request));
+    PreparedSystemAurUpdateOperation retained(
+        std::move(prepared));
+    if(!retained.is_valid() || prepared.is_valid()) {
+        throw std::logic_error(
+            "Test-only system/AUR capability move state is inconsistent.");
+    }
+    return cmd_system_aur_update(
+        std::move(prepared), AppConfig{});
+}
+#endif
+
 int cmd_sync_install(
     const ParsedCliArguments& parsed, bool is_sys_upgrade,
     PackageSourceSelection source_selection, const AppConfig& config) {
     if(source_selection == PackageSourceSelection::RepoOnly) {
         // POLICY(#168): RepoOnly is one ordered binary repository transaction; no classification probe.
-        return run_command(
-            "sudo pacman " +
-            join_pacman_args(parsed.ordered_pacman_args, config));
+        return execute_ordered_repository_sync_transaction(
+            parsed.ordered_pacman_args, config);
     }
 
     const bool system_update = is_sys_upgrade;
     if(source_selection == PackageSourceSelection::Auto &&
        parsed.targets.empty() && !system_update) {
-        return run_command(
-            "sudo pacman " +
-            join_pacman_args(parsed.ordered_pacman_args, config));
+        return execute_ordered_repository_sync_transaction(
+            parsed.ordered_pacman_args, config);
     }
 
     SyncInstallPreparation preparation = prepare_sync_install(

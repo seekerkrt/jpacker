@@ -1,3 +1,148 @@
+# Moguet v2.6.0
+
+This tracked file is the source of truth for release bodies. The English and
+Japanese sections for each release describe the same scope.
+
+## English
+
+Moguet v2.6.0 includes a behavior-changing compatibility correction for the
+exact target-less `moguet -Syu` command. It now follows ordinary AUR-helper
+expectations while keeping Moguet's saved source-build preferences behind the
+explicit source-aware `upgrade*` workflows.
+
+### Ordinary AUR-helper `-Syu`
+
+- Before v2.6.0, exact target-less `moguet -Syu` performed only the official
+  repository system update.
+- Starting with v2.6.0, it performs the official repository system update and,
+  only after success, obtains a fresh installed-foreign/AUR inventory and runs
+  the normal installed-AUR update.
+- The combined meaning applies only to the exact canonical target-less token.
+  Alternate or separated modifiers and target-bearing forms retain their
+  existing routing and do not start an installed-AUR sweep.
+- `--needed` is initially the only supported pacman semantic option for Auto
+  combined `-Syu` and applies only to the repository transaction. Other
+  pacman semantic options or unsupported argument forms fail before repository
+  mutation instead of silently running only the repository phase.
+- `moguet -Syu --aur` remains unsupported. The AUR-only source-aware operation
+  remains `moguet upgrade-aur`.
+
+### Saved source-build preference boundary
+
+- Actual and dry-run `moguet -Syu` do not snapshot, enumerate, or read the
+  source-preference directory, attempt a PackageBase fallback preference, or
+  apply a preference-derived environment. Valid, invalid, unreadable, or
+  failing saved preferences do not affect the normal AUR phase.
+- `moguet upgrade`, `moguet upgrade-aur`, and `moguet upgrade-all` remain
+  explicit source-aware workflows and continue to check and apply saved
+  source-build preferences strictly.
+- `upgrade-aur` remains AUR-only in the sense that it does not run the
+  repository system update; it does not ignore saved preferences.
+
+### Independent devel `RequiresCheck` localization
+
+- In ordinary exact target-less `moguet -Syu`, an independent devel target
+  whose update status is `RequiresCheck` is skipped with a non-blocking
+  warning. It does not prevent unrelated normal AUR updates from continuing,
+  and the aggregate can exit successfully when no other hard failure exists.
+- `RequiresCheck` remains an unverified package-state observation. It is not
+  rewritten as `UpToDate` or `NoChange`, and it never authorizes an automatic
+  update, including with `--noconfirm`.
+- If another update candidate requires that target through a dependency,
+  provider, or required-child relation, the affected root retains a typed
+  blocker and the operation remains non-zero.
+- `upgrade-aur` and `upgrade-all`, including dry-run, retain their strict
+  whole-operation `RequiresCheck` blocker behavior.
+
+### Sequential outcome and dry-run freshness
+
+- Repository and AUR work are separate sequential transactions, not one atomic
+  transaction. A repository failure leaves AUR work unattempted. A later AUR
+  blocker, execution failure, or cleanup failure is non-zero partial
+  completion and does not roll back the completed repository transaction.
+- Cleanup state remains distinct from installation outcome, inconsistent
+  aggregate results fail closed, and AUR `NoUpdates` alone does not make the
+  whole repository-bearing operation `NoOp`.
+- `moguet --dry-run -Syu` displays the repository intent separately from the
+  normal-AUR intents. Its AUR assessment is based on the current installed
+  state; actual execution does not reuse that observation and re-evaluates AUR
+  authority after the repository upgrade succeeds.
+
+### Migration
+
+- To keep the former repository-only behavior, use `moguet -Syu --repo`. The
+  semantic selector is not forwarded to pacman, compatible repository
+  pass-through is preserved, and no AUR, preference, cache, Git, makepkg, or
+  source-runner work is started.
+- For Moguet's source-aware update behavior, use `moguet upgrade`,
+  `moguet upgrade-aur`, or `moguet upgrade-all` according to the required
+  repository/AUR scope.
+
+## 日本語
+
+Moguet v2.6.0では、exact target-less `moguet -Syu`にbehavior-changingな
+compatibility correctionを行います。通常のAUR helperとして期待されるupdateへ合わせつつ、
+Moguetのsaved source-build preferenceは明示的なsource-aware `upgrade*` workflowだけで
+扱います。
+
+### 通常のAUR helper `-Syu`
+
+- v2.6.0より前のexact target-less `moguet -Syu`はofficial repository system updateだけを
+  実行していました。
+- v2.6.0以降はofficial repository system updateを実行し、その成功後にだけfreshな
+  installed-foreign / AUR inventoryを取得してnormal installed-AUR updateを実行します。
+- combined semanticsを持つのはexact canonical target-less tokenだけです。alternate /
+  separated modifierやtarget-bearing formはexisting routingを維持し、installed-AUR sweepを
+  開始しません。
+- Auto combined `-Syu`でinitially対応するpacman semantic optionは`--needed`だけで、
+  repository transactionだけへ適用します。他のpacman semantic optionやunsupported
+  argument formはrepository mutation前にfail closedし、repository phaseだけを黙って実行
+  しません。
+- `moguet -Syu --aur`はunsupportedのままです。AUR-onlyのsource-aware operationは
+  `moguet upgrade-aur`です。
+
+### saved source-build preferenceの境界
+
+- actual / dry-runの`moguet -Syu`はsource-preference directoryのsnapshot、列挙、read、
+  PackageBase fallback preference、preference-derived environment適用を行いません。valid、
+  invalid、unreadable、failureとなるsaved preferenceはnormal AUR phaseへ影響しません。
+- `moguet upgrade`、`moguet upgrade-aur`、`moguet upgrade-all`は明示的なsource-aware
+  workflowのままで、saved source-build preferenceを引き続きStrictに確認・適用します。
+- `upgrade-aur`のAUR-onlyはrepository system updateを行わないことを意味し、saved
+  preferenceを無視する意味ではありません。
+
+### independent devel `RequiresCheck`の局所化
+
+- 通常のexact target-less `moguet -Syu`では、update statusが`RequiresCheck`の
+  independent devel targetをnon-blocking warning付きでskipします。unrelatedなnormal AUR
+  updateは継続し、他にhard failureがなければaggregateはsuccess / exit 0になれます。
+- `RequiresCheck`は未検証のpackage-state observationのままです。`UpToDate` / `NoChange`へ
+  書き換えず、`--noconfirm`を含めautomatic updateのauthorityにはしません。
+- 別のupdate candidateがdependency、provider、required-child relationとしてそのtargetを
+  必要とする場合は、affected rootのtyped blockerを維持してoperationをnon-zeroにします。
+- `upgrade-aur` / `upgrade-all`とそのdry-runは、strictなwhole-operation
+  `RequiresCheck` blocker behaviorを維持します。
+
+### sequential outcomeとdry-run freshness
+
+- repository / AUR workは別のsequential transactionであり、単一atomic transactionでは
+  ありません。repository failure時はAUR workを開始しません。後続AUR blocker、execution
+  failure、cleanup failureはnon-zeroのpartial completionで、完了済みrepository transactionを
+  rollbackしません。
+- cleanup stateをinstall outcomeへflattenせず、inconsistent aggregateはfail closedです。
+  AUR `NoUpdates`だけを根拠にrepository intentを持つoperation全体を`NoOp`と呼びません。
+- `moguet --dry-run -Syu`はrepository intentとnormal-AUR intentを分けて表示します。AUR
+  assessmentは現在インストールされている状態に基づき、actual executionはobservationを
+  再利用せず、repository upgrade成功後にAUR authorityをfreshに再評価します。
+
+### Migration
+
+- 以前のrepository-only behaviorを維持する場合は`moguet -Syu --repo`を使います。semantic
+  selectorはpacmanへforwardせず、compatibleなrepository pass-throughを維持し、AUR、
+  preference、cache、Git、makepkg、source runnerへ到達しません。
+- Moguetのsource-aware updateには、必要なrepository / AUR scopeに応じて
+  `moguet upgrade`、`moguet upgrade-aur`、`moguet upgrade-all`を使います。
+
 # Moguet v2.5.0
 
 This tracked file is the source of truth for release bodies. The English and

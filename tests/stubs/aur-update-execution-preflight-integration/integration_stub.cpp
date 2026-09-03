@@ -28,11 +28,12 @@ AurPackageInfo package_info(
     const std::string& name,
     const std::vector<std::string>& dependencies = {},
     const std::vector<std::string>& conflicts = {},
-    const std::vector<std::string>& replaces = {}) {
+    const std::vector<std::string>& replaces = {},
+    const std::string& version = "2.0-1") {
     AurPackageInfo info;
     info.Name = name;
     info.PackageBase = name;
-    info.Version = "2.0-1";
+    info.Version = version;
     info.Depends = dependencies;
     info.Conflicts = conflicts;
     info.Replaces = replaces;
@@ -170,6 +171,18 @@ std::optional<AurPackageInfo> AurClient::info_strict(
     if(package_name == "relation-query-failure-root") {
         return package_info(
             package_name, {}, {"unknown-conflict"});
+    }
+    if(package_name == "localization-required-root") {
+        return package_info(
+            package_name, {"localization-required-git"});
+    }
+    if(package_name == "localization-independent-root") {
+        return package_info(package_name);
+    }
+    if(package_name == "localization-required-git" ||
+       package_name == "localization-independent-git") {
+        return package_info(
+            package_name, {}, {}, {}, "1.0-1");
     }
 
     throw AurRpcResponseError(

@@ -3,7 +3,6 @@
 #include "package_relation_observation.hpp"
 
 #include <optional>
-#include <string_view>
 #include <vector>
 
 enum class PackageRelationAssessmentKind {
@@ -43,26 +42,3 @@ std::vector<PackageRelationAssessment> assess_package_relations(
         planned_observations,
     const std::optional<PackageRelationObservationSet>&
         repository_context = std::nullopt);
-
-[[nodiscard]] constexpr std::string_view
-package_relation_assessment_kind_token(
-    PackageRelationAssessmentKind kind) noexcept {
-    switch(kind) {
-        case PackageRelationAssessmentKind::DeclaredRelation:
-            return "DeclaredRelation";
-        case PackageRelationAssessmentKind::ConfirmedInstalledConflict:
-            return "ConfirmedInstalledConflict";
-        case PackageRelationAssessmentKind::ConfirmedPlannedTargetConflict:
-            return "ConfirmedPlannedTargetConflict";
-        case PackageRelationAssessmentKind::PotentialReplacement:
-            return "PotentialReplacement";
-        case PackageRelationAssessmentKind::
-            ConfirmedNoMatchingCurrentOrPlannedTarget:
-            return "ConfirmedNoMatchingCurrentOrPlannedTarget";
-        case PackageRelationAssessmentKind::Unknown:
-            return "Unknown";
-        case PackageRelationAssessmentKind::Invalid:
-            return "Invalid";
-    }
-    return "Invalid";
-}

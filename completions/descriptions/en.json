@@ -1,9 +1,9 @@
 {
   "operations": {
     "build": "Build one remote package or local PKGBUILD root without saving a preference",
-    "upgrade": "Update the system and rebuild configured source packages",
-    "upgrade-aur": "Update installed AUR packages only",
-    "upgrade-all": "Update the system, registered source packages, and remaining installed AUR packages",
+    "upgrade": "Run the source-aware system update and apply saved source-build preferences",
+    "upgrade-aur": "Update only installed AUR packages while applying saved source-build preferences",
+    "upgrade-all": "Run the full source-aware repository, configured-source, and remaining-AUR update",
     "clean": "Clean package and build caches",
     "deps": "Classify AUR dependencies for one or more packages",
     "plan": "Show the AUR build-order plan for one or more packages",
@@ -16,7 +16,7 @@
     "-G": "Export one AUR PackageBase repository without building or installing",
     "-Gp": "Print one AUR PackageBase PKGBUILD without keeping a checkout",
     "-S": "Install packages",
-    "-Syu": "Upgrade the system",
+    "-Syu": "Update repository packages and normal installed AUR packages without saved source-build preferences",
     "-Ss": "Search for packages",
     "-Si": "Show package information",
     "-Qua": "Check AUR and foreign-package updates"
@@ -40,8 +40,8 @@
     "--output-dir": "Select an existing export parent for -G",
     "--select": "Interactively select source-aware package candidates for plain -S",
     "--aur": "Limit supported sync operations to AUR",
-    "--repo": "Limit supported sync operations to official binary repositories",
-    "--needed": "Skip reinstall at final package installation",
+    "--repo": "Use only official binary repositories; with -Syu, run the repository system upgrade only",
+    "--needed": "Preserve pacman --needed semantics at the installation phase owned by the selected route",
     "--recursive": "Resolve dependencies recursively"
   }
 }

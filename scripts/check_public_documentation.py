@@ -112,6 +112,14 @@ def shown_path(path: Path) -> str:
         return str(path)
 
 
+def read_current_project_version(repository_root: Path) -> str:
+    version_path = repository_root / "VERSION"
+    lines = read_text(version_path).splitlines()
+    if len(lines) != 1 or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", lines[0]) is None:
+        fail(f"{shown_path(version_path)} must contain exactly one X.Y.Z version")
+    return lines[0]
+
+
 def assert_semantic_text_contract(
     label: str,
     text: str,
@@ -274,6 +282,86 @@ def check_reviewed_source_runtime_help(
             description = descriptions.get(syntax)
             if description is None:
                 fail(f"{label} is missing reviewed-source entry {syntax!r}")
+            assert_semantic_text_contract(
+                f"{label} entry {syntax!r}", description, contract
+            )
+
+
+def system_aur_update_runtime_help_contracts(
+    locale: str,
+) -> dict[str, SemanticTextContract]:
+    if locale == "en":
+        return {
+            "-Syu [--needed]": SemanticTextContract(
+                (
+                    r"official repository packages.*normal installed aur packages",
+                    r"do not read or apply saved source-build preferences",
+                    r"sequentially",
+                    r"does not roll back",
+                )
+            ),
+            "-Syu --repo [--needed]": SemanticTextContract(
+                (
+                    r"repository system upgrade only",
+                    r"full pacman-compatible repository argument tail",
+                )
+            ),
+            "upgrade": SemanticTextContract(
+                (r"source-aware system update", r"saved source-build preferences")
+            ),
+            "upgrade-aur": SemanticTextContract(
+                (
+                    r"installed aur packages only",
+                    r"do not update repository packages",
+                    r"apply saved source-build preferences",
+                )
+            ),
+        }
+    if locale == "ja":
+        return {
+            "-Syu [--needed]": SemanticTextContract(
+                (
+                    r"公式リポジトリパッケージ.*通常のインストール済みaurパッケージ",
+                    r"保存済みソースビルド設定を読み取りも適用もしません",
+                    r"順番に実行",
+                    r"ロールバックしません",
+                )
+            ),
+            "-Syu --repo [--needed]": SemanticTextContract(
+                (
+                    r"リポジトリのシステム更新だけを実行",
+                    r"pacman互換のリポジトリ引数をすべて許可",
+                )
+            ),
+            "upgrade": SemanticTextContract(
+                (r"ソース対応システム更新", r"保存済みソースビルド設定")
+            ),
+            "upgrade-aur": SemanticTextContract(
+                (
+                    r"インストール済みのaurパッケージだけを更新",
+                    r"リポジトリパッケージは更新せず",
+                    r"保存済みソースビルド設定を適用",
+                )
+            ),
+        }
+    raise ValueError(f"unsupported system/AUR help locale: {locale}")
+
+
+def check_system_aur_update_runtime_help(
+    english_help: str,
+    japanese_help: str,
+) -> None:
+    for locale, label, text in (
+        ("en", "English runtime help", english_help),
+        ("ja", "Japanese runtime help", japanese_help),
+    ):
+        descriptions = runtime_help_descriptions(label, text)
+        for syntax, contract in system_aur_update_runtime_help_contracts(
+            locale
+        ).items():
+            description = descriptions.get(syntax)
+            if description is None:
+                fail(f"{label} is missing system/AUR entry {syntax!r}")
             assert_semantic_text_contract(
                 f"{label} entry {syntax!r}", description, contract
             )
@@ -455,6 +543,12 @@ def is_closed_command_form(form: str, schema) -> bool:
     if operation is None or not operation.forms:
         return False
     if not operation.open_grammar:
+        return True
+
+    # An intercepted operation may retain an open pacman fallback while also
+    # owning exact closed forms, including a selector-free default form such
+    # as targetless -Syu. Exact canonical forms remain documentation-owned.
+    if form in {operation_form.syntax for operation_form in operation.forms}:
         return True
 
     selector_ids = tuple(
@@ -1097,6 +1191,116 @@ def check_reviewed_source_documentation(
     check_reviewed_source_completion_semantics(repository_root)
 
 
+def system_aur_update_documentation_contracts(
+    repository_root: Path,
+    current_version: str | None = None,
+) -> dict[Path, tuple[tuple[str, ...], tuple[str, ...]]]:
+    if current_version is None:
+        current_version = read_current_project_version(REPOSITORY_ROOT)
+    return {
+        repository_root / "README.md": (
+            (
+                "ordinary AUR-helper update",
+                "It neither enumerates nor reads saved source-build preferences",
+                "Initially, `--needed` is the only pacman semantic option",
+                "fails before repository mutation",
+                "`moguet -Syu --repo`",
+                "does not affect this route",
+                "reported as a non-zero partial outcome",
+            ),
+            (),
+        ),
+        repository_root / "README.ja.md": (
+            (
+                "通常のAUR helper update",
+                "saved source-build preferenceを列挙・readせず",
+                "initially対応するpacman semantic optionは`--needed`だけ",
+                "repository mutation前に失敗",
+                "`moguet -Syu --repo`",
+                "このrouteへ影響しません",
+                "non-zeroのpartial outcome",
+            ),
+            (),
+        ),
+        repository_root / "docs/COMPATIBILITY.md": (
+            (
+                "Exact target-less `-Syu` compatibility",
+                "fresh installed foreign inventory / exact AUR metadata",
+                "typed `NotAttempted`",
+                "AUR `NoUpdates`だけを根拠にoperation全体を`NoOp`と呼ばない",
+                "PackageBaseへのfallback read",
+                "source-awareなStrict reader",
+                "initially対応するpacman semantic optionは`--needed`だけ",
+                "`moguet -Syu --repo`",
+            ),
+            (),
+        ),
+        repository_root / "man/moguet.1.in": (
+            (
+                "The exact target-less Auto form is the ordinary AUR-helper update",
+                "does not snapshot, enumerate, read, or apply saved source-build preferences",
+                "sequential, not atomic",
+                "non-zero partial failure without rollback",
+                "only initially supported pacman semantic option",
+                "moguet -Syu --repo",
+                "-Syu --aur",
+            ),
+            (),
+        ),
+        repository_root / "man/ja/moguet.1.in": (
+            (
+                "exact target-less Auto formは通常のAUR helper update",
+                "saved source-build preference directoryのsnapshot、列挙、read、適用を行わず",
+                "phaseはsequentialでatomicではありません",
+                "non-zeroのpartial failure",
+                "initially対応するpacman semantic option",
+                "moguet -Syu --repo",
+                "-Syu --aur",
+            ),
+            (),
+        ),
+        repository_root / "RELEASE_NOTES.md": (
+            (
+                f"Moguet v{current_version} includes a behavior-changing compatibility correction",
+                f"Before v{current_version}",
+                f"Starting with v{current_version}",
+                "does not roll back the completed repository transaction",
+                "moguet -Syu --repo",
+                "saved source-build preferences strictly",
+                "behavior-changingな compatibility correction",
+            ),
+            (),
+        ),
+        repository_root / "source/moguet.cpp": (
+            (
+                "Upgrade official repository packages and normal installed {} packages",
+                "Do not read or apply saved source-build preferences",
+                "Run repository and {} phases sequentially",
+                "Run the repository system upgrade only",
+                "For {}, assess the current installed {} state",
+            ),
+            ("Remain compatible with {}; do not scan all source-build preferences",),
+        ),
+        repository_root / "completions/descriptions/en.json": (
+            (
+                '"-Syu": "Update repository packages and normal installed AUR packages without saved source-build preferences"',
+                '"--repo": "Use only official binary repositories; with -Syu, run the repository system upgrade only"',
+            ),
+            ('"-Syu": "Upgrade the system"',),
+        ),
+    }
+
+
+def check_system_aur_update_documentation(
+    repository_root: Path = REPOSITORY_ROOT,
+    current_version: str | None = None,
+) -> None:
+    for path, (required, forbidden) in system_aur_update_documentation_contracts(
+        repository_root, current_version
+    ).items():
+        assert_document_contract(path, required, forbidden)
+
+
 def markdown_canonical_grammar(path: Path) -> tuple[str, ...]:
     text = read_text(path)
     begin_marker = "<!-- CLI CANONICAL GRAMMAR BEGIN -->"
@@ -1155,10 +1359,12 @@ def main() -> int:
         read_text(arguments.help_en),
         read_text(arguments.help_ja),
     )
+    check_system_aur_update_runtime_help(
+        read_text(arguments.help_en),
+        read_text(arguments.help_ja),
+    )
 
-    version = read_text(REPOSITORY_ROOT / "VERSION").strip()
-    if not version:
-        fail("VERSION is empty")
+    version = read_current_project_version(REPOSITORY_ROOT)
     check_generated_man(
         REPOSITORY_ROOT / "man/moguet.1.in",
         REPOSITORY_ROOT / "man/moguet.1",
@@ -1239,6 +1445,7 @@ def main() -> int:
 
     check_package_relation_documentation()
     check_reviewed_source_documentation()
+    check_system_aur_update_documentation(current_version=version)
     check_generated_completions(schema)
     print("public-documentation-check: all checks passed")
     return 0

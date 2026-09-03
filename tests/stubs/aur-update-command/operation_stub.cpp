@@ -178,6 +178,7 @@ AurUpdateOperationTargetResult make_target_result(
     }
     result.status = status;
     result.preflight_issues = target.issues;
+    result.skip_kind = target.skip_kind;
     return result;
 }
 
@@ -629,11 +630,25 @@ AurUpdateQueryResult query_installed_aur_updates() {
                            test_scenario);
 }
 
+AurUpdateQueryResult query_aur_updates_for_foreign_inventory(
+    ForeignPackageInventory) {
+    throw std::logic_error(
+        "System AUR update queries are outside the upgrade-aur command fixture.");
+}
+
 AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
-    const AurUpdatePlan& update_plan) {
+    const AurUpdatePlan& update_plan,
+    DevelRequiresCheckPolicy devel_requires_check_policy) {
+    if(devel_requires_check_policy !=
+       DevelRequiresCheckPolicy::BlockOperation) {
+        throw std::logic_error(
+            "AUR update command did not request BlockOperation RequiresCheck policy.");
+    }
     append_event("preflight");
 
     AurUpdateExecutionPreflight preflight;
+    preflight.devel_requires_check_policy =
+        devel_requires_check_policy;
     for(std::size_t index = 0; index < update_plan.entries.size(); ++index) {
         AurUpdateExecutionTarget target;
         target.update_plan_index = index;
@@ -646,6 +661,7 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
                 break;
             case AurUpdateEffectiveState::UpToDate:
                 target.status = AurUpdateExecutionTargetStatus::Skipped;
+                target.skip_kind = AurUpdateExecutionSkipKind::UpToDate;
                 target.issues.push_back(make_preflight_issue(
                     AurUpdateExecutionReason::UpToDate,
                     target.update.installed_name,
@@ -661,6 +677,8 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
                 break;
             case AurUpdateEffectiveState::NonAurForeign:
                 target.status = AurUpdateExecutionTargetStatus::Skipped;
+                target.skip_kind =
+                    AurUpdateExecutionSkipKind::NonAurForeign;
                 target.issues.push_back(make_preflight_issue(
                     AurUpdateExecutionReason::NonAurForeign,
                     target.update.installed_name,
@@ -747,11 +765,17 @@ PreparedAurUpdateSourceBuildInvocation::PreparedAurUpdateSourceBuildInvocation(
 }
 
 bool AurUpdateSourceBuildPreparation::is_prepared() const noexcept {
-    return issues.empty() && invocation.has_value() && invocation->is_valid();
+    return devel_requires_check_policy ==
+               std::optional<DevelRequiresCheckPolicy>{
+                   DevelRequiresCheckPolicy::BlockOperation} &&
+           issues.empty() && invocation.has_value() && invocation->is_valid();
 }
 
 bool AurUpdateSourceBuildPreparation::is_noop() const noexcept {
-    return issues.empty() && !invocation.has_value() &&
+    return devel_requires_check_policy ==
+               std::optional<DevelRequiresCheckPolicy>{
+                   DevelRequiresCheckPolicy::BlockOperation} &&
+           issues.empty() && !invocation.has_value() &&
            std::none_of(
                affected_update_targets.begin(),
                affected_update_targets.end(),
@@ -767,13 +791,30 @@ bool AurUpdateSourceBuildPreparation::is_blocked() const noexcept {
 
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     const AurUpdateExecutionPreflight& preflight,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
     bool needed,
     const AppConfig& config) {
+    if(devel_requires_check_policy !=
+           DevelRequiresCheckPolicy::BlockOperation ||
+       preflight.devel_requires_check_policy !=
+           std::optional<DevelRequiresCheckPolicy>{
+               DevelRequiresCheckPolicy::BlockOperation}) {
+        throw std::logic_error(
+            "upgrade-aur command lost its BlockOperation RequiresCheck snapshot.");
+    }
+    if(saved_source_preference_policy !=
+       SavedSourcePreferencePolicy::Strict) {
+        throw std::logic_error(
+            "upgrade-aur command did not request strict saved source preferences.");
+    }
     append_event(
         "prepare needed=" + std::string(bool_text(needed)) + " " +
         config_snapshot(config));
 
     AurUpdateSourceBuildPreparation preparation;
+    preparation.devel_requires_check_policy =
+        devel_requires_check_policy;
     preparation.affected_update_targets = preflight.targets;
 
     const bool should_create_invocation =
@@ -936,12 +977,26 @@ execute_prepared_aur_update_source_build_invocation(
 AurUpdateOperationResult reduce_aur_update_operation_result(
     const AurUpdateExecutionPreflight& preflight,
     const AurUpdateSourceBuildPreparation& preparation,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
     const std::optional<AurUpdateSourceBuildExecutionResult>& execution) {
+    if(devel_requires_check_policy !=
+           DevelRequiresCheckPolicy::BlockOperation ||
+       preflight.devel_requires_check_policy !=
+           std::optional<DevelRequiresCheckPolicy>{
+               DevelRequiresCheckPolicy::BlockOperation} ||
+       preparation.devel_requires_check_policy !=
+           std::optional<DevelRequiresCheckPolicy>{
+               DevelRequiresCheckPolicy::BlockOperation}) {
+        throw std::logic_error(
+            "AUR update command reducer lost its BlockOperation policy snapshot.");
+    }
     append_event(
         "reduce execution=" +
         std::string(execution.has_value() ? "yes" : "no"));
 
     AurUpdateOperationResult result;
+    result.devel_requires_check_policy =
+        devel_requires_check_policy;
     result.preparation_issues = preparation.issues;
     result.preparation_warnings = preparation.warnings;
     if(execution.has_value()) {
@@ -1531,7 +1586,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
 }
 
 bool AurUpdateOperationResult::is_success() const noexcept {
-    return (status == AurUpdateOperationStatus::NoUpdates ||
+    return devel_requires_check_policy ==
+               std::optional<DevelRequiresCheckPolicy>{
+                   DevelRequiresCheckPolicy::BlockOperation} &&
+           (status == AurUpdateOperationStatus::NoUpdates ||
             status == AurUpdateOperationStatus::Completed) &&
            selected_repository_provider_transaction.is_success();
 }
@@ -1603,6 +1661,8 @@ bool AurUpdateOperationResult::has_blocking_targets() const noexcept {
 PreparedFilteredAurUpdateOperation::PreparedFilteredAurUpdateOperation(
     PreparedFilteredAurUpdateOperation&& other) noexcept
     : valid_(other.valid_),
+      devel_requires_check_policy(
+          std::move(other.devel_requires_check_policy)),
       query_result(std::move(other.query_result)),
       target_adapter(std::move(other.target_adapter)),
       upgrade_all_plan(std::move(other.upgrade_all_plan)),
@@ -1624,13 +1684,15 @@ bool PreparedFilteredAurUpdateOperation::is_valid() const noexcept {
 }
 
 bool PreparedFilteredAurUpdateOperation::is_prepared() const noexcept {
-    return valid_ && issues.empty() &&
+    return valid_ && devel_requires_check_policy == std::optional<DevelRequiresCheckPolicy>{DevelRequiresCheckPolicy::BlockOperation} &&
+           issues.empty() &&
            !has_upgrade_all_planning_issues(upgrade_all_plan) &&
            preparation.has_value() && preparation->is_prepared();
 }
 
 bool PreparedFilteredAurUpdateOperation::is_noop() const noexcept {
-    return valid_ && issues.empty() &&
+    return valid_ && devel_requires_check_policy == std::optional<DevelRequiresCheckPolicy>{DevelRequiresCheckPolicy::BlockOperation} &&
+           issues.empty() &&
            !has_upgrade_all_planning_issues(upgrade_all_plan) &&
            preparation.has_value() && preparation->is_noop();
 }
@@ -1639,14 +1701,50 @@ bool PreparedFilteredAurUpdateOperation::is_blocked() const noexcept {
     return valid_ && !is_prepared() && !is_noop();
 }
 
+bool FilteredAurUpdateObservation::is_ready() const noexcept {
+    return false;
+}
+
+bool FilteredAurUpdateObservation::is_noop() const noexcept {
+    return false;
+}
+
+bool FilteredAurUpdateObservation::is_blocked() const noexcept {
+    return true;
+}
+
+FilteredAurUpdateObservation observe_filtered_aur_update_operation(
+    AurUpdateQueryResult,
+    FilteredAurUpdateExplicitSourceSatisfaction,
+    DevelRequiresCheckPolicy,
+    SavedSourcePreferencePolicy,
+    const AppConfig&) {
+    throw std::logic_error(
+        "System AUR dry-run observation is outside the upgrade-aur command fixture.");
+}
+
 PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
     AurUpdateQueryResult query_result,
-    std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
+    FilteredAurUpdateExplicitSourceSatisfaction
+        explicit_source_satisfaction,
+    DevelRequiresCheckPolicy devel_requires_check_policy,
+    SavedSourcePreferencePolicy saved_source_preference_policy,
     const AppConfig& config,
     std::optional<ValidatedCacheRoot> cache_root) {
-    if(!explicit_sources.empty()) {
+    if(!std::holds_alternative<NoExplicitSourceSatisfaction>(
+           explicit_source_satisfaction)) {
         throw std::logic_error(
-            "AUR update command stub only supports an empty explicit source set.");
+            "AUR update command stub requires no explicit source satisfaction.");
+    }
+    if(devel_requires_check_policy !=
+       DevelRequiresCheckPolicy::BlockOperation) {
+        throw std::logic_error(
+            "AUR update command stub requires BlockOperation RequiresCheck policy.");
+    }
+    if(saved_source_preference_policy !=
+       SavedSourcePreferencePolicy::Strict) {
+        throw std::logic_error(
+            "AUR update command stub requires strict saved source preferences.");
     }
     if(cache_root.has_value()) {
         throw std::logic_error(
@@ -1654,16 +1752,20 @@ PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
     }
 
     PreparedFilteredAurUpdateOperation prepared;
+    prepared.devel_requires_check_policy =
+        devel_requires_check_policy;
     prepared.query_result = std::move(query_result);
     // POLICY(#281): command regression fixtures keep the full legacy plan so
     // normal skipped targets remain visible in the unchanged presentation.
     prepared.filtered_update_plan = prepared.query_result.plan;
     prepared.preflight = resolve_aur_update_execution_preflight(
-        prepared.filtered_update_plan);
+        prepared.filtered_update_plan,
+        devel_requires_check_policy);
 
     AurUpdateSourceBuildPreparation legacy_preparation =
         prepare_aur_update_source_build_invocation(
-            prepared.preflight, false, config);
+            prepared.preflight, devel_requires_check_policy,
+            saved_source_preference_policy, false, config);
     prepared.preparation.emplace(std::move(legacy_preparation));
     return prepared;
 }
@@ -1688,7 +1790,8 @@ FilteredAurUpdateExecutionResult execute_prepared_filtered_aur_update_operation(
     }
 
     AurUpdateOperationResult reduced = reduce_aur_update_operation_result(
-        prepared.preflight, *prepared.preparation, execution);
+        prepared.preflight, *prepared.preparation,
+        *prepared.devel_requires_check_policy, execution);
     prepared.valid_ = false;
     return FilteredAurUpdateExecutionResult{
         std::move(prepared.query_result),
@@ -1704,11 +1807,13 @@ FilteredAurUpdateExecutionResult execute_prepared_filtered_aur_update_operation(
         std::move(execution),
         std::move(reduced),
         {},
-        std::move(prepared.issues)};
+        std::move(prepared.issues),
+        std::move(prepared.devel_requires_check_policy)};
 }
 
 bool FilteredAurUpdateExecutionResult::is_success() const noexcept {
-    return !has_query_failure() && !has_planning_issue() &&
+    return has_consistent_devel_requires_check_policy_snapshot() &&
+           !has_query_failure() && !has_planning_issue() &&
            reduced_result_is_defensively_successful(
                reduced_operation_result);
 }
@@ -1745,4 +1850,22 @@ bool FilteredAurUpdateExecutionResult::has_planning_issue() const noexcept {
 
 bool FilteredAurUpdateExecutionResult::has_duplicate_exclusions() const noexcept {
     return !upgrade_all_plan.excluded_duplicate_target_indexes.empty();
+}
+
+bool FilteredAurUpdateObservation::
+    has_consistent_devel_requires_check_policy_snapshot() const noexcept {
+    return false;
+}
+
+bool FilteredAurUpdateExecutionResult::
+    has_consistent_devel_requires_check_policy_snapshot() const noexcept {
+    return devel_requires_check_policy.has_value() &&
+           is_known_devel_requires_check_policy(
+               *devel_requires_check_policy) &&
+           preflight.devel_requires_check_policy ==
+               devel_requires_check_policy &&
+           preparation.devel_requires_check_policy ==
+               devel_requires_check_policy &&
+           reduced_operation_result.devel_requires_check_policy ==
+               devel_requires_check_policy;
 }

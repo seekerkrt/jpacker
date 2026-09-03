@@ -3,6 +3,7 @@
 #include "diagnostic_model.hpp"
 
 #include <string>
+#include <string_view>
 
 struct RuntimeDiagnosticPresentation {
     DiagnosticSeverity severity = DiagnosticSeverity::Error;
@@ -14,6 +15,11 @@ struct RuntimeDiagnosticPresentation {
 std::string diagnostic_class_label(DiagnosticClass classification);
 std::string diagnostic_source_label(DiagnosticSourceKind source_kind);
 std::string diagnostic_identity_suffix(const DiagnosticIdentity& identity);
+
+// Runtime details do not carry a terminal-safety capability. Callers that
+// intentionally expose retained external/exception text must opt in at the
+// presentation boundary instead of changing every existing diagnostic.
+std::string terminal_safe_runtime_diagnostic_detail(std::string_view value);
 
 template <typename Reason>
 RuntimeDiagnosticPresentation present_runtime_diagnostic(

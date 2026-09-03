@@ -79,6 +79,7 @@ setup_case() {
     output_file=$case_dir/output
     package_metadata_state=$case_dir/package-metadata.state
     repository_metadata_state=$case_dir/repository-metadata.state
+    foreign_inventory_state=$case_dir/foreign-inventory.state
     source_preference_dir=$case_dir/xdg-config/moguet/source-build.d
 
     mkdir -p \
@@ -88,6 +89,7 @@ setup_case() {
     : > "$command_log"
     : > "$package_metadata_state"
     : > "$repository_metadata_state"
+    : > "$foreign_inventory_state"
     : > "$normal_request_log"
     : > "$schema_request_log"
     export HOME=$case_dir/home
@@ -98,6 +100,7 @@ setup_case() {
     export MOGUET_TEST_COMMAND_LOG=$command_log
     export MOGUET_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
     export MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE=$repository_metadata_state
+    export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$foreign_inventory_state
     export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
     export MOGUET_TEST_PACMAN_EXIT_CODE=1
     export MOGUET_TEST_SUDO_EXIT_CODE=0
@@ -369,7 +372,9 @@ assert_normal_request_log_empty
 
 setup_case pacman-system-upgrade
 run_ok -Syu --needed
-assert_only_command "sudo pacman -Syu --needed"
+assert_command_count "sudo pacman -Syu --needed" 1
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_before "sudo pacman -Syu --needed" "pacman-conf --verbose RootDir DBPath"
 assert_no_source_build_commands
 assert_normal_request_log_empty
 
@@ -676,7 +681,8 @@ assert_no_mutation_commands
 assert_cache_entry_absent invalid-root-preflight
 assert_schema_request_log_nonempty
 
-# Matrix I: custom upgrade/upgrade-aurは--neededを受けず、generic -Syuはpacman-onlyという境界を固定する。
+# Matrix I: explicit source-aware commands reject --needed; ordinary -Syu
+# keeps it in the repository phase and ignores saved source preferences.
 setup_case custom-upgrade-rejects-needed
 prepare_source_preference clean-root
 run_fail upgrade --needed
@@ -696,7 +702,9 @@ setup_case generic-system-upgrade-separation
 prepare_source_preference clean-root
 preference_checksum=$(cksum "$source_preference_dir/clean-root")
 run_ok -Syu --needed
-assert_only_command "sudo pacman -Syu --needed"
+assert_command_count "sudo pacman -Syu --needed" 1
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_before "sudo pacman -Syu --needed" "pacman-conf --verbose RootDir DBPath"
 assert_no_source_build_commands
 assert_preference_unchanged clean-root "$preference_checksum"
 assert_normal_request_log_empty

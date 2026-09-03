@@ -67,11 +67,12 @@ void require_selected_repository_provider(
             "Production source-build selected provider has an invalid repository name.");
     }
     require_valid_package_name(provider.package_name);
+    // POLICY(#485): repository PackageBase comes from the same strict
+    // libalpm observation as the provider package. It is repository source
+    // identity, not an AUR-only field and must not be reconstructed from the
+    // child name.
+    require_valid_package_name(provider.package_base);
     require_valid_package_name(provider.provided_dependency_name);
-    if(!provider.package_base.empty()) {
-        throw std::logic_error(
-            "Production source-build repository provider has an AUR PackageBase.");
-    }
 }
 
 std::vector<ProvidedDependency> collect_selected_repository_providers(
@@ -103,6 +104,56 @@ void add_selected_repository_provider(
        providers.end()) {
         providers.push_back(provider);
     }
+}
+
+struct ProductionSourceBuildPreparationState {
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    std::vector<ProvidedDependency> selected_repository_providers;
+    PacmanDatabasePaths database_paths;
+    std::optional<ValidatedCacheRoot> cache_root;
+};
+
+ProductionSourceBuildPreparationState
+prepare_production_source_build_preparation_state(
+    std::vector<ProductionSourceBuildWorkItem> work_items,
+    const AppConfig& config) {
+    if(work_items.empty()) {
+        throw std::invalid_argument(
+            "Production source-build invocation must contain at least one work item.");
+    }
+
+    // POLICY(#242): exact order is rmdeps, inherited PKGDEST, all source
+    // environments, static identity/role, reviewed state, then database paths.
+    // Every step remains mutation-free.
+    require_supported_separated_install_options(config.rm_deps);
+    require_unclaimed_artifact_pkgdest(SourceBuildEnvironment{});
+    for(const auto& work_item : work_items) {
+        require_unclaimed_artifact_pkgdest(
+            work_item.request.custom_environment);
+    }
+    for(const auto& work_item : work_items) {
+        require_static_production_source_build_work_item(work_item);
+    }
+    for(auto& work_item : work_items) {
+        if(work_item.request.reviewed_state_preflight) {
+            throw std::logic_error(
+                "Production source-build work item already contains a reviewed-state preflight observation.");
+        }
+        work_item.request.reviewed_state_preflight =
+            preflight_reviewed_source_fatal_state_for_production(
+                work_item.request);
+    }
+
+    std::optional<ValidatedCacheRoot> supplied_cache_root =
+        shared_prepared_cache_root(work_items);
+    std::vector<ProvidedDependency> selected_repository_providers =
+        collect_selected_repository_providers(work_items);
+    PacmanDatabasePaths database_paths = resolve_pacman_database_paths();
+    return ProductionSourceBuildPreparationState{
+        std::move(work_items),
+        std::move(selected_repository_providers),
+        std::move(database_paths),
+        std::move(supplied_cache_root)};
 }
 
 } // namespace
@@ -197,6 +248,24 @@ void require_static_production_source_build_work_item(
             throw std::logic_error(
                 "Production source-build work item contains a duplicate selected repository provider.");
         }
+    }
+
+    const auto edge_indices_are_unique = [](const auto& edge_indices) {
+        for(std::size_t index = 0; index < edge_indices.size(); ++index) {
+            if(std::find(
+                   edge_indices.begin(), edge_indices.begin() + index,
+                   edge_indices[index]) != edge_indices.begin() + index) {
+                return false;
+            }
+        }
+        return true;
+    };
+    if(!edge_indices_are_unique(
+           work_item.build_plan_dependency_edge_indices) ||
+       !edge_indices_are_unique(
+           work_item.selected_repository_provider_edge_indices)) {
+        throw std::logic_error(
+            "Production source-build work item contains duplicate BuildPlan edge attribution.");
     }
 
     if(work_item.required_targets.size() == 1) {
@@ -294,45 +363,46 @@ void require_supported_production_source_build_options(
 PreparedProductionSourceBuildInvocation prepare_production_source_build_invocation(
     std::vector<ProductionSourceBuildWorkItem> work_items,
     const AppConfig& config) {
-    if(work_items.empty()) {
-        throw std::invalid_argument(
-            "Production source-build invocation must contain at least one work item.");
-    }
-
-    // POLICY(#242): exact orderはrmdeps → inherited PKGDEST → all source
-    // environments → static identity/role → database paths。ここまではworkspace、
-    // checkout、makepkg、metadata session、sudoを開始しない。
-    require_supported_separated_install_options(config.rm_deps);
-    require_unclaimed_artifact_pkgdest(SourceBuildEnvironment{});
-    for(const auto& work_item : work_items) {
-        require_unclaimed_artifact_pkgdest(
-            work_item.request.custom_environment);
-    }
-    for(const auto& work_item : work_items) {
-        require_static_production_source_build_work_item(work_item);
-    }
-    for(auto& work_item : work_items) {
-        if(work_item.request.reviewed_state_preflight) {
-            throw std::logic_error(
-                "Production source-build work item already contains a reviewed-state preflight observation.");
-        }
-        work_item.request.reviewed_state_preflight =
-            preflight_reviewed_source_fatal_state_for_production(
-                work_item.request);
-    }
-
-    // Explicit build/sync routeがnetwork前に準備済みならcapabilityを保持する。
-    // Update preparationはfilesystem mutationを行わず、execution ownerがactivateする。
-    std::optional<ValidatedCacheRoot> supplied_cache_root =
-        shared_prepared_cache_root(work_items);
-    std::vector<ProvidedDependency> selected_repository_providers =
-        collect_selected_repository_providers(work_items);
-    PacmanDatabasePaths database_paths = resolve_pacman_database_paths();
+    ProductionSourceBuildPreparationState state =
+        prepare_production_source_build_preparation_state(
+            std::move(work_items), config);
     return PreparedProductionSourceBuildInvocation{
-        std::move(work_items),
-        std::move(selected_repository_providers),
-        std::move(database_paths),
-        std::move(supplied_cache_root)};
+        std::move(state.work_items),
+        std::move(state.selected_repository_providers),
+        std::move(state.database_paths),
+        std::move(state.cache_root)};
+}
+
+ProductionSourceBuildPreparationObservation
+observe_production_source_build_preparation(
+    std::vector<ProductionSourceBuildWorkItem> work_items,
+    const AppConfig& config) {
+    if(std::any_of(
+           work_items.begin(), work_items.end(),
+           [](const ProductionSourceBuildWorkItem& work_item) {
+               return work_item.cache_root.has_value();
+           })) {
+        throw std::logic_error(
+            "Read-only source-build observation received a cache capability.");
+    }
+    ProductionSourceBuildPreparationState state =
+        prepare_production_source_build_preparation_state(
+            std::move(work_items), config);
+    if(state.cache_root.has_value()) {
+        throw std::logic_error(
+            "Read-only source-build observation received a cache capability.");
+    }
+    std::vector<ProductionSourceBuildWorkItemObservation>
+        observed_work_items;
+    observed_work_items.reserve(state.work_items.size());
+    for(const ProductionSourceBuildWorkItem& work_item : state.work_items) {
+        observed_work_items.push_back(
+            make_production_source_build_work_item_observation(work_item));
+    }
+    return ProductionSourceBuildPreparationObservation{
+        std::move(observed_work_items),
+        std::move(state.selected_repository_providers),
+        std::move(state.database_paths)};
 }
 
 void preflight_local_source_build_dependencies(

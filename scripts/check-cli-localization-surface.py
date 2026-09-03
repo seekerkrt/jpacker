@@ -44,7 +44,7 @@ INTERNAL_ONLY_ANCHORS: dict[str, tuple[str, ...]] = {
         "Production source-build work items have a partial cache authority.",
         "Production source-build selected provider is not repository-owned.",
         "Production source-build selected provider has an invalid repository name.",
-        "Production source-build repository provider has an AUR PackageBase.",
+        "Production source-build work item contains duplicate BuildPlan edge attribution.",
         "Production source-build work item has an empty Git URL for ",
         "Production source-build work item has no required package target for PackageBase ",
         "Production source-build required target has a mismatched PackageBase: ",

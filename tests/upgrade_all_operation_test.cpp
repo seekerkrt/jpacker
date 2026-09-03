@@ -776,6 +776,52 @@ void test_preparation_and_aur_preflight_do_not_activate_cache() {
     stub::require_script_consumed();
 }
 
+void test_read_only_aur_preflight_requires_check_stays_blocked() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    stub::set_foreign_inventory(foreign_inventory({"dry-check-git"}));
+    enqueue_aur_query(
+        {{"dry-check-git", "dry-check-git"}}, "0");
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+        prepare_upgrade_all_operation(config),
+        "read-only upgrade-all RequiresCheck preflight");
+    const UpgradeAllOperationPreparedSnapshot* snapshot =
+        prepared.snapshot();
+    expect(snapshot != nullptr, "RequiresCheck dry snapshot is unavailable");
+
+    PreparedUpgradeAllAurPreflight aur_preflight =
+        prepare_upgrade_all_aur_preflight(*snapshot, config);
+    const PreparedFilteredAurUpdateOperation* filtered =
+        aur_preflight.filtered_operation();
+    expect(
+        filtered != nullptr && filtered->is_blocked() &&
+            filtered->devel_requires_check_policy_snapshot() ==
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::BlockOperation} &&
+            filtered->execution_preflight()
+                    .devel_requires_check_policy ==
+                filtered->devel_requires_check_policy_snapshot() &&
+            filtered->execution_preflight().targets.size() == 1 &&
+            filtered->execution_preflight().targets.front().status ==
+                AurUpdateExecutionTargetStatus::Incomplete &&
+            filtered->execution_preflight()
+                    .targets.front()
+                    .issues.front()
+                    .reason ==
+                AurUpdateExecutionReason::DevelRequiresCheck &&
+            filtered->source_build_preparation().has_value() &&
+            filtered->source_build_preparation()
+                    ->devel_requires_check_policy ==
+                filtered->devel_requires_check_policy_snapshot(),
+        "upgrade-all read-only RequiresCheck preflight changed blocker semantics");
+    expect(
+        stub::system_commands().empty() &&
+            stub::aur_execution_calls().empty(),
+        "upgrade-all read-only RequiresCheck preflight crossed mutation");
+    stub::require_script_consumed();
+}
+
 void test_cache_replacement_after_system_blocks_inventory_and_aur() {
     stub::reset();
     stub::set_preference_directory(preference_directory({}));
@@ -2229,8 +2275,14 @@ void test_devel_requires_check_preserves_prior_phases_and_blocks_aur() {
         "Devel RequiresCheck rewrote or lost a prior phase outcome");
     const AurUpdateOperationResult& aur_result =
         result.aur.operation_result->reduced_operation_result;
+    const FilteredAurUpdateExecutionResult& filtered =
+        *result.aur.operation_result;
     expect(
-        aur_result.status ==
+        filtered.has_consistent_devel_requires_check_policy_snapshot() &&
+            filtered.devel_requires_check_policy ==
+                std::optional<DevelRequiresCheckPolicy>{
+                    DevelRequiresCheckPolicy::BlockOperation} &&
+            aur_result.status ==
                 AurUpdateOperationStatus::BlockedBeforeExecution &&
             aur_result.targets.size() == 1 &&
             aur_result.targets.front().status ==
@@ -2545,7 +2597,8 @@ void test_system_only_observation_failure_remains_unverified() {
     const UpgradeAllPhasePackageStateObservations phase_observations =
         project_upgrade_all_phase_package_state_observations(result);
     const PresentationProjection presentation =
-        project_upgrade_all_presentation(result);
+        project_upgrade_all_presentation_with_operation_state(
+            result, operation_state);
     expect(
         operation_state.outcome == OperationOutcome::Succeeded &&
             operation_state.package_state.state ==
@@ -3242,7 +3295,17 @@ void test_constructed_no_source_no_updates_helper_fixture() {
         UpgradeAllForeignInventoryPhaseStatus::Completed;
     result.aur.status = UpgradeAllAurPhaseStatus::NoUpdates;
     result.aur.operation_result.emplace();
-    result.aur.operation_result->reduced_operation_result.status =
+    FilteredAurUpdateExecutionResult& filtered =
+        *result.aur.operation_result;
+    filtered.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    filtered.preflight.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    filtered.preparation.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    filtered.reduced_operation_result.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    filtered.reduced_operation_result.status =
         AurUpdateOperationStatus::NoUpdates;
 
     expect(
@@ -3284,8 +3347,18 @@ void test_constructed_aur_no_change_noop_basis_fixture() {
         UpgradeAllForeignInventoryPhaseStatus::Completed;
     result.aur.status = UpgradeAllAurPhaseStatus::NoUpdates;
     result.aur.operation_result.emplace();
+    result.aur.operation_result->devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    result.aur.operation_result->preflight
+        .devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    result.aur.operation_result->preparation
+        .devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     AurUpdateOperationResult& aur =
         result.aur.operation_result->reduced_operation_result;
+    aur.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     aur.status = AurUpdateOperationStatus::NoUpdates;
     AurUpdateOperationTargetResult target;
     target.update.installed_name = "unchanged-aur";
@@ -3315,6 +3388,17 @@ UpgradeAllOperationResult make_constructed_completed_helper_fixture(
         UpgradeAllForeignInventoryPhaseStatus::Completed;
     result.aur.status = UpgradeAllAurPhaseStatus::Completed;
     result.aur.operation_result.emplace();
+    result.aur.operation_result->devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    result.aur.operation_result->preflight
+        .devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    result.aur.operation_result->preparation
+        .devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
+    result.aur.operation_result->reduced_operation_result
+        .devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     result.aur.operation_result->reduced_operation_result.status =
         AurUpdateOperationStatus::Completed;
     result.aur.operation_result->reduced_operation_result.execution_status =
@@ -3662,6 +3746,9 @@ int main() {
         run_case(
             "preparation and AUR preflight are cache-free",
             test_preparation_and_aur_preflight_do_not_activate_cache);
+        run_case(
+            "read-only AUR RequiresCheck preflight stays blocked",
+            test_read_only_aur_preflight_requires_check_stays_blocked);
         run_case(
             "cache replacement after system",
             test_cache_replacement_after_system_blocks_inventory_and_aur);

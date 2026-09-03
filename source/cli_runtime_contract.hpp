@@ -13,6 +13,8 @@ enum class CliInvocationIssueKind {
     MisplacedLocalSourceOption,
     MisplacedPkgbuildOutputDirectoryOption,
     SelectRequiresPlainSync,
+    UnsupportedAutoSystemUpdateOption,
+    UnsupportedAutoSystemUpdateArgumentForm,
     MissingOperand,
     ExtraOperand,
     InvalidOperandOrdering,
@@ -52,7 +54,7 @@ struct CliInvocationValidation {
 // Slice 2のstructured metadataからruntimeで使用するformを選ぶ。filesystem、
 // network、process stateには到達しない。
 ResolvedCliRuntimeContract resolve_cli_runtime_contract(
-    const ParsedCliArguments& parsed) noexcept;
+    const ParsedCliArguments& parsed);
 
 // Moguet-owned / intercepted grammarだけを閉じて検証し、delegated pacmanの
 // open grammarはそのまま返す。productionとdry-runの共通authority。

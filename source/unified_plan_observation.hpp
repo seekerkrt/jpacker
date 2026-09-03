@@ -28,6 +28,8 @@ struct AurUpdateSourceBuildPreparation;
 struct AurUpdatePlanEntry;
 struct AurUpdateQueryFailure;
 struct FetchPreparation;
+struct FilteredAurUpdateObservation;
+struct FilteredAurUpdateOperationIssue;
 struct LocalDependencyPlanFailure;
 struct PreparedRemoteSourceBuild;
 struct ProductionSourceBuildWorkItem;
@@ -42,6 +44,8 @@ struct RootPackageSearchCandidate;
 struct RootPackageInstallPreparationFailure;
 struct SystemSourceUpgradeResult;
 struct SystemSourceUpgradeIssue;
+struct SystemAurUpdateDryRunIssue;
+struct SystemAurUpdateDryRunObservation;
 struct SyncInstallPreparationFailure;
 class SystemSourceUpgradeProjectionAuthority;
 struct UpgradeAllOperationResult;
@@ -394,6 +398,10 @@ using UnifiedPlanRoutePreflightAuthorityReference = std::variant<
     UnifiedPlanBorrowedAuthorityReference<
         PreparedUpgradeAllAurPreflight>,
     UnifiedPlanBorrowedAuthorityReference<
+        FilteredAurUpdateObservation>,
+    UnifiedPlanBorrowedAuthorityReference<
+        SystemAurUpdateDryRunObservation>,
+    UnifiedPlanBorrowedAuthorityReference<
         SystemSourceUpgradeProjectionAuthority>,
     UnifiedPlanBorrowedAuthorityReference<SystemSourceUpgradeResult>,
     UnifiedPlanBorrowedAuthorityReference<
@@ -436,6 +444,12 @@ struct RepositoryTransactionPolicyView {
     bool needed = false;
 };
 
+enum class UnifiedPlanTransactionIntentStage {
+    RouteOwned,
+    RepositorySystemUpgrade,
+    LaterNormalAur,
+};
+
 struct RepositoryRootInstallIntent {
     UnifiedPlanRootReference root;
 };
@@ -472,6 +486,8 @@ struct RepositoryPackageTransactionIntent {
 
     std::vector<RepositoryInstallIntentTarget> targets;
     RepositoryTransactionPolicyView policy;
+    UnifiedPlanTransactionIntentStage stage =
+        UnifiedPlanTransactionIntentStage::RouteOwned;
 };
 
 struct SourceRootArtifactInstallIntent {
@@ -502,6 +518,8 @@ struct SourceBuiltArtifactInstallBoundaryIntent {
 
     std::vector<SourceArtifactInstallIntentTarget> targets;
     bool needed = false;
+    UnifiedPlanTransactionIntentStage stage =
+        UnifiedPlanTransactionIntentStage::RouteOwned;
 };
 
 using UnifiedPlanTransactionIntent = std::variant<
@@ -635,6 +653,8 @@ struct BuildPlanStateUnifiedPlanBlocker {
 using RoutePreflightUnifiedPlanBlockerDetail = std::variant<
     UnifiedPlanBorrowedAuthorityReference<AurUpdateExecutionIssue>,
     UnifiedPlanBorrowedAuthorityReference<AurUpdatePreparationIssue>,
+    UnifiedPlanBorrowedAuthorityReference<FilteredAurUpdateOperationIssue>,
+    UnifiedPlanBorrowedAuthorityReference<SystemAurUpdateDryRunIssue>,
     UnifiedPlanBorrowedAuthorityReference<SystemSourceUpgradeIssue>,
     UnifiedPlanBorrowedAuthorityReference<UpgradeAllOperationIssue>>;
 
@@ -692,7 +712,8 @@ enum class UnifiedPlanObservationInvariantIssueKind {
     SourceArtifactInstallHasNoTarget,
     SourceArtifactInstallTargetInvalid,
     SourceArtifactInstallTargetNotObserved,
-    ObservationPhaseOrderInvalid
+    ObservationPhaseOrderInvalid,
+    TransactionIntentStageInvalid
 };
 
 struct UnifiedPlanObservationInvariantIssue {

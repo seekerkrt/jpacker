@@ -6,6 +6,7 @@
 #include "cli_authority.hpp"
 #include "cli_parser.hpp"
 #include "cli_runtime_contract.hpp"
+#include "commands_aur_update.hpp"
 #include "interactive_confirmation.hpp"
 #include "localization.hpp"
 #include "logging.hpp"
@@ -30,10 +31,8 @@
 namespace {
 
 constexpr std::string_view PACKAGE_BASE_FIELD = "PackageBase";
-constexpr std::string_view PKGDEST_KEY = "PKGDEST";
 constexpr std::string_view AUR_SERVICE = "AUR";
 constexpr std::string_view COMMAND_NAME = "upgrade-all";
-constexpr std::string_view PACMAN_COMMAND = "pacman";
 
 std::string aggregate_status_label(UpgradeAllOperationStatus status) {
     switch(status) {
@@ -426,109 +425,6 @@ std::string adapter_issue_kind_label(
         "Unknown explicit source adapter issue kind."));
 }
 
-std::string preflight_reason_label(AurUpdateExecutionReason reason) {
-    switch(reason) {
-        case AurUpdateExecutionReason::None:
-            return localization::translate_message("none");
-        case AurUpdateExecutionReason::UpToDate:
-            return localization::translate_message("up to date");
-        case AurUpdateExecutionReason::DevelRequiresCheck:
-            return localization::translate_message(
-                "devel update requires check");
-        case AurUpdateExecutionReason::NonAurForeign:
-            // TRANSLATORS: The placeholder is the literal service name "AUR".
-            return localization::format_translated_message("non-{} foreign",
-                                                           AUR_SERVICE);
-        case AurUpdateExecutionReason::AurMetadataUnavailable:
-            // TRANSLATORS: The placeholder is the literal service name "AUR".
-            return localization::format_translated_message(
-                "{} metadata unavailable", AUR_SERVICE);
-        case AurUpdateExecutionReason::VersionComparisonUnavailable:
-            return localization::translate_message("version comparison unavailable");
-        case AurUpdateExecutionReason::InstalledReasonUnknown:
-            return localization::translate_message("installed reason unknown");
-        case AurUpdateExecutionReason::UpdatePlanInconsistent:
-            return localization::translate_message("update plan inconsistent");
-        case AurUpdateExecutionReason::DuplicateUpdateTarget:
-            return localization::translate_message("duplicate update target");
-        case AurUpdateExecutionReason::InstalledPackageMetadataUnavailable:
-            return localization::translate_message(
-                "installed package metadata unavailable");
-        case AurUpdateExecutionReason::RepositoryMetadataUnavailable:
-            return localization::translate_message("repository metadata unavailable");
-        case AurUpdateExecutionReason::AurDependencyMetadataUnavailable:
-            // TRANSLATORS: The placeholder is the literal service name "AUR".
-            return localization::format_translated_message(
-                "{} dependency metadata unavailable", AUR_SERVICE);
-        case AurUpdateExecutionReason::ProviderMetadataUnavailable:
-            return localization::translate_message("provider metadata unavailable");
-        case AurUpdateExecutionReason::UnresolvedDependency:
-            return localization::translate_message("unresolved dependency");
-        case AurUpdateExecutionReason::VersionConstraintUnverified:
-            return localization::translate_message("version constraint unverified");
-        case AurUpdateExecutionReason::DependencyCycle:
-            return localization::translate_message("dependency cycle");
-        case AurUpdateExecutionReason::BuildPlanInconsistent:
-            return localization::translate_message("build plan inconsistent");
-        case AurUpdateExecutionReason::PackageBaseMismatch:
-            return localization::translate_message("package base mismatch");
-        case AurUpdateExecutionReason::SplitPackageSelectionRequired:
-            return localization::translate_message("split package selection required");
-        case AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase:
-            return localization::translate_message("multiple package targets for package base");
-        case AurUpdateExecutionReason::AmbiguousProvider:
-            return localization::translate_message("ambiguous provider");
-        case AurUpdateExecutionReason::ConflictsOrReplacesUnresolved:
-            return localization::translate_message("conflicts/replaces unresolved");
-    }
-    throw std::logic_error(localization::format_translated_message(
-        // TRANSLATORS: The placeholder is the literal service name "AUR".
-        "Unknown {} update preflight reason.", AUR_SERVICE));
-}
-
-std::string preparation_reason_label(AurUpdatePreparationReason reason) {
-    switch(reason) {
-        case AurUpdatePreparationReason::None:
-            return localization::translate_message("none");
-        case AurUpdatePreparationReason::BlockingPreflight:
-            return localization::translate_message("blocking preflight");
-        case AurUpdatePreparationReason::PreflightInconsistent:
-            return localization::translate_message("preflight inconsistent");
-        case AurUpdatePreparationReason::BuildPlanMissing:
-            return localization::translate_message("build plan missing");
-        case AurUpdatePreparationReason::BuildPlanOrderEmpty:
-            return localization::translate_message("build plan order empty");
-        case AurUpdatePreparationReason::RootAttributionInconsistent:
-            return localization::translate_message("root attribution inconsistent");
-        case AurUpdatePreparationReason::PackageTargetAttributionInconsistent:
-            return localization::translate_message("package target attribution inconsistent");
-        case AurUpdatePreparationReason::DesiredInstallReasonMissing:
-            return localization::translate_message("desired install reason missing");
-        case AurUpdatePreparationReason::SourcePreferenceUnavailable:
-            return localization::translate_message("source preference unavailable");
-        case AurUpdatePreparationReason::SourcePreferencePkgdestConflict:
-            // TRANSLATORS: The placeholder is the literal environment key
-            // "PKGDEST".
-            return localization::format_translated_message(
-                "source preference {} conflict", PKGDEST_KEY);
-        case AurUpdatePreparationReason::StaticWorkItemInvalid:
-            return localization::translate_message("static work item invalid");
-        case AurUpdatePreparationReason::PacmanDatabaseUnavailable:
-            // TRANSLATORS: The placeholder is the literal command name "pacman".
-            return localization::format_translated_message(
-                "{} database unavailable", PACMAN_COMMAND);
-        case AurUpdatePreparationReason::GenericPreparationInconsistent:
-            return localization::translate_message("generic preparation inconsistent");
-        case AurUpdatePreparationReason::BuildUnitSelectionInconsistent:
-            return localization::translate_message("build unit selection inconsistent");
-        case AurUpdatePreparationReason::ExternalSatisfactionInconsistent:
-            return localization::translate_message("external satisfaction inconsistent");
-    }
-    throw std::logic_error(localization::format_translated_message(
-        // TRANSLATORS: The placeholder is the literal service name "AUR".
-        "Unknown {} update preparation reason.", AUR_SERVICE));
-}
-
 std::string reduction_stage_label(AurUpdateOperationReductionStage stage) {
     switch(stage) {
         case AurUpdateOperationReductionStage::Preflight:
@@ -607,6 +503,8 @@ std::string reduction_reason_label(
             return localization::translate_message("work item result inconsistent");
         case AurUpdateOperationReductionReason::InvocationResultInconsistent:
             return localization::translate_message("invocation result inconsistent");
+        case AurUpdateOperationReductionReason::
+            DevelRequiresCheckPolicyInconsistent:
         case AurUpdateOperationReductionReason::OtherCorrelationInconsistent:
             return localization::translate_message("other correlation inconsistency");
     }
@@ -620,6 +518,10 @@ std::string filtered_issue_kind_label(
     switch(kind) {
         case FilteredAurUpdateOperationIssueKind::UnknownUpdateClassification:
             return localization::translate_message("unknown update classification");
+        case FilteredAurUpdateOperationIssueKind::
+            DevelRequiresCheckPolicyInconsistent:
+            return localization::translate_message(
+                "target/planner mapping inconsistent");
         case FilteredAurUpdateOperationIssueKind::TargetPlannerMappingInconsistent:
             return localization::translate_message("target/planner mapping inconsistent");
         case FilteredAurUpdateOperationIssueKind::FilteredTargetMappingInconsistent:
@@ -801,38 +703,6 @@ std::string build_unit_role_label(UpgradeAllBuildUnitRole role) {
         // TRANSLATORS: The placeholder is the literal command name
         // "upgrade-all".
         "Unknown {} build-unit role.", COMMAND_NAME));
-}
-
-bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
-    switch(reason) {
-        case AurUpdateExecutionReason::UpToDate:
-        case AurUpdateExecutionReason::NonAurForeign:
-            return true;
-        case AurUpdateExecutionReason::None:
-        case AurUpdateExecutionReason::DevelRequiresCheck:
-        case AurUpdateExecutionReason::AurMetadataUnavailable:
-        case AurUpdateExecutionReason::VersionComparisonUnavailable:
-        case AurUpdateExecutionReason::InstalledReasonUnknown:
-        case AurUpdateExecutionReason::UpdatePlanInconsistent:
-        case AurUpdateExecutionReason::DuplicateUpdateTarget:
-        case AurUpdateExecutionReason::InstalledPackageMetadataUnavailable:
-        case AurUpdateExecutionReason::RepositoryMetadataUnavailable:
-        case AurUpdateExecutionReason::AurDependencyMetadataUnavailable:
-        case AurUpdateExecutionReason::ProviderMetadataUnavailable:
-        case AurUpdateExecutionReason::UnresolvedDependency:
-        case AurUpdateExecutionReason::VersionConstraintUnverified:
-        case AurUpdateExecutionReason::DependencyCycle:
-        case AurUpdateExecutionReason::BuildPlanInconsistent:
-        case AurUpdateExecutionReason::PackageBaseMismatch:
-        case AurUpdateExecutionReason::SplitPackageSelectionRequired:
-        case AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase:
-        case AurUpdateExecutionReason::AmbiguousProvider:
-        case AurUpdateExecutionReason::ConflictsOrReplacesUnresolved:
-            return false;
-    }
-    throw std::logic_error(localization::format_translated_message(
-        // TRANSLATORS: The placeholder is the literal service name "AUR".
-        "Unknown {} update preflight reason.", AUR_SERVICE));
 }
 
 std::string join_strings(const std::vector<std::string>& values) {
@@ -1087,7 +957,7 @@ std::string upgrade_all_presentation_reason_label(
             } else if constexpr(std::is_same_v<
                                     Reason,
                                     AurUpdatePreparationReason>) {
-                return preparation_reason_label(typed_reason);
+                return aur_update_preparation_reason_label(typed_reason);
             } else if constexpr(std::is_same_v<
                                     Reason,
                                     UpgradeAllPlanningIssueKind>) {
@@ -1895,12 +1765,13 @@ void print_filtered_mapping_issues(
 void print_aur_preflight_issues(const AurUpdateOperationResult& result) {
     for(const AurUpdateOperationTargetResult& target : result.targets) {
         for(const AurUpdateExecutionIssue& issue : target.preflight_issues) {
-            if(is_normal_skip_reason(issue.reason)) continue;
+            if(is_routine_aur_update_skip(issue.reason)) continue;
             // TRANSLATORS: The first placeholder is the literal service name
             // "AUR"; the others are a localized reason and diagnostic.
             Logger::error(localization::format_translated_message(
                 "{} preflight issue: {}: {}", AUR_SERVICE,
-                preflight_reason_label(issue.reason), issue.diagnostic));
+                aur_update_preflight_reason_label(issue.reason),
+                issue.diagnostic));
         }
     }
 }
@@ -1925,7 +1796,8 @@ void print_aur_preparation_details(
         // "AUR"; the others are a localized reason and diagnostic.
         Logger::error(localization::format_translated_message(
             "{} preparation issue: {}: {}", AUR_SERVICE,
-            preparation_reason_label(issue.reason), issue.diagnostic));
+            aur_update_preparation_reason_label(issue.reason),
+            issue.diagnostic));
     }
 }
 

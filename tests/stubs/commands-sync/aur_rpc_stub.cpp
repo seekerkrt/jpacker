@@ -72,8 +72,20 @@ std::optional<AurPackageInfo> fixture_info(const std::string& package_name) {
        package_name == "plan-a" || package_name == "plan-b" ||
        package_name == "source-a" || package_name == "source-b" ||
        package_name == "forced-official" || package_name == "mixed-aur" ||
-       package_name == "aur-presented" || package_name == "scope-aur") {
+       package_name == "aur-presented" || package_name == "scope-aur" ||
+       package_name == "system-update-a" ||
+       package_name == "system-devel-git" ||
+       package_name == "system-current" ||
+       package_name == "tree-sitter-cli-git" ||
+       package_name == "wezterm-git" ||
+       package_name == "xpadneo-dkms-git" ||
+       package_name == "system-required-git") {
         return package_info(package_name);
+    }
+    if(package_name == "system-required-root") {
+        AurPackageInfo info = package_info(package_name);
+        info.Depends = {"system-required-git"};
+        return info;
     }
     if(package_name == "constraint-block-root") {
         AurPackageInfo info = package_info(package_name);
@@ -190,6 +202,14 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(
     for(const auto& package_name : package_names)
         line += " " + package_name;
     append_command_log(line);
+
+    for(const std::string& package_name : package_names) {
+        if(package_name == "system-query-fatal") {
+            throw AurRpcResponseError(
+                std::string{"fixture fatal AUR schema failure\n"} +
+                std::string{"\x1b", 1} + "unsafe\\detail");
+        }
+    }
 
     std::map<std::string, AurPackageInfo> package_by_name;
     for(const auto& package_name : package_names) {

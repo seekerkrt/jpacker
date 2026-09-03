@@ -395,10 +395,6 @@ const ExecutionReadiness& execution_readiness(
 std::vector<std::string> collect_build_dependencies(const AurPackageInfo& pkg);
 std::vector<TypedPackageDependency> collect_typed_build_dependencies(const AurPackageInfo& pkg);
 DesiredInstallReason desired_install_reason(const PlannedPackageTarget& target);
-DependencyClassification classify_dependencies(const std::vector<std::string>& dependencies);
-DependencyClassification classify_dependencies(
-    const std::vector<std::string>& dependencies,
-    const ProviderSelectionCallback& select_provider);
 std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(const AurPackageInfo& pkg);
 std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(
     const AurPackageInfo& pkg,
@@ -427,6 +423,13 @@ BuildPlan resolve_fetch_plan(
 void require_compatible_selected_provider_package_identities(
     const BuildPlan& plan);
 bool has_incomplete_constraint_evaluations(const BuildPlan& plan) noexcept;
+// Installed exact is the only resolved dependency shape that can satisfy an
+// update dependency without becoming mutation input. Re-evaluate the retained
+// requirement instead of trusting the stored constraint classification.
+bool is_verified_installed_exact_dependency_satisfaction(
+    const BuildPlanDependencyEdge& edge,
+    const std::string& expected_package_name,
+    const std::string& expected_installed_version);
 std::string constraint_satisfaction_display(
     ConstraintSatisfaction satisfaction);
 std::string constraint_evaluation_reason_display(

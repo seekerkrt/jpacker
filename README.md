@@ -49,15 +49,15 @@ a new storage direction: source-build preferences now use only the executing
 user's XDG config context, while the published v2.0.0 tag, Release, and release
 notes remain historical records.
 
-Moguet v2.5.0 is the latest release. This minor release adds conservative
-VCS/devel AUR tracking that surfaces `RequiresCheck` instead of a false
-`UpToDate` when a conventional devel package cannot yet be authoritatively
-tracked, and targeted `upgrade-all` diagnostics for repo/AUR cross-source
-exact-version dependency locks. It also establishes safety foundations for
-invocation-owned dependency cleanup without enabling public source-build
-`--rmdeps`. See the
-[v2.5.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.5.0) for
-the complete user-visible changes.
+Moguet v2.6.0 is the latest release. Exact target-less `moguet -Syu` now
+performs the official repository system update followed by the normal
+installed-AUR update after repository success, while saved source-build
+preferences remain limited to the explicit source-aware `upgrade*` workflows.
+Independent devel `RequiresCheck` targets in ordinary `-Syu` are skipped
+locally instead of blocking unrelated AUR updates, while required
+`RequiresCheck` relations and explicit upgrade workflows remain strict. See
+the [v2.6.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.6.0)
+for the complete user-visible changes.
 
 The canonical repository identity is Moguet on GitHub, with a GitLab mirror.
 The Moguet package does not provide a `jpacker` command alias. AUR publication
@@ -185,6 +185,12 @@ detailed plan.
   retrying; the package may already be installed. In `upgrade-all`, provider
   selection for the filtered AUR phase occurs before clone, build, pacman, or
   sudo work in that phase, but earlier phases may already have completed.
+- Exact target-less `moguet -Syu` is also sequential: it completes the official
+  repository system upgrade first, then obtains a fresh installed-foreign/AUR
+  inventory and performs the normal AUR update. A repository failure leaves
+  the AUR phase unattempted. A blocker, execution failure, or cleanup failure
+  after repository completion is reported as a non-zero partial outcome; the
+  completed repository transaction is not rolled back.
 
 The detailed compatibility and routing contract is in
 [docs/COMPATIBILITY.md](https://github.com/seekerkrt/moguet/blob/develop/docs/COMPATIBILITY.md),
@@ -260,12 +266,23 @@ shown above are mapped into that graph rather than implemented by a separate
 Make install recipe.
 
 The current development package also installs the private implementation
-helper `/usr/libexec/moguet/moguet-alpm-receipt-helper`. It is a package-owned
-root transaction helper, not a public command: it is outside `PATH`, has no
-man page, does not accept an executable or destination path, and must never be
-replaced by a helper from a source or build tree. The current public
-source-build `--rmdeps` route remains unsupported and fail-closed; installing
-this helper does not enable dependency cleanup.
+helpers `/usr/libexec/moguet/moguet-alpm-receipt-helper` and
+`/usr/libexec/moguet/moguet-source-artifact-install-helper`. They are separate
+package-owned root transaction authorities, not public commands: they are
+outside `PATH`, have no man pages, do not accept an executable, state root, or
+destination path, and must never be replaced by a helper from a source or
+build tree. The source-artifact helper stages only write-sealed validated
+artifact bytes into its private root-owned transaction state before a fixed
+`pacman -U` hand-off. The current public source-build `--rmdeps` route remains
+unsupported and fail-closed; installing either helper does not enable
+dependency cleanup.
+
+The current development tree uses those owner-specific helpers inside one
+closed remote-AUR lifecycle to build an internal cleanup-candidate assessment.
+Only an exact, correlated actual dependency `Install` can become internally
+eligible after the full invocation and current metadata/policy observations
+succeed. This assessment has no public preview, prompt, or removal connection;
+makepkg sync-dependency ownership remains a separate unresolved authority.
 
 The v2.0.0 package and its only executable are named `moguet`; it does not
 install `/usr/bin/jpacker`. Its payload is disjoint from the jpacker v1.16.0
@@ -308,9 +325,10 @@ makepkg -si
 system with `pacman -U` in the same step. This differs from `make` and
 `./moguet --help` above, which only build and inspect the development tree
 in place and install nothing. The `PKGBUILD` is the canonical production
-CMake build/install consumer and configures `BUILD_TESTING=OFF`; the 96
-developer C++ test executables and 119 CTest registrations remain in host,
-CI, and release validation. This `PKGBUILD` is a repository-provided
+CMake build/install consumer and configures `BUILD_TESTING=OFF`; the 99
+developer C++ test-ledger executables, one `EXCLUDE_FROM_ALL` installed
+transport fixture harness, and 124 CTest registrations remain in host, CI,
+and release validation. This `PKGBUILD` is a repository-provided
 packaging path, not an AUR submission; Moguet still has no published AUR
 page.
 
@@ -341,9 +359,13 @@ revert <pkg>...
 -G <pkg> [--output-dir=DIR]
 -Gp <pkg>
 -S --select [--needed] <query>
+-Syu [--needed]
+-Syu --repo [--needed]
 ```
 <!-- CLI CANONICAL GRAMMAR END -->
 
+The two exact target-less `-Syu` forms are Moguet-intercepted semantic routes;
+the repository-only form still accepts a compatible delegated pacman tail.
 Other pacman operation forms remain delegated open grammar, not a Moguet
 allowlist. The closed grammar rejects a second bare operand for remote or local
 `build`, and rejects target operands for `upgrade`, `upgrade-aur`,
@@ -357,8 +379,11 @@ moguet -S --select [--needed] <query>
 moguet -Ss <query>
 moguet -Si <pkg>
 
-# Pacman-compatible system upgrade
+# Ordinary AUR-helper update: official repositories, then normal installed AUR
 moguet -Syu
+
+# Repository-only system upgrade
+moguet -Syu --repo
 
 # Update configured source packages, installed AUR packages, or both
 moguet upgrade
@@ -393,6 +418,7 @@ moguet -Gp <pkg>
 # Observe every supported mutating route without changing persistent state
 moguet --dry-run -S <pkg>
 moguet --dry-run -Syu
+moguet --dry-run -Syu --repo
 moguet --dry-run fetch <pkg>...
 moguet --dry-run build <pkg>
 moguet --dry-run build --local <directory>
@@ -430,6 +456,15 @@ is not reused as an approval token, execution capability, or cached provider
 choice: a later actual invocation revalidates current state. The v2.2.0 surface
 is human-readable only and adds no JSON or other machine-readable plan schema.
 
+For exact target-less `moguet --dry-run -Syu`, the repository system-update
+intent and the later normal-AUR transaction intents are shown separately. The
+AUR assessment is based on the currently installed state, not the state after
+a hypothetical repository transaction. Actual `moguet -Syu` does not reuse
+that observation or any prepared capability: after the repository upgrade
+succeeds it obtains a fresh installed-foreign inventory, AUR metadata, plan,
+provider decisions, and preflight. `moguet --dry-run -Syu --repo` shows only
+the repository intent and does not query AUR or source-build preferences.
+
 Human-readable diagnostics are projections of typed state, never the authority
 used to classify it. English and Japanese keep the same hierarchy: a normal
 summary first, attention-required details next, and route-owned necessary
@@ -439,13 +474,37 @@ independently. A successful but unverified observation remains successful with
 the required check, `Unknown` is not rewritten as `NoOp`, and severity,
 blocking, and exit-status effect remain separate dimensions.
 
-**Choosing an upgrade command:** For ordinary package installation, search,
-and system upgrades, use pacman-compatible operations such as `-S`, `-Ss`,
-and `-Syu`, as with pacman and other AUR helpers. Use the corresponding
-`upgrade`, `upgrade-aur`, or `upgrade-all` command when you intentionally want
-a Moguet-specific multi-phase workflow, such as applying saved source-build
-preferences or rebuilding installed AUR packages from source. These commands
-are not aliases for an ordinary `-Syu`.
+**Choosing an upgrade command:** Use exact target-less `moguet -Syu` for the
+ordinary AUR-helper update: it completes the official repository system
+upgrade, then re-evaluates the installed foreign/AUR state and performs a
+normal AUR update. It neither enumerates nor reads saved source-build
+preferences, including a PackageBase fallback preference, and preference data
+is not applied to the AUR work environment. A valid, invalid, unreadable, or
+otherwise failing saved preference therefore does not affect this route.
+
+The explicit `upgrade*` commands are Moguet source-aware workflows and keep
+strict saved-preference handling. `upgrade` performs the repository system
+update plus configured source-build preferences. `upgrade-aur` updates only
+installed AUR packages (it does not run the repository system update), while
+still checking and applying saved source-build preferences for those AUR
+targets. `upgrade-all` performs the repository update, configured-source
+lifecycle, and remaining AUR update. These commands are not aliases for
+ordinary `-Syu`.
+
+Only the exact target-less canonical `-Syu` token enters the combined route.
+`-Sy`, `-Su`, alternate or separated modifier spellings, target-bearing
+`-Syu <pkg>`, and unknown modifier forms retain their existing routing and do
+not start an installed-AUR sweep. Initially, `--needed` is the only pacman
+semantic option supported by automatic combined `-Syu`; it applies only to
+the repository transaction. Any other pacman semantic option or unsupported
+argument form fails before repository mutation, with guidance to use
+`moguet -Syu --repo`. The repository-only form removes the semantic selector
+before invoking pacman, preserves the compatible pacman pass-through surface,
+and performs no AUR inventory, AUR RPC, preference, cache, Git, or makepkg
+work. `moguet -Syu --aur` is unsupported; use the source-aware
+`moguet upgrade-aur` for an AUR-only update. `--noconfirm` never bypasses
+provider, conflict/replacement, required `RequiresCheck`, or other safety
+guards, and it never approves an unverified devel update.
 
 Moguet v2.5.0 treats installed exact-AUR packages with conventional `-git`,
 `-svn`, `-hg`, `-bzr`, `-cvs`, or `-darcs` suffix evidence as devel
@@ -455,20 +514,34 @@ PackageBase/child evidence, and reason instead of silently treating the
 package as up to date. A normal newer AUR version remains an update candidate
 and keeps the existing precedence.
 
-`RequiresCheck` is not an automatic rebuild candidate. `upgrade-aur`, its
-dry-run, and the fresh AUR phase of `upgrade-all` block before AUR mutation;
-non-TTY use and `--noconfirm` do not add a prompt or approve a rebuild. v2.5.0
-does not query or compare the upstream VCS revision and does not publish devel
-build provenance. The read-only Git observer and installed-artifact-bound
-authoritative comparison remain follow-up work in
-[issue #475](https://github.com/seekerkrt/moguet/issues/475) and
-[issue #476](https://github.com/seekerkrt/moguet/issues/476).
+`RequiresCheck` is neither `UpToDate` nor an automatic rebuild decision. In
+ordinary exact target-less `-Syu`, an independent target in this state is
+skipped with a non-blocking warning; unrelated normal AUR updates can continue,
+and the aggregate can succeed. Its update status remains unverified. If another
+update candidate requires that target through a dependency, provider, or
+required-child relation, the affected root remains blocked and the operation
+is non-zero. `upgrade-aur`, its dry-run, and the fresh AUR phase of
+`upgrade-all` retain their strict whole-operation blocker behavior. Non-TTY use
+and `--noconfirm` do not add a prompt or approve a rebuild.
+
+v2.5.0 does not query or compare the upstream VCS revision and does not publish
+devel build provenance. The current development tree includes the trusted
+HTTPS Git remote revision observer foundation from
+[issue #475](https://github.com/seekerkrt/moguet/issues/475), limited to
+default HEAD and exact branches with strict complete SHA-1 / SHA-256 results.
+It has no production source-authority producer or caller and is not connected
+to AUR update assessment. Installed-artifact-bound provenance and authoritative
+`UpdateAvailable` / `UpToDate` comparison remain
+[issue #476](https://github.com/seekerkrt/moguet/issues/476); users still cannot
+automatically compare VCS package revisions through the current CLI.
 
 `--aur` limits supported `-S`, `-Ss`, and `-Si` forms to AUR. `--repo`
-limits them to official binary repositories. Combining the selectors is an
-error before an external command or AUR query. Pacman-only routes preserve
-compatible pacman options; a source-build route rejects options whose meaning
-cannot be preserved instead of silently ignoring them.
+limits those forms to official binary repositories and is also the
+repository-only selector for exact target-less `-Syu`. `--aur` is not accepted
+with `-Syu`. Combining the selectors is an error before an external command or
+AUR query. Pacman-only routes preserve compatible pacman options; a
+source-build route rejects options whose meaning cannot be preserved instead
+of silently ignoring them.
 
 `-S --select [--needed] <query>` is the interactive source-aware discovery form. Without
 a source selector it searches both official repositories and AUR; `--aur` or
@@ -655,8 +728,11 @@ ${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/<package-name>
 ```
 
 They are not TOML config. `add-src`, `edit-src`, `list-src`, `del-src`,
-`revert`, and every build or upgrade reader use this one authority. A missing
-store or entry means no saved preference; an invalid name, unsafe entry,
+`revert`, and every source-aware build or explicit `upgrade*` reader use this
+one authority. Exact target-less `-Syu`, including its dry-run, deliberately
+does not snapshot, enumerate, or read this directory and does not apply a
+child- or PackageBase-named fallback preference. A missing store or entry
+means no saved preference for strict readers; an invalid name, unsafe entry,
 permission error, or I/O failure is a hard error. Read and list operations do
 not create directories. Only an `add-src` or `edit-src` that first needs
 storage creates the managed directories with mode `0700` and the entry with
@@ -720,6 +796,16 @@ route. Operations handled entirely by pacman pass through options that Moguet
 does not consume. When Moguet takes responsibility for an AUR or source-build
 route, it preserves only options with an explicitly defined equivalent and
 fails before mutation for the rest.
+
+Moguet v2.6.0 changes exact target-less `moguet -Syu` from repository-only to
+the ordinary AUR-helper behavior: repository system update followed by a
+normal installed-AUR update, without reading or applying saved source-build
+preferences. Existing users who require the former repository-only behavior
+must migrate to `moguet -Syu --repo`. Use `moguet upgrade`,
+`moguet upgrade-aur`, or `moguet upgrade-all` when saved source-build
+preferences must be checked and applied. The new combined route is sequential,
+not atomic; a later AUR failure does not roll back a completed repository
+transaction and is reported as partial completion with a non-zero status.
 
 No manual migration is required for an AUR cache created before reviewed-source
 state existed. The absence of a record is normal and causes one initial full

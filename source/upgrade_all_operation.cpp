@@ -1400,7 +1400,10 @@ void PreparedUpgradeAllAurPreflight::prepare_filtered_operation_stage(
         filtered_operation_.emplace(
             prepare_filtered_aur_update_operation(
                 std::move(query_result),
-                std::move(explicit_sources),
+                UpgradeAllExplicitSourceSatisfaction{
+                    std::move(explicit_sources)},
+                DevelRequiresCheckPolicy::BlockOperation,
+                SavedSourcePreferencePolicy::Strict,
                 config,
                 std::move(cache_root)));
     } catch(const TrustedCacheError&) {

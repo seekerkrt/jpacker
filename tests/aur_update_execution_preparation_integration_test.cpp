@@ -216,15 +216,20 @@ AurUpdateExecutionPreflight executable_preflight(
     AurUpdateExecutionPreflight preflight;
     preflight.targets.push_back(std::move(target));
     preflight.build_plan = std::move(plan);
+    preflight.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     return preflight;
 }
 
 AurUpdateSourceBuildPreparation prepare(
     const AurUpdateExecutionPreflight& preflight,
-    bool needed = false) {
+    bool needed = false,
+    SavedSourcePreferencePolicy saved_source_preference_policy =
+        SavedSourcePreferencePolicy::Strict) {
     AppConfig config;
     return prepare_aur_update_source_build_invocation(
-        preflight, needed, config);
+        preflight, DevelRequiresCheckPolicy::BlockOperation,
+        saved_source_preference_policy, needed, config);
 }
 
 void reset_case() {
@@ -670,6 +675,61 @@ void test_empty_and_nonempty_pkgdest(PreferenceFixture& fixture) {
         "nonempty PKGDEST conflict");
 }
 
+void test_ignore_never_reads_actual_preference_authority(
+    PreferenceFixture& fixture) {
+    const std::string invalid_child = "preparation-ignore-invalid-child";
+    const std::string invalid_base = "preparation-ignore-invalid-base";
+    fixture.create_directory_entry(invalid_child);
+    fixture.create_directory_entry(invalid_base);
+    reset_case();
+
+    const AurUpdateSourceBuildPreparation invalid = prepare(
+        executable_preflight(invalid_child, invalid_base), false,
+        SavedSourcePreferencePolicy::Ignore);
+    const ProductionSourceBuildWorkItem& invalid_work_item =
+        require_single_work_item(
+            invalid, "Ignore invalid actual preference entries");
+    expect(
+        invalid.warnings.empty() &&
+            invalid_work_item.request.custom_environment
+                .ordered_assignments.empty() &&
+            invalid_work_item.request.package_name == invalid_child &&
+            invalid_work_item.request.checkout_name == invalid_base,
+        "Ignore read an invalid child or PackageBase preference entry");
+    expect_successful_generic_preparation(
+        invalid, "Ignore invalid actual preference entries");
+
+    const std::string injected_failure =
+        "preparation-ignore-injected-failure";
+    fixture.write_entry(injected_failure, "VALUE=must-remain-unread\n");
+    reset_case();
+    fail_next_source_preference_operation_for_test(
+        injected_failure, SourcePreferenceTestFailurePoint::Read);
+
+    const AurUpdateSourceBuildPreparation ignored_failure = prepare(
+        executable_preflight(injected_failure), false,
+        SavedSourcePreferencePolicy::Ignore);
+    const ProductionSourceBuildWorkItem& ignored_work_item =
+        require_single_work_item(
+            ignored_failure, "Ignore injected actual preference failure");
+    expect(
+        ignored_failure.warnings.empty() &&
+            ignored_work_item.request.custom_environment
+                .ordered_assignments.empty(),
+        "Ignore converted an actual preference failure into loaded data");
+    expect_successful_generic_preparation(
+        ignored_failure, "Ignore injected actual preference failure");
+
+    StrictSourcePreferenceResult still_pending =
+        read_source_preference_strict(injected_failure);
+    const SourcePreferenceFailure* failure =
+        std::get_if<SourcePreferenceFailure>(&still_pending);
+    expect(
+        failure != nullptr &&
+            failure->kind == SourcePreferenceFailureKind::ReadFailed,
+        "Ignore consumed the one-shot actual preference reader failure");
+}
+
 void test_database_failure_is_typed(PreferenceFixture& fixture) {
     const std::string package_name = "preparation-database-failure";
     fixture.write_entry(
@@ -741,6 +801,7 @@ int main(int argc, char* argv[]) {
         test_split_child_package_failure_is_typed_and_stops_fallback(fixture);
         test_split_child_base_failure_is_typed_after_absent_package(fixture);
         test_empty_and_nonempty_pkgdest(fixture);
+        test_ignore_never_reads_actual_preference_authority(fixture);
         test_database_failure_is_typed(fixture);
         reset_source_preference_test_hooks();
     } catch(const std::exception& error) {

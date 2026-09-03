@@ -156,6 +156,7 @@ AurUpdateExecutionTarget skipped_target(
             AurVersionRelation::SameAsInstalled},
         AurUpdateClassification::UpToDate};
     target.status = AurUpdateExecutionTargetStatus::Skipped;
+    target.skip_kind = AurUpdateExecutionSkipKind::UpToDate;
     target.issues.push_back(AurUpdateExecutionIssue{
         AurUpdateExecutionReason::UpToDate,
         package_name,
@@ -187,9 +188,11 @@ AurUpdateExecutionPreflight single_root_preflight(
 }
 
 ProvidedDependency selected_repository_provider() {
-    return ProvidedDependency::from_repository(
+    ProvidedDependency provider = ProvidedDependency::from_repository(
         "extra", "selected-runner-provider", "virtual-runner-api",
         "virtual-runner-api=2", "2.0-1");
+    provider.package_base = "selected-runner-provider-base";
+    return provider;
 }
 
 AurUpdateExecutionPreflight selected_repository_provider_preflight() {
@@ -353,9 +356,12 @@ AurUpdateSourceBuildPreparation prepare_fixture(
     const PacmanDatabasePaths& database_paths) {
     preparation_stub::reset();
     preparation_stub::set_database_paths(database_paths);
+    preflight.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     AurUpdateSourceBuildPreparation preparation =
         prepare_aur_update_source_build_invocation(
-            preflight, needed, config);
+            preflight, DevelRequiresCheckPolicy::BlockOperation,
+            SavedSourcePreferencePolicy::Strict, needed, config);
     expect(
         preparation.is_prepared(),
         preparation.issues.empty()
@@ -816,9 +822,14 @@ void test_later_fatal_preflight_blocks_cache_provider_and_first_work_item() {
         2, "scripted later reviewed-state fatal observation");
     execution_stub::reset();
 
+    AurUpdateExecutionPreflight preflight =
+        later_repository_provider_preflight();
+    preflight.devel_requires_check_policy =
+        DevelRequiresCheckPolicy::BlockOperation;
     AurUpdateSourceBuildPreparation preparation =
         prepare_aur_update_source_build_invocation(
-            later_repository_provider_preflight(), false, config);
+            preflight, DevelRequiresCheckPolicy::BlockOperation,
+            SavedSourcePreferencePolicy::Strict, false, config);
     expect(!preparation.is_prepared() &&
                !preparation.invocation.has_value() &&
                preparation.issues.size() == 1 &&

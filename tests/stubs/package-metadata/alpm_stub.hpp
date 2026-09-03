@@ -75,6 +75,9 @@ void enqueue_local_package_query_present(
     std::string returned_name,
     std::string version,
     alpm_pkgreason_t reason);
+void enqueue_local_package_query_present_metadata(
+    std::string expected_package_name,
+    LocalPackageMetadata returned_package);
 void enqueue_local_package_query_absent(std::string expected_package_name);
 void enqueue_local_package_query_failure(
     std::string expected_package_name,
@@ -90,6 +93,14 @@ void set_local_package_dependencies(
 void set_local_package_cache_entry_null(std::size_t package_index);
 void set_local_package_name_null(std::size_t package_index);
 void set_local_package_version_null(std::size_t package_index);
+void set_local_package_base(
+    std::size_t package_index,
+    const std::string& package_base);
+void set_local_package_base_null(std::size_t package_index);
+void set_local_package_architecture(
+    std::size_t package_index,
+    const std::string& architecture);
+void set_local_package_architecture_null(std::size_t package_index);
 void set_null_package_name();
 void set_null_package_version();
 
@@ -142,6 +153,13 @@ void set_repository_package_base(
     const std::string& package_name,
     const std::string& package_base);
 void set_repository_package_base_null(
+    const std::string& repository_name,
+    const std::string& package_name);
+void set_repository_package_architecture(
+    const std::string& repository_name,
+    const std::string& package_name,
+    const std::string& architecture);
+void set_repository_package_architecture_null(
     const std::string& repository_name,
     const std::string& package_name);
 void set_repository_package_provides(
