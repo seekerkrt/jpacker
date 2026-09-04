@@ -28,6 +28,8 @@ foreach(_moguet_direct_focus IN ITEMS
     local-source-build
     package-identifier
     source-package-identity
+    installed-artifact-binding
+    devel-build-provenance
     source-package-identity-projection
     source-package-compatibility
     invocation-owned-cleanup-model
@@ -49,6 +51,7 @@ foreach(_moguet_direct_focus IN ITEMS
     artifact-workspace
     multiple-artifact-workspace
     makepkg-assignment-precedence
+    makepkg-devel-phase-characterization
     artifact-identity
     multiple-artifact-identity
     package-base-artifact-install-plan

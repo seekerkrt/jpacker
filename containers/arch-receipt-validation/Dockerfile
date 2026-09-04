@@ -7,7 +7,8 @@ USER root:root
 
 RUN install -d -o moguet-validation -g moguet-validation -m 0755 \
         /home/moguet-validation/work/moguet-receipt \
-        /home/moguet-validation/receipt-packages
+        /home/moguet-validation/receipt-packages \
+        /home/moguet-validation/receipt-packages-alternate
 
 WORKDIR /home/moguet-validation/work/moguet-receipt
 
@@ -47,6 +48,15 @@ RUN for fixture in \
                 makepkg --nodeps --noconfirm \
         ) || exit $?; \
     done
+
+# Same package identity/version as source-v2, but different package bytes.
+# A separate destination preserves both artifacts for the Slice 1 reinstall
+# characterization without changing the existing receipt fixture inventory.
+RUN ( \
+        cd containers/arch-receipt-validation/fixtures/source-v2-different \
+        && PKGDEST=/home/moguet-validation/receipt-packages-alternate \
+            makepkg --nodeps --noconfirm \
+    )
 
 USER root:root
 

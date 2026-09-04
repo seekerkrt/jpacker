@@ -44,9 +44,11 @@ receipt_root=$repo_root/containers/arch-receipt-validation
 receipt_dockerfile=$receipt_root/Dockerfile
 receipt_runner=$receipt_root/run-installed-receipt.sh
 source_receipt_runner=$receipt_root/run-installed-source-artifact-receipt.py
+installed_binding_runner=$receipt_root/run-installed-binding-characterization.py
 receipt_dependency_v1=$receipt_root/fixtures/dependency-v1/PKGBUILD
 receipt_dependency_v2=$receipt_root/fixtures/dependency-v2/PKGBUILD
 receipt_target=$receipt_root/fixtures/target/PKGBUILD
+receipt_source_v2_different=$receipt_root/fixtures/source-v2-different/PKGBUILD
 test_targets_file=$repo_root/cmake/MoguetTestTargets.cmake
 production_cmake_file=$repo_root/CMakeLists.txt
 artifact_identity_source=$repo_root/source/artifact_identity.cpp
@@ -131,9 +133,13 @@ assert_regular_file "$receipt_dockerfile" 'trusted receipt Dockerfile'
 assert_regular_file "$receipt_runner" 'trusted receipt installed runner'
 assert_regular_file "$source_receipt_runner" \
     'source-artifact receipt installed runner'
+assert_regular_file "$installed_binding_runner" \
+    'installed-binding characterization runner'
 assert_regular_file "$receipt_dependency_v1" 'trusted receipt dependency v1 fixture'
 assert_regular_file "$receipt_dependency_v2" 'trusted receipt dependency v2 fixture'
 assert_regular_file "$receipt_target" 'trusted receipt solver target fixture'
+assert_regular_file "$receipt_source_v2_different" \
+    'same-version different-artifact fixture'
 assert_regular_file "$artifact_identity_source" 'production artifact identity owner'
 assert_regular_file "$artifact_archive_metadata_source" \
     'production artifact archive metadata owner'
@@ -1258,6 +1264,26 @@ printf '%s\n' "$cleanup_authority_target_body" | grep -F -- \
 printf '%s\n' "$cleanup_authority_target_body" | grep -F -- \
     'positive and installed transport matrix' >/dev/null ||
     fail 'cleanup-authority target lost its existing installed transport matrix'
+assert_contains "$receipt_dockerfile" 'receipt-packages-alternate'
+assert_contains "$receipt_dockerfile" 'fixtures/source-v2-different'
+assert_contains "$installed_binding_runner" 'name_to_handle_at'
+assert_contains "$installed_binding_runner" '--probe-record'
+assert_contains "$installed_binding_runner" 'same-version identical same-second reinstall'
+assert_contains "$installed_binding_runner" 'UnsupportedGeneration'
+assert_contains "$installed_binding_runner" 'installed binding matrix:'
+installed_binding_target_body=$(make_target_body test-container-installed-binding-characterization)
+printf '%s\n' "$installed_binding_target_body" | grep -F -- '--network=none' >/dev/null ||
+    fail 'installed-binding characterization lost its network-none boundary'
+printf '%s\n' "$installed_binding_target_body" | grep -F -- \
+    '--mount type=volume,destination=/var/lib/moguet-installed-binding-characterization,volume-nocopy' >/dev/null ||
+    fail 'installed-binding characterization lost its isolated volume'
+printf '%s\n' "$installed_binding_target_body" | grep -F -- \
+    'run-installed-binding-characterization.py' >/dev/null ||
+    fail 'installed-binding characterization does not run its fixture'
+if printf '%s\n' "$installed_binding_target_body" | grep -F -- \
+    '/var/lib/pacman' >/dev/null; then
+    fail 'installed-binding characterization references the host package DB'
+fi
 assert_contains "$test_targets_file" 'source/source_install.cpp'
 assert_contains "$test_targets_file" \
     'MOGUET_ENABLE_REMOTE_AUR_CLEANUP_RUNNER_TEST_HOOKS'

@@ -37,6 +37,14 @@ _moguet_add_direct_ctest(
     source-package-identity-test
 )
 _moguet_add_direct_ctest(
+    cpp.installed_artifact_binding
+    installed-artifact-binding-test
+)
+_moguet_add_direct_ctest(
+    cpp.devel_build_provenance
+    devel-build-provenance-test
+)
+_moguet_add_direct_ctest(
     cpp.git_remote_revision_observer
     git-remote-revision-observer-test
 )
@@ -59,6 +67,10 @@ _moguet_add_direct_ctest(
 _moguet_add_direct_ctest(
     cpp.source_package_compatibility
     source-package-compatibility-test
+)
+_moguet_add_direct_ctest(
+    cpp.makepkg_devel_phase_characterization
+    makepkg-devel-phase-characterization-test
 )
 _moguet_add_direct_ctest(
     cpp.invocation_owned_cleanup_model
