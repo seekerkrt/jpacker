@@ -109,6 +109,10 @@ _moguet_add_direct_ctest(
     reviewed-source-pinned-build-test
 )
 _moguet_add_direct_ctest(
+    cpp.invocation_owned_source_build_context
+    invocation-owned-source-build-context-test
+)
+_moguet_add_direct_ctest(
     cpp.reviewed_source_projection
     reviewed-source-projection-test
 )

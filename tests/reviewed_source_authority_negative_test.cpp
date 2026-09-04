@@ -1,6 +1,7 @@
 #include "artifact_workspace.hpp"
 #include "devel_build_provenance_codec.hpp"
 #include "devel_build_provenance_reviewed_binding.hpp"
+#include "invocation_owned_source_build_context.hpp"
 #include "reviewed_source_pinned_build.hpp"
 
 #include <cstdint>
@@ -55,6 +56,32 @@ static_assert(!std::is_constructible_v<
               std::uint64_t>);
 static_assert(!std::is_default_constructible_v<
               DevelBuildProvenancePersistentDecoderAccess>);
+static_assert(!std::is_default_constructible_v<
+              InvocationOwnedSourceBuildContext>);
+static_assert(!std::is_copy_constructible_v<
+              InvocationOwnedSourceBuildContext>);
+static_assert(std::is_move_constructible_v<
+              InvocationOwnedSourceBuildContext>);
+static_assert(!std::is_constructible_v<
+              InvocationOwnedSourceBuildContext,
+              PackageBaseIdentity,
+              AurRecipeRevision,
+              std::filesystem::path,
+              std::filesystem::path,
+              std::filesystem::path,
+              std::filesystem::path>);
+static_assert(std::is_invocable_v<
+              decltype(create_invocation_owned_source_build_context),
+              PinnedReviewedSourceBuild>);
+static_assert(!std::is_invocable_v<
+              decltype(create_invocation_owned_source_build_context),
+              PackageBaseIdentity,
+              AurRecipeRevision,
+              std::filesystem::path>);
+static_assert(!std::is_default_constructible_v<
+              ReviewedRecipeSnapshotIdentity>);
+static_assert(!std::is_default_constructible_v<
+              InvocationOwnedMakepkgEnvironment>);
 static_assert(!std::is_constructible_v<
               InstalledArtifactBinding,
               PackageChildIdentity,
@@ -210,6 +237,24 @@ DevelBuildProvenanceDocument forge_persistent_decoder(
     std::string_view document) {
     return DevelBuildProvenancePersistentDecoderAccess::decode_document(
         document);
+}
+#elif defined(MOGUET_FORGE_INVOCATION_SOURCE_BUILD_CONTEXT)
+InvocationOwnedSourceBuildContext forge_invocation_source_build_context() {
+    return InvocationOwnedSourceBuildContext(nullptr);
+}
+#elif defined(MOGUET_FORGE_REVIEWED_RECIPE_SNAPSHOT_IDENTITY)
+ReviewedRecipeSnapshotIdentity forge_reviewed_recipe_snapshot_identity(
+    ReviewedSourceStateRecordBinding binding,
+    ReviewedSourceObjectId tree) {
+    return ReviewedRecipeSnapshotIdentity(
+        std::move(binding), std::move(tree), 1);
+}
+#elif defined(MOGUET_FORGE_INVOCATION_MAKEPKG_ENVIRONMENT)
+InvocationOwnedMakepkgEnvironment forge_invocation_makepkg_environment(
+    SourceBuildEnvironment environment) {
+    return InvocationOwnedMakepkgEnvironment(
+        std::move(environment), SourceEnvironmentEmptyValuePolicy::Forward,
+        std::make_shared<const int>(0));
 }
 #else
 int reviewed_source_authority_negative_fixture_baseline() {
