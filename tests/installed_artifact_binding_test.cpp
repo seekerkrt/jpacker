@@ -29,6 +29,14 @@ static_assert(!std::is_constructible_v<
               InstalledPackageRecordGeneration,
               std::uint64_t>);
 static_assert(!std::is_default_constructible_v<InstalledArtifactBinding>);
+static_assert(!std::is_constructible_v<
+              InstalledArtifactBinding,
+              PackageChildIdentity,
+              PackageVersionIdentity,
+              InstalledPackageArchitectureIdentity,
+              AlpmMtreeSha256Digest,
+              InstalledDatabaseRecordSha256Digest,
+              InstalledPackageRecordGeneration>);
 static_assert(std::variant_size_v<
                   InstalledArtifactBindingObservationResult> == 2);
 
@@ -69,7 +77,7 @@ InstalledArtifactBinding binding(
     std::string mtree_digest = DIGEST_A,
     std::string database_digest = DIGEST_B,
     std::string remote = AUR_REMOTE) {
-    return InstalledArtifactBinding::make(
+    return make_installed_artifact_binding_fixture_for_test(
         package(
             std::move(package_name), std::move(package_base),
             std::move(remote)),
@@ -209,7 +217,7 @@ void test_invalid_values_and_observation_failures() {
         "Empty opaque generation was accepted.");
     require_invalid_argument(
         [] {
-            static_cast<void>(InstalledArtifactBinding::make(
+            static_cast<void>(make_installed_artifact_binding_fixture_for_test(
                 package(), PackageVersionIdentity::unknown(),
                 InstalledPackageArchitectureIdentity::known("any"),
                 AlpmMtreeSha256Digest::make(DIGEST_A),

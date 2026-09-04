@@ -13,6 +13,7 @@ contractの規範上の正本は各文書の日本語本文である。英語利
 | [Source-aware package identity](source-package-identity.md) | #355 | source、PackageBase、package child、revision、release、architectureの分離とread-only projection |
 | [Reviewed AUR source state](reviewed-source-state.md) | #411 | PackageBase単位のexact reviewed revision、explicit acceptance、CAS publication、pinned build、legacy migration |
 | [Trusted Git remote revision observer](git-remote-revision-observer.md) | #475 | authority-approved request、HTTPS-only Git observation、bounded process、strict SHA-1 / SHA-256 result、mutation-free boundary |
+| [Devel build provenance store foundation](devel-build-provenance-store.md) | #476 | production-disconnectedな別XDG namespace、exact #411 binding、strict schema、immutable-generation CAS |
 | [PackageBase build / required-child selection](packagebase-child-selection.md) | #268 | PackageBase build unitとrequired child install selectionの分離 |
 | [separated source-build `--rmdeps`](source-build-rmdeps.md) | #269 / #404 | current source-buildのfail-closed、pacman-only no-op、future causal ownership / interaction boundary |
 | [XDG cache cutover safety](xdg-cache-safety.md) | #305 | cache filesystem identityとlegacy cache非変更 |

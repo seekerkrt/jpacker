@@ -5,11 +5,13 @@
 #include "vcs_source_identity.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
 
-inline constexpr std::uint32_t DEVEL_BUILD_PROVENANCE_SCHEMA_VERSION = 1;
+class DevelBuildProvenancePersistentDecoderAccess;
+class ReviewedSourceStateRecordBinding;
 
 class PackageArchiveSha256Digest final {
 public:
@@ -26,6 +28,105 @@ private:
     explicit PackageArchiveSha256Digest(std::string digest) noexcept;
 
     std::string digest_;
+};
+
+class ReviewedSourceStateDocumentSha256Digest final {
+public:
+    ReviewedSourceStateDocumentSha256Digest() = delete;
+
+    [[nodiscard]] static ReviewedSourceStateDocumentSha256Digest make(
+        std::string digest);
+
+    [[nodiscard]] const std::string& value() const noexcept;
+
+    bool operator==(
+        const ReviewedSourceStateDocumentSha256Digest&) const = default;
+
+private:
+    explicit ReviewedSourceStateDocumentSha256Digest(
+        std::string digest) noexcept;
+
+    std::string digest_;
+};
+
+// This generation belongs only to the #411 reviewed-source state lineage. It
+// is neither the provenance-store generation nor an installed ALPM record
+// generation.
+class ReviewedSourceStateRecordGeneration final {
+public:
+    ReviewedSourceStateRecordGeneration() = delete;
+
+    [[nodiscard]] std::uint64_t value() const noexcept;
+
+    bool operator==(
+        const ReviewedSourceStateRecordGeneration&) const = default;
+
+private:
+    friend class DevelBuildProvenancePersistentDecoderAccess;
+    friend class ReviewedSourceStateRecordBindingAuthority;
+#ifdef MOGUET_ENABLE_DEVEL_BUILD_PROVENANCE_TEST_HOOKS
+    friend ReviewedSourceStateRecordBinding
+    make_reviewed_source_state_record_binding_fixture_for_test(
+        PackageBaseIdentity package_base,
+        AurRecipeRevision reviewed_recipe_revision,
+        std::uint64_t generation,
+        ReviewedSourceStateDocumentSha256Digest document_digest);
+#endif
+
+    explicit ReviewedSourceStateRecordGeneration(
+        std::uint64_t value) noexcept;
+
+    std::uint64_t value_;
+};
+
+// Stable persistent binding to the exact #411 authoritative record used by a
+// build. Filesystem path, leaf, inode, timestamps, and mode stay in the
+// runtime CAS token and are intentionally not business identity here.
+class ReviewedSourceStateRecordBinding final {
+public:
+    ReviewedSourceStateRecordBinding() = delete;
+    ReviewedSourceStateRecordBinding(
+        const ReviewedSourceStateRecordBinding&) = default;
+    ReviewedSourceStateRecordBinding(
+        ReviewedSourceStateRecordBinding&&) noexcept = default;
+    ReviewedSourceStateRecordBinding& operator=(
+        const ReviewedSourceStateRecordBinding&) = default;
+    ReviewedSourceStateRecordBinding& operator=(
+        ReviewedSourceStateRecordBinding&&) noexcept = default;
+    ~ReviewedSourceStateRecordBinding() = default;
+
+    [[nodiscard]] const PackageBaseIdentity& package_base() const noexcept;
+    [[nodiscard]] const AurRecipeRevision& reviewed_recipe_revision()
+        const noexcept;
+    [[nodiscard]] const ReviewedSourceStateRecordGeneration& generation()
+        const noexcept;
+    [[nodiscard]] const ReviewedSourceStateDocumentSha256Digest&
+    document_digest() const noexcept;
+
+    bool operator==(const ReviewedSourceStateRecordBinding&) const = default;
+
+private:
+    friend class DevelBuildProvenancePersistentDecoderAccess;
+    friend class ReviewedSourceStateRecordBindingAuthority;
+#ifdef MOGUET_ENABLE_DEVEL_BUILD_PROVENANCE_TEST_HOOKS
+    friend ReviewedSourceStateRecordBinding
+    make_reviewed_source_state_record_binding_fixture_for_test(
+        PackageBaseIdentity package_base,
+        AurRecipeRevision reviewed_recipe_revision,
+        std::uint64_t generation,
+        ReviewedSourceStateDocumentSha256Digest document_digest);
+#endif
+
+    ReviewedSourceStateRecordBinding(
+        PackageBaseIdentity package_base,
+        AurRecipeRevision reviewed_recipe_revision,
+        ReviewedSourceStateRecordGeneration generation,
+        ReviewedSourceStateDocumentSha256Digest document_digest) noexcept;
+
+    PackageBaseIdentity package_base_;
+    AurRecipeRevision reviewed_recipe_revision_;
+    ReviewedSourceStateRecordGeneration generation_;
+    ReviewedSourceStateDocumentSha256Digest document_digest_;
 };
 
 // Observation of the same makepkg-managed Git workspace at the defined
@@ -83,8 +184,9 @@ struct ActualBuiltGitRevisionProofFailure {
 };
 
 // Capability for the exact Git revision observed at both bounded workspace
-// boundaries. Raw OIDs, reviewed recipe revisions, cache HEADs, and remote
-// observations have no constructor path into this type.
+// boundaries. Live raw OIDs, reviewed recipe revisions, cache HEADs, and
+// remote observations have no production mint path. Strict persistent decode
+// and test fixtures use separate, explicitly scoped construction boundaries.
 class ActualBuiltGitRevision final {
 public:
     ActualBuiltGitRevision() = delete;
@@ -105,6 +207,7 @@ private:
         ActualBuiltGitRevisionProofFailure>
     prove_actual_built_git_revision(
         MakepkgManagedGitWorkspaceRevisionObservation observation);
+    friend class DevelBuildProvenancePersistentDecoderAccess;
 
     explicit ActualBuiltGitRevision(
         UpstreamGitRevision revision) noexcept;
@@ -120,27 +223,6 @@ using ActualBuiltGitRevisionProofResult = std::variant<
 prove_actual_built_git_revision(
     MakepkgManagedGitWorkspaceRevisionObservation observation);
 
-class DevelBuildProvenanceRecordGeneration final {
-public:
-    DevelBuildProvenanceRecordGeneration() = delete;
-
-    // Slice 1 models the first CAS generation only. Loading or advancing a
-    // persisted generation belongs to the later store Slice.
-    [[nodiscard]] static DevelBuildProvenanceRecordGeneration
-    initial() noexcept;
-
-    [[nodiscard]] std::uint64_t value() const noexcept;
-
-    bool operator==(
-        const DevelBuildProvenanceRecordGeneration&) const = default;
-
-private:
-    explicit DevelBuildProvenanceRecordGeneration(
-        std::uint64_t value) noexcept;
-
-    std::uint64_t value_;
-};
-
 // Archive SHA-256 is historical evidence for the selected bytes. The MTREE
 // digest is kept separately because it can be compared with the installed
 // local-database MTREE after the archive itself has been cleaned up.
@@ -155,6 +237,8 @@ struct BuiltPackageArtifactEvidence {
 
 enum class DevelBuildProvenanceFailureReason {
     PackageSourceMismatch,
+    ReviewedSourceBindingMismatch,
+    UnsupportedEvaluatedSource,
     EvaluatedSourceMismatch,
     PackageIdentityMismatch,
     PackageBaseMismatch,
@@ -180,10 +264,9 @@ public:
         DevelBuildProvenance&&) noexcept = default;
     ~DevelBuildProvenance() = default;
 
-    [[nodiscard]] std::uint32_t schema_version() const noexcept;
-    [[nodiscard]] const DevelBuildProvenanceRecordGeneration&
-    record_generation() const noexcept;
     [[nodiscard]] const PackageBaseIdentity& package_base() const noexcept;
+    [[nodiscard]] const ReviewedSourceStateRecordBinding&
+    reviewed_source_binding() const noexcept;
     [[nodiscard]] const AurRecipeRevision& reviewed_recipe_revision()
         const noexcept;
     [[nodiscard]] const VcsSourceIdentity& evaluated_source() const noexcept;
@@ -201,26 +284,23 @@ private:
         DevelBuildProvenance,
         DevelBuildProvenanceFailure>
     make_devel_build_provenance(
-        DevelBuildProvenanceRecordGeneration record_generation,
         PackageBaseIdentity package_base,
-        AurRecipeRevision reviewed_recipe_revision,
+        ReviewedSourceStateRecordBinding reviewed_source_binding,
         VcsSourceIdentity evaluated_source,
         ActualBuiltGitRevision actual_built_revision,
         BuiltPackageArtifactEvidence artifact,
         InstalledArtifactBinding installed_binding);
 
     DevelBuildProvenance(
-        DevelBuildProvenanceRecordGeneration record_generation,
         PackageBaseIdentity package_base,
-        AurRecipeRevision reviewed_recipe_revision,
+        ReviewedSourceStateRecordBinding reviewed_source_binding,
         VcsSourceIdentity evaluated_source,
         ActualBuiltGitRevision actual_built_revision,
         BuiltPackageArtifactEvidence artifact,
         InstalledArtifactBinding installed_binding) noexcept;
 
-    DevelBuildProvenanceRecordGeneration record_generation_;
     PackageBaseIdentity package_base_;
-    AurRecipeRevision reviewed_recipe_revision_;
+    ReviewedSourceStateRecordBinding reviewed_source_binding_;
     VcsSourceIdentity evaluated_source_;
     ActualBuiltGitRevision actual_built_revision_;
     BuiltPackageArtifactEvidence artifact_;
@@ -232,15 +312,21 @@ using DevelBuildProvenanceResult = std::variant<
     DevelBuildProvenanceFailure>;
 
 [[nodiscard]] DevelBuildProvenanceResult make_devel_build_provenance(
-    DevelBuildProvenanceRecordGeneration record_generation,
     PackageBaseIdentity package_base,
-    AurRecipeRevision reviewed_recipe_revision,
+    ReviewedSourceStateRecordBinding reviewed_source_binding,
     VcsSourceIdentity evaluated_source,
     ActualBuiltGitRevision actual_built_revision,
     BuiltPackageArtifactEvidence artifact,
     InstalledArtifactBinding installed_binding);
 
 #ifdef MOGUET_ENABLE_DEVEL_BUILD_PROVENANCE_TEST_HOOKS
+[[nodiscard]] ReviewedSourceStateRecordBinding
+make_reviewed_source_state_record_binding_fixture_for_test(
+    PackageBaseIdentity package_base,
+    AurRecipeRevision reviewed_recipe_revision,
+    std::uint64_t generation,
+    ReviewedSourceStateDocumentSha256Digest document_digest);
+
 // Test-only workspace observation mint. The production observation owner is
 // intentionally absent from Slice 1.
 [[nodiscard]] MakepkgManagedGitWorkspaceRevisionObservation

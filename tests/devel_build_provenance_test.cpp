@@ -28,6 +28,8 @@ constexpr const char* OTHER_MTREE_DIGEST =
     "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
 constexpr const char* DATABASE_DIGEST =
     "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+constexpr const char* REVIEWED_DOCUMENT_DIGEST =
+    "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 constexpr const char* AUR_REMOTE =
     "https://aur.archlinux.org/moguet-provenance-fixture.git";
 constexpr const char* UPSTREAM_REMOTE =
@@ -60,6 +62,14 @@ static_assert(!std::is_constructible_v<
               UpstreamGitRevision>);
 static_assert(std::variant_size_v<ActualBuiltGitRevisionProofResult> == 2);
 static_assert(std::variant_size_v<DevelBuildProvenanceResult> == 2);
+static_assert(!std::is_default_constructible_v<
+              ReviewedSourceStateRecordBinding>);
+static_assert(!std::is_constructible_v<
+              ReviewedSourceStateRecordBinding,
+              PackageBaseIdentity,
+              AurRecipeRevision,
+              std::uint64_t,
+              ReviewedSourceStateDocumentSha256Digest>);
 
 void require(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
@@ -107,7 +117,7 @@ InstalledArtifactBinding installed_binding(
     std::string version = "1.r2.g222222222222-1",
     std::string architecture = "any",
     std::string mtree_digest = MTREE_DIGEST) {
-    return InstalledArtifactBinding::make(
+    return make_installed_artifact_binding_fixture_for_test(
         PackageChildIdentity::make(
             std::move(package_base), std::move(package_name)),
         PackageVersionIdentity::composite(std::move(version)),
@@ -117,6 +127,16 @@ InstalledArtifactBinding installed_binding(
         InstalledDatabaseRecordSha256Digest::make(DATABASE_DIGEST),
         make_installed_package_record_generation_fixture_for_test(
             "ext4:opaque-record-generation"));
+}
+
+ReviewedSourceStateRecordBinding reviewed_binding(
+    PackageBaseIdentity package_base,
+    std::uint64_t generation = 7) {
+    return make_reviewed_source_state_record_binding_fixture_for_test(
+        std::move(package_base), AurRecipeRevision::git_commit(RECIPE_OID),
+        generation,
+        ReviewedSourceStateDocumentSha256Digest::make(
+            REVIEWED_DOCUMENT_DIGEST));
 }
 
 BuiltPackageArtifactEvidence artifact(
@@ -143,9 +163,10 @@ DevelBuildProvenanceResult make_valid_provenance(
     ActualBuiltGitRevision built_revision,
     BuiltPackageArtifactEvidence built_artifact,
     InstalledArtifactBinding current_binding) {
+    ReviewedSourceStateRecordBinding exact_reviewed =
+        reviewed_binding(package_base);
     return make_devel_build_provenance(
-        DevelBuildProvenanceRecordGeneration::initial(),
-        std::move(package_base), AurRecipeRevision::git_commit(RECIPE_OID),
+        std::move(package_base), std::move(exact_reviewed),
         std::move(evaluated_source), std::move(built_revision),
         std::move(built_artifact), std::move(current_binding));
 }
@@ -218,12 +239,11 @@ void test_provenance_retains_separate_authorities() {
         result, "Valid pure provenance model was rejected.");
 
     require(
-        provenance.schema_version() ==
-                DEVEL_BUILD_PROVENANCE_SCHEMA_VERSION &&
-            provenance.record_generation().value() == 1,
-        "Schema and future CAS generation concepts were not retained.");
-    require(
         provenance.package_base() == package_base &&
+            provenance.reviewed_source_binding().generation().value() == 7 &&
+            provenance.reviewed_source_binding()
+                    .document_digest()
+                    .value() == REVIEWED_DOCUMENT_DIGEST &&
             provenance.reviewed_recipe_revision().value().git_commit() !=
                 nullptr &&
             *provenance.reviewed_recipe_revision()
@@ -272,6 +292,26 @@ void test_provenance_retains_separate_authorities() {
 void test_provenance_mismatch_taxonomy() {
     const PackageBaseIdentity package_base = aur_package_base();
     const VcsSourceIdentity evaluated = upstream_source();
+
+    expect_failure(
+        make_devel_build_provenance(
+            package_base,
+            reviewed_binding(aur_package_base("different-base")),
+            evaluated, actual_revision(evaluated), artifact(),
+            installed_binding(package_base)),
+        DevelBuildProvenanceFailureReason::ReviewedSourceBindingMismatch,
+        "Different #411 record binding was accepted.");
+
+    const VcsSourceIdentity fixed_source = VcsSourceIdentity::make(
+        VcsKind::Git, UPSTREAM_REMOTE,
+        VcsSelector::fixed_revision(BUILT_OID));
+    expect_failure(
+        make_devel_build_provenance(
+            package_base, reviewed_binding(package_base), fixed_source,
+            actual_revision(fixed_source), artifact(),
+            installed_binding(package_base)),
+        DevelBuildProvenanceFailureReason::UnsupportedEvaluatedSource,
+        "Fixed source selector entered the initial provenance subset.");
 
     expect_failure(
         make_valid_provenance(

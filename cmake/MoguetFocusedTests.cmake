@@ -6,6 +6,7 @@ foreach(_moguet_direct_focus IN ITEMS
     interactive-confirmation
     xdg-paths
     xdg-directory-safety
+    xdg-generation-store
     xdg-state-log
     trusted-cache
     provider-selection
@@ -30,6 +31,7 @@ foreach(_moguet_direct_focus IN ITEMS
     source-package-identity
     installed-artifact-binding
     devel-build-provenance
+    devel-build-provenance-store
     source-package-identity-projection
     source-package-compatibility
     invocation-owned-cleanup-model

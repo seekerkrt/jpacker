@@ -1,6 +1,10 @@
 #include "artifact_workspace.hpp"
+#include "devel_build_provenance_codec.hpp"
+#include "devel_build_provenance_reviewed_binding.hpp"
 #include "reviewed_source_pinned_build.hpp"
 
+#include <cstdint>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -44,6 +48,21 @@ static_assert(!std::is_constructible_v<
 static_assert(!std::is_constructible_v<
               ReviewedSourceEditorOverlayProof,
               std::filesystem::path>);
+static_assert(!std::is_default_constructible_v<
+              ReviewedSourceStateRecordBinding>);
+static_assert(!std::is_constructible_v<
+              ReviewedSourceStateRecordGeneration,
+              std::uint64_t>);
+static_assert(!std::is_default_constructible_v<
+              DevelBuildProvenancePersistentDecoderAccess>);
+static_assert(!std::is_constructible_v<
+              InstalledArtifactBinding,
+              PackageChildIdentity,
+              PackageVersionIdentity,
+              InstalledPackageArchitectureIdentity,
+              AlpmMtreeSha256Digest,
+              InstalledDatabaseRecordSha256Digest,
+              InstalledPackageRecordGeneration>);
 
 #if defined(MOGUET_FORGE_LIFECYCLE_EXPECTED)
 class ReviewedSourceLifecycleAuthority final {
@@ -151,6 +170,47 @@ struct ReviewedSourceEditorOverlayAccess {
             std::move(pre_editor), std::move(post_editor));
     }
 };
+#elif defined(MOGUET_FORGE_PROVENANCE_REVIEWED_GENERATION)
+ReviewedSourceStateRecordGeneration forge_reviewed_generation() {
+    return ReviewedSourceStateRecordGeneration(1);
+}
+#elif defined(MOGUET_FORGE_PROVENANCE_REVIEWED_BINDING)
+ReviewedSourceStateRecordBinding forge_reviewed_binding(
+    PackageBaseIdentity package_base,
+    AurRecipeRevision revision,
+    ReviewedSourceStateRecordGeneration generation,
+    ReviewedSourceStateDocumentSha256Digest digest) {
+    return ReviewedSourceStateRecordBinding(
+        std::move(package_base), std::move(revision),
+        std::move(generation), std::move(digest));
+}
+#elif defined(MOGUET_FORGE_PROVENANCE_REVIEWED_BINDING_AUTHORITY)
+ReviewedSourceStateRecordBinding forge_reviewed_binding_authority(
+    PackageBaseIdentity package_base,
+    AurRecipeRevision revision,
+    ReviewedSourceStateDocumentSha256Digest digest) {
+    return ReviewedSourceStateRecordBindingAuthority::make(
+        std::move(package_base), std::move(revision), 1,
+        std::move(digest));
+}
+#elif defined(MOGUET_FORGE_INSTALLED_ARTIFACT_BINDING)
+InstalledArtifactBinding forge_installed_binding(
+    PackageChildIdentity package,
+    PackageVersionIdentity version,
+    InstalledPackageArchitectureIdentity architecture,
+    AlpmMtreeSha256Digest mtree,
+    InstalledDatabaseRecordSha256Digest database,
+    InstalledPackageRecordGeneration generation) {
+    return InstalledArtifactBinding::make(
+        std::move(package), std::move(version), std::move(architecture),
+        std::move(mtree), std::move(database), std::move(generation));
+}
+#elif defined(MOGUET_FORGE_PROVENANCE_PERSISTENT_DECODER)
+DevelBuildProvenanceDocument forge_persistent_decoder(
+    std::string_view document) {
+    return DevelBuildProvenancePersistentDecoderAccess::decode_document(
+        document);
+}
 #else
 int reviewed_source_authority_negative_fixture_baseline() {
     return 0;

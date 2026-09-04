@@ -44,6 +44,7 @@ release操作は[`DEVELOPMENT.md`](DEVELOPMENT.md)を正とする。この文書
 | security-specific installed ALPM receipt | `test-container-receipt` | networkなしのinstalled root helper、transaction-local hook、actual isolated Install / Upgrade / failure |
 | source-artifact installed receipt | `test-container-source-artifact-receipt` | production transport、write-sealed bytes、root-owned staging、fixed `pacman -U`、actual observation / causal evidenceとInstall / Upgrade / reinstall / downgrade / skip / failure |
 | installed binding feasibility | `test-container-installed-binding-characterization` | networkless anonymous volume上のephemeral pacman rootでInstall / Upgrade / skip / same-version reinstallとopaque local DB record generationをcharacterizeする。production publicationへは接続しない |
+| devel provenance store foundation | `test-xdg-generation-store` / `test-devel-build-provenance-store` | production-disconnectedなimmutable-generation/CAS機械層と、別XDG namespaceのstrict provenance codec/storeを確認する |
 | closed cleanup candidate authority | `test-container-cleanup-authority` | production collector、mutation前baseline、actual trusted dependency Install、post-success current / policy、aggregate / classifierとinstalled positive `Eligible` |
 
 PR / mergeのcanonical host gateは`test-host-release`である。`test`と
