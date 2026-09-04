@@ -107,8 +107,8 @@ include / link graph、negative compile recipeを所有しない。
 | `build/cmake-production` | `BUILD_TESTING=OFF` | 通常の`make`、install / uninstall、production smoke |
 | `build/cmake-testing` | `BUILD_TESTING=ON` | developer、CTest、host / release validation、focused test |
 
-通常の`make`はproduction treeだけから`moguet`をbuildし、102個のC++ test-ledger executable、
-1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、127件のCTest registrationを不用意にbuildしない。
+通常の`make`はproduction treeだけから`moguet`をbuildし、104個のC++ test-ledger executable、
+1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、129件のCTest registrationを不用意にbuildしない。
 `make test`はtesting treeをbuildし、CTestを実行してから
 gettext、shell、docs、packaging等のrepository-specific validationを実行する。`make test-<area>`は
 互換entrypointとして残るが、exact target / CTest selectionは
@@ -180,17 +180,17 @@ inventoryを所有する。
 
 | Inventory | Expected |
 | --- | ---: |
-| C++ test executables | 102 |
+| C++ test executables | 104 |
 | installed transport fixture harnesses (`EXCLUDE_FROM_ALL`) | 1 |
 | support / stub translation units | 30 |
 | link firewalls | 49 |
 | firewall descriptors | 49 |
-| CTest registrations | 127 |
+| CTest registrations | 129 |
 
 stub / real implementation exclusion、replacement ABI、ALPM stub、exact source closureをtarget-localに
 維持する。単一production libraryを全testへ無条件linkしない。negative compileはCTest registrationから
 effective CMake compiler / launcher / compile optionを取得し、GNU Make recursive compileへ戻さない。
-Make focused aliasとCMake focused targetは各106件で一致し、missing / unexpectedを0に保つ。
+Make focused aliasとCMake focused targetは各108件で一致し、missing / unexpectedを0に保つ。
 
 completion生成が使う`moguet-cli-authority-exporter`もCMake targetであり、Python generatorはcompilerを
 直接起動しない。このtargetは`EXCLUDE_FROM_ALL`なので通常のproduction/package buildへ混ざらず、
@@ -295,6 +295,12 @@ reinstall、identical same-second reinstallをactual `pacman -U`で実行し、f
 通常userから再取得したfilesystem-scoped opaque file handleを比較する。`name_to_handle_at(2)`をsupportしない
 filesystem/runtime、またはidentical same-second replacementを区別できない環境はPASSへ丸めずfail closedする。
 このtargetはfeasibility evidenceであり、provenance publication、host A–D、offline E、actual Fを代替しない。
+
+Issue #476 Slice 2のproduction-disconnected storage foundationは、host focused target
+`test-xdg-generation-store`と`test-devel-build-provenance-store`で確認する。前者は#411から抽出した
+raw immutable-generation/CAS機械層、後者は別namespace、strict codec、exact #411 binding、future-schema
+refusal、typed lookup/publicationを所有する。production sourceへcompileされてもnormal CLIからのstore
+lookup/publication callerは持たず、installed characterizationやcontainer transaction evidenceを代替しない。
 
 Issue #485 Slice 5のclosed lifecycle / authoritative candidate gateは、同じnetworkless installed imageを
 使う専用targetで確認する。

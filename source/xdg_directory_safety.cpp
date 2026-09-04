@@ -27,9 +27,6 @@ constexpr mode_t REQUIRED_OWNER_PERMISSIONS = S_IRUSR | S_IWUSR | S_IXUSR;
 constexpr mode_t FORBIDDEN_WRITE_PERMISSIONS = S_IWGRP | S_IWOTH;
 constexpr std::string_view SOURCE_PREFERENCE_DIRECTORY_NAME =
     "source-build.d";
-constexpr std::string_view REVIEWED_SOURCE_STATE_DIRECTORY_NAME =
-    "reviewed-sources";
-constexpr std::string_view REVIEWED_SOURCE_STATE_AUR_DIRECTORY_NAME = "aur";
 
 struct DirectoryRequest {
     xdg_paths::DirectoryKind directory_kind;
@@ -1188,14 +1185,19 @@ DirectoryRequest make_request(
 }
 
 DirectoryRequest make_request(
-    const xdg_paths::ReviewedSourceStatePaths& paths) {
-    const fs::path expected_directory =
+    const xdg_paths::StateStorePaths& paths) {
+    fs::path expected_directory =
         paths.creation_boundary.base_directory /
-        std::string(application_identity::XDG_IDENTITY) /
-        std::string(REVIEWED_SOURCE_STATE_DIRECTORY_NAME) /
-        std::string(REVIEWED_SOURCE_STATE_AUR_DIRECTORY_NAME);
+        std::string(application_identity::XDG_IDENTITY);
+    for(const std::string& component : paths.managed_components) {
+        expected_directory /= component;
+    }
     return DirectoryRequest{
-        xdg_paths::DirectoryKind::State, paths.directory, paths.creation_boundary, paths.directory == expected_directory, {std::string(REVIEWED_SOURCE_STATE_DIRECTORY_NAME), std::string(REVIEWED_SOURCE_STATE_AUR_DIRECTORY_NAME)}, true};
+        xdg_paths::DirectoryKind::State, paths.directory,
+        paths.creation_boundary,
+        !paths.managed_components.empty() &&
+            paths.directory == expected_directory,
+        paths.managed_components, true};
 }
 
 } // namespace
@@ -1530,13 +1532,13 @@ std::optional<PreparedDirectory> open_existing_directory(
 }
 
 PreparedDirectory prepare_directory(
-    const xdg_paths::ReviewedSourceStatePaths& paths) {
+    const xdg_paths::StateStorePaths& paths) {
     const DirectoryRequest request = make_request(paths);
     return DirectorySafetyAccess::prepare(request, nullptr);
 }
 
 std::optional<PreparedDirectory> open_existing_directory(
-    const xdg_paths::ReviewedSourceStatePaths& paths) {
+    const xdg_paths::StateStorePaths& paths) {
     const DirectoryRequest request = make_request(paths);
     return DirectorySafetyAccess::open_existing(request, nullptr);
 }
@@ -1574,13 +1576,13 @@ std::optional<PreparedDirectory> open_existing_directory_for_test(
 }
 
 PreparedDirectory prepare_directory_for_test(
-    const xdg_paths::ReviewedSourceStatePaths& paths,
+    const xdg_paths::StateStorePaths& paths,
     const DirectorySafetyTestOverrides& overrides) {
     return DirectorySafetyAccess::prepare(make_request(paths), &overrides);
 }
 
 std::optional<PreparedDirectory> open_existing_directory_for_test(
-    const xdg_paths::ReviewedSourceStatePaths& paths,
+    const xdg_paths::StateStorePaths& paths,
     const DirectorySafetyTestOverrides& overrides) {
     return DirectorySafetyAccess::open_existing(
         make_request(paths), &overrides);

@@ -9,7 +9,8 @@
 
 namespace {
 
-void require_sha256_digest(std::string_view digest) {
+void require_sha256_digest(
+    std::string_view digest, std::string_view field_name) {
     const bool is_lowercase_hex =
         digest.size() == 64 &&
         std::all_of(digest.begin(), digest.end(), [](char character) {
@@ -18,7 +19,8 @@ void require_sha256_digest(std::string_view digest) {
         });
     if(!is_lowercase_hex) {
         throw std::invalid_argument(
-            "Package archive digest must be a canonical lowercase SHA-256 digest.");
+            std::string(field_name) +
+            " must be a canonical lowercase SHA-256 digest.");
     }
 }
 
@@ -45,12 +47,67 @@ PackageArchiveSha256Digest::PackageArchiveSha256Digest(
 
 PackageArchiveSha256Digest PackageArchiveSha256Digest::make(
     std::string digest) {
-    require_sha256_digest(digest);
+    require_sha256_digest(digest, "Package archive digest");
     return PackageArchiveSha256Digest(std::move(digest));
 }
 
 const std::string& PackageArchiveSha256Digest::value() const noexcept {
     return digest_;
+}
+
+ReviewedSourceStateDocumentSha256Digest::
+    ReviewedSourceStateDocumentSha256Digest(std::string digest) noexcept
+    : digest_(std::move(digest)) {
+}
+
+ReviewedSourceStateDocumentSha256Digest
+ReviewedSourceStateDocumentSha256Digest::make(std::string digest) {
+    require_sha256_digest(digest, "Reviewed source state document digest");
+    return ReviewedSourceStateDocumentSha256Digest(std::move(digest));
+}
+
+const std::string& ReviewedSourceStateDocumentSha256Digest::value()
+    const noexcept {
+    return digest_;
+}
+
+ReviewedSourceStateRecordGeneration::
+    ReviewedSourceStateRecordGeneration(std::uint64_t value) noexcept
+    : value_(value) {
+}
+
+std::uint64_t ReviewedSourceStateRecordGeneration::value() const noexcept {
+    return value_;
+}
+
+ReviewedSourceStateRecordBinding::ReviewedSourceStateRecordBinding(
+    PackageBaseIdentity package_base,
+    AurRecipeRevision reviewed_recipe_revision,
+    ReviewedSourceStateRecordGeneration generation,
+    ReviewedSourceStateDocumentSha256Digest document_digest) noexcept
+    : package_base_(std::move(package_base)),
+      reviewed_recipe_revision_(std::move(reviewed_recipe_revision)),
+      generation_(generation), document_digest_(std::move(document_digest)) {
+}
+
+const PackageBaseIdentity& ReviewedSourceStateRecordBinding::package_base()
+    const noexcept {
+    return package_base_;
+}
+
+const AurRecipeRevision&
+ReviewedSourceStateRecordBinding::reviewed_recipe_revision() const noexcept {
+    return reviewed_recipe_revision_;
+}
+
+const ReviewedSourceStateRecordGeneration&
+ReviewedSourceStateRecordBinding::generation() const noexcept {
+    return generation_;
+}
+
+const ReviewedSourceStateDocumentSha256Digest&
+ReviewedSourceStateRecordBinding::document_digest() const noexcept {
+    return document_digest_;
 }
 
 MakepkgManagedGitWorkspaceRevisionObservation::
@@ -99,45 +156,19 @@ ActualBuiltGitRevisionProofResult prove_actual_built_git_revision(
     return ActualBuiltGitRevision(observation.post_build_revision());
 }
 
-DevelBuildProvenanceRecordGeneration::
-    DevelBuildProvenanceRecordGeneration(std::uint64_t value) noexcept
-    : value_(value) {
-}
-
-DevelBuildProvenanceRecordGeneration
-DevelBuildProvenanceRecordGeneration::initial() noexcept {
-    return DevelBuildProvenanceRecordGeneration(1);
-}
-
-std::uint64_t DevelBuildProvenanceRecordGeneration::value()
-    const noexcept {
-    return value_;
-}
-
 DevelBuildProvenance::DevelBuildProvenance(
-    DevelBuildProvenanceRecordGeneration record_generation,
     PackageBaseIdentity package_base,
-    AurRecipeRevision reviewed_recipe_revision,
+    ReviewedSourceStateRecordBinding reviewed_source_binding,
     VcsSourceIdentity evaluated_source,
     ActualBuiltGitRevision actual_built_revision,
     BuiltPackageArtifactEvidence artifact,
     InstalledArtifactBinding installed_binding) noexcept
-    : record_generation_(record_generation),
-      package_base_(std::move(package_base)),
-      reviewed_recipe_revision_(std::move(reviewed_recipe_revision)),
+    : package_base_(std::move(package_base)),
+      reviewed_source_binding_(std::move(reviewed_source_binding)),
       evaluated_source_(std::move(evaluated_source)),
       actual_built_revision_(std::move(actual_built_revision)),
       artifact_(std::move(artifact)),
       installed_binding_(std::move(installed_binding)) {
-}
-
-std::uint32_t DevelBuildProvenance::schema_version() const noexcept {
-    return DEVEL_BUILD_PROVENANCE_SCHEMA_VERSION;
-}
-
-const DevelBuildProvenanceRecordGeneration&
-DevelBuildProvenance::record_generation() const noexcept {
-    return record_generation_;
 }
 
 const PackageBaseIdentity& DevelBuildProvenance::package_base()
@@ -145,9 +176,14 @@ const PackageBaseIdentity& DevelBuildProvenance::package_base()
     return package_base_;
 }
 
+const ReviewedSourceStateRecordBinding&
+DevelBuildProvenance::reviewed_source_binding() const noexcept {
+    return reviewed_source_binding_;
+}
+
 const AurRecipeRevision&
 DevelBuildProvenance::reviewed_recipe_revision() const noexcept {
-    return reviewed_recipe_revision_;
+    return reviewed_source_binding_.reviewed_recipe_revision();
 }
 
 const VcsSourceIdentity& DevelBuildProvenance::evaluated_source()
@@ -171,9 +207,8 @@ DevelBuildProvenance::installed_binding() const noexcept {
 }
 
 DevelBuildProvenanceResult make_devel_build_provenance(
-    DevelBuildProvenanceRecordGeneration record_generation,
     PackageBaseIdentity package_base,
-    AurRecipeRevision reviewed_recipe_revision,
+    ReviewedSourceStateRecordBinding reviewed_source_binding,
     VcsSourceIdentity evaluated_source,
     ActualBuiltGitRevision actual_built_revision,
     BuiltPackageArtifactEvidence artifact,
@@ -184,6 +219,28 @@ DevelBuildProvenanceResult make_devel_build_provenance(
        package_source.location().state() != SourceLocationState::Known) {
         return provenance_failure(
             DevelBuildProvenanceFailureReason::PackageSourceMismatch);
+    }
+
+    if(reviewed_source_binding.package_base() != package_base) {
+        return provenance_failure(
+            DevelBuildProvenanceFailureReason::
+                ReviewedSourceBindingMismatch);
+    }
+
+    const VcsSelectorKind selector_kind = evaluated_source.selector().kind();
+    if(evaluated_source.kind() != VcsKind::Git ||
+       !std::string_view(evaluated_source.source_location())
+            .starts_with("https://") ||
+       evaluated_source.source_location().size() <=
+           std::string_view("https://").size() ||
+       (selector_kind != VcsSelectorKind::DefaultHead &&
+        selector_kind != VcsSelectorKind::Branch) ||
+       evaluated_source.selector().tracking_behavior() !=
+           VcsSelectorTrackingBehavior::Floating ||
+       evaluated_source.architecture() != nullptr) {
+        return provenance_failure(
+            DevelBuildProvenanceFailureReason::
+                UnsupportedEvaluatedSource);
     }
 
     if(evaluated_source != actual_built_revision.revision().source()) {
@@ -248,13 +305,29 @@ DevelBuildProvenanceResult make_devel_build_provenance(
     }
 
     return DevelBuildProvenance(
-        record_generation, std::move(package_base),
-        std::move(reviewed_recipe_revision), std::move(evaluated_source),
+        std::move(package_base), std::move(reviewed_source_binding),
+        std::move(evaluated_source),
         std::move(actual_built_revision), std::move(artifact),
         std::move(installed_binding));
 }
 
 #ifdef MOGUET_ENABLE_DEVEL_BUILD_PROVENANCE_TEST_HOOKS
+ReviewedSourceStateRecordBinding
+make_reviewed_source_state_record_binding_fixture_for_test(
+    PackageBaseIdentity package_base,
+    AurRecipeRevision reviewed_recipe_revision,
+    std::uint64_t generation,
+    ReviewedSourceStateDocumentSha256Digest document_digest) {
+    if(generation == 0) {
+        throw std::invalid_argument(
+            "Reviewed source state record generation must be positive.");
+    }
+    return ReviewedSourceStateRecordBinding(
+        std::move(package_base), std::move(reviewed_recipe_revision),
+        ReviewedSourceStateRecordGeneration(generation),
+        std::move(document_digest));
+}
+
 MakepkgManagedGitWorkspaceRevisionObservation
 make_makepkg_git_workspace_revision_observation_fixture_for_test(
     UpstreamGitRevision prepared_revision,

@@ -351,7 +351,7 @@ struct ReplacingCleanupTarget {
     static void handler(const ReviewedSourceStateStoreTestRaceContext& context) {
         require(instance != nullptr, "ReplacingCleanupTarget was not armed.");
         instance->surviving_path =
-            context.package_directory / "-.moguet-reviewed-source-planted";
+            context.unit_directory / "-.moguet-reviewed-source-planted";
         write_bytes(instance->surviving_path, instance->contents, 0600);
     }
 };
@@ -371,7 +371,7 @@ struct ReplacingTemporarySource {
         instance->observed_source_device = context.source_device;
         instance->observed_source_inode = context.source_inode;
         instance->decoy_path =
-            context.package_directory / "-.moguet-reviewed-source-foreign";
+            context.unit_directory / "-.moguet-reviewed-source-foreign";
         write_bytes(instance->decoy_path, instance->contents, 0600);
         replace_path_with_new_inode(
             instance->decoy_path, instance->contents, 0600);
@@ -394,7 +394,7 @@ struct RewritingTemporarySourceInPlace {
         instance->observed_source_device = context.source_device;
         instance->observed_source_inode = context.source_inode;
         instance->decoy_path =
-            context.package_directory / "-.moguet-reviewed-source-rewrite";
+            context.unit_directory / "-.moguet-reviewed-source-rewrite";
         write_bytes(instance->decoy_path, std::string(instance->contents.size(), 'x'), 0600);
         rewrite_path_in_place_restoring_mtime(
             instance->decoy_path, instance->contents, 0600);
@@ -410,7 +410,7 @@ struct ReplacingPackageDirectory {
     static void handler(const ReviewedSourceStateStoreTestRaceContext& context) {
         require(instance != nullptr, "ReplacingPackageDirectory was not armed.");
         install_package_directory_replacement(
-            context.package_directory, instance->marker);
+            context.unit_directory, instance->marker);
     }
 };
 ReplacingPackageDirectory* ReplacingPackageDirectory::instance = nullptr;
@@ -448,7 +448,7 @@ struct PlantingManagedLeaf {
     static void handler(const ReviewedSourceStateStoreTestRaceContext& context) {
         require(instance != nullptr, "PlantingManagedLeaf was not armed.");
         write_bytes(
-            context.package_directory / instance->leaf, instance->contents,
+            context.unit_directory / instance->leaf, instance->contents,
             0600);
     }
 };
@@ -1920,7 +1920,7 @@ void test_package_directory_replacement_after_commit_is_published_uncertain() {
     ReplacingPackageDirectory::instance = nullptr;
     require(uncertain.issue ==
                 ReviewedSourceStatePostPublicationIssue::
-                    PackageDirectoryIdentityUncertain,
+                    UnitDirectoryIdentityUncertain,
             "Post-commit PackageBase replacement issue drifted.");
     const fs::path package_dir =
         reviewed_source_state_store_entry_path(first.package_base());

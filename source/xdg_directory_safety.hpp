@@ -18,7 +18,7 @@ struct StateLogDirectoryAccess;
 
 struct TrustedCacheDirectoryAccess;
 struct SourcePreferenceDirectoryAccess;
-struct ReviewedSourceStateDirectoryAccess;
+struct XdgGenerationStoreDirectoryAccess;
 
 namespace xdg_directory_safety {
 
@@ -125,15 +125,15 @@ class PreparedDirectory final {
     friend PreparedDirectory prepare_directory(
         const xdg_paths::SourcePreferencePaths& paths);
     friend PreparedDirectory prepare_directory(
-        const xdg_paths::ReviewedSourceStatePaths& paths);
+        const xdg_paths::StateStorePaths& paths);
     friend std::optional<PreparedDirectory> open_existing_directory(
-        const xdg_paths::ReviewedSourceStatePaths& paths);
+        const xdg_paths::StateStorePaths& paths);
 
     friend struct DirectorySafetyAccess;
     friend struct xdg_state_log::StateLogDirectoryAccess;
     friend struct ::TrustedCacheDirectoryAccess;
     friend struct ::SourcePreferenceDirectoryAccess;
-    friend struct ::ReviewedSourceStateDirectoryAccess;
+    friend struct ::XdgGenerationStoreDirectoryAccess;
 
 public:
     PreparedDirectory(const PreparedDirectory&) = delete;
@@ -193,11 +193,12 @@ PreparedDirectory prepare_directory(
 std::optional<PreparedDirectory> open_existing_directory(
     const xdg_paths::SourcePreferencePaths& paths);
 
-// Reviewed-source AUR store directory。lookupはcreateせず、missingはnullopt。
+// Resolver-owned XDG state-store directory. Lookup does not create it;
+// missing is represented only by nullopt.
 PreparedDirectory prepare_directory(
-    const xdg_paths::ReviewedSourceStatePaths& paths);
+    const xdg_paths::StateStorePaths& paths);
 std::optional<PreparedDirectory> open_existing_directory(
-    const xdg_paths::ReviewedSourceStatePaths& paths);
+    const xdg_paths::StateStorePaths& paths);
 
 #ifdef MOGUET_TEST_XDG_DIRECTORY_SAFETY_HOOKS
 enum class DirectorySafetyTestEvent {
@@ -250,10 +251,10 @@ std::optional<PreparedDirectory> open_existing_directory_for_test(
     const xdg_paths::SourcePreferencePaths& paths,
     const DirectorySafetyTestOverrides& overrides);
 PreparedDirectory prepare_directory_for_test(
-    const xdg_paths::ReviewedSourceStatePaths& paths,
+    const xdg_paths::StateStorePaths& paths,
     const DirectorySafetyTestOverrides& overrides);
 std::optional<PreparedDirectory> open_existing_directory_for_test(
-    const xdg_paths::ReviewedSourceStatePaths& paths,
+    const xdg_paths::StateStorePaths& paths,
     const DirectorySafetyTestOverrides& overrides);
 #endif
 

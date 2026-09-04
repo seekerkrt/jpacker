@@ -203,4 +203,17 @@ make_installed_package_record_generation_fixture_for_test(
         InstalledPackageRecordGenerationScheme::LinuxNameToHandleAt,
         std::move(opaque_identity));
 }
+
+InstalledArtifactBinding make_installed_artifact_binding_fixture_for_test(
+    PackageChildIdentity package,
+    PackageVersionIdentity version,
+    InstalledPackageArchitectureIdentity architecture,
+    AlpmMtreeSha256Digest mtree_digest,
+    InstalledDatabaseRecordSha256Digest database_record_digest,
+    InstalledPackageRecordGeneration record_generation) {
+    return InstalledArtifactBinding::make(
+        std::move(package), std::move(version), std::move(architecture),
+        std::move(mtree_digest), std::move(database_record_digest),
+        std::move(record_generation));
+}
 #endif

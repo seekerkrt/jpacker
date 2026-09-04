@@ -7,6 +7,8 @@
 #include <utility>
 #include <variant>
 
+class DevelBuildProvenancePersistentDecoderAccess;
+
 class AlpmMtreeSha256Digest final {
 public:
     AlpmMtreeSha256Digest() = delete;
@@ -73,6 +75,7 @@ public:
         const InstalledPackageRecordGeneration&) const = default;
 
 private:
+    friend class DevelBuildProvenancePersistentDecoderAccess;
 #ifdef MOGUET_ENABLE_INSTALLED_ARTIFACT_BINDING_TEST_HOOKS
     friend InstalledPackageRecordGeneration
     make_installed_package_record_generation_fixture_for_test(
@@ -101,14 +104,6 @@ public:
         InstalledArtifactBinding&&) noexcept = default;
     ~InstalledArtifactBinding() = default;
 
-    [[nodiscard]] static InstalledArtifactBinding make(
-        PackageChildIdentity package,
-        PackageVersionIdentity version,
-        InstalledPackageArchitectureIdentity architecture,
-        AlpmMtreeSha256Digest mtree_digest,
-        InstalledDatabaseRecordSha256Digest database_record_digest,
-        InstalledPackageRecordGeneration record_generation);
-
     [[nodiscard]] const PackageChildIdentity& package() const noexcept;
     [[nodiscard]] const PackageVersionIdentity& version() const noexcept;
     [[nodiscard]] const InstalledPackageArchitectureIdentity& architecture()
@@ -122,6 +117,26 @@ public:
     bool operator==(const InstalledArtifactBinding&) const = default;
 
 private:
+    friend class DevelBuildProvenancePersistentDecoderAccess;
+#ifdef MOGUET_ENABLE_INSTALLED_ARTIFACT_BINDING_TEST_HOOKS
+    friend InstalledArtifactBinding
+    make_installed_artifact_binding_fixture_for_test(
+        PackageChildIdentity package,
+        PackageVersionIdentity version,
+        InstalledPackageArchitectureIdentity architecture,
+        AlpmMtreeSha256Digest mtree_digest,
+        InstalledDatabaseRecordSha256Digest database_record_digest,
+        InstalledPackageRecordGeneration record_generation);
+#endif
+
+    [[nodiscard]] static InstalledArtifactBinding make(
+        PackageChildIdentity package,
+        PackageVersionIdentity version,
+        InstalledPackageArchitectureIdentity architecture,
+        AlpmMtreeSha256Digest mtree_digest,
+        InstalledDatabaseRecordSha256Digest database_record_digest,
+        InstalledPackageRecordGeneration record_generation);
+
     InstalledArtifactBinding(
         PackageChildIdentity package,
         PackageVersionIdentity version,
@@ -189,4 +204,16 @@ using InstalledArtifactBindingObservationResult = std::variant<
 [[nodiscard]] InstalledPackageRecordGeneration
 make_installed_package_record_generation_fixture_for_test(
     std::string opaque_identity);
+
+// Whole-binding raw construction is test-only. Persistent decode has a
+// separate friend boundary; a future live observer must add its own producer
+// capability rather than reopening InstalledArtifactBinding::make().
+[[nodiscard]] InstalledArtifactBinding
+make_installed_artifact_binding_fixture_for_test(
+    PackageChildIdentity package,
+    PackageVersionIdentity version,
+    InstalledPackageArchitectureIdentity architecture,
+    AlpmMtreeSha256Digest mtree_digest,
+    InstalledDatabaseRecordSha256Digest database_record_digest,
+    InstalledPackageRecordGeneration record_generation);
 #endif

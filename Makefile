@@ -36,6 +36,7 @@ CMAKE_FOCUSED_ALIASES := \
 	test-localization \
 	test-xdg-paths \
 	test-xdg-directory-safety \
+	test-xdg-generation-store \
 	test-xdg-state-log \
 	test-trusted-cache \
 	test-runtime-identity \
@@ -63,6 +64,7 @@ CMAKE_FOCUSED_ALIASES := \
 	test-source-package-identity \
 	test-installed-artifact-binding \
 	test-devel-build-provenance \
+	test-devel-build-provenance-store \
 	test-git-remote-revision-observer \
 	test-source-package-identity-projection \
 	test-source-package-compatibility \

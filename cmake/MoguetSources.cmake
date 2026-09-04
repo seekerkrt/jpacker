@@ -34,6 +34,9 @@ set(MOGUET_PRODUCTION_SOURCES
     source/cross_source_version_lock.cpp
     source/cross_source_version_lock_observation.cpp
     source/devel_build_provenance.cpp
+    source/devel_build_provenance_codec.cpp
+    source/devel_build_provenance_reviewed_binding.cpp
+    source/devel_build_provenance_store.cpp
     source/devel_package_classification.cpp
     source/devel_update_model.cpp
     source/dependency_constraint.cpp
@@ -132,6 +135,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/user_config.cpp
     source/vcs_source_identity.cpp
     source/xdg_directory_safety.cpp
+    source/xdg_generation_store.cpp
     source/xdg_paths.cpp
     source/xdg_state_log.cpp
 )

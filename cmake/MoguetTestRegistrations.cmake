@@ -14,6 +14,10 @@ endmacro()
 _moguet_add_direct_ctest(cpp.interactive_confirmation interactive-confirmation-test)
 _moguet_add_direct_ctest(cpp.xdg_paths xdg-paths-test)
 _moguet_add_direct_ctest(cpp.xdg_directory_safety xdg-directory-safety-test)
+_moguet_add_direct_ctest(
+    cpp.xdg_generation_store
+    xdg-generation-store-test
+)
 _moguet_add_direct_ctest(cpp.xdg_state_log xdg-state-log-test)
 _moguet_add_direct_ctest(cpp.trusted_cache trusted-cache-test)
 _moguet_add_direct_ctest(cpp.provider_selection provider-selection-test)
@@ -43,6 +47,10 @@ _moguet_add_direct_ctest(
 _moguet_add_direct_ctest(
     cpp.devel_build_provenance
     devel-build-provenance-test
+)
+_moguet_add_direct_ctest(
+    cpp.devel_build_provenance_store
+    devel-build-provenance-store-test
 )
 _moguet_add_direct_ctest(
     cpp.git_remote_revision_observer
