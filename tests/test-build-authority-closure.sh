@@ -111,6 +111,37 @@ cmp -s \
     "$test_root/expected-provenance-store-includes.txt" \
     "$provenance_store_includes" ||
     fail 'Issue #476 Slice 2 provenance store gained a production caller'
+
+# Issue #476 Slice 3 is linked into the production binary as a dormant
+# foundation. No production route may include its minting API until the later
+# build-authority slices explicitly replace the current lifecycle.
+source_build_context_includes=$test_root/source-build-context-includes.txt
+if grep -l -F -- \
+    '#include "invocation_owned_source_build_context.hpp"' \
+    "$repo_root"/source/*.cpp > "$source_build_context_includes"
+then
+    :
+else
+    include_status=$?
+    [ "$include_status" -eq 1 ] ||
+        fail "source-build context production include scan failed with status $include_status"
+fi
+printf '%s\n' \
+    "$repo_root/source/invocation_owned_source_build_context.cpp" \
+    > "$test_root/expected-source-build-context-includes.txt"
+cmp -s \
+    "$test_root/expected-source-build-context-includes.txt" \
+    "$source_build_context_includes" ||
+    fail 'Issue #476 Slice 3 context gained a production caller'
+assert_not_contains \
+    "$repo_root/source/invocation_owned_source_build_context.cpp" \
+    'publish_devel_build_provenance'
+assert_not_contains \
+    "$repo_root/source/invocation_owned_source_build_context.cpp" \
+    'devel_build_provenance_store.hpp'
+assert_not_matches \
+    "$repo_root/source/invocation_owned_source_build_context.cpp" \
+    'makepkg[[:space:]]+--(nobuild|noextract|printsrcinfo)'
 assert_not_contains "$makefile" 'legacy-cpp-focused-authority'
 assert_not_contains "$makefile" '-std=c++20'
 assert_not_contains "$makefile" '-Wall'
@@ -209,8 +240,8 @@ assert_contains "$repo_root/.gitignore" '/compile_commands.json'
 
 # Compare the historical Make aliases with the actual CMake focused targets.
 # This checks the frontend mapping without duplicating either inventory here.
-[ "$#" -eq 108 ] ||
-    fail "Make focused alias inventory is $#, expected 108"
+[ "$#" -eq 109 ] ||
+    fail "Make focused alias inventory is $#, expected 109"
 make_aliases=$test_root/make-focused-aliases.txt
 cmake_aliases=$test_root/cmake-focused-aliases.txt
 cmake_help=$test_root/cmake-target-help.txt
@@ -218,15 +249,15 @@ missing_aliases=$test_root/missing-focused-aliases.txt
 unexpected_aliases=$test_root/unexpected-focused-aliases.txt
 
 printf '%s\n' "$@" | LC_ALL=C sort > "$make_aliases"
-[ "$(LC_ALL=C sort -u "$make_aliases" | wc -l)" -eq 108 ] ||
+[ "$(LC_ALL=C sort -u "$make_aliases" | wc -l)" -eq 109 ] ||
     fail 'Make focused alias inventory contains duplicates'
 
 "$cmake_command" --build "$cmake_build_dir" --target help > "$cmake_help"
 sed -n \
     's/.*moguet-focus-\(test-[a-z0-9-][a-z0-9-]*\).*/\1/p' \
     "$cmake_help" | LC_ALL=C sort -u > "$cmake_aliases"
-[ "$(wc -l < "$cmake_aliases")" -eq 108 ] ||
-    fail "CMake focused target inventory is $(wc -l < "$cmake_aliases"), expected 108"
+[ "$(wc -l < "$cmake_aliases")" -eq 109 ] ||
+    fail "CMake focused target inventory is $(wc -l < "$cmake_aliases"), expected 109"
 
 LC_ALL=C comm -23 "$make_aliases" "$cmake_aliases" > "$missing_aliases"
 LC_ALL=C comm -13 "$make_aliases" "$cmake_aliases" > "$unexpected_aliases"
@@ -258,5 +289,5 @@ assert_contains "$phony_marker" 'test-cmake'
 assert_contains "$phony_marker" 'test-repository'
 
 printf '%s\n' \
-    'build-authority-closure-test: Make aliases=108, CMake targets=108, missing=0, unexpected=0'
+    'build-authority-closure-test: Make aliases=109, CMake targets=109, missing=0, unexpected=0'
 printf '%s\n' 'build-authority-closure-test: all checks passed'
