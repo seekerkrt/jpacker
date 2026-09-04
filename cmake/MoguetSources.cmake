@@ -33,6 +33,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/commands_upgrade_all.cpp
     source/cross_source_version_lock.cpp
     source/cross_source_version_lock_observation.cpp
+    source/devel_build_provenance.cpp
     source/devel_package_classification.cpp
     source/devel_update_model.cpp
     source/dependency_constraint.cpp
@@ -44,6 +45,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/dry_run.cpp
     source/filtered_aur_update_operation.cpp
     source/git_remote_revision_observer.cpp
+    source/installed_artifact_binding.cpp
     source/installed_package_relation_inventory.cpp
     source/interactive_confirmation.cpp
     source/invocation_owned_cleanup_adapter.cpp

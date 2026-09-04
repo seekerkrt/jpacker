@@ -107,8 +107,8 @@ include / link graph、negative compile recipeを所有しない。
 | `build/cmake-production` | `BUILD_TESTING=OFF` | 通常の`make`、install / uninstall、production smoke |
 | `build/cmake-testing` | `BUILD_TESTING=ON` | developer、CTest、host / release validation、focused test |
 
-通常の`make`はproduction treeだけから`moguet`をbuildし、99個のC++ test-ledger executable、
-1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、124件のCTest registrationを不用意にbuildしない。
+通常の`make`はproduction treeだけから`moguet`をbuildし、102個のC++ test-ledger executable、
+1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、127件のCTest registrationを不用意にbuildしない。
 `make test`はtesting treeをbuildし、CTestを実行してから
 gettext、shell、docs、packaging等のrepository-specific validationを実行する。`make test-<area>`は
 互換entrypointとして残るが、exact target / CTest selectionは
@@ -180,17 +180,17 @@ inventoryを所有する。
 
 | Inventory | Expected |
 | --- | ---: |
-| C++ test executables | 99 |
+| C++ test executables | 102 |
 | installed transport fixture harnesses (`EXCLUDE_FROM_ALL`) | 1 |
 | support / stub translation units | 30 |
 | link firewalls | 49 |
 | firewall descriptors | 49 |
-| CTest registrations | 124 |
+| CTest registrations | 127 |
 
 stub / real implementation exclusion、replacement ABI、ALPM stub、exact source closureをtarget-localに
 維持する。単一production libraryを全testへ無条件linkしない。negative compileはCTest registrationから
 effective CMake compiler / launcher / compile optionを取得し、GNU Make recursive compileへ戻さない。
-Make focused aliasとCMake focused targetは各103件で一致し、missing / unexpectedを0に保つ。
+Make focused aliasとCMake focused targetは各106件で一致し、missing / unexpectedを0に保つ。
 
 completion生成が使う`moguet-cli-authority-exporter`もCMake targetであり、Python generatorはcompilerを
 直接起動しない。このtargetは`EXCLUDE_FROM_ALL`なので通常のproduction/package buildへ混ざらず、
@@ -283,6 +283,18 @@ Issue #485 Slice 2のSourceArtifactInstall boundaryは、selected-provider lane�
 multi-artifact、replay / cross-owner isolationをephemeral container package databaseで確認する。単一artifact
 matrixはproduction C++ transportから`SourceArtifactInstallReceiptObservation`とcausal evidenceまで通す。
 `test-container-receipt`のselected-provider evidenceとは相互に代替しない。
+
+Issue #476 Slice 1のinstalled binding feasibilityは、同じnetworkless imageを使うがproduction helperへ
+接続しない専用characterizationで確認する。
+
+    make test-container-installed-binding-characterization
+
+runtimeはhost `/var/lib/pacman`を共有せず、自動破棄されるanonymous volumeだけをpacman root / local DB
+authorityにする。Install、Upgrade、`--needed` skip、same-version different artifact reinstall、identical artifact
+reinstall、identical same-second reinstallをactual `pacman -U`で実行し、fresh `desc` / `files` / `mtree`と
+通常userから再取得したfilesystem-scoped opaque file handleを比較する。`name_to_handle_at(2)`をsupportしない
+filesystem/runtime、またはidentical same-second replacementを区別できない環境はPASSへ丸めずfail closedする。
+このtargetはfeasibility evidenceであり、provenance publication、host A–D、offline E、actual Fを代替しない。
 
 Issue #485 Slice 5のclosed lifecycle / authoritative candidate gateは、同じnetworkless installed imageを
 使う専用targetで確認する。

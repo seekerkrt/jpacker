@@ -61,6 +61,8 @@ CMAKE_FOCUSED_ALIASES := \
 	test-user-config \
 	test-package-identifier \
 	test-source-package-identity \
+	test-installed-artifact-binding \
+	test-devel-build-provenance \
 	test-git-remote-revision-observer \
 	test-source-package-identity-projection \
 	test-source-package-compatibility \
@@ -85,6 +87,7 @@ CMAKE_FOCUSED_ALIASES := \
 	test-artifact-workspace \
 	test-multiple-artifact-workspace \
 	test-makepkg-assignment-precedence \
+	test-makepkg-devel-phase-characterization \
 	test-artifact-identity \
 	test-multiple-artifact-identity \
 	test-package-base-artifact-install-plan \
@@ -294,7 +297,8 @@ export MOGUET_FRONTEND_USE_DEFAULT_COMPILE_OPTIONS
 	test-container-live-local \
 	test-container-receipt \
 	test-container-cleanup-authority \
-	test-container-source-artifact-receipt
+	test-container-source-artifact-receipt \
+	test-container-installed-binding-characterization
 .PHONY: check-reviewed-source-pinned-build-authority $(CMAKE_FOCUSED_ALIASES)
 
 all: $(TARGET) $(MANPAGES)
@@ -668,6 +672,20 @@ test-container-source-artifact-receipt:
 			"$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
 			/usr/bin/python3 \
 			containers/arch-receipt-validation/run-installed-source-artifact-receipt.py
+
+test-container-installed-binding-characterization:
+	@set -eu; \
+		printf '%s\n' ':: Building installed-binding characterization image'; \
+		$(DOCKER) build --network=none \
+			--tag "$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
+			--file containers/arch-receipt-validation/Dockerfile \
+			.; \
+		printf '%s\n' ':: Running installed-binding characterization container'; \
+		$(DOCKER) run --rm --network=none \
+			--mount type=volume,destination=/var/lib/moguet-installed-binding-characterization,volume-nocopy \
+			"$(ARCH_RECEIPT_VALIDATION_IMAGE)" \
+			/usr/bin/python3 \
+			containers/arch-receipt-validation/run-installed-binding-characterization.py
 
 test-container-cleanup-authority:
 	@set -eu; \
