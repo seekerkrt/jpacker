@@ -1566,6 +1566,18 @@ public:
         return recipe_->descriptor.get();
     }
 
+    [[nodiscard]] int pkgdest_descriptor() const noexcept {
+        return pkgdest_->descriptor.get();
+    }
+
+    [[nodiscard]] int builddir_descriptor() const noexcept {
+        return builddir_->descriptor.get();
+    }
+
+    [[nodiscard]] int srcdest_descriptor() const noexcept {
+        return srcdest_->descriptor.get();
+    }
+
     [[nodiscard]] std::uintmax_t device() const noexcept {
         return root_.identity.device;
     }
@@ -2658,6 +2670,26 @@ const fs::path& InvocationOwnedSourceBuildContext::owned_root() const {
 const InvocationOwnedMakepkgExecutableIdentity&
 InvocationOwnedSourceBuildContext::makepkg_executable() const {
     return require_state().makepkg_executable;
+}
+
+int InvocationOwnedSourceBuildContext::recipe_descriptor() const {
+    return require_state().roots.recipe_descriptor();
+}
+
+int InvocationOwnedSourceBuildContext::pkgdest_descriptor() const {
+    return require_state().roots.pkgdest_descriptor();
+}
+
+int InvocationOwnedSourceBuildContext::builddir_descriptor() const {
+    return require_state().roots.builddir_descriptor();
+}
+
+int InvocationOwnedSourceBuildContext::srcdest_descriptor() const {
+    return require_state().roots.srcdest_descriptor();
+}
+
+std::uintmax_t InvocationOwnedSourceBuildContext::root_device() const {
+    return require_state().roots.device();
 }
 
 InvocationOwnedSourceBuildContextValidationResult

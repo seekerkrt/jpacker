@@ -11,6 +11,7 @@
 #include <variant>
 
 class DevelBuildProvenancePersistentDecoderAccess;
+class EvaluatedDevelSourceBuildAuthority;
 class ReviewedSourceStateRecordBinding;
 
 class PackageArchiveSha256Digest final {
@@ -156,6 +157,7 @@ public:
         default;
 
 private:
+    friend class EvaluatedDevelSourceBuildAuthority;
 #ifdef MOGUET_ENABLE_DEVEL_BUILD_PROVENANCE_TEST_HOOKS
     friend MakepkgManagedGitWorkspaceRevisionObservation
     make_makepkg_git_workspace_revision_observation_fixture_for_test(
@@ -327,8 +329,8 @@ make_reviewed_source_state_record_binding_fixture_for_test(
     std::uint64_t generation,
     ReviewedSourceStateDocumentSha256Digest document_digest);
 
-// Test-only workspace observation mint. The production observation owner is
-// intentionally absent from Slice 1.
+// Test-only workspace observation mint. Slice 4 has a separate closed
+// production friend; ordinary callers still cannot supply raw observations.
 [[nodiscard]] MakepkgManagedGitWorkspaceRevisionObservation
 make_makepkg_git_workspace_revision_observation_fixture_for_test(
     UpstreamGitRevision prepared_revision,

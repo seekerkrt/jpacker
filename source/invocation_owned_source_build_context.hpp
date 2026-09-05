@@ -18,6 +18,7 @@
 #endif
 
 class InvocationOwnedSourceBuildContextAuthority;
+class EvaluatedDevelSourceBuildAuthority;
 
 enum class InvocationOwnedSourceBuildContextStage {
     PinnedBuildValidation,
@@ -155,6 +156,7 @@ public:
 private:
     friend class InvocationOwnedSourceBuildContextAuthority;
     friend class InvocationOwnedSourceBuildContext;
+    friend class EvaluatedDevelSourceBuildAuthority;
 
     InvocationOwnedMakepkgExecutableIdentity(
         std::filesystem::path path, int descriptor,
@@ -195,6 +197,7 @@ public:
 private:
     friend class InvocationOwnedSourceBuildContextAuthority;
     friend class InvocationOwnedSourceBuildContext;
+    friend class EvaluatedDevelSourceBuildAuthority;
 
     InvocationOwnedMakepkgEnvironment(
         SourceBuildEnvironment source_environment,
@@ -278,6 +281,7 @@ public:
 
 private:
     friend class InvocationOwnedSourceBuildContextAuthority;
+    friend class EvaluatedDevelSourceBuildAuthority;
 
     struct State;
     explicit InvocationOwnedSourceBuildContext(
@@ -285,6 +289,11 @@ private:
 
     [[nodiscard]] const State& require_state() const;
     [[nodiscard]] State& require_state();
+    [[nodiscard]] int recipe_descriptor() const;
+    [[nodiscard]] int pkgdest_descriptor() const;
+    [[nodiscard]] int builddir_descriptor() const;
+    [[nodiscard]] int srcdest_descriptor() const;
+    [[nodiscard]] std::uintmax_t root_device() const;
 
     std::unique_ptr<State> state_;
 };

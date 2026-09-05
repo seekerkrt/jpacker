@@ -70,6 +70,7 @@ CMAKE_FOCUSED_ALIASES := \
 	test-source-package-compatibility \
 	test-invocation-owned-cleanup-model \
 	test-invocation-owned-source-build-context \
+	test-evaluated-devel-source-build \
 	test-remote-aur-cleanup-collector \
 	test-source-artifact-install-trusted-transport \
 	test-reviewed-source-state \

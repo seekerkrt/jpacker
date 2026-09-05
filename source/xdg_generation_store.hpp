@@ -173,6 +173,14 @@ using XdgGenerationStorePublishResult = std::variant<
 [[nodiscard]] std::string xdg_generation_store_raw_contents_sha256(
     std::string_view raw_contents);
 
+// Streams exactly expected_size bytes from one already-open descriptor with
+// the same SHA-256 implementation used by generation records. The caller
+// owns descriptor identity/replacement checks around this bounded read.
+[[nodiscard]] std::string xdg_generation_store_file_descriptor_sha256(
+    int descriptor,
+    std::uintmax_t expected_size,
+    std::uintmax_t maximum_size);
+
 // Read-no-create. Missing is returned only for an absent managed namespace,
 // absent unit directory, or a unit directory containing temp residue only.
 [[nodiscard]] XdgGenerationStoreReadResult read_xdg_generation_store(

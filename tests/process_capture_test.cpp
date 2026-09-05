@@ -394,6 +394,25 @@ void test_explicit_process_launch_outcome(
         "invalid pre-launch invocation did not remain NotStarted");
 }
 
+void test_explicit_retained_executable_identity(
+    const fs::path& executable_path) {
+    const int executable_descriptor = open(
+        executable_path.c_str(), O_PATH | O_CLOEXEC | O_NOFOLLOW);
+    require(executable_descriptor >= 0,
+            "Failed to retain explicit executable identity");
+    ExplicitProcessInvocation invocation{
+        "/path/replaced/after-retention",
+        {std::string(CHILD_MARKER), "final-lf"},
+        {}};
+    invocation.executable_fd = executable_descriptor;
+    CapturedCommandResult result =
+        capture_explicit_process_output_raw(invocation);
+    require(close(executable_descriptor) == 0,
+            "Explicit process closed the caller-owned executable descriptor");
+    require_result(
+        "explicit retained executable identity", result, "line\n", 0);
+}
+
 void run_tests(const fs::path& executable_path) {
     test_raw_chunk_boundaries(executable_path);
     test_raw_byte_preservation(executable_path);
@@ -404,6 +423,7 @@ void run_tests(const fs::path& executable_path) {
     test_explicit_working_directory_descriptor(executable_path);
     test_explicit_standard_input_descriptor(executable_path);
     test_explicit_process_launch_outcome(executable_path);
+    test_explicit_retained_executable_identity(executable_path);
 }
 
 } // namespace

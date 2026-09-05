@@ -250,57 +250,86 @@ void sha256_process_block(
     hash[7] += h;
 }
 
+class ContentSha256 final {
+public:
+    void update(std::string_view data) {
+        if(data.size() >
+           std::numeric_limits<std::uint64_t>::max() - total_size_) {
+            throw std::length_error("SHA-256 input length overflow.");
+        }
+        total_size_ += static_cast<std::uint64_t>(data.size());
+        while(!data.empty()) {
+            const std::size_t copied = std::min(
+                data.size(), block_.size() - block_used_);
+            for(std::size_t index = 0; index < copied; ++index) {
+                block_[block_used_ + index] =
+                    static_cast<std::uint8_t>(
+                        static_cast<unsigned char>(data[index]));
+            }
+            block_used_ += copied;
+            data.remove_prefix(copied);
+            if(block_used_ == block_.size()) {
+                sha256_process_block(hash_, block_.data());
+                block_used_ = 0;
+            }
+        }
+    }
+
+    [[nodiscard]] std::string finish() {
+        const std::uint64_t bit_length = total_size_ * 8U;
+        consume_padding_byte(0x80U);
+        if(block_used_ > 56) {
+            while(block_used_ != 0)
+                consume_padding_byte(0);
+        }
+        while(block_used_ < 56)
+            consume_padding_byte(0);
+        for(std::size_t index = 0; index < 8; ++index) {
+            consume_padding_byte(static_cast<std::uint8_t>(
+                bit_length >> (8U * (7U - index))));
+        }
+
+        std::string hex(CONTENT_DIGEST_HEX_SIZE, '0');
+        constexpr char digits[] = "0123456789abcdef";
+        for(std::size_t index = 0; index < hash_.size(); ++index) {
+            const std::uint32_t word = hash_[index];
+            hex[index * 8] = digits[(word >> 28) & 0x0fU];
+            hex[index * 8 + 1] = digits[(word >> 24) & 0x0fU];
+            hex[index * 8 + 2] = digits[(word >> 20) & 0x0fU];
+            hex[index * 8 + 3] = digits[(word >> 16) & 0x0fU];
+            hex[index * 8 + 4] = digits[(word >> 12) & 0x0fU];
+            hex[index * 8 + 5] = digits[(word >> 8) & 0x0fU];
+            hex[index * 8 + 6] = digits[(word >> 4) & 0x0fU];
+            hex[index * 8 + 7] = digits[word & 0x0fU];
+        }
+        return hex;
+    }
+
+private:
+    void consume_padding_byte(std::uint8_t byte) noexcept {
+        block_[block_used_++] = byte;
+        if(block_used_ == block_.size()) {
+            sha256_process_block(hash_, block_.data());
+            block_used_ = 0;
+        }
+    }
+
+    std::array<std::uint32_t, 8> hash_ = {
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    std::array<std::uint8_t, 64> block_{};
+    std::size_t block_used_ = 0;
+    std::uint64_t total_size_ = 0;
+};
+
 // POLICY: generation identity must bind observed raw contents, not only
 // predecessor dev/ino. Linux has no rename-if-contents-match primitive, so
 // the digest lives in the successor leaf and lookup refuses a stale
 // successor after a same-inode rewrite.
 std::string content_digest_hex(std::string_view data) {
-    std::array<std::uint32_t, 8> hash = {
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
-    std::array<std::uint8_t, 64> block{};
-    std::size_t block_used = 0;
-    const auto consume_byte = [&](std::uint8_t byte) {
-        block[block_used] = byte;
-        ++block_used;
-        if(block_used == block.size()) {
-            sha256_process_block(hash, block.data());
-            block_used = 0;
-        }
-    };
-    for(const char ch : data) {
-        consume_byte(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
-    }
-    const std::uint64_t bit_length =
-        static_cast<std::uint64_t>(data.size()) * 8U;
-    consume_byte(0x80);
-    if(block_used > 56) {
-        while(block_used != 0) {
-            consume_byte(0);
-        }
-    }
-    while(block_used < 56) {
-        consume_byte(0);
-    }
-    for(std::size_t i = 0; i < 8; ++i) {
-        consume_byte(static_cast<std::uint8_t>(
-            bit_length >> (8U * (7U - i))));
-    }
-
-    std::string hex(CONTENT_DIGEST_HEX_SIZE, '0');
-    constexpr char digits[] = "0123456789abcdef";
-    for(std::size_t i = 0; i < hash.size(); ++i) {
-        const std::uint32_t word = hash[i];
-        hex[i * 8] = digits[(word >> 28) & 0x0fU];
-        hex[i * 8 + 1] = digits[(word >> 24) & 0x0fU];
-        hex[i * 8 + 2] = digits[(word >> 20) & 0x0fU];
-        hex[i * 8 + 3] = digits[(word >> 16) & 0x0fU];
-        hex[i * 8 + 4] = digits[(word >> 12) & 0x0fU];
-        hex[i * 8 + 5] = digits[(word >> 8) & 0x0fU];
-        hex[i * 8 + 6] = digits[(word >> 4) & 0x0fU];
-        hex[i * 8 + 7] = digits[word & 0x0fU];
-    }
-    return hex;
+    ContentSha256 digest;
+    digest.update(data);
+    return digest.finish();
 }
 
 struct GenerationLeaf {
@@ -1704,6 +1733,45 @@ std::string xdg_generation_store_successor_leaf(
 std::string xdg_generation_store_raw_contents_sha256(
     std::string_view raw_contents) {
     return content_digest_hex(raw_contents);
+}
+
+std::string xdg_generation_store_file_descriptor_sha256(
+    int descriptor,
+    std::uintmax_t expected_size,
+    std::uintmax_t maximum_size) {
+    if(descriptor < 0 || expected_size > maximum_size ||
+       expected_size > static_cast<std::uintmax_t>(
+                           std::numeric_limits<off_t>::max())) {
+        throw std::invalid_argument(
+            "SHA-256 descriptor input exceeds its fixed boundary.");
+    }
+    ContentSha256 digest;
+    std::array<char, 64U * 1024U> buffer{};
+    std::uintmax_t offset = 0;
+    while(offset < expected_size) {
+        const std::size_t requested = static_cast<std::size_t>(std::min(
+            expected_size - offset,
+            static_cast<std::uintmax_t>(buffer.size())));
+        ssize_t read_size;
+        do {
+            read_size = ::pread(
+                descriptor, buffer.data(), requested,
+                static_cast<off_t>(offset));
+        } while(read_size < 0 && errno == EINTR);
+        if(read_size < 0) {
+            throw std::system_error(
+                errno, std::generic_category(),
+                "Failed to read SHA-256 descriptor input");
+        }
+        if(read_size == 0) {
+            throw std::runtime_error(
+                "SHA-256 descriptor input ended before its expected size.");
+        }
+        digest.update(std::string_view(
+            buffer.data(), static_cast<std::size_t>(read_size)));
+        offset += static_cast<std::uintmax_t>(read_size);
+    }
+    return digest.finish();
 }
 
 XdgGenerationStoreReadResult read_xdg_generation_store(
