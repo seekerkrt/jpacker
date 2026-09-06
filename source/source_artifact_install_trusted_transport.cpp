@@ -8,6 +8,7 @@
 #include "source_package_identity_projection.hpp"
 #include "trusted_alpm_receipt_protocol.hpp"
 #include "trusted_alpm_receipt_transport.hpp"
+#include "xdg_generation_store.hpp"
 
 #include <algorithm>
 #include <array>
@@ -415,7 +416,7 @@ std::vector<std::string> prepare_arguments(
         request.needed ? "1" : "0",
         request.no_confirm ? "1" : "0",
         "--"};
-    arguments.reserve(arguments.size() + request.artifacts.size() * 7);
+    arguments.reserve(arguments.size() + request.artifacts.size() * 9);
     for(const auto& artifact : request.artifacts) {
         arguments.push_back(std::to_string(artifact.artifact_index));
         arguments.push_back(artifact.package_name);
@@ -424,6 +425,8 @@ std::vector<std::string> prepare_arguments(
         arguments.push_back(artifact.architecture);
         arguments.push_back(std::to_string(artifact.artifact_size));
         arguments.push_back(std::to_string(artifact.signature_size));
+        arguments.push_back(artifact.archive_sha256);
+        arguments.push_back(artifact.signature_sha256);
     }
     return arguments;
 }
@@ -530,6 +533,15 @@ InvocationDependencyTransaction make_transaction(
         command_outcome,
         validate_pacman_transaction_receipt(
             transaction_token, OWNER, observation)};
+}
+
+std::optional<SourceArtifactInstallSealingRefusal> parse_helper_refusal(
+    const CapturedCommandResult& result, const std::string& token) {
+    if(result.stdout_capture_limit_exceeded) return std::nullopt;
+    const auto parsed = parse_source_artifact_install_execution_observation(result.output);
+    const auto* observation = std::get_if<SourceArtifactInstallExecutionObservation>(&parsed);
+    if(!observation || observation->transaction_token != token) return std::nullopt;
+    return observation->refusal;
 }
 
 } // namespace
@@ -841,11 +853,15 @@ private:
                 record.artifact_descriptor, record.artifact_device,
                 record.artifact_inode, record.artifact_owner,
                 SOURCE_ARTIFACT_INSTALL_MAXIMUM_ARTIFACT_BYTES);
+            const std::string archive_digest = xdg_generation_store_file_descriptor_sha256(
+                record.artifact_descriptor, static_cast<std::uintmax_t>(artifact_metadata.st_size),
+                SOURCE_ARTIFACT_INSTALL_MAXIMUM_ARTIFACT_BYTES);
             append_descriptor_bytes(
                 record.artifact_descriptor, artifact_metadata,
                 snapshot.get());
 
             std::uint64_t signature_size = 0;
+            std::string signature_digest = "-";
             if(record.has_signature) {
                 const struct stat signature_metadata =
                     require_snapshot_source(
@@ -854,6 +870,9 @@ private:
                         record.signature_inode,
                         record.signature_owner,
                         SOURCE_ARTIFACT_INSTALL_MAXIMUM_SIGNATURE_BYTES);
+                signature_digest = xdg_generation_store_file_descriptor_sha256(
+                    record.signature_descriptor, static_cast<std::uintmax_t>(signature_metadata.st_size),
+                    SOURCE_ARTIFACT_INSTALL_MAXIMUM_SIGNATURE_BYTES);
                 append_descriptor_bytes(
                     record.signature_descriptor, signature_metadata,
                     snapshot.get());
@@ -885,7 +904,7 @@ private:
                     *architecture,
                     static_cast<std::uint64_t>(
                         artifact_metadata.st_size),
-                    signature_size});
+                    signature_size, archive_digest, signature_digest});
             observed_artifacts.push_back(
                 SourceArtifactInstallObservedSelectedArtifact{
                     selected.artifact_index,
@@ -939,7 +958,8 @@ public:
     unknown_after_consumption(
         const SourceArtifactInstallTrustedBinding& binding,
         const std::string& transaction_token) {
-        static_cast<void>(abort_prepared_state_noexcept(transaction_token));
+        // A failed/ambiguous wait may leave the privileged transaction alive.
+        // Retain its stage instead of attempting cleanup or authorizing retry.
         return SourceArtifactInstallTrustedExecutionResult(
             SourceArtifactInstallTrustedExecutionStatus::OutcomeUnknown,
             std::nullopt,
@@ -1041,22 +1061,28 @@ public:
                         NotAttempted,
                     missing_observation()));
             return SourceArtifactInstallTrustedExecutionResult(
-                abort_status == 0
-                    ? SourceArtifactInstallTrustedExecutionStatus::
-                          PrepareFailed
-                    : SourceArtifactInstallTrustedExecutionStatus::
-                          AbortFailed,
-                std::nullopt, std::move(expectation),
-                std::move(observation),
-                abort_status == 0
-                    ? "source-artifact preparation failed"
-                    : "source-artifact preparation and exact abort failed");
+                SourceArtifactInstallTrustedExecutionStatus::ArtifactSealingFailed,
+                std::nullopt, std::move(expectation), std::move(observation),
+                abort_status == 0 ? "source-artifact preparation authority failed"
+                                  : "source-artifact preparation authority and exact abort failed",
+                std::nullopt, parse_helper_refusal(prepare_result, transaction_token).value_or(SourceArtifactInstallSealingRefusal{SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch}));
         }
 
         int pacman_status = 127;
         try {
-            pacman_status = run_explicit(
-                pacman_invocation(input.root_request, *prepared));
+            // Display the unchanged pacman options/paths. The installed helper
+            // now retains and reproves the stage itself immediately before exec.
+            log_explicit_invocation(pacman_invocation(input.root_request, *prepared));
+            auto invocation = helper_invocation("execute", transaction_token);
+            log_explicit_invocation(invocation);
+            const auto execution = run_explicit_process_with_outcome(invocation);
+            if(execution.status == ExplicitProcessExecutionStatus::StartedOutcomeUnknown ||
+               (execution.status == ExplicitProcessExecutionStatus::StartedKnownOutcome && !execution.exit_code)) {
+                return unknown_after_consumption(binding, transaction_token);
+            }
+            if(execution.status == ExplicitProcessExecutionStatus::NotStarted)
+                throw std::runtime_error("privileged execution helper was not started");
+            pacman_status = *execution.exit_code;
         } catch(...) {
             const int abort_status =
                 abort_prepared_state_noexcept(transaction_token);
@@ -1079,6 +1105,44 @@ public:
                 abort_status == 0
                     ? "source-artifact pacman invocation failed before execution"
                     : "source-artifact pacman invocation and exact abort failed");
+        }
+        {
+            // Authorization only permits exec. A trusted package-manager hook
+            // must independently prove a reached phase before any numeric exit
+            // can be attributed to pacman. Even zero cannot replace that proof.
+            std::optional<SourceArtifactInstallExecutionObservation> execution;
+            try {
+                auto query = helper_invocation("execution-status", transaction_token);
+                query.stdout_capture_limit = SOURCE_ARTIFACT_INSTALL_MAXIMUM_PROTOCOL_BYTES;
+                const auto status = capture_explicit(query);
+                if(status.exit_code == 0 && !status.stdout_capture_limit_exceeded) {
+                    auto parsed = parse_source_artifact_install_execution_observation(status.output);
+                    if(auto* observed = std::get_if<SourceArtifactInstallExecutionObservation>(&parsed);
+                       observed && observed->transaction_token == transaction_token) execution = *observed;
+                }
+            } catch(...) {
+            }
+            if(!execution || execution->refusal || !execution->authorized ||
+               execution->execution_evidence == SourceArtifactInstallExecutionEvidence::Unobserved) {
+                const bool refused = execution && execution->refusal.has_value();
+                // Missing/unparseable status proves neither refusal nor the
+                // package-manager outcome. Keep the exact private evidence for
+                // diagnosis; the consumed capability must not restart or retry.
+                const int abort_status = refused ? abort_prepared_state_noexcept(transaction_token) : 0;
+                auto observation = make_observation(binding, std::move(input.observed_artifacts),
+                                                    make_transaction(transaction_token, std::move(input.requested_package_names),
+                                                                     refused ? InvocationDependencyTransactionCommandOutcome::NotAttempted
+                                                                             : InvocationDependencyTransactionCommandOutcome::Unknown,
+                                                                     incomplete_observation(transaction_token)));
+                return SourceArtifactInstallTrustedExecutionResult(
+                    refused ? SourceArtifactInstallTrustedExecutionStatus::ArtifactSealingFailed
+                            : SourceArtifactInstallTrustedExecutionStatus::OutcomeUnknown,
+                    std::nullopt, std::move(expectation), std::move(observation),
+                    !refused            ? "source-artifact execution outcome is unknown; private state retained"
+                    : abort_status == 0 ? "source-artifact sealed handoff was refused"
+                                        : "source-artifact sealed handoff and exact abort failed",
+                    std::nullopt, refused ? execution->refusal : std::nullopt);
+            }
         }
         if(pacman_status != 0) {
             const int abort_status =
@@ -1103,7 +1167,8 @@ public:
                     : "source-artifact pacman transaction and exact abort failed");
         }
 
-        // Operation success is fixed immediately after pacman exits 0. The
+        // A known zero outcome plus independently observed execution fixes
+        // operation success. The
         // later receipt/consume path may fail closed for cleanup authority,
         // but it must not rewrite this completed installation as failure.
         PackageBaseArtifactInstallExecutionResult operation_result =
@@ -1148,17 +1213,15 @@ public:
                     std::move(input.requested_package_names),
                     InvocationDependencyTransactionCommandOutcome::Succeeded,
                     incomplete_observation(transaction_token)));
+            const auto refusal = parse_helper_refusal(consume_result, transaction_token);
             return SourceArtifactInstallTrustedExecutionResult(
-                abort_status == 0
-                    ? SourceArtifactInstallTrustedExecutionStatus::
-                          ConsumeFailed
-                    : SourceArtifactInstallTrustedExecutionStatus::
-                          AbortFailed,
+                refusal ? SourceArtifactInstallTrustedExecutionStatus::ArtifactSealingFailed
+                        : (abort_status == 0 ? SourceArtifactInstallTrustedExecutionStatus::ConsumeFailed
+                                             : SourceArtifactInstallTrustedExecutionStatus::AbortFailed),
                 0, std::move(expectation), std::move(observation),
-                abort_status == 0
-                    ? "source-artifact receipt consume failed"
-                    : "source-artifact receipt consume and exact abort failed",
-                std::move(operation_result));
+                abort_status == 0 ? "source-artifact receipt consume failed"
+                                  : "source-artifact receipt consume and exact abort failed",
+                std::move(operation_result), refusal);
         }
         if(consume_result.stdout_capture_limit_exceeded) {
             auto observation = make_observation(
@@ -1259,12 +1322,13 @@ SourceArtifactInstallTrustedExecutionResult::
         std::optional<SourceArtifactInstallReceiptObservation> observation,
         std::optional<std::string> diagnostic,
         std::optional<PackageBaseArtifactInstallExecutionResult>
-            operation_result) noexcept
+            operation_result,
+        std::optional<SourceArtifactInstallSealingRefusal> sealing_failure) noexcept
     : status_(status), pacman_exit_status_(pacman_exit_status),
       expectation_(std::move(expectation)),
       observation_(std::move(observation)),
       diagnostic_(std::move(diagnostic)),
-      operation_result_(std::move(operation_result)) {
+      operation_result_(std::move(operation_result)), sealing_failure_(std::move(sealing_failure)) {
 }
 
 SourceArtifactInstallTrustedExecutionStatus
@@ -1297,6 +1361,11 @@ SourceArtifactInstallTrustedExecutionResult::operation_result()
 const std::optional<std::string>&
 SourceArtifactInstallTrustedExecutionResult::diagnostic() const noexcept {
     return diagnostic_;
+}
+
+const std::optional<SourceArtifactInstallSealingRefusal>&
+SourceArtifactInstallTrustedExecutionResult::sealing_failure() const noexcept {
+    return sealing_failure_;
 }
 
 SourceArtifactInstallTrustedExecutionResult

@@ -97,6 +97,15 @@ int main(int argc, char* argv[]) {
             case SourceArtifactInstallTrustedHelperCommand::Record:
                 store.record(invocation->transaction_token, STDIN_FILENO);
                 break;
+            case SourceArtifactInstallTrustedHelperCommand::Execute:
+                return store.execute(invocation->transaction_token);
+            case SourceArtifactInstallTrustedHelperCommand::ExecutionStatus:
+                if(!write_stdout(serialize_source_artifact_install_execution_observation(
+                       store.execution_status(invocation->transaction_token)))) return 1;
+                break;
+            case SourceArtifactInstallTrustedHelperCommand::ObserveExecution:
+                store.observe_execution(invocation->transaction_token);
+                break;
             case SourceArtifactInstallTrustedHelperCommand::Consume: {
                 const std::string response =
                     store.consume(invocation->transaction_token);
@@ -110,6 +119,16 @@ int main(int argc, char* argv[]) {
                 store.abort(invocation->transaction_token);
                 break;
         }
+    } catch(const SourceArtifactInstallTrustedStateError& error) {
+        if(runtime_fd >= 0) static_cast<void>(close(runtime_fd));
+        std::cerr << "moguet-source-artifact-install-helper: " << error.what() << '\n';
+        if(invocation->command == SourceArtifactInstallTrustedHelperCommand::Prepare ||
+           invocation->command == SourceArtifactInstallTrustedHelperCommand::Consume ||
+           invocation->command == SourceArtifactInstallTrustedHelperCommand::ExecutionStatus) {
+            static_cast<void>(write_stdout(serialize_source_artifact_install_execution_observation(
+                {invocation->transaction_token, false, error.refusal()})));
+        }
+        return 1;
     } catch(const std::exception& error) {
         if(runtime_fd >= 0) static_cast<void>(close(runtime_fd));
         std::cerr << "moguet-source-artifact-install-helper: "

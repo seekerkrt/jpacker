@@ -71,6 +71,8 @@ std::string status_name(SourceArtifactInstallTrustedExecutionStatus status) {
             return "Missing";
         case SourceArtifactInstallTrustedExecutionStatus::Complete:
             return "Complete";
+        case SourceArtifactInstallTrustedExecutionStatus::ArtifactSealingFailed:
+            return "ArtifactSealingFailed";
         case SourceArtifactInstallTrustedExecutionStatus::OutcomeUnknown:
             return "OutcomeUnknown";
     }

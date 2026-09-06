@@ -15,6 +15,7 @@ contractの規範上の正本は各文書の日本語本文である。英語利
 | [Trusted Git remote revision observer](git-remote-revision-observer.md) | #475 | authority-approved request、HTTPS-only Git observation、bounded process、strict SHA-1 / SHA-256 result、mutation-free boundary |
 | [Devel build provenance store foundation](devel-build-provenance-store.md) | #476 | production-disconnectedな別XDG namespace、exact #411 binding、strict schema、immutable-generation CAS |
 | [Evaluated devel source build proof](evaluated-devel-source-build-proof.md) | #476 | reviewed/evaluated source、actual makepkg Git workspace、dynamic version、fresh artifactのproduction-disconnected proof |
+| [Trusted source artifact transport sealing](trusted-source-artifact-transport.md) | #485 / #476 | trusted-root threat model、exact archive/signature digest、staged generation、privileged final reproofとpathname handoff |
 | [PackageBase build / required-child selection](packagebase-child-selection.md) | #268 | PackageBase build unitとrequired child install selectionの分離 |
 | [separated source-build `--rmdeps`](source-build-rmdeps.md) | #269 / #404 | current source-buildのfail-closed、pacman-only no-op、future causal ownership / interaction boundary |
 | [XDG cache cutover safety](xdg-cache-safety.md) | #305 | cache filesystem identityとlegacy cache非変更 |

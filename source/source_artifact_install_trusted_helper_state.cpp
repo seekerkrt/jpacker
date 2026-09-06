@@ -1,6 +1,7 @@
 #include "source_artifact_install_trusted_helper_state.hpp"
 
 #include "trusted_alpm_receipt_protocol.hpp"
+#include "xdg_generation_store.hpp"
 
 #include <alpm.h>
 
@@ -14,7 +15,9 @@
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <system_error>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
@@ -32,6 +35,17 @@ namespace {
 constexpr mode_t PRIVATE_DIRECTORY_MODE = 0700;
 constexpr mode_t PRIVATE_FILE_MODE = 0600;
 constexpr std::string_view PREPARED_FILE = "prepared";
+constexpr std::string_view IDENTITY_FILE = "identity";
+constexpr std::string_view LIFETIME_FILE = "lifetime";
+constexpr std::string_view EXECUTION_FILE = "execution";
+constexpr std::string_view AUTHORIZED_FILE = "authorized";
+constexpr std::string_view REFUSAL_FILE = "refusal";
+constexpr std::string_view OBSERVED_FILE = "execution-observed";
+constexpr std::size_t MAX_IDENTITY_BYTES = 1024U * 1024U;
+#ifdef MOGUET_ENABLE_SOURCE_ARTIFACT_INSTALL_TRUSTED_TRANSPORT_TEST_HOOKS
+SourceArtifactInstallTrustedStateTestHook g_state_test_hook;
+std::function<int(const std::vector<std::string>&)> g_exec_test_hook;
+#endif
 constexpr std::string_view HOOK_DIRECTORY = "hooks";
 constexpr std::string_view ARTIFACT_DIRECTORY = "artifacts";
 constexpr std::string_view RECEIPT_FILE = "receipt";
@@ -89,7 +103,8 @@ using AlpmPackage = std::unique_ptr<alpm_pkg_t, AlpmPackageDeleter>;
 [[noreturn]] void throw_state_error(const std::string& action) {
     const int error_number = errno;
     throw SourceArtifactInstallTrustedStateError(
-        action + ": " + std::strerror(error_number));
+        SourceArtifactInstallSealingFailure::StagedArtifactRevalidationFailure,
+        action + ": " + std::strerror(error_number), error_number);
 }
 
 [[noreturn]] void throw_state_error_message(const std::string& message) {
@@ -110,7 +125,8 @@ struct stat require_descriptor_metadata(
         throw_state_error("unable to inspect " + description);
     }
     if((metadata.st_mode & S_IFMT) != expected_type ||
-       metadata.st_uid != expected_owner) {
+       metadata.st_uid != expected_owner ||
+       (expected_type == S_IFREG && metadata.st_nlink != 1)) {
         throw_state_error_message(
             description + " has an unexpected type or owner");
     }
@@ -260,7 +276,7 @@ OwnedDescriptor open_private_file(
     const std::string& description,
     std::optional<std::uint64_t> expected_size = std::nullopt) {
     const int descriptor = openat(
-        parent_fd, name.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+        parent_fd, name.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
     if(descriptor == -1) {
         throw_state_error("unable to open " + description);
     }
@@ -414,6 +430,22 @@ std::string hook_contents(const std::string& transaction_token) {
            transaction_token + "\nNeedsTargets\n";
 }
 
+std::string execution_hook_filename(const std::string& token) {
+    return "moguet-source-artifact-execution-" + token + ".hook";
+}
+
+std::string execution_hook_contents(const std::string& token) {
+    // A missing/failed observation must not change pacman's transaction policy:
+    // there is deliberately no AbortOnFail. Lack of proof stays Unknown later.
+    return "[Trigger]\nOperation = Install\nOperation = Upgrade\nType = Package\nTarget = *\n\n"
+           "[Action]\nDescription = Check Moguet package inputs\nWhen = PreTransaction\nExec = " MOGUET_SOURCE_ARTIFACT_INSTALL_HELPER_PATH " observe-execution " +
+           token + "\n";
+}
+
+std::vector<std::string> expected_hook_entries(const std::string& token) {
+    return {source_artifact_install_hook_filename(token), execution_hook_filename(token)};
+}
+
 bool unlink_if_present(int parent_fd, const std::string& name, int flags = 0) {
     if(unlinkat(parent_fd, name.c_str(), flags) == 0) return true;
     return errno == ENOENT;
@@ -450,6 +482,7 @@ bool cleanup_preparing_directory(
             static_cast<void>(unlink_if_present(
                 hooks.get(), source_artifact_install_hook_filename(
                                  request.transaction_token)));
+            static_cast<void>(unlink_if_present(hooks.get(), execution_hook_filename(request.transaction_token)));
         }
         static_cast<void>(unlink_if_present(
             staging.get(), std::string(HOOK_DIRECTORY), AT_REMOVEDIR));
@@ -468,6 +501,8 @@ bool cleanup_preparing_directory(
             AT_REMOVEDIR));
         static_cast<void>(unlink_if_present(
             staging.get(), std::string(PREPARED_FILE)));
+        static_cast<void>(unlink_if_present(staging.get(), std::string(IDENTITY_FILE)));
+        static_cast<void>(unlink_if_present(staging.get(), std::string(LIFETIME_FILE)));
         return unlink_if_present(active_fd, staging_name, AT_REMOVEDIR);
     } catch(...) {
         return false;
@@ -529,68 +564,345 @@ void require_archive_identity(
     }
 }
 
-SourceArtifactInstallRootPrepareRequest validate_prepared_state(
-    int transaction_fd, uid_t expected_owner,
-    const std::string& transaction_token) {
-    OwnedDescriptor prepared = open_private_file(
-        transaction_fd, std::string(PREPARED_FILE), expected_owner,
-        "prepared source-artifact state");
-    const std::string prepared_protocol = read_bounded(
-        prepared.get(), SOURCE_ARTIFACT_INSTALL_MAXIMUM_PROTOCOL_BYTES,
-        "prepared source-artifact state");
-    const SourceArtifactInstallRootPreparedStateResult parsed =
-        parse_source_artifact_install_root_prepared_state(
-            prepared_protocol);
-    const auto* request =
-        std::get_if<SourceArtifactInstallRootPrepareRequest>(&parsed);
-    if(request == nullptr ||
-       request->transaction_token != transaction_token) {
-        throw_state_error_message(
-            "prepared source-artifact state is malformed or mismatched");
-    }
 
-    OwnedDescriptor hooks = open_directory_at(
-        transaction_fd, std::string(HOOK_DIRECTORY), expected_owner,
-        PRIVATE_DIRECTORY_MODE,
-        "source-artifact transaction hook directory");
-    const std::string hook_filename =
-        source_artifact_install_hook_filename(transaction_token);
-    require_exact_entries(
-        hooks.get(), {hook_filename},
-        "source-artifact transaction hook directory");
-    OwnedDescriptor hook = open_private_file(
-        hooks.get(), hook_filename, expected_owner,
-        "source-artifact transaction hook");
-    if(read_bounded(
-           hook.get(), SOURCE_ARTIFACT_INSTALL_MAXIMUM_PROTOCOL_BYTES,
-           "source-artifact transaction hook") !=
-       hook_contents(transaction_token)) {
-        throw_state_error_message(
-            "source-artifact transaction hook content changed");
-    }
+// This is a live transaction identity, not an installed-record generation.
+// Regular-file ctime/mtime and link count detect drift in addition to dev/ino.
+// Directory contents change during other transactions and receipt publication;
+// their identity uses dev/ino/type/owner/mode, not directory timestamps.
+struct StagedFilesystemIdentity {
+    std::uintmax_t device, inode, mode, owner, group, links, size;
+    std::intmax_t mtime_seconds, mtime_nanoseconds, ctime_seconds, ctime_nanoseconds;
 
-    OwnedDescriptor artifacts = open_directory_at(
-        transaction_fd, std::string(ARTIFACT_DIRECTORY), expected_owner,
-        PRIVATE_DIRECTORY_MODE,
-        "source-artifact staging directory");
-    require_exact_entries(
-        artifacts.get(), expected_artifact_entries(*request),
-        "source-artifact staging directory");
-    for(std::size_t index = 0; index < request->artifacts.size(); ++index) {
-        const auto& expected = request->artifacts[index];
-        OwnedDescriptor artifact = open_private_file(
-            artifacts.get(), staged_artifact_filename(index),
-            expected_owner, "staged package artifact",
-            expected.artifact_size);
-        require_archive_identity(artifact.get(), expected);
-        if(expected.signature_size > 0) {
-            static_cast<void>(open_private_file(
-                artifacts.get(), staged_signature_filename(index),
-                expected_owner, "staged package signature",
-                expected.signature_size));
+    static StagedFilesystemIdentity observe(int descriptor) {
+        struct stat metadata{};
+        if(fstat(descriptor, &metadata) != 0) throw_state_error("unable to observe staged generation");
+        const bool file = S_ISREG(metadata.st_mode);
+        return {static_cast<std::uintmax_t>(metadata.st_dev),
+                static_cast<std::uintmax_t>(metadata.st_ino),
+                static_cast<std::uintmax_t>(metadata.st_mode),
+                static_cast<std::uintmax_t>(metadata.st_uid),
+                static_cast<std::uintmax_t>(metadata.st_gid),
+                file ? static_cast<std::uintmax_t>(metadata.st_nlink) : 0,
+                file ? static_cast<std::uintmax_t>(metadata.st_size) : 0,
+                file ? metadata.st_mtim.tv_sec : 0, file ? metadata.st_mtim.tv_nsec : 0,
+                file ? metadata.st_ctim.tv_sec : 0, file ? metadata.st_ctim.tv_nsec : 0};
+    }
+    bool operator==(const StagedFilesystemIdentity&) const = default;
+    std::string serialize(const std::string& name) const {
+        return name + "\t" + std::to_string(device) + "\t" + std::to_string(inode) +
+               "\t" + std::to_string(mode) + "\t" + std::to_string(owner) +
+               "\t" + std::to_string(group) + "\t" + std::to_string(links) +
+               "\t" + std::to_string(size) + "\t" + std::to_string(mtime_seconds) +
+               "\t" + std::to_string(mtime_nanoseconds) + "\t" + std::to_string(ctime_seconds) +
+               "\t" + std::to_string(ctime_nanoseconds) + "\n";
+    }
+};
+
+std::string descriptor_digest(int descriptor, std::uint64_t size) {
+    try {
+        return xdg_generation_store_file_descriptor_sha256(
+            descriptor, size, SOURCE_ARTIFACT_INSTALL_MAXIMUM_TRANSACTION_BYTES);
+    } catch(const std::system_error& error) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::StagedArtifactRevalidationFailure,
+            "unable to hash staged descriptor", error.code().value());
+    } catch(const std::exception& error) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::StagedArtifactRevalidationFailure,
+            error.what());
+    }
+}
+
+void require_staged_identity(int parent, const std::string& name,
+                             int descriptor, const StagedFilesystemIdentity& before) {
+    struct stat named{};
+    if(fstatat(parent, name.c_str(), &named, AT_SYMLINK_NOFOLLOW) != 0 ||
+       before.device != static_cast<std::uintmax_t>(named.st_dev) ||
+       before.inode != static_cast<std::uintmax_t>(named.st_ino)) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::StagedArtifactReplacement,
+            "staged pathname no longer names its retained object");
+    }
+    if(before != StagedFilesystemIdentity::observe(descriptor)) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::StagedArtifactGenerationMismatch,
+            "staged descriptor changed during observation");
+    }
+}
+
+std::string lifetime_lease_contents(const std::string& token) {
+    return "MOGUET-TRANSACTION-LIFETIME\t2\nTOKEN\t" + token + "\n";
+}
+
+OwnedDescriptor acquire_lifetime_lease(int transaction_fd, uid_t owner,
+                                       const std::string& token, int lock_mode) {
+    // Never create here: every published transaction already owns exactly one
+    // lease. The held descriptor is included in the subsequent generation proof,
+    // so locking an unlinked/recreated object cannot authorize another lifetime.
+    auto lease = open_private_file(transaction_fd, std::string(LIFETIME_FILE), owner, "transaction lifetime lease");
+    const auto identity = StagedFilesystemIdentity::observe(lease.get());
+    if(identity.group != StagedFilesystemIdentity::observe(transaction_fd).group ||
+       read_bounded(lease.get(), 256, "transaction lifetime lease") != lifetime_lease_contents(token)) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch,
+            "transaction lifetime lease has an unexpected group or token");
+    }
+    int result;
+    do {
+        result = flock(lease.get(), lock_mode | LOCK_NB);
+    } while(result != 0 && errno == EINTR);
+    if(result != 0) {
+        const int error_number = errno;
+        if(error_number == EWOULDBLOCK || error_number == EAGAIN) {
+            throw SourceArtifactInstallTrustedStateError(
+                SourceArtifactInstallSealingFailure::TransactionLifetimeBusy,
+                "source-artifact transaction lifetime is busy", error_number);
+        }
+        throw_state_error("unable to acquire transaction lifetime lease");
+    }
+    require_staged_identity(transaction_fd, std::string(LIFETIME_FILE), lease.get(), identity);
+    return lease;
+}
+
+void require_transaction_entries(int descriptor, std::vector<std::string> expected,
+                                 uid_t owner, const std::string& description) {
+    static_cast<void>(open_private_file(descriptor, std::string(LIFETIME_FILE), owner, "transaction lifetime lease"));
+    expected.emplace_back(LIFETIME_FILE);
+    for(const auto name : {EXECUTION_FILE, AUTHORIZED_FILE, REFUSAL_FILE, OBSERVED_FILE}) {
+        if(entry_exists(descriptor, std::string(name))) {
+            static_cast<void>(open_private_file(descriptor, std::string(name), owner, description));
+            expected.emplace_back(name);
         }
     }
+    require_exact_entries(descriptor, std::move(expected), description);
+}
+
+std::string collect_staged_projection(int transaction_fd, uid_t owner,
+                                      const SourceArtifactInstallRootPrepareRequest& request,
+                                      const std::string& namespace_identity,
+                                      int lifetime_fd,
+                                      std::vector<OwnedDescriptor>* retained = nullptr) {
+    std::vector<OwnedDescriptor> descriptors;
+    std::string projection = "MOGUET-STAGED-IDENTITY\t2\nTOKEN\t" +
+                             request.transaction_token + "\n" + namespace_identity +
+                             StagedFilesystemIdentity::observe(transaction_fd).serialize("transaction");
+    const auto lifetime_identity = StagedFilesystemIdentity::observe(lifetime_fd);
+    if(lifetime_identity.group != StagedFilesystemIdentity::observe(transaction_fd).group) {
+        throw_state_error_message("transaction lifetime lease has an unexpected group");
+    }
+    require_staged_identity(transaction_fd, std::string(LIFETIME_FILE), lifetime_fd, lifetime_identity);
+    projection += lifetime_identity.serialize("lifetime");
+    OwnedDescriptor prepared = open_private_file(transaction_fd, std::string(PREPARED_FILE), owner, "prepared state");
+    const auto prepared_identity = StagedFilesystemIdentity::observe(prepared.get());
+    const std::string prepared_bytes = read_bounded(prepared.get(),
+                                                    SOURCE_ARTIFACT_INSTALL_MAXIMUM_PROTOCOL_BYTES, "prepared state");
+    if(prepared_bytes != serialize_source_artifact_install_root_prepared_state(request)) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch,
+            "prepared state changed its exact request");
+    }
+    require_staged_identity(transaction_fd, std::string(PREPARED_FILE), prepared.get(), prepared_identity);
+    projection += prepared_identity.serialize("prepared");
+    projection += "request-sha256\t" + xdg_generation_store_raw_contents_sha256(prepared_bytes) + "\n";
+    descriptors.push_back(std::move(prepared));
+
+    OwnedDescriptor hooks = open_directory_at(transaction_fd, std::string(HOOK_DIRECTORY), owner,
+                                              PRIVATE_DIRECTORY_MODE, "transaction hook directory");
+    const auto hooks_identity = StagedFilesystemIdentity::observe(hooks.get());
+    require_exact_entries(hooks.get(), expected_hook_entries(request.transaction_token), "transaction hook directory");
+    projection += hooks_identity.serialize("hooks");
+    for(const auto& hook_name : expected_hook_entries(request.transaction_token)) {
+        OwnedDescriptor hook = open_private_file(hooks.get(), hook_name, owner, "transaction hook");
+        const auto hook_identity = StagedFilesystemIdentity::observe(hook.get());
+        const auto expected_contents = hook_name == execution_hook_filename(request.transaction_token)
+                                           ? execution_hook_contents(request.transaction_token)
+                                           : hook_contents(request.transaction_token);
+        if(read_bounded(hook.get(), SOURCE_ARTIFACT_INSTALL_MAXIMUM_PROTOCOL_BYTES, "transaction hook") != expected_contents) {
+            throw SourceArtifactInstallTrustedStateError(
+                SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "transaction hook changed");
+        }
+        require_staged_identity(hooks.get(), hook_name, hook.get(), hook_identity);
+        projection += hook_identity.serialize(hook_name);
+        descriptors.push_back(std::move(hook));
+    }
+    require_staged_identity(transaction_fd, std::string(HOOK_DIRECTORY), hooks.get(), hooks_identity);
+    descriptors.push_back(std::move(hooks));
+
+    OwnedDescriptor artifacts = open_directory_at(transaction_fd, std::string(ARTIFACT_DIRECTORY), owner,
+                                                  PRIVATE_DIRECTORY_MODE, "staged artifact directory");
+    const auto artifacts_identity = StagedFilesystemIdentity::observe(artifacts.get());
+    require_exact_entries(artifacts.get(), expected_artifact_entries(request), "staged artifact directory");
+    projection += artifacts_identity.serialize("artifacts");
+    for(std::size_t index = 0; index < request.artifacts.size(); ++index) {
+        const auto& expected = request.artifacts[index];
+        const auto inspect = [&](const std::string& leaf, std::uint64_t size,
+                                 const std::string& digest, bool signature) {
+            OwnedDescriptor file = open_private_file(artifacts.get(), leaf, owner, "staged input", size);
+            const auto identity = StagedFilesystemIdentity::observe(file.get());
+            if(!signature) {
+                require_archive_identity(file.get(), expected);
+#ifdef MOGUET_ENABLE_SOURCE_ARTIFACT_INSTALL_TRUSTED_TRANSPORT_TEST_HOOKS
+                if(g_state_test_hook) g_state_test_hook(
+                    SourceArtifactInstallTrustedStateTestEvent::AfterArtifactMetadataValidation,
+                    artifacts.get(), leaf);
+#endif
+            }
+            if(descriptor_digest(file.get(), size) != digest) {
+                throw SourceArtifactInstallTrustedStateError(signature
+                                                                 ? SourceArtifactInstallSealingFailure::SignatureDigestMismatch
+                                                                 : SourceArtifactInstallSealingFailure::StagedArtifactDigestMismatch,
+                                                             "staged input differs from its retained archive/signature SHA-256");
+            }
+            require_staged_identity(artifacts.get(), leaf, file.get(), identity);
+            projection += identity.serialize(leaf);
+            descriptors.push_back(std::move(file));
+        };
+        inspect(staged_artifact_filename(index), expected.artifact_size, expected.archive_sha256, false);
+        if(expected.signature_size > 0) inspect(staged_signature_filename(index),
+                                                expected.signature_size, expected.signature_sha256, true);
+    }
+    require_exact_entries(artifacts.get(), expected_artifact_entries(request), "staged artifact directory");
+    require_staged_identity(transaction_fd, std::string(ARTIFACT_DIRECTORY), artifacts.get(), artifacts_identity);
+    descriptors.push_back(std::move(artifacts));
+    if(projection.size() > MAX_IDENTITY_BYTES) throw_state_error_message("staged identity exceeds its bound");
+    if(retained) *retained = std::move(descriptors);
+    return projection;
+}
+
+SourceArtifactInstallRootPrepareRequest validate_prepared_state(
+    int transaction_fd, uid_t expected_owner, const std::string& transaction_token,
+    const std::string& namespace_identity, int lifetime_fd, std::vector<OwnedDescriptor>* retained = nullptr) {
+    OwnedDescriptor prepared = open_private_file(transaction_fd, std::string(PREPARED_FILE),
+                                                 expected_owner, "prepared source-artifact state");
+    const auto parsed = parse_source_artifact_install_root_prepared_state(
+        read_bounded(prepared.get(), SOURCE_ARTIFACT_INSTALL_MAXIMUM_PROTOCOL_BYTES, "prepared state"));
+    const auto* request = std::get_if<SourceArtifactInstallRootPrepareRequest>(&parsed);
+    if(!request || request->transaction_token != transaction_token) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch,
+            "prepared source-artifact state is malformed or mismatched");
+    }
+    if(!entry_exists(transaction_fd, std::string(IDENTITY_FILE))) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch,
+            "staged generation authority is missing");
+    }
+    OwnedDescriptor identity = open_private_file(transaction_fd, std::string(IDENTITY_FILE),
+                                                 expected_owner, "staged generation authority");
+    const auto identity_metadata = StagedFilesystemIdentity::observe(identity.get());
+    const std::string expected = read_bounded(identity.get(), MAX_IDENTITY_BYTES, "staged generation authority");
+    if(!expected.starts_with("MOGUET-STAGED-IDENTITY\t2\nTOKEN\t" + transaction_token + "\n")) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch,
+            "staged generation schema or token is invalid");
+    }
+    if(collect_staged_projection(transaction_fd, expected_owner, *request, namespace_identity, lifetime_fd, retained) != expected) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::StagedArtifactGenerationMismatch,
+            "staged filesystem generation differs from trusted prepare");
+    }
+    require_staged_identity(transaction_fd, std::string(IDENTITY_FILE), identity.get(), identity_metadata);
+    if(retained) retained->push_back(std::move(identity));
     return *request;
+}
+
+
+// These records describe the helper before exec. A hook observation is a
+// separate authority and cannot be smuggled into a claim/authorization/refusal.
+SourceArtifactInstallExecutionObservation read_execution_authority(
+    int transaction_fd, uid_t owner, const std::string& token) {
+    SourceArtifactInstallExecutionObservation result{token, false, std::nullopt};
+    const auto read_record = [&](std::string_view leaf) {
+        auto file = open_private_file(transaction_fd, std::string(leaf), owner, "execution authority");
+        const auto identity = StagedFilesystemIdentity::observe(file.get());
+        auto parsed = parse_source_artifact_install_execution_observation(
+            read_bounded(file.get(), SOURCE_ARTIFACT_INSTALL_MAXIMUM_PROTOCOL_BYTES, "execution authority"));
+        const auto* observation = std::get_if<SourceArtifactInstallExecutionObservation>(&parsed);
+        if(!observation || observation->transaction_token != token ||
+           observation->execution_evidence != SourceArtifactInstallExecutionEvidence::Unobserved) {
+            throw SourceArtifactInstallTrustedStateError(
+                SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "invalid pre-exec authority");
+        }
+        require_staged_identity(transaction_fd, std::string(leaf), file.get(), identity);
+        return *observation;
+    };
+    if(!entry_exists(transaction_fd, std::string(EXECUTION_FILE))) {
+        for(const auto leaf : {AUTHORIZED_FILE, REFUSAL_FILE, OBSERVED_FILE, RECEIPT_FILE, PARTIAL_RECEIPT_FILE}) {
+            if(entry_exists(transaction_fd, std::string(leaf))) {
+                throw SourceArtifactInstallTrustedStateError(
+                    SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "execution evidence has no claim");
+            }
+        }
+        return result;
+    }
+    const auto claim = read_record(EXECUTION_FILE);
+    if(claim.authorized || claim.refusal) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "invalid execution claim");
+    }
+    if(entry_exists(transaction_fd, std::string(AUTHORIZED_FILE))) {
+        result = read_record(AUTHORIZED_FILE);
+        if(!result.authorized || result.refusal) {
+            throw SourceArtifactInstallTrustedStateError(
+                SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "invalid launch authorization");
+        }
+    }
+    if(entry_exists(transaction_fd, std::string(REFUSAL_FILE))) {
+        const auto refusal = read_record(REFUSAL_FILE);
+        if(!refusal.refusal || refusal.authorized != result.authorized) {
+            throw SourceArtifactInstallTrustedStateError(
+                SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "invalid launch refusal");
+        }
+        result.refusal = refusal.refusal;
+    }
+    if(entry_exists(transaction_fd, std::string(OBSERVED_FILE)) && (!result.authorized || result.refusal)) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "hook execution evidence contradicts helper state");
+    }
+    return result;
+}
+
+std::string observed_execution_contents(int transaction_fd, uid_t owner, const std::string& token,
+                                        SourceArtifactInstallExecutionEvidence evidence, int marker_fd) {
+    auto seal = open_private_file(transaction_fd, std::string(IDENTITY_FILE), owner, "staged generation authority");
+    const auto seal_identity = StagedFilesystemIdentity::observe(seal.get());
+    const auto seal_bytes = read_bounded(seal.get(), MAX_IDENTITY_BYTES, "staged generation authority");
+    require_staged_identity(transaction_fd, std::string(IDENTITY_FILE), seal.get(), seal_identity);
+    auto marker = StagedFilesystemIdentity::observe(marker_fd);
+    if(marker.group != StagedFilesystemIdentity::observe(transaction_fd).group) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "execution marker group differs from transaction");
+    }
+    // Bind this immutable marker's own inode as well as the prepared generation.
+    // Size/timestamps cannot be embedded in a file whose write changes them;
+    // readers still reprove the full metadata across their bounded read.
+    marker.size = 0;
+    marker.mtime_seconds = marker.mtime_nanoseconds = marker.ctime_seconds = marker.ctime_nanoseconds = 0;
+    return "MOGUET-PACKAGE-EXECUTION\t1\nTOKEN\t" + token + "\nPHASE\t" +
+           (evidence == SourceArtifactInstallExecutionEvidence::PreTransaction ? "PreTransaction" : "PostTransaction") +
+           "\nSEAL\t" + xdg_generation_store_raw_contents_sha256(seal_bytes) + "\n" +
+           marker.serialize("marker") + "END\n";
+}
+
+SourceArtifactInstallExecutionEvidence read_observed_execution(int transaction_fd, uid_t owner, const std::string& token) {
+    if(!entry_exists(transaction_fd, std::string(OBSERVED_FILE))) return SourceArtifactInstallExecutionEvidence::Unobserved;
+    auto file = open_private_file(transaction_fd, std::string(OBSERVED_FILE), owner, "package execution observation");
+    const auto identity = StagedFilesystemIdentity::observe(file.get());
+    const auto bytes = read_bounded(file.get(), 4096, "package execution observation");
+    require_staged_identity(transaction_fd, std::string(OBSERVED_FILE), file.get(), identity);
+    for(const auto evidence : {SourceArtifactInstallExecutionEvidence::PreTransaction, SourceArtifactInstallExecutionEvidence::PostTransaction}) {
+        if(bytes == observed_execution_contents(transaction_fd, owner, token, evidence, file.get())) return evidence;
+    }
+    throw SourceArtifactInstallTrustedStateError(
+        SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "package execution observation is malformed or stale");
+}
+
+void publish_observed_execution(int transaction_fd, uid_t owner, const std::string& token,
+                                SourceArtifactInstallExecutionEvidence evidence) {
+    auto file = create_private_file(transaction_fd, std::string(OBSERVED_FILE), owner, "package execution observation");
+    write_all(file.get(), observed_execution_contents(transaction_fd, owner, token, evidence, file.get()));
+    synchronize_file(file.get(), "package execution observation");
+    synchronize_file(transaction_fd, "observed execution transaction");
 }
 
 void validate_optional_private_file(
@@ -634,27 +946,27 @@ void cleanup_retired_transaction(
     bool has_receipt, bool has_partial_receipt) {
     std::vector<std::string> expected{
         std::string(PREPARED_FILE), std::string(HOOK_DIRECTORY),
-        std::string(ARTIFACT_DIRECTORY)};
+        std::string(ARTIFACT_DIRECTORY), std::string(IDENTITY_FILE)};
     if(has_receipt) expected.emplace_back(RECEIPT_FILE);
     if(has_partial_receipt) expected.emplace_back(PARTIAL_RECEIPT_FILE);
-    require_exact_entries(
-        retired.descriptor.get(), expected,
+    require_transaction_entries(
+        retired.descriptor.get(), expected, expected_owner,
         "retired source-artifact transaction");
 
     OwnedDescriptor hooks = open_directory_at(
         retired.descriptor.get(), std::string(HOOK_DIRECTORY),
         expected_owner, PRIVATE_DIRECTORY_MODE,
         "retired source-artifact hook directory");
-    const std::string hook_filename =
-        source_artifact_install_hook_filename(request.transaction_token);
     require_exact_entries(
-        hooks.get(), {hook_filename},
+        hooks.get(), expected_hook_entries(request.transaction_token),
         "retired source-artifact hook directory");
-    static_cast<void>(open_private_file(
-        hooks.get(), hook_filename, expected_owner,
-        "retired source-artifact hook"));
-    if(unlinkat(hooks.get(), hook_filename.c_str(), 0) == -1) {
-        throw_state_error("unable to remove retired source-artifact hook");
+    for(const auto& hook_filename : expected_hook_entries(request.transaction_token)) {
+        static_cast<void>(open_private_file(
+            hooks.get(), hook_filename, expected_owner,
+            "retired source-artifact hook"));
+        if(unlinkat(hooks.get(), hook_filename.c_str(), 0) == -1) {
+            throw_state_error("unable to remove retired source-artifact hook");
+        }
     }
     if(unlinkat(
            retired.descriptor.get(),
@@ -729,6 +1041,13 @@ void cleanup_retired_transaction(
                 "unable to remove retired source-artifact receipt");
         }
     }
+    for(const auto name : {IDENTITY_FILE, EXECUTION_FILE, AUTHORIZED_FILE, REFUSAL_FILE, OBSERVED_FILE, LIFETIME_FILE}) {
+        if(!entry_exists(retired.descriptor.get(), std::string(name))) continue;
+        static_cast<void>(open_private_file(retired.descriptor.get(), std::string(name),
+                                            expected_owner, "retired sealing authority"));
+        if(unlinkat(retired.descriptor.get(), std::string(name).c_str(), 0) != 0)
+            throw_state_error("unable to remove retired sealing authority");
+    }
     require_exact_entries(
         retired.descriptor.get(), {},
         "used source-artifact transaction tombstone");
@@ -773,9 +1092,32 @@ std::uint64_t require_sealed_input(
 
 struct SourceArtifactInstallTrustedStateStore::Implementation {
     uid_t expected_owner;
+    OwnedDescriptor runtime;
+    OwnedDescriptor moguet;
     OwnedDescriptor state_root;
     OwnedDescriptor active;
     OwnedDescriptor used;
+
+    std::string reprove_namespace() const {
+        const auto runtime_metadata = require_descriptor_metadata(runtime.get(), expected_owner,
+                                                                  S_IFDIR, std::nullopt, "runtime parent");
+#ifndef MOGUET_ENABLE_SOURCE_ARTIFACT_INSTALL_TRUSTED_TRANSPORT_TEST_HOOKS
+        // The installed producer has only fixed /run. The test-only build
+        // substitutes its isolated runtime descriptor, never a CLI override.
+        require_named_identity(AT_FDCWD, "/run", runtime_metadata, "fixed runtime parent");
+#endif
+        const auto inspect = [&](int parent, const std::string& name, int descriptor) {
+            const auto metadata = require_descriptor_metadata(descriptor, expected_owner,
+                                                              S_IFDIR, PRIVATE_DIRECTORY_MODE, name);
+            require_named_identity(parent, name, metadata, name);
+            return StagedFilesystemIdentity::observe(descriptor).serialize(name);
+        };
+        static_cast<void>(runtime_metadata);
+        return StagedFilesystemIdentity::observe(runtime.get()).serialize("runtime") +
+               inspect(runtime.get(), "moguet", moguet.get()) +
+               inspect(moguet.get(), "source-artifact-installs", state_root.get()) +
+               inspect(state_root.get(), "active", active.get());
+    }
 };
 
 SourceArtifactInstallTrustedStateStore::
@@ -794,6 +1136,8 @@ SourceArtifactInstallTrustedStateStore::open_below_runtime_parent(
         runtime_parent_fd, expected_owner, S_IFDIR, std::nullopt,
         "runtime parent"));
 
+    OwnedDescriptor runtime(fcntl(runtime_parent_fd, F_DUPFD_CLOEXEC, 3));
+    if(runtime.get() < 0) throw_state_error("unable to retain runtime parent");
     OwnedDescriptor moguet = ensure_private_directory(
         runtime_parent_fd, "moguet", expected_owner,
         "Moguet runtime directory");
@@ -812,8 +1156,8 @@ SourceArtifactInstallTrustedStateStore::open_below_runtime_parent(
 
     return SourceArtifactInstallTrustedStateStore(
         std::make_unique<Implementation>(Implementation{
-            expected_owner, std::move(state_root), std::move(active),
-            std::move(used)}));
+            expected_owner, std::move(runtime), std::move(moguet),
+            std::move(state_root), std::move(active), std::move(used)}));
 }
 
 SourceArtifactInstallTrustedStateStore::
@@ -872,6 +1216,16 @@ SourceArtifactInstallTrustedStateStore::prepare(
         write_all(prepared.get(), prepared_protocol);
         synchronize_file(prepared.get(), "prepared source-artifact state");
 
+        OwnedDescriptor lifetime = create_private_file(
+            staging.get(), std::string(LIFETIME_FILE), state.expected_owner,
+            "transaction lifetime lease");
+        write_all(lifetime.get(), lifetime_lease_contents(request.transaction_token));
+        synchronize_file(lifetime.get(), "transaction lifetime lease");
+        // Hold publication exclusive through the post-rename reproof. Later
+        // execute/record readers and cleanup writers all open this same inode.
+        if(flock(lifetime.get(), LOCK_EX | LOCK_NB) != 0)
+            throw_state_error("unable to acquire preparing transaction lifetime");
+
         OwnedDescriptor hooks = ensure_private_directory(
             staging.get(), std::string(HOOK_DIRECTORY),
             state.expected_owner,
@@ -884,6 +1238,10 @@ SourceArtifactInstallTrustedStateStore::prepare(
             "source-artifact transaction hook");
         write_all(hook.get(), hook_contents(request.transaction_token));
         synchronize_file(hook.get(), "source-artifact transaction hook");
+        OwnedDescriptor execution_hook = create_private_file(
+            hooks.get(), execution_hook_filename(request.transaction_token), state.expected_owner, "execution observation hook");
+        write_all(execution_hook.get(), execution_hook_contents(request.transaction_token));
+        synchronize_file(execution_hook.get(), "execution observation hook");
         synchronize_file(
             hooks.get(), "source-artifact transaction hook directory");
 
@@ -932,10 +1290,19 @@ SourceArtifactInstallTrustedStateStore::prepare(
             require_archive_identity(artifact.get(), expected);
         }
 
+        {
+            const std::string projection = collect_staged_projection(staging.get(),
+                                                                     state.expected_owner, request, state.reprove_namespace(), lifetime.get());
+            OwnedDescriptor identity = create_private_file(staging.get(), std::string(IDENTITY_FILE),
+                                                           state.expected_owner, "staged generation authority");
+            write_all(identity.get(), projection);
+            synchronize_file(identity.get(), "staged generation authority");
+        }
+
         require_exact_entries(
             staging.get(),
             {std::string(PREPARED_FILE), std::string(HOOK_DIRECTORY),
-             std::string(ARTIFACT_DIRECTORY)},
+             std::string(ARTIFACT_DIRECTORY), std::string(IDENTITY_FILE), std::string(LIFETIME_FILE)},
             "preparing source-artifact state");
         synchronize_file(staging.get(), "preparing source-artifact state");
 
@@ -952,7 +1319,7 @@ SourceArtifactInstallTrustedStateStore::prepare(
         const SourceArtifactInstallRootPrepareRequest validated =
             validate_prepared_state(
                 transaction.descriptor.get(), state.expected_owner,
-                request.transaction_token);
+                request.transaction_token, state.reprove_namespace(), lifetime.get());
         if(validated != request) {
             throw_state_error_message(
                 "published source-artifact state changed identity");
@@ -975,20 +1342,7 @@ SourceArtifactInstallTrustedStateStore::prepare(
     } catch(...) {
         if(published) {
             try {
-                OpenTransaction transaction = open_transaction(
-                    state.active.get(), state.expected_owner,
-                    request.transaction_token);
-                const SourceArtifactInstallRootPrepareRequest validated =
-                    validate_prepared_state(
-                        transaction.descriptor.get(), state.expected_owner,
-                        request.transaction_token);
-                OpenTransaction retired = retire_transaction(
-                    state.active.get(), state.used.get(),
-                    state.expected_owner, request.transaction_token,
-                    std::move(transaction));
-                cleanup_retired_transaction(
-                    retired, state.expected_owner, validated, false,
-                    false);
+                abort(request.transaction_token);
             } catch(...) {
                 throw_state_error_message(
                     "source-artifact prepare failed and exact published-state cleanup failed");
@@ -1013,15 +1367,25 @@ void SourceArtifactInstallTrustedStateStore::record(
     Implementation& state = *implementation_;
     OpenTransaction transaction = open_transaction(
         state.active.get(), state.expected_owner, transaction_token);
+    auto lifetime = acquire_lifetime_lease(transaction.descriptor.get(), state.expected_owner,
+                                           transaction_token, LOCK_SH);
     static_cast<void>(validate_prepared_state(
         transaction.descriptor.get(), state.expected_owner,
-        transaction_token));
-    require_exact_entries(
+        transaction_token, state.reprove_namespace(), lifetime.get()));
+    require_transaction_entries(
         transaction.descriptor.get(),
         {std::string(PREPARED_FILE), std::string(HOOK_DIRECTORY),
-         std::string(ARTIFACT_DIRECTORY)},
+         std::string(ARTIFACT_DIRECTORY), std::string(IDENTITY_FILE)},
+        state.expected_owner,
         "recordable source-artifact transaction");
+    const auto execution = read_execution_authority(transaction.descriptor.get(), state.expected_owner, transaction_token);
+    if(!execution.authorized || execution.refusal) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch,
+            "Install receipt requires a successfully sealed execution handoff");
+    }
 
+    static_cast<void>(state.reprove_namespace());
     const std::string input = read_bounded(
         needs_targets_input_fd,
         SOURCE_ARTIFACT_INSTALL_MAXIMUM_PROTOCOL_BYTES,
@@ -1040,6 +1404,20 @@ void SourceArtifactInstallTrustedStateStore::record(
                 SourceArtifactInstallRootReceiptState::Complete,
                 transaction_token, *packages});
 
+    require_named_identity(state.active.get(), transaction_token, transaction.metadata, "record execution transaction");
+    static_cast<void>(state.reprove_namespace());
+    const auto evidence = read_observed_execution(transaction.descriptor.get(), state.expected_owner, transaction_token);
+    if(evidence == SourceArtifactInstallExecutionEvidence::PostTransaction) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "PostTransaction recording was already attempted");
+    }
+    if(evidence == SourceArtifactInstallExecutionEvidence::Unobserved) {
+        // A later trusted hook can prove its own phase if the earlier hook did
+        // not publish anything. It never repairs a partial/stale marker.
+        publish_observed_execution(transaction.descriptor.get(), state.expected_owner, transaction_token,
+                                   SourceArtifactInstallExecutionEvidence::PostTransaction);
+    }
+
     OwnedDescriptor partial = create_private_file(
         transaction.descriptor.get(),
         std::string(PARTIAL_RECEIPT_FILE), state.expected_owner,
@@ -1049,6 +1427,7 @@ void SourceArtifactInstallTrustedStateStore::record(
     require_named_identity(
         state.active.get(), transaction_token, transaction.metadata,
         "active source-artifact transaction");
+    static_cast<void>(state.reprove_namespace());
     rename_noreplace(
         transaction.descriptor.get(),
         std::string(PARTIAL_RECEIPT_FILE),
@@ -1057,10 +1436,11 @@ void SourceArtifactInstallTrustedStateStore::record(
     synchronize_file(
         transaction.descriptor.get(),
         "active source-artifact transaction");
-    require_exact_entries(
+    require_transaction_entries(
         transaction.descriptor.get(),
         {std::string(PREPARED_FILE), std::string(HOOK_DIRECTORY),
-         std::string(ARTIFACT_DIRECTORY), std::string(RECEIPT_FILE)},
+         std::string(ARTIFACT_DIRECTORY), std::string(IDENTITY_FILE), std::string(RECEIPT_FILE)},
+        state.expected_owner,
         "recorded source-artifact transaction");
 }
 
@@ -1073,11 +1453,14 @@ std::string SourceArtifactInstallTrustedStateStore::consume(
     Implementation& state = *implementation_;
     OpenTransaction transaction = open_transaction(
         state.active.get(), state.expected_owner, transaction_token);
+    auto cleanup_lease = acquire_lifetime_lease(transaction.descriptor.get(), state.expected_owner,
+                                                transaction_token, LOCK_EX);
     const SourceArtifactInstallRootPrepareRequest request =
         validate_prepared_state(
             transaction.descriptor.get(), state.expected_owner,
-            transaction_token);
+            transaction_token, state.reprove_namespace(), cleanup_lease.get());
 
+    static_cast<void>(state.reprove_namespace());
     const bool has_receipt = entry_exists(
         transaction.descriptor.get(), std::string(RECEIPT_FILE));
     if(entry_exists(
@@ -1088,10 +1471,10 @@ std::string SourceArtifactInstallTrustedStateStore::consume(
     }
     std::vector<std::string> expected{
         std::string(PREPARED_FILE), std::string(HOOK_DIRECTORY),
-        std::string(ARTIFACT_DIRECTORY)};
+        std::string(ARTIFACT_DIRECTORY), std::string(IDENTITY_FILE)};
     if(has_receipt) expected.emplace_back(RECEIPT_FILE);
-    require_exact_entries(
-        transaction.descriptor.get(), expected,
+    require_transaction_entries(
+        transaction.descriptor.get(), expected, state.expected_owner,
         "consumable source-artifact transaction");
 
     SourceArtifactInstallRootReceipt receipt{
@@ -1117,6 +1500,14 @@ std::string SourceArtifactInstallTrustedStateStore::consume(
             throw_state_error_message(
                 "complete source-artifact receipt is malformed or mismatched");
         }
+        const auto execution = read_execution_authority(transaction.descriptor.get(), state.expected_owner, transaction_token);
+        if(!execution.authorized || execution.refusal ||
+           read_observed_execution(transaction.descriptor.get(), state.expected_owner, transaction_token) ==
+               SourceArtifactInstallExecutionEvidence::Unobserved) {
+            throw SourceArtifactInstallTrustedStateError(
+                SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch,
+                "receipt lost its sealed execution authority");
+        }
         receipt = *complete;
     }
     require_named_identity(
@@ -1139,10 +1530,13 @@ void SourceArtifactInstallTrustedStateStore::abort(
     Implementation& state = *implementation_;
     OpenTransaction transaction = open_transaction(
         state.active.get(), state.expected_owner, transaction_token);
+    auto cleanup_lease = acquire_lifetime_lease(transaction.descriptor.get(), state.expected_owner,
+                                                transaction_token, LOCK_EX);
     const SourceArtifactInstallRootPrepareRequest request =
         validate_prepared_state(
             transaction.descriptor.get(), state.expected_owner,
-            transaction_token);
+            transaction_token, state.reprove_namespace(), cleanup_lease.get());
+    static_cast<void>(state.reprove_namespace());
     const bool has_receipt = entry_exists(
         transaction.descriptor.get(), std::string(RECEIPT_FILE));
     const bool has_partial_receipt = entry_exists(
@@ -1162,11 +1556,11 @@ void SourceArtifactInstallTrustedStateStore::abort(
         "abortable partial source-artifact receipt");
     std::vector<std::string> expected{
         std::string(PREPARED_FILE), std::string(HOOK_DIRECTORY),
-        std::string(ARTIFACT_DIRECTORY)};
+        std::string(ARTIFACT_DIRECTORY), std::string(IDENTITY_FILE)};
     if(has_receipt) expected.emplace_back(RECEIPT_FILE);
     if(has_partial_receipt) expected.emplace_back(PARTIAL_RECEIPT_FILE);
-    require_exact_entries(
-        transaction.descriptor.get(), expected,
+    require_transaction_entries(
+        transaction.descriptor.get(), expected, state.expected_owner,
         "abortable source-artifact transaction");
     require_named_identity(
         state.active.get(), transaction_token, transaction.metadata,
@@ -1178,3 +1572,214 @@ void SourceArtifactInstallTrustedStateStore::abort(
         retired, state.expected_owner, request, has_receipt,
         has_partial_receipt);
 }
+
+SourceArtifactInstallTrustedStateError::SourceArtifactInstallTrustedStateError(
+    const std::string& diagnostic)
+    : SourceArtifactInstallTrustedStateError(
+          SourceArtifactInstallSealingFailure::StagedArtifactRevalidationFailure, diagnostic) {
+}
+
+SourceArtifactInstallTrustedStateError::SourceArtifactInstallTrustedStateError(
+    SourceArtifactInstallSealingFailure reason, const std::string& diagnostic, int error_number)
+    : std::runtime_error(diagnostic), refusal_{reason, error_number} {
+}
+
+const SourceArtifactInstallSealingRefusal&
+SourceArtifactInstallTrustedStateError::refusal() const noexcept {
+    return refusal_;
+}
+
+SourceArtifactInstallExecutionObservation
+SourceArtifactInstallTrustedStateStore::execution_status(const std::string& token) {
+    if(!implementation_ || !is_valid_trusted_alpm_receipt_token(token)) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "invalid execution status request");
+    }
+    auto& state = *implementation_;
+    static_cast<void>(state.reprove_namespace());
+    auto transaction = open_transaction(state.active.get(), state.expected_owner, token);
+    auto lifetime = acquire_lifetime_lease(transaction.descriptor.get(), state.expected_owner, token, LOCK_SH);
+    auto result = read_execution_authority(transaction.descriptor.get(), state.expected_owner, token);
+    if(entry_exists(transaction.descriptor.get(), std::string(OBSERVED_FILE))) {
+        // Negative helper refusals remain readable when the archive itself
+        // failed sealing. Positive evidence, however, requires the exact stage
+        // and lease generation at every query; old or recreated state is not
+        // promoted merely because a hook marker exists.
+        static_cast<void>(validate_prepared_state(transaction.descriptor.get(), state.expected_owner,
+                                                  token, state.reprove_namespace(), lifetime.get()));
+        std::vector<std::string> expected{std::string(PREPARED_FILE), std::string(HOOK_DIRECTORY),
+                                          std::string(ARTIFACT_DIRECTORY), std::string(IDENTITY_FILE)};
+        for(const auto name : {RECEIPT_FILE, PARTIAL_RECEIPT_FILE})
+            if(entry_exists(transaction.descriptor.get(), std::string(name))) expected.emplace_back(name);
+        require_transaction_entries(transaction.descriptor.get(), expected, state.expected_owner, "observed execution state");
+        result.execution_evidence = read_observed_execution(transaction.descriptor.get(), state.expected_owner, token);
+    }
+    require_named_identity(state.active.get(), token, transaction.metadata, "execution transaction");
+    return result;
+}
+
+void SourceArtifactInstallTrustedStateStore::observe_execution(const std::string& token) {
+    if(!implementation_ || !is_valid_trusted_alpm_receipt_token(token)) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "invalid execution observation request");
+    }
+    auto& state = *implementation_;
+    auto transaction = open_transaction(state.active.get(), state.expected_owner, token);
+    auto lifetime = acquire_lifetime_lease(transaction.descriptor.get(), state.expected_owner, token, LOCK_SH);
+    static_cast<void>(validate_prepared_state(transaction.descriptor.get(), state.expected_owner,
+                                              token, state.reprove_namespace(), lifetime.get()));
+    require_entry_absent(transaction.descriptor.get(), std::string(OBSERVED_FILE), "package execution observation");
+    require_transaction_entries(transaction.descriptor.get(),
+                                {std::string(PREPARED_FILE), std::string(HOOK_DIRECTORY),
+                                 std::string(ARTIFACT_DIRECTORY), std::string(IDENTITY_FILE)},
+                                state.expected_owner, "PreTransaction execution observation");
+    const auto execution = read_execution_authority(transaction.descriptor.get(), state.expected_owner, token);
+    if(!execution.authorized || execution.refusal) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "hook observation requires launch authorization");
+    }
+    require_named_identity(state.active.get(), token, transaction.metadata, "observed execution transaction");
+    static_cast<void>(state.reprove_namespace());
+    publish_observed_execution(transaction.descriptor.get(), state.expected_owner, token,
+                               SourceArtifactInstallExecutionEvidence::PreTransaction);
+}
+
+int SourceArtifactInstallTrustedStateStore::execute(const std::string& token) {
+    if(!implementation_ || !is_valid_trusted_alpm_receipt_token(token)) {
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "invalid execution request");
+    }
+    auto& state = *implementation_;
+    auto transaction = open_transaction(state.active.get(), state.expected_owner, token);
+    auto execution_lease = acquire_lifetime_lease(transaction.descriptor.get(), state.expected_owner,
+                                                  token, LOCK_SH);
+    for(const auto leaf : {EXECUTION_FILE, AUTHORIZED_FILE, REFUSAL_FILE, OBSERVED_FILE, RECEIPT_FILE, PARTIAL_RECEIPT_FILE}) {
+        if(entry_exists(transaction.descriptor.get(), std::string(leaf))) {
+            throw SourceArtifactInstallTrustedStateError(
+                SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch,
+                "source-artifact execution authority is already consumed");
+        }
+    }
+    const auto publish = [&](std::string_view leaf, const SourceArtifactInstallExecutionObservation& observation) {
+        auto file = create_private_file(transaction.descriptor.get(), std::string(leaf),
+                                        state.expected_owner, "execution authority");
+        write_all(file.get(), serialize_source_artifact_install_execution_observation(observation));
+        synchronize_file(file.get(), "execution authority");
+    };
+    // O_EXCL is the one-shot claim, independent of the shared lifetime lock.
+    // Its durable existence rejects replay even after the last lease FD closes.
+    publish(EXECUTION_FILE, {token, false, std::nullopt});
+    try {
+        std::vector<OwnedDescriptor> retained;
+        const auto request = validate_prepared_state(transaction.descriptor.get(), state.expected_owner,
+                                                     token, state.reprove_namespace(), execution_lease.get(), &retained);
+        auto seal = open_private_file(transaction.descriptor.get(), std::string(IDENTITY_FILE),
+                                      state.expected_owner, "staged generation authority");
+        const auto seal_identity = StagedFilesystemIdentity::observe(seal.get());
+        const std::string initial_seal = read_bounded(seal.get(), MAX_IDENTITY_BYTES, "staged generation authority");
+        std::vector<std::string> arguments{"/usr/bin/pacman", "-U"};
+        if(request.needed) arguments.emplace_back("--needed");
+        if(request.directive == SourceArtifactInstallTrustedDirective::AsDependency) arguments.emplace_back("--asdeps");
+        if(request.no_confirm) arguments.emplace_back("--noconfirm");
+        arguments.emplace_back("--hookdir");
+        arguments.push_back(source_artifact_install_hook_directory(token));
+        arguments.emplace_back("--");
+        for(std::size_t index = 0; index < request.artifacts.size(); ++index)
+            arguments.push_back(source_artifact_install_staged_artifact_path(token, index));
+        std::vector<char*> argv;
+        for(auto& argument : arguments)
+            argv.push_back(argument.data());
+        argv.push_back(nullptr);
+#ifdef MOGUET_ENABLE_SOURCE_ARTIFACT_INSTALL_TRUSTED_TRANSPORT_TEST_HOOKS
+        if(g_state_test_hook) g_state_test_hook(
+            SourceArtifactInstallTrustedStateTestEvent::BeforeFinalReproof,
+            transaction.descriptor.get(), token);
+        if(!g_exec_test_hook) throw_state_error_message("test execution replacement is required");
+#endif
+        const int descriptor_flags = fcntl(execution_lease.get(), F_GETFD);
+        if(descriptor_flags < 0 || fcntl(execution_lease.get(), F_SETFD, descriptor_flags & ~FD_CLOEXEC) != 0)
+            throw_state_error("unable to retain execution lease across pacman");
+        // Threat Model A: kernel/root/helper are trusted. Reproof and exec share
+        // this owner and retained namespace/file descriptors. Only the separate
+        // authorization record is written below; no stage path is mutated or
+        // rediscovered by another Moguet process after this boundary.
+        std::vector<OwnedDescriptor> final_retained;
+        if(validate_prepared_state(transaction.descriptor.get(), state.expected_owner,
+                                   token, state.reprove_namespace(), execution_lease.get(), &final_retained) != request) {
+            throw SourceArtifactInstallTrustedStateError(
+                SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "final request drift");
+        }
+        require_staged_identity(transaction.descriptor.get(), std::string(IDENTITY_FILE), seal.get(), seal_identity);
+        auto final_seal = open_private_file(transaction.descriptor.get(), std::string(IDENTITY_FILE),
+                                            state.expected_owner, "final staged generation authority");
+        if(read_bounded(final_seal.get(), MAX_IDENTITY_BYTES, "final stage identity") != initial_seal) {
+            throw SourceArtifactInstallTrustedStateError(
+                SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch, "final identity authority drift");
+        }
+        require_named_identity(state.active.get(), token, transaction.metadata, "final transaction");
+        static_cast<void>(state.reprove_namespace());
+        try {
+            require_exact_entries(transaction.descriptor.get(),
+                                  {std::string(PREPARED_FILE), std::string(HOOK_DIRECTORY),
+                                   std::string(ARTIFACT_DIRECTORY), std::string(IDENTITY_FILE), std::string(EXECUTION_FILE),
+                                   std::string(LIFETIME_FILE)},
+                                  "final transaction namespace");
+        } catch(const SourceArtifactInstallTrustedStateError& error) {
+            throw SourceArtifactInstallTrustedStateError(
+                SourceArtifactInstallSealingFailure::TrustedTransportProtocolMismatch,
+                error.what(), error.refusal().error_number);
+        }
+        publish(AUTHORIZED_FILE, {token, true, std::nullopt});
+#ifdef MOGUET_ENABLE_SOURCE_ARTIFACT_INSTALL_TRUSTED_TRANSPORT_TEST_HOOKS
+        return g_exec_test_hook(arguments);
+#else
+        // Namespace/artifact FDs remain held until atomic exec. The separate
+        // execution lease survives exec, so even an ambiguous outer wait cannot
+        // let Moguet consume/abort delete an in-flight package input. A surviving
+        // descendant retains cleanup refusal instead of permitting early removal.
+        // Pathname and adjacent .sig semantics stay owned by pacman.
+        // Preserve the environment established by the same fixed sudo entry
+        // used previously for pacman (including its HOME/USER defaults).
+        execv("/usr/bin/pacman", argv.data());
+        const int error_number = errno;
+        throw SourceArtifactInstallTrustedStateError(
+            SourceArtifactInstallSealingFailure::ExecutableLaunchFailure,
+            "unable to execute fixed pacman", error_number);
+#endif
+    } catch(const SourceArtifactInstallTrustedStateError& error) {
+        try {
+#ifdef MOGUET_ENABLE_SOURCE_ARTIFACT_INSTALL_TRUSTED_TRANSPORT_TEST_HOOKS
+            if(g_state_test_hook) g_state_test_hook(SourceArtifactInstallTrustedStateTestEvent::BeforeRefusalPublication,
+                                                    transaction.descriptor.get(), token);
+#endif
+            publish(REFUSAL_FILE, {token,
+                                   entry_exists(transaction.descriptor.get(), std::string(AUTHORIZED_FILE)), error.refusal()});
+        } catch(...) {
+            // The caller must classify an unavailable status as unknown; it
+            // cannot turn this failed one-shot handoff into a successful one.
+        }
+        throw;
+    } catch(const std::exception& error) {
+        SourceArtifactInstallTrustedStateError failure(
+            SourceArtifactInstallSealingFailure::StagedArtifactRevalidationFailure, error.what());
+        try {
+#ifdef MOGUET_ENABLE_SOURCE_ARTIFACT_INSTALL_TRUSTED_TRANSPORT_TEST_HOOKS
+            if(g_state_test_hook) g_state_test_hook(SourceArtifactInstallTrustedStateTestEvent::BeforeRefusalPublication,
+                                                    transaction.descriptor.get(), token);
+#endif
+            publish(REFUSAL_FILE, {token,
+                                   entry_exists(transaction.descriptor.get(), std::string(AUTHORIZED_FILE)), failure.refusal()});
+        } catch(...) {
+        }
+        throw failure;
+    }
+}
+
+#ifdef MOGUET_ENABLE_SOURCE_ARTIFACT_INSTALL_TRUSTED_TRANSPORT_TEST_HOOKS
+void set_source_artifact_install_trusted_state_test_hook(SourceArtifactInstallTrustedStateTestHook hook) {
+    g_state_test_hook = std::move(hook);
+}
+void set_source_artifact_install_trusted_exec_test_hook(std::function<int(const std::vector<std::string>&)> hook) {
+    g_exec_test_hook = std::move(hook);
+}
+#endif

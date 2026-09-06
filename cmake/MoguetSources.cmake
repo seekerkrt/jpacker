@@ -138,6 +138,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/vcs_source_identity.cpp
     source/xdg_directory_safety.cpp
     source/xdg_generation_store.cpp
+    source/xdg_generation_store_sha256.cpp
     source/xdg_paths.cpp
     source/xdg_state_log.cpp
 )
@@ -157,6 +158,7 @@ set(MOGUET_ALPM_RECEIPT_HELPER_SOURCES
 set(MOGUET_SOURCE_ARTIFACT_INSTALL_HELPER_SOURCES
     source/source_artifact_install_trusted_helper_main.cpp
     source/source_artifact_install_trusted_helper_state.cpp
+    source/xdg_generation_store_sha256.cpp
     source/source_artifact_install_trusted_protocol.cpp
     source/trusted_alpm_receipt_protocol.cpp
     source/package_identifier.cpp

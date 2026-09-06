@@ -4,6 +4,7 @@
 #include "trusted_alpm_receipt_protocol.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <charconv>
 #include <limits>
 #include <optional>
@@ -15,11 +16,11 @@ namespace {
 
 constexpr std::string_view OWNER = "source-artifact-install";
 constexpr std::string_view PREPARED_HEADER =
-    "MOGUET-SOURCE-ARTIFACT-PREPARED\t1";
+    "MOGUET-SOURCE-ARTIFACT-PREPARED\t2";
 constexpr std::string_view PREPARE_RESPONSE_HEADER =
-    "MOGUET-SOURCE-ARTIFACT-PREPARE-RESPONSE\t1";
+    "MOGUET-SOURCE-ARTIFACT-PREPARE-RESPONSE\t2";
 constexpr std::string_view RECEIPT_HEADER =
-    "MOGUET-SOURCE-ARTIFACT-RECEIPT\t1";
+    "MOGUET-SOURCE-ARTIFACT-RECEIPT\t2";
 constexpr std::string_view TOKEN_PREFIX = "TOKEN\t";
 constexpr std::string_view OWNER_PREFIX = "OWNER\t";
 constexpr std::string_view PACKAGE_BASE_PREFIX = "PACKAGEBASE\t";
@@ -64,7 +65,10 @@ bool artifact_is_valid(
            artifact.artifact_size <=
                SOURCE_ARTIFACT_INSTALL_MAXIMUM_ARTIFACT_BYTES &&
            artifact.signature_size <=
-               SOURCE_ARTIFACT_INSTALL_MAXIMUM_SIGNATURE_BYTES;
+               SOURCE_ARTIFACT_INSTALL_MAXIMUM_SIGNATURE_BYTES &&
+           is_valid_source_artifact_install_sha256(artifact.archive_sha256) &&
+           (artifact.signature_size == 0 ? artifact.signature_sha256 == "-"
+                                         : is_valid_source_artifact_install_sha256(artifact.signature_sha256));
 }
 
 bool checked_add(
@@ -185,7 +189,7 @@ parse_artifact_fields(
     const std::vector<std::string_view>& fields,
     std::size_t offset,
     std::string_view expected_package_base) {
-    if(fields.size() < offset + 7) return std::nullopt;
+    if(fields.size() < offset + 9) return std::nullopt;
     const auto artifact_index =
         parse_canonical_unsigned<std::size_t>(fields[offset]);
     const auto artifact_size =
@@ -203,7 +207,8 @@ parse_artifact_fields(
         std::string(fields[offset + 3]),
         std::string(fields[offset + 4]),
         *artifact_size,
-        *signature_size};
+        *signature_size, std::string(fields[offset + 7]),
+        std::string(fields[offset + 8])};
     if(!artifact_is_valid(artifact, expected_package_base)) {
         return std::nullopt;
     }
@@ -221,7 +226,9 @@ void append_artifact_record(
     protocol.append(artifact.package_base).push_back('\t');
     protocol.append(artifact.architecture).push_back('\t');
     protocol.append(std::to_string(artifact.artifact_size)).push_back('\t');
-    protocol.append(std::to_string(artifact.signature_size)).push_back('\n');
+    protocol.append(std::to_string(artifact.signature_size)).push_back('\t');
+    protocol.append(artifact.archive_sha256).push_back('\t');
+    protocol.append(artifact.signature_sha256).push_back('\n');
 }
 
 } // namespace
@@ -260,7 +267,7 @@ bool is_valid_source_artifact_install_root_request(
         const std::size_t artifact_protocol_size =
             artifact.package_name.size() + artifact.full_version.size() +
             artifact.package_base.size() + artifact.architecture.size() +
-            128;
+            288;
         if(protocol_size >
                SOURCE_ARTIFACT_INSTALL_MAXIMUM_PROTOCOL_BYTES ||
            artifact_protocol_size >
@@ -293,6 +300,12 @@ parse_source_artifact_install_trusted_helper_arguments(
     SourceArtifactInstallTrustedHelperCommand command;
     if(arguments[0] == "prepare") {
         command = SourceArtifactInstallTrustedHelperCommand::Prepare;
+    } else if(arguments[0] == "execute") {
+        command = SourceArtifactInstallTrustedHelperCommand::Execute;
+    } else if(arguments[0] == "execution-status") {
+        command = SourceArtifactInstallTrustedHelperCommand::ExecutionStatus;
+    } else if(arguments[0] == "observe-execution") {
+        command = SourceArtifactInstallTrustedHelperCommand::ObserveExecution;
     } else if(arguments[0] == "record") {
         command = SourceArtifactInstallTrustedHelperCommand::Record;
     } else if(arguments[0] == "consume") {
@@ -323,7 +336,7 @@ parse_source_artifact_install_trusted_helper_arguments(
             command, arguments[1], {}, {}, SourceArtifactInstallTrustedDirective::PreserveExistingReason, false, false};
     }
 
-    if(arguments.size() < 14) {
+    if(arguments.size() < 16) {
         return fail<SourceArtifactInstallTrustedHelperInvocation>(
             SourceArtifactInstallTrustedProtocolIssueKind::EmptyArtifactSet);
     }
@@ -348,12 +361,12 @@ parse_source_artifact_install_trusted_helper_arguments(
             SourceArtifactInstallTrustedProtocolIssueKind::
                 MissingArgumentSeparator);
     }
-    if((arguments.size() - 7) % 7 != 0) {
+    if((arguments.size() - 7) % 9 != 0) {
         return fail<SourceArtifactInstallTrustedHelperInvocation>(
             SourceArtifactInstallTrustedProtocolIssueKind::
                 InvalidArgumentCount);
     }
-    const std::size_t artifact_count = (arguments.size() - 7) / 7;
+    const std::size_t artifact_count = (arguments.size() - 7) / 9;
     if(artifact_count == 0) {
         return fail<SourceArtifactInstallTrustedHelperInvocation>(
             SourceArtifactInstallTrustedProtocolIssueKind::EmptyArtifactSet);
@@ -371,12 +384,26 @@ parse_source_artifact_install_trusted_helper_arguments(
     std::vector<SourceArtifactInstallRootArtifactExpectation> artifacts;
     artifacts.reserve(artifact_count);
     for(std::size_t index = 0; index < artifact_count; ++index) {
+        if(!is_valid_source_artifact_install_sha256(fields[index * 9 + 7]) ||
+           (fields[index * 9 + 8] != "-" &&
+            !is_valid_source_artifact_install_sha256(fields[index * 9 + 8]))) {
+            return fail<SourceArtifactInstallTrustedHelperInvocation>(
+                SourceArtifactInstallTrustedProtocolIssueKind::InvalidDigest);
+        }
         const auto artifact = parse_artifact_fields(
-            fields, index * 7, arguments[2]);
+            fields, index * 9, arguments[2]);
         if(!artifact.has_value()) {
             return fail<SourceArtifactInstallTrustedHelperInvocation>(
                 SourceArtifactInstallTrustedProtocolIssueKind::
                     UnexpectedRecord);
+        }
+        for(const auto& prior : artifacts) {
+            if(prior.artifact_index == artifact->artifact_index)
+                return fail<SourceArtifactInstallTrustedHelperInvocation>(
+                    SourceArtifactInstallTrustedProtocolIssueKind::DuplicateArtifactIndex);
+            if(prior.package_name == artifact->package_name)
+                return fail<SourceArtifactInstallTrustedHelperInvocation>(
+                    SourceArtifactInstallTrustedProtocolIssueKind::DuplicatePackageName);
         }
         artifacts.push_back(*artifact);
     }
@@ -481,10 +508,15 @@ parse_source_artifact_install_root_prepared_state(
     artifacts.reserve(lines.size() - 8);
     for(std::size_t index = 7; index + 1 < lines.size(); ++index) {
         const auto fields = split_tabs(lines[index]);
-        if(fields.size() != 8 || fields[0] != "ARTIFACT") {
+        if(fields.size() != 10 || fields[0] != "ARTIFACT") {
             return fail<SourceArtifactInstallRootPrepareRequest>(
                 SourceArtifactInstallTrustedProtocolIssueKind::
                     UnexpectedRecord);
+        }
+        if(!is_valid_source_artifact_install_sha256(fields[8]) ||
+           (fields[9] != "-" && !is_valid_source_artifact_install_sha256(fields[9]))) {
+            return fail<SourceArtifactInstallRootPrepareRequest>(
+                SourceArtifactInstallTrustedProtocolIssueKind::InvalidDigest);
         }
         const auto artifact = parse_artifact_fields(
             fields, 1, *package_base);
@@ -771,4 +803,84 @@ parse_source_artifact_install_root_receipt(std::string_view protocol) {
     }
     return SourceArtifactInstallRootReceipt{
         state, std::string(*token), std::move(packages)};
+}
+
+bool is_valid_source_artifact_install_sha256(std::string_view digest) noexcept {
+    return digest.size() == 64 && std::all_of(digest.begin(), digest.end(),
+                                              [](char ch) { return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f'); });
+}
+
+namespace {
+constexpr std::string_view EXECUTION_HEADER = "MOGUET-SOURCE-ARTIFACT-EXECUTION\t3";
+constexpr std::string_view EXECUTION_EVIDENCE[] = {"Unobserved", "PreTransaction", "PostTransaction"};
+constexpr std::string_view SEALING_REASONS[] = {
+    "StagedArtifactDigestMismatch", "StagedArtifactGenerationMismatch",
+    "StagedArtifactReplacement", "StagedArtifactRevalidationFailure",
+    "SignatureDigestMismatch", "TrustedTransportProtocolMismatch",
+    "ExecutableLaunchFailure", "TransactionLifetimeBusy"};
+} // namespace
+
+std::string serialize_source_artifact_install_execution_observation(
+    const SourceArtifactInstallExecutionObservation& observation) {
+    const auto evidence_index = static_cast<std::size_t>(observation.execution_evidence);
+    if(!is_valid_trusted_alpm_receipt_token(observation.transaction_token) ||
+       evidence_index >= std::size(EXECUTION_EVIDENCE) ||
+       (observation.execution_evidence != SourceArtifactInstallExecutionEvidence::Unobserved &&
+        (!observation.authorized || observation.refusal))) {
+        throw std::invalid_argument("invalid execution observation token");
+    }
+    std::string reason = "None";
+    int error_number = 0;
+    if(observation.refusal) {
+        const auto index = static_cast<std::size_t>(observation.refusal->reason);
+        if(index >= std::size(SEALING_REASONS) || observation.refusal->error_number < 0) {
+            throw std::invalid_argument("invalid sealing refusal");
+        }
+        reason = SEALING_REASONS[index];
+        error_number = observation.refusal->error_number;
+    }
+    return std::string(EXECUTION_HEADER) + "\nTOKEN\t" + observation.transaction_token +
+           "\nOWNER\t" + std::string(OWNER) + "\nAUTHORIZED\t" +
+           (observation.authorized ? "1" : "0") + "\nEXECUTION\t" + std::string(EXECUTION_EVIDENCE[evidence_index]) +
+           "\nREASON\t" + reason +
+           "\nERRNO\t" + std::to_string(error_number) + "\nEND\n";
+}
+
+std::variant<SourceArtifactInstallExecutionObservation, SourceArtifactInstallTrustedProtocolFailure>
+parse_source_artifact_install_execution_observation(std::string_view protocol) {
+    const auto split = split_protocol_lines(protocol);
+    if(const auto* failure = std::get_if<SourceArtifactInstallTrustedProtocolFailure>(&split)) return *failure;
+    const auto& lines = std::get<std::vector<std::string_view>>(split);
+    const auto malformed = SourceArtifactInstallTrustedProtocolFailure{
+        SourceArtifactInstallTrustedProtocolIssueKind::UnexpectedRecord};
+    if(lines.size() != 8 || lines[0] != EXECUTION_HEADER || lines[7] != END_RECORD) return malformed;
+    const auto token = record_value(lines[1], TOKEN_PREFIX);
+    const auto owner = record_value(lines[2], OWNER_PREFIX);
+    const auto authorized_text = record_value(lines[3], "AUTHORIZED\t");
+    const auto evidence_text = record_value(lines[4], "EXECUTION\t");
+    const auto reason_text = record_value(lines[5], "REASON\t");
+    const auto errno_text = record_value(lines[6], "ERRNO\t");
+    if(!token || !is_valid_trusted_alpm_receipt_token(*token) ||
+       !owner || *owner != OWNER || !authorized_text || !evidence_text || !reason_text || !errno_text) return malformed;
+    const auto authorized = parse_boolean(*authorized_text);
+    const auto error_number = parse_canonical_unsigned<unsigned>(*errno_text);
+    if(!authorized || !error_number || *error_number > static_cast<unsigned>(std::numeric_limits<int>::max())) return malformed;
+    SourceArtifactInstallExecutionObservation result{std::string(*token), *authorized, std::nullopt};
+    const auto evidence = std::find(std::begin(EXECUTION_EVIDENCE), std::end(EXECUTION_EVIDENCE), *evidence_text);
+    if(evidence == std::end(EXECUTION_EVIDENCE)) return malformed;
+    result.execution_evidence = static_cast<SourceArtifactInstallExecutionEvidence>(evidence - std::begin(EXECUTION_EVIDENCE));
+    if(result.execution_evidence != SourceArtifactInstallExecutionEvidence::Unobserved &&
+       (!result.authorized || *reason_text != "None")) return malformed;
+    if(*reason_text == "None") {
+        if(*error_number != 0) return malformed;
+        return result;
+    }
+    for(std::size_t i = 0; i < std::size(SEALING_REASONS); ++i) {
+        if(*reason_text == SEALING_REASONS[i]) {
+            result.refusal = SourceArtifactInstallSealingRefusal{
+                static_cast<SourceArtifactInstallSealingFailure>(i), static_cast<int>(*error_number)};
+            return result;
+        }
+    }
+    return malformed;
 }
