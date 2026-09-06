@@ -36,6 +36,7 @@ foreach(_moguet_direct_focus IN ITEMS
     source-package-compatibility
     invocation-owned-cleanup-model
     invocation-owned-source-build-context
+    evaluated-devel-source-build
     source-artifact-install-trusted-transport
     reviewed-source-state
     reviewed-source-state-store

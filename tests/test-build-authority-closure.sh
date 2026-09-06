@@ -113,8 +113,8 @@ cmp -s \
     fail 'Issue #476 Slice 2 provenance store gained a production caller'
 
 # Issue #476 Slice 3 is linked into the production binary as a dormant
-# foundation. No production route may include its minting API until the later
-# build-authority slices explicitly replace the current lifecycle.
+# foundation. Slice 4 is its only additional production-compiled consumer;
+# normal source-build routes remain outside this authority chain.
 source_build_context_includes=$test_root/source-build-context-includes.txt
 if grep -l -F -- \
     '#include "invocation_owned_source_build_context.hpp"' \
@@ -139,9 +139,46 @@ assert_not_contains \
 assert_not_contains \
     "$repo_root/source/invocation_owned_source_build_context.cpp" \
     'devel_build_provenance_store.hpp'
+
+# Slice 4 proves only the exact actually built inside the sealed Slice 3
+# context. Its API remains self-owned and has no normal production caller,
+# install/pacman hand-off, provenance publication, or #475 remote observation.
+evaluated_build_includes=$test_root/evaluated-build-includes.txt
+if grep -l -F -- \
+    '#include "evaluated_devel_source_build.hpp"' \
+    "$repo_root"/source/*.cpp > "$evaluated_build_includes"
+then
+    :
+else
+    include_status=$?
+    [ "$include_status" -eq 1 ] ||
+        fail "evaluated build production include scan failed with status $include_status"
+fi
+printf '%s\n' \
+    "$repo_root/source/evaluated_devel_source_build.cpp" \
+    > "$test_root/expected-evaluated-build-includes.txt"
+cmp -s \
+    "$test_root/expected-evaluated-build-includes.txt" \
+    "$evaluated_build_includes" ||
+    fail 'Issue #476 Slice 4 gained a normal production caller'
+assert_not_contains \
+    "$repo_root/source/evaluated_devel_source_build.cpp" \
+    'publish_devel_build_provenance'
+assert_not_contains \
+    "$repo_root/source/evaluated_devel_source_build.cpp" \
+    'devel_build_provenance_store.hpp'
+assert_not_contains \
+    "$repo_root/source/evaluated_devel_source_build.cpp" \
+    'observe_git_remote_revision('
 assert_not_matches \
-    "$repo_root/source/invocation_owned_source_build_context.cpp" \
-    'makepkg[[:space:]]+--(nobuild|noextract|printsrcinfo)'
+    "$repo_root/source/evaluated_devel_source_build.cpp" \
+    '(^|[^A-Za-z])(sudo|pacman)([^A-Za-z]|$)'
+assert_contains \
+    "$repo_root/source/evaluated_devel_source_build.cpp" \
+    'context.makepkg_executable().descriptor_'
+assert_contains \
+    "$repo_root/source/evaluated_devel_source_build.hpp" \
+    '#include "invocation_owned_source_build_context.hpp"'
 assert_not_contains "$makefile" 'legacy-cpp-focused-authority'
 assert_not_contains "$makefile" '-std=c++20'
 assert_not_contains "$makefile" '-Wall'
@@ -240,8 +277,8 @@ assert_contains "$repo_root/.gitignore" '/compile_commands.json'
 
 # Compare the historical Make aliases with the actual CMake focused targets.
 # This checks the frontend mapping without duplicating either inventory here.
-[ "$#" -eq 109 ] ||
-    fail "Make focused alias inventory is $#, expected 109"
+[ "$#" -eq 110 ] ||
+    fail "Make focused alias inventory is $#, expected 110"
 make_aliases=$test_root/make-focused-aliases.txt
 cmake_aliases=$test_root/cmake-focused-aliases.txt
 cmake_help=$test_root/cmake-target-help.txt
@@ -249,15 +286,15 @@ missing_aliases=$test_root/missing-focused-aliases.txt
 unexpected_aliases=$test_root/unexpected-focused-aliases.txt
 
 printf '%s\n' "$@" | LC_ALL=C sort > "$make_aliases"
-[ "$(LC_ALL=C sort -u "$make_aliases" | wc -l)" -eq 109 ] ||
+[ "$(LC_ALL=C sort -u "$make_aliases" | wc -l)" -eq 110 ] ||
     fail 'Make focused alias inventory contains duplicates'
 
 "$cmake_command" --build "$cmake_build_dir" --target help > "$cmake_help"
 sed -n \
     's/.*moguet-focus-\(test-[a-z0-9-][a-z0-9-]*\).*/\1/p' \
     "$cmake_help" | LC_ALL=C sort -u > "$cmake_aliases"
-[ "$(wc -l < "$cmake_aliases")" -eq 109 ] ||
-    fail "CMake focused target inventory is $(wc -l < "$cmake_aliases"), expected 109"
+[ "$(wc -l < "$cmake_aliases")" -eq 110 ] ||
+    fail "CMake focused target inventory is $(wc -l < "$cmake_aliases"), expected 110"
 
 LC_ALL=C comm -23 "$make_aliases" "$cmake_aliases" > "$missing_aliases"
 LC_ALL=C comm -13 "$make_aliases" "$cmake_aliases" > "$unexpected_aliases"
@@ -289,5 +326,5 @@ assert_contains "$phony_marker" 'test-cmake'
 assert_contains "$phony_marker" 'test-repository'
 
 printf '%s\n' \
-    'build-authority-closure-test: Make aliases=109, CMake targets=109, missing=0, unexpected=0'
+    'build-authority-closure-test: Make aliases=110, CMake targets=110, missing=0, unexpected=0'
 printf '%s\n' 'build-authority-closure-test: all checks passed'

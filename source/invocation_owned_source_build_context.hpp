@@ -1,5 +1,6 @@
 #pragma once
 
+#include "evaluated_devel_source_build_authority.hpp"
 #include "devel_build_provenance_reviewed_binding.hpp"
 #include "reviewed_source_pinned_build.hpp"
 #include "source_environment.hpp"
@@ -11,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <variant>
 
 #ifdef MOGUET_ENABLE_INVOCATION_OWNED_SOURCE_BUILD_CONTEXT_TEST_HOOKS
@@ -48,6 +50,8 @@ enum class InvocationOwnedSourceBuildContextFailureReason {
     InvalidEnvironmentAssignment,
     InvalidState,
     CleanupFailure,
+    UnprovenCleanupContent,
+    CleanupResourceLimitExceeded,
 };
 
 // A factory failure cannot return the partially constructed owner. If its
@@ -155,6 +159,7 @@ public:
 private:
     friend class InvocationOwnedSourceBuildContextAuthority;
     friend class InvocationOwnedSourceBuildContext;
+    friend class EvaluatedDevelSourceBuildAuthority;
 
     InvocationOwnedMakepkgExecutableIdentity(
         std::filesystem::path path, int descriptor,
@@ -195,6 +200,7 @@ public:
 private:
     friend class InvocationOwnedSourceBuildContextAuthority;
     friend class InvocationOwnedSourceBuildContext;
+    friend class EvaluatedDevelSourceBuildAuthority;
 
     InvocationOwnedMakepkgEnvironment(
         SourceBuildEnvironment source_environment,
@@ -271,13 +277,14 @@ public:
     [[nodiscard]] bool owns_makepkg_environment(
         const InvocationOwnedMakepkgEnvironment& environment) const noexcept;
 
-    // Explicit cleanup reports failure and retains authority for a safe retry.
-    // The destructor performs only a best-effort fallback and never fabricates
-    // a successful build/cleanup outcome.
+    // Explicit retry is possible for transient failures. Unproven-content and
+    // budget refusals are permanent for this context. Destruction never retries
+    // an already attempted cleanup.
     [[nodiscard]] InvocationOwnedSourceBuildContextCleanupResult cleanup() noexcept;
 
 private:
     friend class InvocationOwnedSourceBuildContextAuthority;
+    friend class EvaluatedDevelSourceBuildAuthority;
 
     struct State;
     explicit InvocationOwnedSourceBuildContext(
@@ -285,6 +292,14 @@ private:
 
     [[nodiscard]] const State& require_state() const;
     [[nodiscard]] State& require_state();
+    [[nodiscard]] int recipe_descriptor() const;
+    [[nodiscard]] int pkgdest_descriptor() const;
+    [[nodiscard]] int builddir_descriptor() const;
+    [[nodiscard]] int srcdest_descriptor() const;
+    [[nodiscard]] std::uintmax_t root_device() const;
+    // Slice 4 rejects the complete context when artifact/workspace proof has
+    // rejected entries that a fresh generic cleanup scan must not adopt.
+    void refuse_unproven_cleanup() noexcept;
 
     std::unique_ptr<State> state_;
 };
@@ -343,6 +358,9 @@ void set_invocation_owned_source_build_context_makepkg_path_for_test(
 
 void set_invocation_owned_source_build_context_parent_path_for_test(
     std::optional<std::filesystem::path> parent_path);
+
+void set_invocation_owned_source_build_context_cleanup_limits_for_test(
+    std::optional<std::pair<std::size_t, std::size_t>> entry_and_depth_limits);
 
 [[nodiscard]] std::optional<
     InvocationOwnedSourceBuildContextFailureReason>

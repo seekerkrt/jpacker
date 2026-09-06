@@ -46,6 +46,7 @@ set(MOGUET_PRODUCTION_SOURCES
     source/dependency_spec.cpp
     source/diagnostic_projection.cpp
     source/dry_run.cpp
+    source/evaluated_devel_source_build.cpp
     source/filtered_aur_update_operation.cpp
     source/git_remote_revision_observer.cpp
     source/installed_artifact_binding.cpp

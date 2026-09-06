@@ -1,6 +1,7 @@
 #include "artifact_workspace.hpp"
 #include "devel_build_provenance_codec.hpp"
 #include "devel_build_provenance_reviewed_binding.hpp"
+#include "evaluated_devel_source_build.hpp"
 #include "invocation_owned_source_build_context.hpp"
 #include "reviewed_source_pinned_build.hpp"
 
@@ -82,6 +83,33 @@ static_assert(!std::is_default_constructible_v<
               ReviewedRecipeSnapshotIdentity>);
 static_assert(!std::is_default_constructible_v<
               InvocationOwnedMakepkgEnvironment>);
+static_assert(!std::is_default_constructible_v<
+              EvaluatedDevelSourceBuildProof>);
+static_assert(!std::is_copy_constructible_v<
+              EvaluatedDevelSourceBuildProof>);
+static_assert(!std::is_constructible_v<
+              EvaluatedDevelSourceBuildProof,
+              PackageBaseIdentity,
+              std::string,
+              std::filesystem::path>);
+static_assert(!std::is_default_constructible_v<
+              EvaluatedDevelSourceProjection>);
+static_assert(!std::is_constructible_v<
+              EvaluatedDevelSourceProjection,
+              VcsSourceIdentity,
+              std::size_t,
+              std::size_t>);
+static_assert(!std::is_default_constructible_v<
+              FreshDevelPackageArtifact>);
+static_assert(!std::is_constructible_v<
+              FreshDevelPackageArtifact,
+              std::filesystem::path>);
+static_assert(!std::is_constructible_v<
+              EvaluatedDevelSourceBuildProof,
+              InvocationOwnedSourceBuildContext,
+              EvaluatedDevelSourceProjection,
+              ActualBuiltGitRevision,
+              FreshDevelPackageArtifact>);
 static_assert(!std::is_constructible_v<
               InstalledArtifactBinding,
               PackageChildIdentity,
@@ -255,6 +283,25 @@ InvocationOwnedMakepkgEnvironment forge_invocation_makepkg_environment(
     return InvocationOwnedMakepkgEnvironment(
         std::move(environment), SourceEnvironmentEmptyValuePolicy::Forward,
         std::make_shared<const int>(0));
+}
+#elif defined(MOGUET_FORGE_EVALUATED_DEVEL_SOURCE_PROJECTION)
+EvaluatedDevelSourceProjection forge_evaluated_source_projection(
+    VcsSourceIdentity source) {
+    return EvaluatedDevelSourceProjection(
+        std::move(source), 1, 0);
+}
+#elif defined(MOGUET_FORGE_FRESH_DEVEL_PACKAGE_ARTIFACT)
+FreshDevelPackageArtifact forge_fresh_devel_package_artifact(
+    PackageChildIdentity package,
+    BuiltPackageArtifactEvidence evidence,
+    std::filesystem::path path) {
+    return FreshDevelPackageArtifact(
+        std::move(package), std::move(evidence), std::move(path),
+        "artifact.pkg.tar.zst", -1, 1, 2, 3, 4);
+}
+#elif defined(MOGUET_FORGE_EVALUATED_DEVEL_SOURCE_BUILD_PROOF)
+EvaluatedDevelSourceBuildProof forge_evaluated_source_build_proof() {
+    return EvaluatedDevelSourceBuildProof(nullptr);
 }
 #else
 int reviewed_source_authority_negative_fixture_baseline() {

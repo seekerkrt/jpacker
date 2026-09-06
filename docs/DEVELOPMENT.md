@@ -107,8 +107,8 @@ include / link graph、negative compile recipeを所有しない。
 | `build/cmake-production` | `BUILD_TESTING=OFF` | 通常の`make`、install / uninstall、production smoke |
 | `build/cmake-testing` | `BUILD_TESTING=ON` | developer、CTest、host / release validation、focused test |
 
-通常の`make`はproduction treeだけから`moguet`をbuildし、105個のC++ test-ledger executable、
-1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、130件のCTest registrationを不用意にbuildしない。
+通常の`make`はproduction treeだけから`moguet`をbuildし、106個のC++ test-ledger executable、
+1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、131件のCTest registrationを不用意にbuildしない。
 `make test`はtesting treeをbuildし、CTestを実行してから
 gettext、shell、docs、packaging等のrepository-specific validationを実行する。`make test-<area>`は
 互換entrypointとして残るが、exact target / CTest selectionは
@@ -180,17 +180,17 @@ inventoryを所有する。
 
 | Inventory | Expected |
 | --- | ---: |
-| C++ test executables | 105 |
+| C++ test executables | 106 |
 | installed transport fixture harnesses (`EXCLUDE_FROM_ALL`) | 1 |
 | support / stub translation units | 30 |
-| link firewalls | 49 |
-| firewall descriptors | 49 |
-| CTest registrations | 130 |
+| link firewalls | 50 |
+| firewall descriptors | 50 |
+| CTest registrations | 131 |
 
 stub / real implementation exclusion、replacement ABI、ALPM stub、exact source closureをtarget-localに
 維持する。単一production libraryを全testへ無条件linkしない。negative compileはCTest registrationから
 effective CMake compiler / launcher / compile optionを取得し、GNU Make recursive compileへ戻さない。
-Make focused aliasとCMake focused targetは各109件で一致し、missing / unexpectedを0に保つ。
+Make focused aliasとCMake focused targetは各110件で一致し、missing / unexpectedを0に保つ。
 
 completion生成が使う`moguet-cli-authority-exporter`もCMake targetであり、Python generatorはcompilerを
 直接起動しない。このtargetは`EXCLUDE_FROM_ALL`なので通常のproduction/package buildへ混ざらず、
@@ -312,6 +312,16 @@ descriptorとnamed identityをcontext lifetime中も再検証する。partial co
 だけをdescriptor-relativeにcleanupし、abort cleanup failureをprimary creation failureと別のtyped consequenceへ
 保持する。このfoundationはproduction sourceへcompileされるが、current source-build caller、makepkg phase、
 provenance publication、devel comparisonへは接続しない。
+
+Issue #476 Slice 4のproduction-disconnected actual-build proofは、host focused target
+`test-evaluated-devel-source-build`で確認する。exact reviewed snapshotと同じcontext内のprivate working recipeを
+分離し、retained `/usr/bin/makepkg` FD、raw/evaluated source一致、`--nobuild`後のprivate mirror/worktree、
+pre/post-build complete Git OID、dynamic version、fresh one-artifact inventory、retained-FD libalpm metadata、
+archive / ALPM-MTREE SHA-256を一つのmove-only capabilityへ束縛する。pre-build stale packagelist、source shape drift、
+ambiguous workspace、PKGDEST contamination、artifact replacement/mismatch、cross-context compositionはfail closedする。
+このproofはcontextとartifactをSlice 5向けに保持するが、current source-build / install / CLI、pacman、provenance
+publication、#475 observationへは接続しない。詳細は
+[`evaluated-devel-source-build-proof.md`](contracts/evaluated-devel-source-build-proof.md)を正とする。
 
 Issue #485 Slice 5のclosed lifecycle / authoritative candidate gateは、同じnetworkless installed imageを
 使う専用targetで確認する。

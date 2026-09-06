@@ -113,6 +113,14 @@ _moguet_add_direct_ctest(
     invocation-owned-source-build-context-test
 )
 _moguet_add_direct_ctest(
+    cpp.evaluated_devel_source_build
+    evaluated-devel-source-build-test
+)
+set_tests_properties(
+    cpp.evaluated_devel_source_build
+    PROPERTIES TIMEOUT 180
+)
+_moguet_add_direct_ctest(
     cpp.reviewed_source_projection
     reviewed-source-projection-test
 )

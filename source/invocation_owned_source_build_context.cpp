@@ -44,11 +44,15 @@ constexpr std::size_t MAX_NAME_ATTEMPTS = 32;
 constexpr std::size_t MAX_SNAPSHOT_PATH_BYTES = 4096;
 constexpr std::size_t MAX_SNAPSHOT_PATH_DEPTH = 256;
 constexpr std::size_t MAX_SNAPSHOT_COMPONENT_BYTES = 255;
+// Includes generated trees, with headroom above the supported snapshot depth.
+constexpr std::size_t MAX_CLEANUP_ENTRIES = 65536;
+constexpr std::size_t MAX_CLEANUP_DEPTH = 512;
 
 #ifdef MOGUET_ENABLE_INVOCATION_OWNED_SOURCE_BUILD_CONTEXT_TEST_HOOKS
 InvocationOwnedSourceBuildContextTestHook g_context_test_hook;
 std::optional<fs::path> g_makepkg_path_for_test;
 std::optional<fs::path> g_context_root_parent_for_test;
+std::optional<std::pair<std::size_t, std::size_t>> g_cleanup_limits_for_test;
 
 void notify_test_event(
     InvocationOwnedSourceBuildContextTestEvent event,
@@ -428,7 +432,8 @@ struct stat named_status(
 std::vector<std::string> directory_names(
     int directory_descriptor,
     InvocationOwnedSourceBuildContextStage stage,
-    const fs::path& relative_path = {}) {
+    const fs::path& relative_path = {},
+    std::size_t entry_limit = std::numeric_limits<std::size_t>::max()) {
     // LANDMINE: dup/fcntl would share the directory offset with the retained
     // authority descriptor. A fresh open-file-description is required for
     // every complete enumeration and revalidation pass.
@@ -458,6 +463,11 @@ std::vector<std::string> directory_names(
     while(dirent* entry = ::readdir(directory.get())) {
         const std::string name(entry->d_name);
         if(name == "." || name == "..") continue;
+        if(names.size() >= entry_limit) {
+            throw_context_failure(stage,
+                                  InvocationOwnedSourceBuildContextFailureReason::CleanupResourceLimitExceeded,
+                                  relative_path);
+        }
         names.push_back(name);
         errno = 0;
     }
@@ -1148,6 +1158,30 @@ OwnedDirectory create_owned_child_directory(
     }
 }
 
+struct CleanupBudget {
+    std::size_t max_entries = MAX_CLEANUP_ENTRIES;
+    std::size_t max_depth = MAX_CLEANUP_DEPTH;
+    std::size_t entries = 0;
+
+    CleanupBudget() {
+#ifdef MOGUET_ENABLE_INVOCATION_OWNED_SOURCE_BUILD_CONTEXT_TEST_HOOKS
+        if(g_cleanup_limits_for_test.has_value()) {
+            max_entries = g_cleanup_limits_for_test->first;
+            max_depth = g_cleanup_limits_for_test->second;
+        }
+#endif
+    }
+
+    void consume(std::size_t depth, const fs::path& relative_path) {
+        if(entries >= max_entries || depth > max_depth) {
+            throw_context_failure(InvocationOwnedSourceBuildContextStage::Cleanup,
+                                  InvocationOwnedSourceBuildContextFailureReason::CleanupResourceLimitExceeded,
+                                  relative_path);
+        }
+        ++entries;
+    }
+};
+
 struct CleanupNode {
     std::string name;
     fs::path relative_path;
@@ -1182,7 +1216,9 @@ void make_cleanup_directory_accessible(
 
 CleanupNode plan_cleanup_node(
     int parent_descriptor, const std::string& name,
-    const fs::path& relative_path, std::uintmax_t root_device) {
+    const fs::path& relative_path, std::uintmax_t root_device,
+    CleanupBudget& budget, std::size_t depth) {
+    budget.consume(depth, relative_path);
     NodeIdentity named = node_identity(named_status(
         parent_descriptor, name,
         InvocationOwnedSourceBuildContextStage::Cleanup, relative_path));
@@ -1229,17 +1265,17 @@ CleanupNode plan_cleanup_node(
     }
     const std::vector<std::string> names = directory_names(
         directory.get(), InvocationOwnedSourceBuildContextStage::Cleanup,
-        relative_path);
+        relative_path, budget.max_entries - budget.entries);
     node.children.reserve(names.size());
     for(const std::string& child : names) {
         node.children.push_back(plan_cleanup_node(
             directory.get(), child, relative_path / child,
-            root_device));
+            root_device, budget, depth + 1));
     }
     if(names != directory_names(
                     directory.get(),
                     InvocationOwnedSourceBuildContextStage::Cleanup,
-                    relative_path)) {
+                    relative_path, names.size())) {
         throw_context_failure(
             InvocationOwnedSourceBuildContextStage::Cleanup,
             InvocationOwnedSourceBuildContextFailureReason::ConcurrentReplacement,
@@ -1268,6 +1304,9 @@ void require_cleanup_node_unchanged(
 void validate_cleanup_plan(
     int parent_descriptor, const CleanupNode& node,
     std::uintmax_t root_device) {
+    // The immutable plan already passed the shared entry/depth budget. Each
+    // rescan is capped by its exact child inventory, so validation/removal cannot
+    // expand that plan or begin an unbounded traversal of new recipe content.
     require_cleanup_node_unchanged(parent_descriptor, node, root_device);
     if(!node.is_directory) return;
     OwnedDescriptor directory = open_child_directory(
@@ -1276,7 +1315,7 @@ void validate_cleanup_plan(
         node.relative_path);
     const std::vector<std::string> names = directory_names(
         directory.get(), InvocationOwnedSourceBuildContextStage::Cleanup,
-        node.relative_path);
+        node.relative_path, node.children.size());
     std::vector<std::string> expected_names;
     expected_names.reserve(node.children.size());
     for(const CleanupNode& child : node.children) {
@@ -1310,7 +1349,7 @@ void remove_cleanup_plan(
         if(!directory_names(
                 directory.get(),
                 InvocationOwnedSourceBuildContextStage::Cleanup,
-                node.relative_path)
+                node.relative_path, 0)
                 .empty()) {
             throw_context_failure(
                 InvocationOwnedSourceBuildContextStage::Cleanup,
@@ -1350,16 +1389,18 @@ public:
           pkgdest_(std::move(other.pkgdest_)),
           builddir_(std::move(other.builddir_)),
           srcdest_(std::move(other.srcdest_)),
-          active_(std::exchange(other.active_, false)) {
+          active_(std::exchange(other.active_, false)),
+          cleanup_attempted_(other.cleanup_attempted_),
+          cleanup_refusal_(other.cleanup_refusal_) {
     }
 
     PrivateBuildRoot& operator=(PrivateBuildRoot&&) = delete;
 
     ~PrivateBuildRoot() noexcept {
         if(!active_) return;
-        InvocationOwnedSourceBuildContextCleanupResult result = cleanup();
-        if(std::holds_alternative<InvocationOwnedSourceBuildContextFailure>(
-               result)) {
+        const bool failed = cleanup_attempted_ || cleanup_refusal_.has_value() ||
+                            std::holds_alternative<InvocationOwnedSourceBuildContextFailure>(cleanup());
+        if(failed) {
             const fs::path retained = root_.path;
             Logger::warn_noexcept([&retained]() {
                 return "Invocation-owned source-build context cleanup failed; retained root: " +
@@ -1566,6 +1607,18 @@ public:
         return recipe_->descriptor.get();
     }
 
+    [[nodiscard]] int pkgdest_descriptor() const noexcept {
+        return pkgdest_->descriptor.get();
+    }
+
+    [[nodiscard]] int builddir_descriptor() const noexcept {
+        return builddir_->descriptor.get();
+    }
+
+    [[nodiscard]] int srcdest_descriptor() const noexcept {
+        return srcdest_->descriptor.get();
+    }
+
     [[nodiscard]] std::uintmax_t device() const noexcept {
         return root_.identity.device;
     }
@@ -1621,9 +1674,19 @@ public:
         }
     }
 
+    void refuse_unproven_cleanup() noexcept {
+        cleanup_refusal_ = InvocationOwnedSourceBuildContextFailureReason::UnprovenCleanupContent;
+    }
+
     [[nodiscard]] InvocationOwnedSourceBuildContextCleanupResult cleanup() noexcept {
         if(!active_) return InvocationOwnedSourceBuildContextCleaned{};
+        if(cleanup_refusal_.has_value()) {
+            return context_failure(InvocationOwnedSourceBuildContextStage::Cleanup,
+                                   *cleanup_refusal_);
+        }
+        cleanup_attempted_ = true;
         try {
+            CleanupBudget budget;
             notify_before_cleanup(root_.path);
             require_parent_identity(
                 InvocationOwnedSourceBuildContextStage::Cleanup);
@@ -1683,7 +1746,7 @@ public:
             std::sort(expected_names.begin(), expected_names.end());
             const std::vector<std::string> names = directory_names(
                 root_.descriptor.get(),
-                InvocationOwnedSourceBuildContextStage::Cleanup);
+                InvocationOwnedSourceBuildContextStage::Cleanup, {}, budget.max_entries);
             if(names != expected_names) {
                 throw_context_failure(
                     InvocationOwnedSourceBuildContextStage::Cleanup,
@@ -1695,11 +1758,11 @@ public:
             for(const std::string& name : names) {
                 plans.push_back(plan_cleanup_node(
                     root_.descriptor.get(), name, fs::path(name),
-                    root_.identity.device));
+                    root_.identity.device, budget, 1));
             }
             if(names != directory_names(
                             root_.descriptor.get(),
-                            InvocationOwnedSourceBuildContextStage::Cleanup)) {
+                            InvocationOwnedSourceBuildContextStage::Cleanup, {}, names.size())) {
                 throw_context_failure(
                     InvocationOwnedSourceBuildContextStage::Cleanup,
                     InvocationOwnedSourceBuildContextFailureReason::ConcurrentReplacement);
@@ -1716,7 +1779,7 @@ public:
             }
             if(!directory_names(
                     root_.descriptor.get(),
-                    InvocationOwnedSourceBuildContextStage::Cleanup)
+                    InvocationOwnedSourceBuildContextStage::Cleanup, {}, 0)
                     .empty()) {
                 throw_context_failure(
                     InvocationOwnedSourceBuildContextStage::Cleanup,
@@ -1762,6 +1825,10 @@ public:
             InvocationOwnedSourceBuildContextFailure failure =
                 error.release();
             failure.stage = InvocationOwnedSourceBuildContextStage::Cleanup;
+            if(failure.reason == InvocationOwnedSourceBuildContextFailureReason::CleanupResourceLimitExceeded) {
+                cleanup_refusal_ = failure.reason;
+                return failure;
+            }
             if(failure.reason !=
                    InvocationOwnedSourceBuildContextFailureReason::OwnershipMismatch &&
                failure.reason !=
@@ -1910,6 +1977,8 @@ private:
     std::optional<OwnedDirectory> builddir_;
     std::optional<OwnedDirectory> srcdest_;
     bool active_ = true;
+    bool cleanup_attempted_ = false;
+    std::optional<InvocationOwnedSourceBuildContextFailureReason> cleanup_refusal_;
 };
 
 void materialize_snapshot_directory(
@@ -2660,6 +2729,26 @@ InvocationOwnedSourceBuildContext::makepkg_executable() const {
     return require_state().makepkg_executable;
 }
 
+int InvocationOwnedSourceBuildContext::recipe_descriptor() const {
+    return require_state().roots.recipe_descriptor();
+}
+
+int InvocationOwnedSourceBuildContext::pkgdest_descriptor() const {
+    return require_state().roots.pkgdest_descriptor();
+}
+
+int InvocationOwnedSourceBuildContext::builddir_descriptor() const {
+    return require_state().roots.builddir_descriptor();
+}
+
+int InvocationOwnedSourceBuildContext::srcdest_descriptor() const {
+    return require_state().roots.srcdest_descriptor();
+}
+
+std::uintmax_t InvocationOwnedSourceBuildContext::root_device() const {
+    return require_state().roots.device();
+}
+
 InvocationOwnedSourceBuildContextValidationResult
 InvocationOwnedSourceBuildContext::revalidate() const {
     if(!valid()) {
@@ -2750,6 +2839,10 @@ bool InvocationOwnedSourceBuildContext::owns_makepkg_environment(
            state_->lineage.get() == environment.lineage_.get();
 }
 
+void InvocationOwnedSourceBuildContext::refuse_unproven_cleanup() noexcept {
+    if(state_ != nullptr) state_->roots.refuse_unproven_cleanup();
+}
+
 InvocationOwnedSourceBuildContextCleanupResult
 InvocationOwnedSourceBuildContext::cleanup() noexcept {
     if(state_ == nullptr) {
@@ -2782,6 +2875,15 @@ create_invocation_owned_source_build_context(
 }
 
 #ifdef MOGUET_ENABLE_INVOCATION_OWNED_SOURCE_BUILD_CONTEXT_TEST_HOOKS
+void set_invocation_owned_source_build_context_cleanup_limits_for_test(
+    std::optional<std::pair<std::size_t, std::size_t>> limits) {
+    if(limits.has_value() && (limits->first > MAX_CLEANUP_ENTRIES ||
+                              limits->second > MAX_CLEANUP_DEPTH)) {
+        throw std::invalid_argument("Cleanup test limits may only reduce production bounds.");
+    }
+    g_cleanup_limits_for_test = limits;
+}
+
 void set_invocation_owned_source_build_context_test_hook(
     InvocationOwnedSourceBuildContextTestHook hook) {
     g_context_test_hook = std::move(hook);

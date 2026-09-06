@@ -279,8 +279,8 @@ makepkg -si
 `makepkg -si`は、そのtag付きreleaseをbuildし、同じ操作で`pacman -U`によってlive
 systemへinstallします。これは、development treeをその場でbuild・確認するだけで
 何もinstallしない、上記の`make`や`./moguet --help`とは異なります。`PKGBUILD`はcanonicalな
-production CMake build / install consumerとして`BUILD_TESTING=OFF`を指定し、104個のdeveloper
-C++ test-ledger executable、1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、129件のCTest
+production CMake build / install consumerとして`BUILD_TESTING=OFF`を指定し、106個のdeveloper
+C++ test-ledger executable、1個の`EXCLUDE_FROM_ALL` installed transport fixture harness、131件のCTest
 registrationはhost / CI / release validation側で扱います。
 この`PKGBUILD`は
 repository同梱のpackaging経路であり、AUR submissionではありません。Moguetはまだ
