@@ -76,8 +76,13 @@ escape、entry/depth limitを検証する。
 
 mirror `origin`はevaluated canonical HTTPS remoteと一致し、worktree `origin`はそのexact private mirrorを指す。
 default HEADはmirror `HEAD` / worktree `origin/HEAD`、branchはmirror `refs/heads/<branch>` / worktree
-`refs/remotes/origin/<branch>`を照合する。worktree `HEAD^{commit}`はselected refおよびmirrorと一致し、
+`refs/remotes/origin/<branch>`を照合する。worktree `HEAD`のraw commit OIDはselected refおよびmirrorと一致し、
 preparation後とbuild後で同じcomplete lowercase SHA-1 / SHA-256 OIDでなければならない。
+両proof pointの最初のGit observationより前と最後に、loose / packed / reftableの`refs/replace`および
+`info/grafts`の存在を拒否する。すべてのactual-proof Git commandは`--no-replace-objects`を使用し、
+selected ref / HEADをpeelせず取得したOIDのraw typeが`commit`で、repositoryのstorage object formatとも
+一致することを確認する。replacement無効化はmetadata存在のfail-closed検査を代替しない。refs inventoryはGit自身へ問い合わせ、
+filesystem上のloose ref directoryの不在だけからreplacement metadataの不在を推定しない。
 
 makepkgのshared cloneが作るalternateはexact private mirror `objects` 1件だけを許す。linked worktree、submodule、
 external alternateは拒否する。`prepare()`やbuildがtracked worktree bytesを変更することは許すが、dirty stateを
@@ -109,7 +114,22 @@ artifactを保持するため、Slice 5は将来このcapability自体をconsume
 
 phase、reason、existing parser/context/process/revision causeをtyped failureとして保持する。失敗時はcontextの
 descriptor-relative cleanupを明示実行し、cleanupも失敗した場合はprimary failureを置換せず
-`cleanup_consequence`へ別に保持する。
+`cleanup_consequence`へ別に保持する。retained archive queryで発生したruntime failureは狭いquery境界で
+`ArtifactMetadata / ArtifactMetadataQueryFailure`へ翻訳し、元diagnosticを保持する。
+
+artifact inventory拒否、replacement、ambiguous / unsafe workspace、またはpackage build開始後のfailureでは、
+context全体を`UnprovenCleanupContent`として保持する。失敗後の再走査で未証明entryを削除対象へ採用しない。
+cleanup consequenceはprimary failureとは別にtyped reasonと`retained_root`を返す。この拒否はcontextの寿命中
+解除せず、destructorもgeneric cleanupを再試行しない。build開始前のfailureでも`PKGDEST`をemptyと
+証明できなければpartial / unproven outputとして同じ拒否を保持する。
+
+generic context cleanupはroot自身を除く合計65536 entries / root配下depth512を上限とする。
+全体のplan構築とvalidationを削除開始前に完了し、validation / removalはその有限planと各directoryの
+固定inventoryだけを走査する。budget超過は`CleanupResourceLimitExceeded`としてrootを保持し、再試行しない。
+他のtransient cleanup failureは明示retryが可能だが、destructorは一度試行済みのcleanupを繰り返さない。
+
+friendを与える各narrow headerは循環依存のないcomplete `EvaluatedDevelSourceBuildAuthority`宣言をincludeし、
+callerによる同名class定義やraw observation mintをcompilerのredefinition / access controlで拒否する。
 
 Slice 4はpacman、sudo、installed local DB、installed binding、provenance store publication、
 `observe_git_remote_revision()`を呼ばない。

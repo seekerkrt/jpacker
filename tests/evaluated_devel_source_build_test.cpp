@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <iterator>
 #include <memory>
@@ -893,11 +894,84 @@ void test_sha256_upstream_revision() {
     cleanup_proof(proof);
 }
 
+struct FixtureNode {
+    fs::path path;
+    struct stat identity;
+};
+
+std::vector<FixtureNode> retained_fixture_inventory(const fs::path& root) {
+    struct stat root_status{};
+    require(root.is_absolute() && root.lexically_normal() == root &&
+                root.filename().string().starts_with("moguet-source-build-context-") &&
+                ::lstat(root.c_str(), &root_status) == 0 &&
+                S_ISDIR(root_status.st_mode) && root_status.st_uid == ::geteuid(),
+            "Invalid exact retained fixture root");
+    std::vector<FixtureNode> nodes{{root, root_status}};
+    for(const fs::directory_entry& entry : fs::recursive_directory_iterator(root)) {
+        struct stat status{};
+        require(nodes.size() < 100000 &&
+                    ::lstat(entry.path().c_str(), &status) == 0 &&
+                    status.st_uid == ::geteuid() && status.st_dev == root_status.st_dev &&
+                    (S_ISDIR(status.st_mode) || S_ISREG(status.st_mode) || S_ISLNK(status.st_mode)),
+                "Retained fixture has foreign or unsupported content");
+        nodes.push_back({entry.path(), status});
+    }
+    std::sort(nodes.begin(), nodes.end(), [](const FixtureNode& left, const FixtureNode& right) {
+        return left.path < right.path;
+    });
+    return nodes;
+}
+
+bool same_fixture_inventory(const std::vector<FixtureNode>& left,
+                            const std::vector<FixtureNode>& right) {
+    if(left.size() != right.size()) return false;
+    for(std::size_t i = 0; i < left.size(); ++i) {
+        if(left[i].path != right[i].path ||
+           left[i].identity.st_dev != right[i].identity.st_dev ||
+           left[i].identity.st_ino != right[i].identity.st_ino ||
+           (left[i].identity.st_mode & S_IFMT) != (right[i].identity.st_mode & S_IFMT) ||
+           left[i].identity.st_uid != right[i].identity.st_uid) return false;
+    }
+    return true;
+}
+
+void cleanup_retained_fixture(const fs::path& root, const struct stat& created_root) {
+    // This test owns recipe execution and injections. Prove the exact created
+    // root and complete owner/device/type/path inventory before any deletion;
+    // remove only recorded entries, never a fresh recursive-delete adoption.
+    const auto nodes = retained_fixture_inventory(root);
+    require(nodes.front().path == root &&
+                nodes.front().identity.st_dev == created_root.st_dev &&
+                nodes.front().identity.st_ino == created_root.st_ino,
+            "Retained fixture root was replaced");
+    require(same_fixture_inventory(nodes, retained_fixture_inventory(root)),
+            "Retained fixture inventory drifted before fixture cleanup");
+    for(const auto& node : nodes) {
+        if(S_ISDIR(node.identity.st_mode)) {
+            require(::chmod(node.path.c_str(), 0700) == 0, "Cannot access owned fixture directory");
+        }
+    }
+    for(auto node = nodes.rbegin(); node != nodes.rend(); ++node) {
+        struct stat current{};
+        require(::lstat(node->path.c_str(), &current) == 0 &&
+                    current.st_ino == node->identity.st_ino && current.st_dev == node->identity.st_dev &&
+                    current.st_uid == node->identity.st_uid &&
+                    (current.st_mode & S_IFMT) == (node->identity.st_mode & S_IFMT),
+                "Fixture entry changed before removal");
+        require((S_ISDIR(current.st_mode) ? ::rmdir(node->path.c_str()) : ::unlink(node->path.c_str())) == 0,
+                "Failed to remove exact owned fixture entry");
+    }
+}
+
 void expect_failure(
     ReviewedBuildFixture& fixture,
-    EvaluatedDevelSourceBuildFailureReason expected_reason) {
+    EvaluatedDevelSourceBuildFailureReason expected_reason,
+    bool retains_unproven_content = false,
+    const std::function<void(const fs::path&)>& inspect_retained = {}) {
     InvocationOwnedSourceBuildContext context = fixture.make_context();
     const fs::path root = context.owned_root();
+    struct stat created_root{};
+    require(::lstat(root.c_str(), &created_root) == 0, "Failed to retain test root identity");
     InvocationOwnedMakepkgEnvironment environment =
         fixture.make_environment(context);
     EvaluatedDevelSourceBuildResult result =
@@ -907,6 +981,16 @@ void expect_failure(
         result, "Unsupported fixture produced a proof");
     require(failure.reason == expected_reason,
             "Unsupported fixture returned a different typed failure");
+    if(retains_unproven_content) {
+        require(failure.cleanup_consequence.has_value() &&
+                    failure.cleanup_consequence->failure.reason ==
+                        InvocationOwnedSourceBuildContextFailureReason::UnprovenCleanupContent &&
+                    failure.cleanup_consequence->retained_root == root && fs::exists(root),
+                "Rejected content was adopted by automatic cleanup");
+        if(inspect_retained) inspect_retained(root);
+        cleanup_retained_fixture(root, created_root);
+        return;
+    }
     require(!failure.cleanup_consequence.has_value(),
             "Ordinary failure also reported cleanup failure");
     require(!fs::exists(root),
@@ -995,7 +1079,7 @@ void test_dynamic_version_drift_fails_closed() {
         RecipeShape::DynamicVersionDrift);
     expect_failure(
         fixture,
-        EvaluatedDevelSourceBuildFailureReason::DynamicVersionUnavailable);
+        EvaluatedDevelSourceBuildFailureReason::DynamicVersionUnavailable, true);
 }
 
 void write_file(const fs::path& path, std::string_view bytes) {
@@ -1006,12 +1090,102 @@ void write_file(const fs::path& path, std::string_view bytes) {
     require(static_cast<bool>(output), "Failed to finish injected file");
 }
 
+void test_git_replacement_and_grafts_rejected() {
+    UpstreamGitFixture upstream("git-replacement");
+    // Raw non-commit objects must never become commit evidence through
+    // replacement interpretation, including a packed-only replacement ref.
+    for(const std::string kind : {"blob", "tree", "tag", "packed", "reftable",
+                                  "drift", "mirror-graft", "worktree-graft"}) {
+        ReviewedBuildFixture fixture("replace-" + kind, upstream);
+        bool injected = false;
+        set_evaluated_devel_source_build_test_hook(
+            [&](EvaluatedDevelSourceBuildTestEvent event,
+                const fs::path& root, const fs::path&) {
+                const auto injection_event = kind == "drift"
+                                                 ? EvaluatedDevelSourceBuildTestEvent::AfterPackageBuild
+                                                 : EvaluatedDevelSourceBuildTestEvent::AfterSourcePreparation;
+                if(event != injection_event) return;
+                const fs::path mirror = root / "srcdest" / fixture.package_name();
+                const fs::path workspace = root / "build" / fixture.package_base() /
+                                           "src" / fixture.package_name();
+                const auto environment = git_environment(fixture.home());
+                auto git_line = [&](std::vector<std::string> arguments) {
+                    return require_output_line(capture_process(
+                        "/usr/bin/git", std::move(arguments), environment, &workspace));
+                };
+                const std::string commit = git_line({"rev-parse", "HEAD"});
+                injected = true;
+                if(kind == "mirror-graft" || kind == "worktree-graft") {
+                    const fs::path metadata = kind == "mirror-graft" ? mirror : workspace / ".git";
+                    fs::create_directories(metadata / "info");
+                    write_file(metadata / "info/grafts", commit + "\n");
+                    return;
+                }
+                std::string raw_oid;
+                if(kind == "tag") {
+                    require_process_success("/usr/bin/git",
+                                            {"tag", "-a", "replacement-tag", "-m", "replacement"},
+                                            environment, &workspace);
+                    raw_oid = git_line({"rev-parse", "refs/tags/replacement-tag"});
+                    const fs::path object = fs::path("objects") / raw_oid.substr(0, 2) / raw_oid.substr(2);
+                    fs::create_directories((mirror / object).parent_path());
+                    fs::copy_file(workspace / ".git" / object, mirror / object);
+                } else {
+                    raw_oid = git_line({"rev-parse", kind == "tree" ? "HEAD^{tree}" : "HEAD:payload.txt"});
+                }
+                const std::string raw_type = kind == "tree" ? "tree" : kind == "tag" ? "tag"
+                                                                                     : "blob";
+                for(const fs::path& metadata : {mirror, workspace / ".git"}) {
+                    fs::create_directories(metadata / "refs/replace");
+                    write_file(metadata / "refs/replace" / raw_oid, commit + "\n");
+                    if(kind == "packed") {
+                        std::ifstream packed_input(metadata / "packed-refs");
+                        const std::string packed_bytes((std::istreambuf_iterator<char>(packed_input)), {});
+                        write_file(metadata / "packed-refs", packed_bytes +
+                                                                 commit + " refs/replace/" + raw_oid + "\n");
+                        require(fs::remove(metadata / "refs/replace" / raw_oid), "Remove exact replacement fixture ref");
+                        require(fs::remove(metadata / "refs/replace"), "Remove exact empty replacement fixture directory");
+                    }
+                }
+                require(git_line({"--no-replace-objects", "cat-file", "-t", raw_oid}) == raw_type,
+                        "Replacement fixture lost raw object type");
+                require(git_line({"cat-file", "-t", raw_oid}) == "commit",
+                        "Fixture did not reproduce replacement type substitution");
+                if(kind == "reftable") {
+                    for(const fs::path& repository : {mirror, workspace}) {
+                        require_process_success("/usr/bin/git",
+                                                {"refs", "migrate", "--ref-format=reftable"},
+                                                environment, &repository);
+                    }
+                    return;
+                }
+                if(kind == "drift") return;
+                const std::string head = git_line({"symbolic-ref", "HEAD"});
+                write_file(mirror / "refs/heads/main", raw_oid + "\n");
+                write_file(workspace / ".git/refs/remotes/origin/main", raw_oid + "\n");
+                write_file(workspace / ".git" / head, raw_oid + "\n");
+                const fs::path recipe = root / "build/.moguet-evaluated-recipe/PKGBUILD";
+                std::ifstream input(recipe);
+                std::string bytes((std::istreambuf_iterator<char>(input)), {});
+                const std::size_t offset = bytes.find(commit.substr(0, 12));
+                require(offset != std::string::npos, "Missing dynamic version in replacement fixture");
+                bytes.replace(offset, 12, raw_oid.substr(0, 12));
+                write_file(recipe, bytes);
+            });
+        expect_failure(fixture, EvaluatedDevelSourceBuildFailureReason::GitRepositoryInvalid, kind == "drift");
+        set_evaluated_devel_source_build_test_hook({});
+        require(injected, "Git metadata regression did not reach injection point");
+    }
+}
+
 void test_stale_pkgdest_and_extra_artifact() {
     UpstreamGitFixture upstream("inventory-negative");
     {
         ReviewedBuildFixture fixture("stale-pkgdest", upstream);
         InvocationOwnedSourceBuildContext context = fixture.make_context();
         const fs::path root = context.owned_root();
+        struct stat created_root{};
+        require(::lstat(root.c_str(), &created_root) == 0, "Missing stale fixture root");
         write_file(context.pkgdest() / "stale.pkg.tar.zst", "stale");
         InvocationOwnedMakepkgEnvironment environment =
             fixture.make_environment(context);
@@ -1024,8 +1198,12 @@ void test_stale_pkgdest_and_extra_artifact() {
                     .reason ==
                 EvaluatedDevelSourceBuildFailureReason::ArtifactInventoryMismatch,
             "Stale PKGDEST returned the wrong failure");
-        require(!fs::exists(root),
-                "Stale PKGDEST failure left its context");
+        const auto& failure = std::get<EvaluatedDevelSourceBuildFailure>(result);
+        require(failure.cleanup_consequence.has_value() &&
+                    failure.cleanup_consequence->retained_root == root &&
+                    fs::file_size(root / "pkgdest/stale.pkg.tar.zst") == 5,
+                "Stale artifact was deleted by automatic cleanup");
+        cleanup_retained_fixture(root, created_root);
     }
     {
         ReviewedBuildFixture fixture("extra-artifact", upstream);
@@ -1042,30 +1220,57 @@ void test_stale_pkgdest_and_extra_artifact() {
             });
         expect_failure(
             fixture,
-            EvaluatedDevelSourceBuildFailureReason::ArtifactInventoryMismatch);
+            EvaluatedDevelSourceBuildFailureReason::ArtifactInventoryMismatch, true,
+            [](const fs::path& root) {
+                require(sha256_path(root / "pkgdest/extra.pkg.tar.zst") ==
+                            xdg_generation_store_raw_contents_sha256("extra"),
+                        "Cleanup deleted or changed the unexpected sibling");
+            });
+        set_evaluated_devel_source_build_test_hook({});
+    }
+    {
+        ReviewedBuildFixture fixture("partial-artifact", upstream);
+        set_evaluated_devel_source_build_test_hook(
+            [](EvaluatedDevelSourceBuildTestEvent event, const fs::path& root, const fs::path&) {
+                if(event != EvaluatedDevelSourceBuildTestEvent::AfterSourcePreparation) return;
+                write_file(root / "pkgdest/partial.pkg.tar", "partial");
+                throw std::runtime_error("Unrelated preparation failure");
+            });
+        expect_failure(fixture, EvaluatedDevelSourceBuildFailureReason::InternalFailure, true,
+                       [](const fs::path& root) {
+                           require(fs::file_size(root / "pkgdest/partial.pkg.tar") == 7,
+                                   "Unproven partial output was adopted for cleanup");
+                       });
         set_evaluated_devel_source_build_test_hook({});
     }
 }
 
 void test_artifact_replacement() {
     UpstreamGitFixture upstream("replacement");
-    ReviewedBuildFixture fixture("replacement", upstream);
-    set_evaluated_devel_source_build_test_hook(
-        [](EvaluatedDevelSourceBuildTestEvent event,
-           const fs::path&,
-           const fs::path& artifact) {
-            if(event !=
-               EvaluatedDevelSourceBuildTestEvent::AfterArtifactInventory) {
-                return;
-            }
-            const fs::path displaced = artifact.parent_path() / "displaced";
-            fs::rename(artifact, displaced);
-            write_file(artifact, "replacement");
-        });
-    expect_failure(
-        fixture,
-        EvaluatedDevelSourceBuildFailureReason::ArtifactReplacement);
-    set_evaluated_devel_source_build_test_hook({});
+    for(const auto point : {EvaluatedDevelSourceBuildTestEvent::AfterArtifactInventory,
+                            EvaluatedDevelSourceBuildTestEvent::AfterArtifactOpen,
+                            EvaluatedDevelSourceBuildTestEvent::BeforeFinalArtifactReproof}) {
+        ReviewedBuildFixture fixture("replacement", upstream);
+        fs::path replaced_path;
+        std::string original_digest;
+        set_evaluated_devel_source_build_test_hook(
+            [&](EvaluatedDevelSourceBuildTestEvent event, const fs::path&, const fs::path& artifact) {
+                if(event != point) return;
+                replaced_path = artifact;
+                original_digest = sha256_path(artifact);
+                fs::rename(artifact, artifact.parent_path() / "displaced");
+                write_file(artifact, "replacement");
+            });
+        expect_failure(fixture, EvaluatedDevelSourceBuildFailureReason::ArtifactReplacement, true,
+                       [&](const fs::path& root) {
+                           require(replaced_path.parent_path() == root / "pkgdest" &&
+                                       fs::file_size(replaced_path) == 11 &&
+                                       sha256_path(replaced_path) == xdg_generation_store_raw_contents_sha256("replacement") &&
+                                       sha256_path(root / "pkgdest/displaced") == original_digest,
+                                   "Cleanup touched replacement/displaced bytes");
+                       });
+        set_evaluated_devel_source_build_test_hook({});
+    }
 }
 
 void test_ambiguous_workspace_and_artifact_hardlink() {
@@ -1084,7 +1289,7 @@ void test_ambiguous_workspace_and_artifact_hardlink() {
             });
         expect_failure(
             fixture,
-            EvaluatedDevelSourceBuildFailureReason::SourceWorkspaceAmbiguous);
+            EvaluatedDevelSourceBuildFailureReason::SourceWorkspaceAmbiguous, true);
         set_evaluated_devel_source_build_test_hook({});
     }
     {
@@ -1112,7 +1317,7 @@ void test_ambiguous_workspace_and_artifact_hardlink() {
             });
         expect_failure(
             fixture,
-            EvaluatedDevelSourceBuildFailureReason::ArtifactInventoryMismatch);
+            EvaluatedDevelSourceBuildFailureReason::ArtifactInventoryMismatch, true);
         set_evaluated_devel_source_build_test_hook({});
     }
 }
@@ -1185,7 +1390,7 @@ void test_artifact_metadata_mismatch() {
         });
     expect_failure(
         fixture,
-        EvaluatedDevelSourceBuildFailureReason::ArtifactMetadataMismatch);
+        EvaluatedDevelSourceBuildFailureReason::ArtifactMetadataMismatch, true);
     set_evaluated_devel_source_build_test_hook({});
 }
 
@@ -1218,12 +1423,62 @@ void test_cross_context_environment_rejected() {
         "Context B cleanup failed");
 }
 
+void test_malformed_archive_metadata_taxonomy() {
+    UpstreamGitFixture upstream("malformed-metadata");
+    for(const std::string kind : {"missing-name", "invalid-name", "invalid-version"}) {
+        ReviewedBuildFixture fixture("malformed-" + kind, upstream);
+        TemporaryTree archive_tree("malformed-" + kind);
+        std::string pkginfo = kind == "missing-name"
+                                  ? "pkgver = 1-1\n"
+                                  : "pkgname = " + (kind == "invalid-name" ? std::string("bad/name") : fixture.package_name()) +
+                                        "\npkgver = " + (kind == "invalid-version" ? "bad version" : "1-1") + "\n";
+        write_file(archive_tree.path() / ".PKGINFO", pkginfo);
+        write_file(archive_tree.path() / ".MTREE", "#mtree\n");
+        const fs::path archive = archive_tree.path() / "malformed.pkg.tar";
+        require_process_success("/usr/bin/bsdtar",
+                                {"-cf", archive.string(), ".PKGINFO", ".MTREE"},
+                                git_environment(fixture.home()), &archive_tree.path());
+        bool injected = false;
+        set_evaluated_devel_source_build_test_hook(
+            [&](EvaluatedDevelSourceBuildTestEvent event, const fs::path& root, const fs::path&) {
+                if(event != EvaluatedDevelSourceBuildTestEvent::AfterPackageBuild) return;
+                std::vector<fs::path> artifacts;
+                for(const auto& entry : fs::directory_iterator(root / "pkgdest"))
+                    artifacts.push_back(entry.path());
+                require(artifacts.size() == 1, "Malformed fixture did not find one built artifact");
+                fs::copy_file(archive, artifacts.front(), fs::copy_options::overwrite_existing);
+                injected = true;
+            });
+        auto context = fixture.make_context();
+        const fs::path root = context.owned_root();
+        struct stat created_root{};
+        require(::lstat(root.c_str(), &created_root) == 0, "Missing malformed fixture root");
+        auto environment = fixture.make_environment(context);
+        const auto result = build_evaluated_devel_source(std::move(context), std::move(environment));
+        set_evaluated_devel_source_build_test_hook({});
+        const auto& failure = require_arm<EvaluatedDevelSourceBuildFailure>(result, "Malformed metadata produced a proof");
+        require(injected && failure.stage == EvaluatedDevelSourceBuildStage::ArtifactMetadata &&
+                    failure.reason == EvaluatedDevelSourceBuildFailureReason::ArtifactMetadataQueryFailure &&
+                    failure.diagnostic.has_value() &&
+                    (failure.diagnostic == "Failed to read package archive metadata with libalpm." ||
+                     failure.diagnostic == "Package archive metadata contains an invalid name or version.") &&
+                    failure.cleanup_consequence.has_value() &&
+                    failure.cleanup_consequence->failure.reason == InvocationOwnedSourceBuildContextFailureReason::UnprovenCleanupContent &&
+                    failure.cleanup_consequence->retained_root == root,
+                "Archive query failure lost artifact stage, original diagnostic, or cleanup refusal");
+        require(std::distance(fs::directory_iterator(root / "pkgdest"), fs::directory_iterator{}) == 1,
+                "Malformed artifact was deleted during failure cleanup");
+        cleanup_retained_fixture(root, created_root);
+    }
+}
+
 void test_cleanup_failure_preserves_primary() {
     UpstreamGitFixture upstream("cleanup-failure");
-    ReviewedBuildFixture fixture("cleanup-failure", upstream);
+    ReviewedBuildFixture fixture("cleanup-failure", upstream, RecipeShape::RawEvaluatedMismatch);
     InvocationOwnedSourceBuildContext context = fixture.make_context();
     const fs::path root = context.owned_root();
-    write_file(context.pkgdest() / "stale.pkg.tar.zst", "stale");
+    struct stat created_root{};
+    require(::lstat(root.c_str(), &created_root) == 0, "Missing cleanup fixture root");
     InvocationOwnedMakepkgEnvironment environment =
         fixture.make_environment(context);
     bool injected = false;
@@ -1245,41 +1500,87 @@ void test_cleanup_failure_preserves_primary() {
         result, "Cleanup-failure fixture produced a proof");
     require(
         failure.reason ==
-                EvaluatedDevelSourceBuildFailureReason::ArtifactInventoryMismatch &&
+                EvaluatedDevelSourceBuildFailureReason::RawEvaluatedSourceMismatch &&
             failure.cleanup_consequence.has_value() &&
             failure.cleanup_consequence->failure.reason ==
                 InvocationOwnedSourceBuildContextFailureReason::ConcurrentReplacement,
         "Cleanup failure replaced or lost the primary failure");
     require(fs::exists(root),
             "Injected cleanup failure did not retain the exact test root");
-    struct stat root_status{};
-    require(
-        ::lstat(root.c_str(), &root_status) == 0 &&
-            S_ISDIR(root_status.st_mode) &&
-            root_status.st_uid == ::geteuid(),
-        "Retained cleanup fixture root lost test ownership");
-    std::vector<fs::path> retained_directories{root};
-    for(const fs::directory_entry& entry :
-        fs::recursive_directory_iterator(root)) {
-        struct stat status{};
-        require(
-            ::lstat(entry.path().c_str(), &status) == 0 &&
-                status.st_uid == ::geteuid() &&
-                !S_ISLNK(status.st_mode),
-            "Retained cleanup fixture contains a foreign entry");
-        if(S_ISDIR(status.st_mode)) {
-            retained_directories.push_back(entry.path());
+    cleanup_retained_fixture(root, created_root);
+}
+
+void test_cleanup_budgets() {
+    UpstreamGitFixture upstream("cleanup-budget");
+    for(const std::string kind : {"exact", "entries", "depth"}) {
+        ReviewedBuildFixture fixture("budget-" + kind, upstream);
+        fs::path root;
+        struct stat created_root{};
+        std::vector<FixtureNode> inventory;
+        std::size_t cleanup_attempts = 0;
+        {
+            InvocationOwnedSourceBuildContext context = fixture.make_context();
+            root = context.owned_root();
+            require(::lstat(root.c_str(), &created_root) == 0, "Missing budget fixture root");
+            fs::create_directories(context.builddir() / "one/two/three");
+            write_file(context.builddir() / "one/two/three/payload", "budget fixture");
+            inventory = retained_fixture_inventory(root);
+            const std::size_t entries = inventory.size() - 1;
+            std::size_t depth = 0;
+            for(const auto& node : inventory) {
+                if(node.path == root) continue;
+                const auto relative = node.path.lexically_relative(root);
+                depth = std::max(depth, static_cast<std::size_t>(std::distance(relative.begin(), relative.end())));
+            }
+            set_invocation_owned_source_build_context_cleanup_limits_for_test(
+                std::pair{entries - (kind == "entries" ? 1U : 0U),
+                          depth - (kind == "depth" ? 1U : 0U)});
+            set_invocation_owned_source_build_context_test_hook(
+                [&](InvocationOwnedSourceBuildContextTestEvent event, const fs::path&) {
+                    if(event == InvocationOwnedSourceBuildContextTestEvent::BeforeCleanup) ++cleanup_attempts;
+                });
+            const auto cleanup = context.cleanup();
+            if(kind == "exact") {
+                require(std::holds_alternative<InvocationOwnedSourceBuildContextCleaned>(cleanup) && !fs::exists(root),
+                        "Exactly-at-limit cleanup failed");
+            } else {
+                const auto& failure = require_arm<InvocationOwnedSourceBuildContextFailure>(cleanup, "Budget overflow was accepted");
+                require(failure.stage == InvocationOwnedSourceBuildContextStage::Cleanup &&
+                            failure.reason == InvocationOwnedSourceBuildContextFailureReason::CleanupResourceLimitExceeded &&
+                            same_fixture_inventory(inventory, retained_fixture_inventory(root)),
+                        "Budget refusal lost type or started deleting entries");
+                set_invocation_owned_source_build_context_cleanup_limits_for_test(std::nullopt);
+                require(std::get<InvocationOwnedSourceBuildContextFailure>(context.cleanup()).reason == failure.reason &&
+                            cleanup_attempts == 1,
+                        "Explicit cleanup retried after budget refusal");
+            }
+            set_invocation_owned_source_build_context_cleanup_limits_for_test(std::nullopt);
+        }
+        require(cleanup_attempts == 1, "Destructor retried refused cleanup");
+        set_invocation_owned_source_build_context_test_hook({});
+        if(kind != "exact") {
+            require(same_fixture_inventory(inventory, retained_fixture_inventory(root)),
+                    "Destructor deleted a budget-refused entry");
+            cleanup_retained_fixture(root, created_root);
         }
     }
-    for(const fs::path& directory : retained_directories) {
-        fs::permissions(
-            directory, fs::perms::owner_all,
-            fs::perm_options::replace);
-    }
-    std::error_code cleanup_error;
-    fs::remove_all(root, cleanup_error);
-    require(!cleanup_error && !fs::exists(root),
-            "Failed to remove the exact cleanup-failure test root");
+
+    ReviewedBuildFixture fixture("budget-primary", upstream, RecipeShape::RawEvaluatedMismatch);
+    InvocationOwnedSourceBuildContext context = fixture.make_context();
+    const fs::path root = context.owned_root();
+    struct stat created_root{};
+    require(::lstat(root.c_str(), &created_root) == 0, "Missing primary budget root");
+    auto environment = fixture.make_environment(context);
+    set_invocation_owned_source_build_context_cleanup_limits_for_test(std::pair<std::size_t, std::size_t>{4, 8});
+    const auto result = build_evaluated_devel_source(std::move(context), std::move(environment));
+    set_invocation_owned_source_build_context_cleanup_limits_for_test(std::nullopt);
+    const auto& failure = require_arm<EvaluatedDevelSourceBuildFailure>(result, "Budget-primary fixture produced a proof");
+    require(failure.reason == EvaluatedDevelSourceBuildFailureReason::RawEvaluatedSourceMismatch &&
+                failure.cleanup_consequence.has_value() &&
+                failure.cleanup_consequence->failure.reason == InvocationOwnedSourceBuildContextFailureReason::CleanupResourceLimitExceeded &&
+                failure.cleanup_consequence->retained_root == root,
+            "Cleanup budget refusal replaced the primary failure or lost retained location");
+    cleanup_retained_fixture(root, created_root);
 }
 
 std::vector<fs::path> context_root_inventory() {
@@ -1308,12 +1609,15 @@ int main() {
         test_source_projection_fail_closed();
         test_two_upstream_revisions_change_dynamic_identity();
         test_dynamic_version_drift_fails_closed();
+        test_git_replacement_and_grafts_rejected();
         test_stale_pkgdest_and_extra_artifact();
         test_artifact_replacement();
         test_ambiguous_workspace_and_artifact_hardlink();
         test_artifact_metadata_mismatch();
+        test_malformed_archive_metadata_taxonomy();
         test_cross_context_environment_rejected();
         test_cleanup_failure_preserves_primary();
+        test_cleanup_budgets();
         set_evaluated_devel_source_build_test_hook({});
         set_invocation_owned_source_build_context_test_hook({});
         require(

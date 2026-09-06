@@ -1,5 +1,6 @@
 #pragma once
 
+#include "evaluated_devel_source_build_authority.hpp"
 #include "devel_build_provenance.hpp"
 #include "invocation_owned_source_build_context.hpp"
 #include "local_package_metadata.hpp"
@@ -18,8 +19,6 @@
 #ifdef MOGUET_ENABLE_EVALUATED_DEVEL_SOURCE_BUILD_TEST_HOOKS
 #include <functional>
 #endif
-
-class EvaluatedDevelSourceBuildAuthority;
 
 enum class EvaluatedDevelSourceBuildStage {
     ContextValidation,
@@ -61,6 +60,7 @@ enum class EvaluatedDevelSourceBuildFailureReason {
     ResourceLimitExceeded,
     CleanupFailure,
     InternalFailure,
+    ArtifactMetadataQueryFailure,
 };
 
 enum class EvaluatedDevelSourceBuildProcess {
@@ -78,6 +78,7 @@ enum class EvaluatedDevelSourceBuildProcess {
 
 struct EvaluatedDevelSourceBuildCleanupConsequence {
     InvocationOwnedSourceBuildContextFailure failure;
+    std::filesystem::path retained_root;
 
     bool operator==(
         const EvaluatedDevelSourceBuildCleanupConsequence&) const = default;
@@ -211,7 +212,7 @@ public:
     [[nodiscard]] const FreshDevelPackageArtifact& artifact() const;
 
     // Explicit cleanup is available to tests and abandoned future installs.
-    // A failed cleanup keeps the context owner active for a retry.
+    // Refusal keeps the root; the context owns whether a safe retry is allowed.
     [[nodiscard]] InvocationOwnedSourceBuildContextCleanupResult cleanup() noexcept;
 
 private:
@@ -226,10 +227,6 @@ private:
     std::unique_ptr<State> state_;
 };
 
-using EvaluatedDevelSourceBuildResult = std::variant<
-    EvaluatedDevelSourceBuildProof,
-    EvaluatedDevelSourceBuildFailure>;
-
 // The only production mint consumes one context and an environment sealed by
 // that same context. Normal source-build and install routes intentionally have
 // no caller in Slice 4.
@@ -237,18 +234,6 @@ using EvaluatedDevelSourceBuildResult = std::variant<
 build_evaluated_devel_source(
     InvocationOwnedSourceBuildContext context,
     InvocationOwnedMakepkgEnvironment environment);
-
-class EvaluatedDevelSourceBuildAuthority final {
-    EvaluatedDevelSourceBuildAuthority() = delete;
-
-    friend EvaluatedDevelSourceBuildResult build_evaluated_devel_source(
-        InvocationOwnedSourceBuildContext context,
-        InvocationOwnedMakepkgEnvironment environment);
-
-    [[nodiscard]] static EvaluatedDevelSourceBuildResult build(
-        InvocationOwnedSourceBuildContext context,
-        InvocationOwnedMakepkgEnvironment environment);
-};
 
 enum class EvaluatedDevelSourceBuildTestEvent {
     WorkingRecipeReady,

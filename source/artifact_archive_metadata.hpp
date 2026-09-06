@@ -1,12 +1,11 @@
 #pragma once
 
+#include "evaluated_devel_source_build_authority.hpp"
 #include "artifact_identity.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-
-class EvaluatedDevelSourceBuildAuthority;
 
 namespace artifact_archive_metadata {
 

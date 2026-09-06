@@ -1,5 +1,6 @@
 #pragma once
 
+#include "evaluated_devel_source_build_authority.hpp"
 #include "artifact_identity.hpp"
 #include "installed_artifact_binding.hpp"
 #include "vcs_source_identity.hpp"
@@ -11,7 +12,6 @@
 #include <variant>
 
 class DevelBuildProvenancePersistentDecoderAccess;
-class EvaluatedDevelSourceBuildAuthority;
 class ReviewedSourceStateRecordBinding;
 
 class PackageArchiveSha256Digest final {

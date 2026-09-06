@@ -1481,7 +1481,7 @@ void require_named_directory_unchanged(
     }
 }
 
-std::string git_output_line(
+std::string git_output(
     const FixedExecutable& git,
     const RetainedDirectory& repository,
     const OwnedDescriptor& null_input,
@@ -1490,6 +1490,9 @@ std::string git_output_line(
     git.require_validity();
     std::vector<std::string> complete =
         trusted_git_managed_process_arguments();
+    // Actual commit evidence must use raw objects even if metadata drifts
+    // between the explicit replacement/graft checks at a proof point.
+    complete.push_back("--no-replace-objects");
     complete.insert(
         complete.end(),
         std::make_move_iterator(arguments.begin()),
@@ -1507,8 +1510,18 @@ std::string git_output_line(
         EvaluatedDevelSourceBuildFailureReason::GitRepositoryInvalid,
         process);
     git.require_validity();
+    return output;
+}
+
+std::string git_output_line(
+    const FixedExecutable& git,
+    const RetainedDirectory& repository,
+    const OwnedDescriptor& null_input,
+    std::vector<std::string> arguments,
+    EvaluatedDevelSourceBuildProcess process) {
     return require_single_output_line(
-        output, EvaluatedDevelSourceBuildStage::GitRevision,
+        git_output(git, repository, null_input, std::move(arguments), process),
+        EvaluatedDevelSourceBuildStage::GitRevision,
         EvaluatedDevelSourceBuildFailureReason::GitRevisionUnavailable);
 }
 
@@ -1621,6 +1634,46 @@ struct GitProofPoint {
     GitObjectFormat object_format = GitObjectFormat::Sha1;
 };
 
+void require_unmodified_git_object_semantics(
+    const FixedExecutable& git, const OwnedDescriptor& null_input,
+    const RetainedDirectory& repository, int git_directory_descriptor,
+    EvaluatedDevelSourceBuildProcess process) {
+    require_entry_absent(git_directory_descriptor, "refs/replace");
+    require_entry_absent(git_directory_descriptor, "info/grafts");
+    // Keep the physical packed-metadata check too: Git may omit a broken ref
+    // from its logical inventory. Such metadata is still unsupported here.
+    struct stat status{};
+    if(::fstatat(git_directory_descriptor, "packed-refs", &status,
+                 AT_SYMLINK_NOFOLLOW) == 0) {
+        OpenedRegularFile packed = open_and_read_regular_file(
+            git_directory_descriptor, "packed-refs", repository.identity.device,
+            MAX_SRCINFO_BYTES, EvaluatedDevelSourceBuildStage::GitRevision,
+            EvaluatedDevelSourceBuildFailureReason::GitRepositoryInvalid);
+        if(packed.bytes.find(" refs/replace/") != std::string::npos ||
+           packed.bytes.find(" refs/replace\n") != std::string::npos) {
+            throw_build_failure(
+                EvaluatedDevelSourceBuildStage::GitRevision,
+                EvaluatedDevelSourceBuildFailureReason::GitRepositoryInvalid);
+        }
+    } else if(errno != ENOENT) {
+        throw_build_failure(
+            EvaluatedDevelSourceBuildStage::GitRevision,
+            EvaluatedDevelSourceBuildFailureReason::GitRepositoryInvalid, errno);
+    }
+    // Ref storage is Git-owned (files, packed refs, or reftable). Inspect the
+    // logical namespace with replacements disabled before any commit/ref proof,
+    // and repeat at the end of both proof points. On-disk absence alone cannot
+    // prove the absence of replacement authority in a different ref backend.
+    if(!git_output(git, repository, null_input,
+                   {"-c", "safe.bareRepository=all", "for-each-ref", "--format=%(refname)", "refs/replace"},
+                   process)
+            .empty()) {
+        throw_build_failure(
+            EvaluatedDevelSourceBuildStage::GitRevision,
+            EvaluatedDevelSourceBuildFailureReason::GitRepositoryInvalid);
+    }
+}
+
 GitProofPoint observe_git_proof_point(
     const FixedExecutable& git,
     const OwnedDescriptor& null_input,
@@ -1640,6 +1693,12 @@ GitProofPoint observe_git_proof_point(
     require_contained_git_metadata_tree(
         workspace_git.get(), workspace.identity.device, 0,
         workspace_git_entry_count);
+    require_unmodified_git_object_semantics(
+        git, null_input, mirror, mirror.descriptor.get(),
+        EvaluatedDevelSourceBuildProcess::GitMirrorObservation);
+    require_unmodified_git_object_semantics(
+        git, null_input, workspace, workspace_git.get(),
+        EvaluatedDevelSourceBuildProcess::GitWorkspaceObservation);
     if(git_output_line(
            git, mirror, null_input,
            {"-c", "safe.bareRepository=all", "rev-parse",
@@ -1698,9 +1757,9 @@ GitProofPoint observe_git_proof_point(
             EvaluatedDevelSourceBuildFailureReason::GitRepositoryInvalid);
     }
 
-    std::string mirror_selector = "HEAD^{commit}";
+    std::string mirror_selector = "HEAD";
     std::string workspace_selector =
-        "refs/remotes/origin/HEAD^{commit}";
+        "refs/remotes/origin/HEAD";
     if(source.selector().kind() == VcsSelectorKind::DefaultHead) {
         const std::string mirror_head = git_output_line(
             git, mirror, null_input,
@@ -1729,9 +1788,9 @@ GitProofPoint observe_git_proof_point(
                 EvaluatedDevelSourceBuildStage::GitRevision,
                 EvaluatedDevelSourceBuildFailureReason::GitRepositoryInvalid);
         }
-        mirror_selector = "refs/heads/" + *branch + "^{commit}";
+        mirror_selector = "refs/heads/" + *branch;
         workspace_selector =
-            "refs/remotes/origin/" + *branch + "^{commit}";
+            "refs/remotes/origin/" + *branch;
     } else {
         throw_build_failure(
             EvaluatedDevelSourceBuildStage::GitRevision,
@@ -1748,7 +1807,7 @@ GitProofPoint observe_git_proof_point(
         EvaluatedDevelSourceBuildProcess::GitWorkspaceObservation);
     const std::string workspace_oid = git_output_line(
         git, workspace, null_input,
-        {"rev-parse", "--verify", "HEAD^{commit}"},
+        {"rev-parse", "--verify", "HEAD"},
         EvaluatedDevelSourceBuildProcess::GitWorkspaceObservation);
     SourceRevisionIdentity mirror_revision =
         SourceRevisionIdentity::git_commit(mirror_oid);
@@ -1762,6 +1821,23 @@ GitProofPoint observe_git_proof_point(
         throw_build_failure(
             EvaluatedDevelSourceBuildStage::GitRevision,
             EvaluatedDevelSourceBuildFailureReason::GitRevisionMismatch);
+    }
+    const std::string expected_format =
+        *workspace_revision.git_object_format() == GitObjectFormat::Sha1
+            ? "sha1"
+            : "sha256";
+    for(const RetainedDirectory* repository : {&mirror, &workspace}) {
+        const auto process = repository == &mirror
+                                 ? EvaluatedDevelSourceBuildProcess::GitMirrorObservation
+                                 : EvaluatedDevelSourceBuildProcess::GitWorkspaceObservation;
+        if(git_output_line(git, *repository, null_input,
+                           {"-c", "safe.bareRepository=all", "rev-parse", "--show-object-format=storage"}, process) != expected_format ||
+           git_output_line(git, *repository, null_input,
+                           {"-c", "safe.bareRepository=all", "cat-file", "-t", workspace_oid}, process) != "commit") {
+            throw_build_failure(
+                EvaluatedDevelSourceBuildStage::GitRevision,
+                EvaluatedDevelSourceBuildFailureReason::GitRepositoryInvalid);
+        }
     }
 
     require_entry_absent(workspace.descriptor.get(), ".git/commondir");
@@ -1781,6 +1857,12 @@ GitProofPoint observe_git_proof_point(
             EvaluatedDevelSourceBuildStage::GitRevision,
             EvaluatedDevelSourceBuildFailureReason::GitRepositoryInvalid);
     }
+    require_unmodified_git_object_semantics(
+        git, null_input, mirror, mirror.descriptor.get(),
+        EvaluatedDevelSourceBuildProcess::GitMirrorObservation);
+    require_unmodified_git_object_semantics(
+        git, null_input, workspace, workspace_git.get(),
+        EvaluatedDevelSourceBuildProcess::GitWorkspaceObservation);
     return GitProofPoint{
         workspace_oid, *workspace_revision.git_object_format()};
 }
@@ -2075,7 +2157,7 @@ void attach_cleanup_consequence(
            std::get_if<InvocationOwnedSourceBuildContextFailure>(&cleanup)) {
         failure.cleanup_consequence =
             EvaluatedDevelSourceBuildCleanupConsequence{
-                std::move(*cleanup_failure)};
+                std::move(*cleanup_failure), context.owned_root()};
     }
 }
 
@@ -2256,6 +2338,31 @@ EvaluatedDevelSourceBuildProof::cleanup() noexcept {
 EvaluatedDevelSourceBuildResult EvaluatedDevelSourceBuildAuthority::build(
     InvocationOwnedSourceBuildContext context,
     InvocationOwnedMakepkgEnvironment environment) {
+    bool package_build_started = false;
+    const auto cleanup_after_failure = [&](EvaluatedDevelSourceBuildFailure& failure) {
+        if(context.valid()) {
+            // A failed artifact proof cannot grant a fresh cleanup scan new
+            // authority. Failure before artifact validation can also leave
+            // partial recipe output, so prove PKGDEST empty before allowing it.
+            bool has_unproven_content = package_build_started ||
+                                        failure.reason == EvaluatedDevelSourceBuildFailureReason::ArtifactInventoryMismatch ||
+                                        failure.reason == EvaluatedDevelSourceBuildFailureReason::ArtifactReplacement ||
+                                        failure.reason == EvaluatedDevelSourceBuildFailureReason::SourceWorkspaceAmbiguous ||
+                                        failure.reason == EvaluatedDevelSourceBuildFailureReason::SourceContainmentFailure;
+            if(!has_unproven_content) {
+                try {
+                    require_empty_pkgdest(context.pkgdest_descriptor(),
+                                          EvaluatedDevelSourceBuildStage::Cleanup);
+                } catch(...) {
+                    // Unavailable inventory is not permission to delete. Keep
+                    // the primary error and report retention independently.
+                    has_unproven_content = true;
+                }
+            }
+            if(has_unproven_content) context.refuse_unproven_cleanup();
+        }
+        attach_cleanup_consequence(context, failure);
+    };
     try {
         if(!context.valid()) {
             throw_build_failure(
@@ -2413,6 +2520,7 @@ EvaluatedDevelSourceBuildResult EvaluatedDevelSourceBuildAuthority::build(
         notify_test_event(
             EvaluatedDevelSourceBuildTestEvent::BeforePackageBuild,
             context.owned_root());
+        package_build_started = true;
         static_cast<void>(run_makepkg(
             {"--noextract", "--nodeps", "--noconfirm"},
             EvaluatedDevelSourceBuildStage::PackageBuild,
@@ -2488,11 +2596,21 @@ EvaluatedDevelSourceBuildResult EvaluatedDevelSourceBuildAuthority::build(
         validate_archive_metadata_inventory(
             bsdtar, opened_artifact, root_directory);
 
-        artifact_archive_metadata::RetainedDescriptorQueryAuthority
-            metadata_authority(opened_artifact.descriptor.get());
-        ArtifactPackageIdentity artifact_identity =
-            artifact_archive_metadata::query_with_libalpm(
-                metadata_authority);
+        ArtifactPackageIdentity artifact_identity = [&]() {
+            try {
+                artifact_archive_metadata::RetainedDescriptorQueryAuthority
+                    metadata_authority(opened_artifact.descriptor.get());
+                return artifact_archive_metadata::query_with_libalpm(metadata_authority);
+            } catch(const std::runtime_error& error) {
+                // Only the retained archive query boundary owns this translation.
+                // Allocation/logic errors and unrelated phases keep their own layer.
+                auto failure = build_failure(
+                    EvaluatedDevelSourceBuildStage::ArtifactMetadata,
+                    EvaluatedDevelSourceBuildFailureReason::ArtifactMetadataQueryFailure);
+                failure.diagnostic = error.what();
+                throw BuildFailureError(std::move(failure));
+            }
+        }();
         const std::string* artifact_package_base =
             artifact_identity.package_base.value();
         const std::string* artifact_architecture =
@@ -2547,20 +2665,20 @@ EvaluatedDevelSourceBuildResult EvaluatedDevelSourceBuildAuthority::build(
                 std::move(actual_revision), std::move(artifact)));
     } catch(BuildFailureError& error) {
         EvaluatedDevelSourceBuildFailure failure = error.release();
-        attach_cleanup_consequence(context, failure);
+        cleanup_after_failure(failure);
         return failure;
     } catch(const std::exception& error) {
         EvaluatedDevelSourceBuildFailure failure = build_failure(
             EvaluatedDevelSourceBuildStage::ContextValidation,
             EvaluatedDevelSourceBuildFailureReason::InternalFailure);
         failure.diagnostic = error.what();
-        attach_cleanup_consequence(context, failure);
+        cleanup_after_failure(failure);
         return failure;
     } catch(...) {
         EvaluatedDevelSourceBuildFailure failure = build_failure(
             EvaluatedDevelSourceBuildStage::ContextValidation,
             EvaluatedDevelSourceBuildFailureReason::InternalFailure);
-        attach_cleanup_consequence(context, failure);
+        cleanup_after_failure(failure);
         return failure;
     }
 }

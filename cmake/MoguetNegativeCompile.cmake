@@ -185,8 +185,66 @@ foreach(_moguet_authority_case IN LISTS _moguet_authority_cases)
 endforeach()
 
 list(LENGTH _moguet_authority_cases _moguet_authority_case_count)
+
+# Slice 4 friendship must be closed even when only a narrow granting header
+# is visible. Generated probes use no test/forge macros. Baselines prove the
+# headers compile, and each negative requires redefinition or access control.
+get_filename_component(_moguet_negative_state_dir
+    "${MOGUET_NEGATIVE_COMPILE_PROJECT_OPTIONS_FILE}" DIRECTORY)
+set(_moguet_narrow_case_count 0)
+foreach(_moguet_header IN ITEMS
+    devel_build_provenance
+    invocation_owned_source_build_context
+    artifact_archive_metadata
+    evaluated_devel_source_build)
+    set(_moguet_probe "${_moguet_negative_state_dir}/slice4-${_moguet_header}.cpp")
+    set(_moguet_include "#include \"${_moguet_header}.hpp\"\n")
+    file(WRITE "${_moguet_probe}" "${_moguet_include}int baseline() { return 0; }\n")
+    execute_process(COMMAND ${_moguet_compile_command} ${_moguet_common_arguments}
+        -fsyntax-only "${_moguet_probe}"
+        RESULT_VARIABLE _moguet_status OUTPUT_VARIABLE _moguet_stdout ERROR_VARIABLE _moguet_stderr)
+    if(NOT "${_moguet_status}" STREQUAL "0")
+        message(FATAL_ERROR "Narrow header ${_moguet_header} baseline failed: ${_moguet_stdout}${_moguet_stderr}")
+    endif()
+    foreach(_moguet_probe_kind IN ITEMS spoof raw_observation direct_constructor)
+        if(_moguet_probe_kind STREQUAL "spoof")
+            set(_moguet_body "class EvaluatedDevelSourceBuildAuthority {};\n")
+            set(_moguet_expected "redefinition")
+        elseif(_moguet_probe_kind STREQUAL "raw_observation")
+            if(_moguet_header STREQUAL "artifact_archive_metadata")
+                continue()
+            endif()
+            set(_moguet_body "MakepkgManagedGitWorkspaceRevisionObservation mint(UpstreamGitRevision a, UpstreamGitRevision b) { return MakepkgManagedGitWorkspaceRevisionObservation(a, b); }\n")
+            set(_moguet_expected "is private within this context|private member|private constructor")
+        else()
+            if(_moguet_header STREQUAL "devel_build_provenance")
+                # Its raw-observation case already exercises its direct constructor.
+                continue()
+            elseif(_moguet_header STREQUAL "artifact_archive_metadata")
+                set(_moguet_body "void mint() { artifact_archive_metadata::RetainedDescriptorQueryAuthority authority(3); }\n")
+            elseif(_moguet_header STREQUAL "invocation_owned_source_build_context")
+                set(_moguet_body "void mint() { InvocationOwnedSourceBuildContext context(nullptr); }\n")
+            else()
+                set(_moguet_body "void mint() { EvaluatedDevelSourceBuildProof proof(nullptr); }\n")
+            endif()
+            set(_moguet_expected "is private within this context|private member|private constructor")
+        endif()
+        file(WRITE "${_moguet_probe}" "${_moguet_include}${_moguet_body}")
+        execute_process(COMMAND ${_moguet_compile_command} ${_moguet_common_arguments}
+            -fsyntax-only "${_moguet_probe}"
+            RESULT_VARIABLE _moguet_status OUTPUT_VARIABLE _moguet_stdout ERROR_VARIABLE _moguet_stderr)
+        if("${_moguet_status}" STREQUAL "0" OR
+            NOT "${_moguet_stdout}${_moguet_stderr}" MATCHES "${_moguet_expected}")
+            message(FATAL_ERROR "Narrow authority ${_moguet_header}/${_moguet_probe_kind} failed its expected rejection: status=${_moguet_status}\n${_moguet_stdout}${_moguet_stderr}")
+        endif()
+        file(WRITE "${_moguet_negative_state_dir}/slice4-${_moguet_header}-${_moguet_probe_kind}.diagnostic.txt"
+            "${_moguet_stdout}${_moguet_stderr}")
+        math(EXPR _moguet_narrow_case_count "${_moguet_narrow_case_count} + 1")
+    endforeach()
+endforeach()
 message(
     STATUS
     "Reviewed source authority negative compile: baseline=1, "
-    "expected diagnostics=${_moguet_authority_case_count}"
+    "expected diagnostics=${_moguet_authority_case_count}; "
+    "Slice 4 narrow baselines=4, expected diagnostics=${_moguet_narrow_case_count}"
 )

@@ -362,6 +362,14 @@ int duplicate_executable_descriptor_for_exec(
         _exit(127);
     }
 
+    // Preserve the retained executable before stdio can overwrite an alias
+    // (or close a shared stdin FD). Only this child-local FD may be executed.
+    const int executable_descriptor =
+        duplicate_executable_descriptor_for_exec(invocation);
+    if(invocation.executable_fd.has_value() && executable_descriptor < 0) {
+        _exit(127);
+    }
+
     if(invocation.standard_input_fd.has_value()) {
         const int source_fd = *invocation.standard_input_fd;
         if(source_fd == STDIN_FILENO) {
@@ -418,11 +426,6 @@ int duplicate_executable_descriptor_for_exec(
         }
     }
 
-    const int executable_descriptor =
-        duplicate_executable_descriptor_for_exec(invocation);
-    if(invocation.executable_fd.has_value() && executable_descriptor < 0) {
-        _exit(127);
-    }
     if(executable_descriptor >= 0) {
         static_cast<void>(syscall(
             SYS_execveat, executable_descriptor, "",
@@ -772,6 +775,15 @@ void bind_bounded_child_descriptor(
         exec_status_descriptor,
         BoundedProcessLaunchStage::WorkingDirectory);
 
+    // Stdio binding must not change the object behind executable_fd.
+    const int executable_descriptor =
+        duplicate_executable_descriptor_for_exec(invocation);
+    if(invocation.executable_fd.has_value() && executable_descriptor < 0) {
+        report_bounded_child_failure(
+            exec_status_descriptor,
+            BoundedProcessLaunchStage::DescriptorHygiene, errno);
+    }
+
     bind_bounded_child_descriptor(
         *invocation.standard_input_fd, STDIN_FILENO,
         exec_status_descriptor, BoundedProcessLaunchStage::StandardInput);
@@ -792,13 +804,6 @@ void bind_bounded_child_descriptor(
             BoundedProcessLaunchStage::StandardError);
     }
 
-    const int executable_descriptor =
-        duplicate_executable_descriptor_for_exec(invocation);
-    if(invocation.executable_fd.has_value() && executable_descriptor < 0) {
-        report_bounded_child_failure(
-            exec_status_descriptor,
-            BoundedProcessLaunchStage::DescriptorHygiene, errno);
-    }
     const bool descriptors_closed =
         executable_descriptor >= 0
             ? close_descriptors_except(
